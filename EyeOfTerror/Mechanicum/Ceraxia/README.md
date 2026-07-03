@@ -168,6 +168,10 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
   imports, barrel exports, side-effect imports, and Go module imports rooted in
   `go.mod` to repository files, then passes them through the CodeBrigade
   handoff.
+- `repo_survey.json.repository_dependency_graph` normalizes source nodes,
+  dependency edges, reverse indexes, language counts, and high-impact nodes
+  across the surveyed repository. It currently includes Python local imports,
+  JS/TS relative imports, Go module imports, and Rust `mod`/`crate::` edges.
 - `repo_survey.json.caller_candidates` groups reverse dependency callers for
   candidate files, and `contract_surface_candidates` flags likely API, schema,
   route, endpoint, or contract files for compatibility review.

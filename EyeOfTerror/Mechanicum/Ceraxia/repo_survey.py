@@ -402,6 +402,146 @@ def build_go_module_import_edges(go_files: list[Path], root: Path) -> list[dict[
     return edges[:80]
 
 
+def rust_import_targets(path: Path) -> list[str]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    text = re.sub(r"//.*", "", text)
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    targets: list[str] = []
+    for match in re.finditer(r"(?m)^\s*(?:pub\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;", text):
+        targets.append("mod:" + match.group(1))
+    for match in re.finditer(r"(?m)^\s*use\s+crate::([A-Za-z_][A-Za-z0-9_]*)", text):
+        targets.append("crate:" + match.group(1))
+    return unique(targets)
+
+
+def resolve_rust_module_target(source_path: Path, import_target: str, rel_to_path: dict[str, Path], root: Path) -> str:
+    if ":" not in import_target:
+        return ""
+    kind, module_name = import_target.split(":", 1)
+    candidates: list[Path] = []
+    if kind == "mod":
+        candidates = [
+            source_path.parent / f"{module_name}.rs",
+            source_path.parent / module_name / "mod.rs",
+        ]
+    elif kind == "crate":
+        crate_root = source_path.parent
+        if source_path.name != "lib.rs" and "src" in source_path.parts:
+            rel_parts = source_path.relative_to(root).parts
+            if "src" in rel_parts:
+                crate_root = root.joinpath(*rel_parts[: rel_parts.index("src") + 1])
+        candidates = [
+            crate_root / f"{module_name}.rs",
+            crate_root / module_name / "mod.rs",
+        ]
+    for candidate in candidates:
+        try:
+            rel = str(candidate.resolve().relative_to(root.resolve()))
+        except (OSError, ValueError):
+            continue
+        if rel in rel_to_path:
+            return rel
+    return ""
+
+
+def build_rust_crate_import_edges(rust_files: list[Path], rel_to_path: dict[str, Path], root: Path) -> list[dict[str, str]]:
+    edges: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for path in sorted(rust_files, key=lambda item: str(item.relative_to(root))):
+        source = str(path.relative_to(root))
+        for imported in rust_import_targets(path):
+            target = resolve_rust_module_target(path, imported, rel_to_path, root)
+            if not target or target == source:
+                continue
+            key = (source, imported, target)
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append({"source": source, "import": imported, "target": target, "language": "rust"})
+    return edges[:80]
+
+
+def build_repository_dependency_graph(
+    files: list[Path],
+    root: Path,
+    dependency_edges: list[dict[str, str]],
+    tests: list[str],
+    entrypoints: list[str],
+    contract_surface_candidates: list[dict[str, Any]],
+) -> dict[str, Any]:
+    contract_surfaces = {str(row.get("path") or "") for row in contract_surface_candidates if isinstance(row, dict)}
+    source_paths = {str(path.relative_to(root)) for path in files if path.suffix.lower() in SOURCE_SUFFIXES}
+    graph_paths = sorted(source_paths | {str(edge.get("source") or "") for edge in dependency_edges} | {str(edge.get("target") or "") for edge in dependency_edges})
+    outgoing: dict[str, list[str]] = {path: [] for path in graph_paths if path}
+    incoming: dict[str, list[str]] = {path: [] for path in graph_paths if path}
+    language_by_path = {
+        str(path.relative_to(root)): source_language(path)
+        for path in files
+        if path.suffix.lower() in SOURCE_SUFFIXES
+    }
+    for edge in dependency_edges:
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if not source or not target:
+            continue
+        outgoing.setdefault(source, [])
+        incoming.setdefault(target, [])
+        if target not in outgoing[source]:
+            outgoing[source].append(target)
+        if source not in incoming[target]:
+            incoming[target].append(source)
+        incoming.setdefault(source, incoming.get(source, []))
+        outgoing.setdefault(target, outgoing.get(target, []))
+    nodes: list[dict[str, Any]] = []
+    for path in sorted(set(outgoing) | set(incoming)):
+        tags: list[str] = []
+        if path in tests or is_test_file(Path(path)):
+            tags.append("test")
+        if path in entrypoints:
+            tags.append("entrypoint")
+        if path in contract_surfaces:
+            tags.append("contract_surface")
+        if incoming.get(path):
+            tags.append("depended_on")
+        if outgoing.get(path):
+            tags.append("depends_on_others")
+        nodes.append(
+            {
+                "path": path,
+                "language": language_by_path.get(path, source_language(Path(path))),
+                "tags": tags,
+                "incoming_count": len(incoming.get(path, [])),
+                "outgoing_count": len(outgoing.get(path, [])),
+                "incoming": sorted(incoming.get(path, []))[:20],
+                "outgoing": sorted(outgoing.get(path, []))[:20],
+            }
+        )
+    language_counts = Counter(str(node["language"]) for node in nodes)
+    high_impact_nodes = [
+        {
+            "path": node["path"],
+            "reason": ",".join(node["tags"]) or "dependency_degree",
+            "incoming_count": node["incoming_count"],
+            "outgoing_count": node["outgoing_count"],
+        }
+        for node in nodes
+        if node["incoming_count"] >= 2 or "entrypoint" in node["tags"] or "contract_surface" in node["tags"]
+    ][:40]
+    return {
+        "kind": "ceraxia_repository_dependency_graph",
+        "node_count": len(nodes),
+        "edge_count": len(dependency_edges),
+        "language_counts": dict(sorted(language_counts.items())),
+        "nodes": nodes[:160],
+        "edges": dependency_edges[:160],
+        "reverse_index": build_reverse_dependency_index(dependency_edges),
+        "high_impact_nodes": high_impact_nodes,
+    }
+
+
 def build_recommended_read_order(
     existing_path_hints: list[str],
     entrypoints: list[str],
@@ -707,6 +847,16 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
             "source_summaries": [],
             "local_import_edges": [],
             "generic_import_edges": [],
+            "repository_dependency_graph": {
+                "kind": "ceraxia_repository_dependency_graph",
+                "node_count": 0,
+                "edge_count": 0,
+                "language_counts": {},
+                "nodes": [],
+                "edges": [],
+                "reverse_index": {},
+                "high_impact_nodes": [],
+            },
             "reverse_dependency_index": {},
             "test_coverage_links": [],
             "caller_candidates": [],
@@ -795,7 +945,8 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
     source_summaries = [generic_source_summary(path, root) for path in all_source_files[:MAX_SOURCE_SUMMARY_FILES]]
     python_edges = build_local_import_edges(python_symbols, python_files, root)
     go_edges = build_go_module_import_edges([path for path in all_source_files if path.suffix.lower() == ".go"], root)
-    generic_edges = unique_edges([*build_generic_import_edges(source_summaries, rel_to_path, root), *go_edges])[:120]
+    rust_edges = build_rust_crate_import_edges([path for path in all_source_files if path.suffix.lower() == ".rs"], rel_to_path, root)
+    generic_edges = unique_edges([*build_generic_import_edges(source_summaries, rel_to_path, root), *go_edges, *rust_edges])[:120]
     dependency_edges = unique_edges([*python_edges, *generic_edges])[:120]
     reverse_dependency_index = build_reverse_dependency_index(dependency_edges)
     test_coverage_links = build_test_coverage_links(dependency_edges)
@@ -803,6 +954,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
     caller_candidates = build_caller_candidates(candidates, reverse_dependency_index)
     contract_surface_candidates = build_contract_surface_candidates(files, root)
     package_manifest_candidates = build_package_manifest_candidates(files, root)
+    repository_dependency_graph = build_repository_dependency_graph(files, root, dependency_edges, tests, entrypoints, contract_surface_candidates)
     recommended_read_order = build_recommended_read_order(existing_path_hints, entrypoints, candidates, tests, dependency_edges)
     repository_cartography = build_repository_cartography(
         entrypoints,
@@ -840,6 +992,7 @@ def survey_repository(repo_path: str, focus: list[str], exclude_patterns: list[s
         "source_summaries": source_summaries,
         "local_import_edges": dependency_edges,
         "generic_import_edges": generic_edges,
+        "repository_dependency_graph": repository_dependency_graph,
         "reverse_dependency_index": reverse_dependency_index,
         "test_coverage_links": test_coverage_links,
         "missing_python_import_hints": missing_python_import_hints,

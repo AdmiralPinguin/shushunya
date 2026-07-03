@@ -709,6 +709,34 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("cmd/forge/main.go", survey["reverse_dependency_index"]["internal/audit/audit.go"])
             self.assertTrue(any(row["path"] == "go.mod" and row["package_name"] == "example.com/forge" for row in survey["package_manifest_candidates"]))
 
+    def test_repo_survey_builds_normalized_dependency_graph_with_rust_edges(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            (repo / "Cargo.toml").write_text("[package]\nname = \"forge\"\nversion = \"0.1.0\"\n", encoding="utf-8")
+            (repo / "src").mkdir()
+            (repo / "src" / "lib.rs").write_text(
+                "pub mod auth;\nuse crate::auth::enabled;\n\npub fn ready() -> bool { enabled() }\n",
+                encoding="utf-8",
+            )
+            (repo / "src" / "auth.rs").write_text("pub fn enabled() -> bool { true }\n", encoding="utf-8")
+            packet = build_planning_packet({"task": "Inspect Rust dependency impact", "repo_path": str(repo)})
+            survey = build_repo_survey(packet)
+            self.assertTrue(any(edge["source"] == "src/lib.rs" and edge["target"] == "src/auth.rs" for edge in survey["generic_import_edges"]))
+            graph = survey["repository_dependency_graph"]
+            self.assertEqual(graph["kind"], "ceraxia_repository_dependency_graph")
+            self.assertGreaterEqual(graph["node_count"], 2)
+            self.assertGreaterEqual(graph["edge_count"], 1)
+            self.assertGreaterEqual(graph["language_counts"]["rust"], 2)
+            self.assertIn("src/lib.rs", graph["reverse_index"]["src/auth.rs"])
+            auth_node = next(node for node in graph["nodes"] if node["path"] == "src/auth.rs")
+            self.assertEqual(auth_node["incoming_count"], 1)
+            self.assertIn("depended_on", auth_node["tags"])
+            brief = build_implementation_brief(packet, survey)
+            worker_report = code_brigade_adapter.build_worker_report(brief, dry_run=True)
+            plan_graph = worker_report["implementation_plan"]["repository_dependency_graph"]
+            self.assertEqual(plan_graph["reverse_index"]["src/auth.rs"], ["src/lib.rs"])
+
     def test_missing_repo_blocks_before_claiming_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             result = run_ceraxia(

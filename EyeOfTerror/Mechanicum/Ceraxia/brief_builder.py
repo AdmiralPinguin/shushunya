@@ -225,6 +225,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
             "source_summaries": survey.get("source_summaries", []),
             "local_import_edges": survey.get("local_import_edges", []),
             "generic_import_edges": survey.get("generic_import_edges", []),
+            "repository_dependency_graph": survey.get("repository_dependency_graph", {}),
             "reverse_dependency_index": survey.get("reverse_dependency_index", {}),
             "test_coverage_links": survey.get("test_coverage_links", []),
             "missing_python_import_hints": survey.get("missing_python_import_hints", []),

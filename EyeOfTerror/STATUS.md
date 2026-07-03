@@ -28,6 +28,10 @@
 - Ceraxia repository survey now resolves Go module imports rooted in `go.mod`
   into local dependency edges, so CodeBrigade handoffs and reverse dependency
   indexes can see Go package impact instead of only JS/TS/Python edges.
+- Ceraxia repository survey also emits a normalized
+  `repository_dependency_graph` with source nodes, language counts, reverse
+  impact, high-impact nodes, and Rust `mod`/`crate::` edges; CodeBrigade
+  receives that graph in its implementation plan.
 - Ceraxia run-package audit now compares saved artifact manifest hashes and
   sizes against current artifacts, and a focused run-report self-test covers
   that drift check without running the whole Ceraxia suite.

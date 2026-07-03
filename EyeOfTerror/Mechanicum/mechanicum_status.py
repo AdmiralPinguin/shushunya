@@ -91,7 +91,7 @@ ROADMAP = [
     {
         "priority": 2,
         "item": "deepen repository survey beyond shallow generic import edges",
-        "reason": "Ceraxia now records path hints, read order, investigation playbook stages, caller candidates, contract surface candidates, package manifest candidates, Python import edges, source summaries, local JS/TS relative import edges, and Go module import edges rooted in go.mod; cross-language call graphs and manifest-to-source impact analysis are still shallow.",
+        "reason": "Ceraxia now records path hints, read order, investigation playbook stages, caller candidates, contract surface candidates, package manifest candidates, Python import edges, source summaries, local JS/TS relative import edges, Go module import edges rooted in go.mod, Rust mod/crate edges, and a normalized repository_dependency_graph; cross-language call graphs and manifest-to-source impact analysis are still shallow.",
         "owner": "Ceraxia",
     },
     {
