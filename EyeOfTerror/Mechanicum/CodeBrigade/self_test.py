@@ -1052,6 +1052,14 @@ def main() -> int:
             raise AssertionError(f"missing-import diagnostic repair should use guarded source repair: {missing_import_execution}")
         if "def value():\n    return 2\n" not in (repo / "app.py").read_text(encoding="utf-8"):
             raise AssertionError("missing-import diagnostic repair should add source function from test oracle")
+        (repo / "app.py").write_text("", encoding="utf-8")
+        name_error_request = json.loads(json.dumps(executable_request))
+        name_error_request["diagnostic_repair_queue"]["items"][0]["diagnostic_signals"] = ["name_error"]
+        name_error_execution = execute_diagnostic_repair_request(name_error_request)
+        if name_error_execution["status"] != "implemented" or name_error_execution["changed_files"] != ["app.py"]:
+            raise AssertionError(f"name-error diagnostic repair should use guarded source repair: {name_error_execution}")
+        if "def value():\n    return 2\n" not in (repo / "app.py").read_text(encoding="utf-8"):
+            raise AssertionError("name-error diagnostic repair should add source function from test oracle")
         (repo / "app.py").write_text("def value():\n    return 1\n", encoding="utf-8")
         request_path = repo / "diagnostic_repair_request.json"
         request_path.write_text(json.dumps(executable_request), encoding="utf-8")

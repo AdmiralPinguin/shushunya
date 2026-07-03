@@ -15,6 +15,9 @@
   design-decision seed, review decision records, and focused revision context.
 - Ceraxia can infer a narrow arithmetic return-expression patch from a
   two-argument unittest assertion when the candidate is unique and verified.
+- CodeBrigade diagnostic repair requests now support `name_error` as a guarded
+  repair signal when preserved tests expose a single safe missing symbol and
+  literal expectation.
 - Ceraxia/CodeBrigade handoffs expose implementation work packages, package
   surface coverage, package statuses, and review blocking for blocked packages.
 - CodeBrigade real source mutation for medium/high-risk tasks now requires a

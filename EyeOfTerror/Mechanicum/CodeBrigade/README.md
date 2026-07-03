@@ -95,7 +95,9 @@ per-attempt executor support, and blockers. Its first executor path is
 intentionally narrow: assertion-failure repair requests, failed-command
 requests, and traceback-backed repair requests may reuse the existing guarded
 test-inferred source patch adapter; missing-import repair requests can use the
-same guarded path when tests identify the missing source symbol. Unsupported
+same guarded path when tests identify the missing source symbol. NameError
+repair requests use the same guarded oracle path when the preserved tests expose
+a single safe missing symbol and literal expectation. Unsupported
 diagnostics, such as raw syntax-error repair without a guarded oracle, return
 blocked execution results with the unsupported reason attached to the attempt.
 `diagnostic_repair_intake.schema.json` contracts that intake shape so future
@@ -103,6 +105,9 @@ orchestrators can decide whether to execute, replan, or escalate before trying
 an unsupported repair. The
 repair execution brief includes the same worker-output contract shape as normal
 Ceraxia handoff, so diagnostic repair cannot bypass package-status auditing.
+Diagnostic repair scope budgets are normalized with required replan triggers,
+so partial request budgets cannot accidentally bypass the implementation brief
+contract.
 Use it directly when inspecting a run package:
 
 ```bash

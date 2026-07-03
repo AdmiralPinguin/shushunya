@@ -186,7 +186,7 @@ def build_diagnostic_repair_intake(request: dict[str, Any]) -> dict[str, Any]:
         signature = str(history_item.get("repair_signature") or "")
         if signature:
             previous_by_signature.setdefault(signature, []).append(history_item)
-    executor_supported_signals = {"assertion_failure", "failed_command", "traceback", "missing_import"}
+    executor_supported_signals = {"assertion_failure", "failed_command", "traceback", "missing_import", "name_error"}
     attempt_plan = []
     for index, item in enumerate(items):
         if not isinstance(item, dict):
@@ -206,7 +206,7 @@ def build_diagnostic_repair_intake(request: dict[str, Any]) -> dict[str, Any]:
                 "executor_supported": supported,
                 "unsupported_reason": ""
                 if supported
-                else "current guarded executor supports assertion_failure, failed_command, traceback, or missing_import only",
+                else "current guarded executor supports assertion_failure, failed_command, traceback, missing_import, or name_error only",
                 "read_order": item.get("concrete_read_targets", []) if isinstance(item.get("concrete_read_targets"), list) else [],
                 "package_ids": item.get("package_ids", []) if isinstance(item.get("package_ids"), list) else [],
                 "stop_conditions": item.get("stop_conditions", []) if isinstance(item.get("stop_conditions"), list) else [],
@@ -295,14 +295,15 @@ def build_repair_execution_brief(request: dict[str, Any], intake: dict[str, Any]
         ordered_packages.append("verification_evidence_package")
     source_files = [path for path in request.get("target_files_to_inspect", []) if isinstance(path, str)]
     test_files = [path for path in request.get("test_files_to_preserve", []) if isinstance(path, str)]
-    scope_budget = request.get("scope_budget") if isinstance(request.get("scope_budget"), dict) else {}
-    if not scope_budget:
-        scope_budget = {
-            "max_source_files_to_edit": 1,
-            "max_test_files_to_edit_without_explicit_user_request": 0,
-            "max_docs_files_to_edit": 0,
-            "requires_ceraxia_replan_when": ["diagnostic repair exceeds guarded scope"],
-        }
+    requested_scope_budget = request.get("scope_budget") if isinstance(request.get("scope_budget"), dict) else {}
+    scope_budget = {
+        "max_source_files_to_edit": int(requested_scope_budget.get("max_source_files_to_edit") or 1),
+        "max_test_files_to_edit_without_explicit_user_request": int(requested_scope_budget.get("max_test_files_to_edit_without_explicit_user_request") or 0),
+        "max_docs_files_to_edit": int(requested_scope_budget.get("max_docs_files_to_edit") or 0),
+        "requires_ceraxia_replan_when": requested_scope_budget.get("requires_ceraxia_replan_when")
+        if isinstance(requested_scope_budget.get("requires_ceraxia_replan_when"), list) and requested_scope_budget.get("requires_ceraxia_replan_when")
+        else ["diagnostic repair exceeds guarded scope"],
+    }
     packages = [
         {
             "id": package_id,
