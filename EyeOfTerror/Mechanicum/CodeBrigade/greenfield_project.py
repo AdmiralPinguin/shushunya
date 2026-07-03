@@ -680,6 +680,64 @@ def repair_guidance_for_verification(project_brief: dict[str, Any], verification
     )
 
 
+def project_file_content_map(project_brief: dict[str, Any]) -> dict[str, str]:
+    rows = project_brief.get("files") if isinstance(project_brief.get("files"), list) else []
+    contents: dict[str, str] = {}
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        content = item.get("content")
+        if path and isinstance(content, str):
+            contents[path] = content
+    return contents
+
+
+def apply_greenfield_repair(repo: Path, project_brief: dict[str, Any], verification: dict[str, Any]) -> dict[str, Any]:
+    template_contents = project_file_content_map(project_brief)
+    expected_files = [str(path) for path in project_brief.get("expected_files", []) if isinstance(path, str)]
+    repaired_files: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    for rel_path in expected_files:
+        if rel_path == "greenfield_project_brief.json":
+            continue
+        path = repo / rel_path
+        if path.exists():
+            continue
+        if rel_path not in template_contents:
+            blockers.append(f"missing file has no template repair content: {rel_path}")
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(template_contents[rel_path], encoding="utf-8")
+        repaired_files.append({"path": rel_path, "repair": "restored_missing_template_file"})
+    readme = repo / "README.md"
+    if readme.exists() and readme.is_file():
+        text = readme.read_text(encoding="utf-8")
+        additions: list[str] = []
+        for command in project_brief.get("run_commands", []):
+            if isinstance(command, str) and command and command not in text:
+                additions.append(f"```bash\n{command}\n```")
+        for command in project_brief.get("verification_commands", []):
+            if isinstance(command, str) and command and command not in text:
+                additions.append(f"```bash\n{command}\n```")
+        if additions:
+            readme.write_text(text.rstrip() + "\n\n## Repaired Commands\n\n" + "\n\n".join(additions) + "\n", encoding="utf-8")
+            repaired_files.append({"path": "README.md", "repair": "added_missing_contract_commands"})
+    elif "README.md" in template_contents:
+        readme.write_text(template_contents["README.md"], encoding="utf-8")
+        repaired_files.append({"path": "README.md", "repair": "restored_missing_template_file"})
+    if not repaired_files and not blockers:
+        blockers.append("no bounded greenfield repair was applicable")
+    return {
+        "kind": "code_brigade_greenfield_repair_execution",
+        "contract_version": "eye-mechanicum.v1",
+        "status": "applied" if repaired_files else "not_applicable",
+        "repaired_files": repaired_files,
+        "blockers": blockers,
+        "verification_status_before": verification.get("status", ""),
+    }
+
+
 def run_greenfield_verification_loop(repo: Path, commands: list[str], project_brief: dict[str, Any], max_cycles: int = 2) -> dict[str, Any]:
     attempts: list[dict[str, Any]] = []
     previous_signature = ""
@@ -704,7 +762,18 @@ def run_greenfield_verification_loop(repo: Path, commands: list[str], project_br
             attempts.append({"cycle": cycle, "status": verification.get("status", ""), "failure_signature": "", "repair_guidance": {}})
             return {"kind": "code_brigade_greenfield_verification_loop", "status": "passed", "attempts": attempts, "final_verification": verification, "stop_reason": "verification passed"}
         repair_guidance = repair_guidance_for_verification(project_brief, verification, signature)
-        attempts.append({"cycle": cycle, "status": verification.get("status", ""), "failure_signature": signature, "repair_guidance": repair_guidance})
+        repair_execution = apply_greenfield_repair(repo, project_brief, verification)
+        attempts.append(
+            {
+                "cycle": cycle,
+                "status": verification.get("status", ""),
+                "failure_signature": signature,
+                "repair_guidance": repair_guidance,
+                "repair_execution": repair_execution,
+            }
+        )
+        if repair_execution.get("status") != "applied":
+            return {"kind": "code_brigade_greenfield_verification_loop", "status": "blocked", "attempts": attempts, "final_verification": verification, "stop_reason": "no bounded repair applicable"}
         if signature and signature == previous_signature:
             return {"kind": "code_brigade_greenfield_verification_loop", "status": "blocked", "attempts": attempts, "final_verification": verification, "stop_reason": "same verification failure repeats"}
         previous_signature = signature
@@ -717,6 +786,17 @@ def build_greenfield_memory_record(
     verification_loop: dict[str, Any],
     greenfield_review: dict[str, Any],
 ) -> dict[str, Any]:
+    repair_attempts = [
+        attempt.get("repair_execution", {})
+        for attempt in verification_loop.get("attempts", [])
+        if isinstance(attempt, dict) and isinstance(attempt.get("repair_execution"), dict)
+    ]
+    repaired_files = [
+        str(row.get("path") or "")
+        for attempt in repair_attempts
+        for row in (attempt.get("repaired_files", []) if isinstance(attempt.get("repaired_files"), list) else [])
+        if isinstance(row, dict) and row.get("path")
+    ]
     return {
         "kind": "code_brigade_greenfield_memory_record",
         "contract_version": "eye-mechanicum.v1",
@@ -729,6 +809,8 @@ def build_greenfield_memory_record(
         "verification_status": verification_loop.get("status", ""),
         "verification_stop_reason": verification_loop.get("stop_reason", ""),
         "verification_attempt_count": len(verification_loop.get("attempts", [])) if isinstance(verification_loop.get("attempts"), list) else 0,
+        "repair_attempt_count": len(repair_attempts),
+        "repaired_files": repaired_files,
         "review_status": greenfield_review.get("status", ""),
         "review_blockers": greenfield_review.get("blockers", []),
         "review_warnings": greenfield_review.get("warnings", []),

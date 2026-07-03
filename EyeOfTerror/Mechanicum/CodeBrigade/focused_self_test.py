@@ -8,7 +8,7 @@ from pathlib import Path
 
 import code_brigade_adapter
 from diagnostic_repair_contract import execute_diagnostic_repair_loop, execute_diagnostic_repair_request
-from greenfield_project import build_greenfield_project_brief, validate_greenfield_project_brief
+from greenfield_project import build_greenfield_project_brief, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_templates import available_templates
 from self_test import valid_brief
 
@@ -205,6 +205,25 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             review = report["execution_result"]["greenfield_project"]["greenfield_review"]
             self.assertEqual(review["semantic_review"]["status"], "blocked")
             self.assertTrue(any("placeholder marker" in item for item in review["semantic_review"]["blockers"]))
+
+    def test_greenfield_verification_loop_repairs_missing_template_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief("Создай новый CLI проект `repair-demo`.")
+            for item in project["files"]:
+                rel_path = item["path"]
+                if rel_path == "repair_demo/core.py":
+                    continue
+                path = repo / rel_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=2)
+            self.assertEqual(loop["status"], "passed", loop)
+            self.assertEqual(len(loop["attempts"]), 2)
+            repair = loop["attempts"][0]["repair_execution"]
+            self.assertEqual(repair["status"], "applied")
+            self.assertTrue(any(row["path"] == "repair_demo/core.py" for row in repair["repaired_files"]))
+            self.assertTrue((repo / "repair_demo/core.py").exists())
 
     def test_project_creation_mode_blocks_nonempty_unowned_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

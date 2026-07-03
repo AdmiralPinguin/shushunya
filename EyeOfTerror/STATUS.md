@@ -40,7 +40,10 @@
   function/component traces, paired tests, milestones, and anti-stub policy;
   GreenfieldReview reads generated artifacts back from disk and blocks missing
   files, empty generated files, placeholder markers, missing module traces, and
-  source-without-test scaffolds.
+  source-without-test scaffolds. The greenfield verification loop can now apply
+  bounded repairs before rerunning: it restores missing files only from the
+  selected template contract and adds missing README command blocks when those
+  commands are declared in the project brief.
 - Warmaster gateway HTTP-governor preparation now has a focused live self-test;
   the old monolithic gateway self-test is opt-in through
   `RUN_MONOLITHIC_GATEWAY_SELF_TEST=1` so normal checks do not hang on one huge

@@ -164,6 +164,11 @@ Greenfield reports also expose role-specific model guidance for
 `greenfield_memory_record` with the chosen stack, template, dependency status,
 verification attempts, review blockers/warnings, commands, template failure
 fixes, and reusable learnings for later Ceraxia runs.
+The greenfield verification loop can now execute bounded repairs before a
+rerun: it restores missing files only from the selected template contract and
+adds missing README command blocks when they are declared by `run_commands` or
+`verification_commands`. If no bounded repair applies, the loop stops with an
+explicit blocker instead of spinning.
 Adapter results must satisfy
 `execution_result.schema.json`: status, changed files, patch summary, executed
 verification commands, blockers, rollback notes, and per-operation patch
