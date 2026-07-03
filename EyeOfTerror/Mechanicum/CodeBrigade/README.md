@@ -182,7 +182,9 @@ todo app with add/complete/delete/persistence behavior, DOM entrypoints,
 module contracts, and structure tests. API service tasks can also derive a
 notes-service implementation with create/list/get/delete logic, optional
 FastAPI routes, invalid-title handling, and tests that do not require a live
-server. Greenfield review reads generated artifacts back from
+server. Data-processing tasks can derive a CSV summary tool with row and column
+counts, numeric sums, numeric averages, JSON CLI output, module contracts, and
+processor tests. Greenfield review reads generated artifacts back from
 disk and records a semantic review that blocks missing files, empty generated
 files, placeholder markers, missing module traces, and source-without-test
 scaffolds. Placeholder detection treats uppercase `TODO` as a stub marker

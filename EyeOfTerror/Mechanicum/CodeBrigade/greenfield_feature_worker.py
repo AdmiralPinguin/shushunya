@@ -34,6 +34,15 @@ def infer_acceptance_features(task: str) -> list[dict[str, Any]]:
                 "operations": ["create", "list", "get", "delete"],
             }
         )
+    if any(word in lowered for word in ("csv summary", "csv summarize", "summarize csv", "data summary", "сводк", "суммар", "csv отчет", "csv отчёт")):
+        features.append(
+            {
+                "id": "csv_summary",
+                "kind": "functional_requirement",
+                "description": "summarize CSV rows, columns, numeric sums, and numeric averages through processor and CLI",
+                "operations": ["count_rows", "list_columns", "sum_numeric_columns", "average_numeric_columns"],
+            }
+        )
     return features
 
 
@@ -53,6 +62,8 @@ def apply_task_feature_overrides(
         return apply_static_site_todo_feature(project_name, files), static_todo_module_contracts(), features
     if template_id == "python_fastapi_service" and any(feature.get("id") == "notes_api" for feature in features):
         return apply_fastapi_notes_feature(project_name, files), fastapi_notes_module_contracts(), features
+    if template_id == "data_processing_tool" and any(feature.get("id") == "csv_summary" for feature in features):
+        return apply_data_processing_csv_summary_feature(project_name, files), csv_summary_module_contracts(project_name), features
     return files, module_contracts, features
 
 
@@ -425,5 +436,99 @@ def fastapi_notes_module_contracts() -> list[dict[str, Any]]:
             "path": "tests/test_health.py",
             "responsibility": "notes service behavior verification",
             "requirements": ["prove note lifecycle", "prove invalid title rejection", "prove deletion behavior without requiring live server"],
+        },
+    ]
+
+
+def apply_data_processing_csv_summary_feature(project_name: str, files: list[Any]) -> list[Any]:
+    package = project_name.replace("-", "_")
+    processor = (
+        "import csv\n"
+        "from io import StringIO\n\n\n"
+        "def _to_number(value: str) -> float | None:\n"
+        "    try:\n"
+        "        return float(value)\n"
+        "    except (TypeError, ValueError):\n"
+        "        return None\n\n\n"
+        "def summarize_rows(csv_text: str) -> dict[str, object]:\n"
+        "    reader = csv.DictReader(StringIO(csv_text))\n"
+        "    rows = list(reader)\n"
+        "    columns = list(reader.fieldnames or [])\n"
+        "    numeric_values: dict[str, list[float]] = {column: [] for column in columns}\n"
+        "    for row in rows:\n"
+        "        for column in columns:\n"
+        "            number = _to_number(row.get(column, ''))\n"
+        "            if number is not None:\n"
+        "                numeric_values[column].append(number)\n"
+        "    numeric_columns = {column: values for column, values in numeric_values.items() if values}\n"
+        "    sums = {column: sum(values) for column, values in numeric_columns.items()}\n"
+        "    averages = {column: sums[column] / len(values) for column, values in numeric_columns.items()}\n"
+        "    return {\n"
+        "        'rows': len(rows),\n"
+        "        'columns': columns,\n"
+        "        'numeric_sums': sums,\n"
+        "        'numeric_averages': averages,\n"
+        "    }\n"
+    )
+    cli = (
+        "from pathlib import Path\n"
+        "import json\n"
+        "import sys\n\n"
+        "from .processor import summarize_rows\n\n\n"
+        "def main(argv: list[str] | None = None) -> None:\n"
+        "    args = list(sys.argv[1:] if argv is None else argv)\n"
+        "    if not args:\n"
+        "        raise SystemExit('input csv path required')\n"
+        "    summary = summarize_rows(Path(args[0]).read_text(encoding='utf-8'))\n"
+        "    print(json.dumps(summary, ensure_ascii=False, sort_keys=True))\n\n\n"
+        "if __name__ == '__main__':\n"
+        "    main()\n"
+    )
+    tests = (
+        f"import unittest\n\nfrom {package}.processor import summarize_rows\n\n\n"
+        "class CsvSummaryTests(unittest.TestCase):\n"
+        "    def test_counts_rows_columns_sums_and_averages(self):\n"
+        "        summary = summarize_rows('name,score,cost\\na,10,2.5\\nb,20,3.5\\n')\n"
+        "        self.assertEqual(summary['rows'], 2)\n"
+        "        self.assertEqual(summary['columns'], ['name', 'score', 'cost'])\n"
+        "        self.assertEqual(summary['numeric_sums'], {'score': 30.0, 'cost': 6.0})\n"
+        "        self.assertEqual(summary['numeric_averages'], {'score': 15.0, 'cost': 3.0})\n\n"
+        "    def test_ignores_non_numeric_values(self):\n"
+        "        summary = summarize_rows('name,score\\na,10\\nb,nope\\n')\n"
+        "        self.assertEqual(summary['numeric_sums'], {'score': 10.0})\n"
+    )
+    readme = (
+        f"# {project_name}\n\nA CSV summary tool that reports row count, columns, numeric sums, and numeric averages.\n\n"
+        "## Run\n\n```bash\npython -m "
+        f"{package}.cli input.csv\n```\n\n"
+        "## Test\n\n```bash\npython -m unittest discover tests\n```\n"
+    )
+    rows = replace_project_file(files, f"{package}/processor.py", processor)
+    rows = replace_project_file(rows, f"{package}/cli.py", cli)
+    rows = replace_project_file(rows, "tests/test_processor.py", tests)
+    rows = replace_project_file(rows, "README.md", readme)
+    return rows
+
+
+def csv_summary_module_contracts(project_name: str) -> list[dict[str, Any]]:
+    package = project_name.replace("-", "_")
+    return [
+        {
+            "module": f"{package}.processor",
+            "path": f"{package}/processor.py",
+            "responsibility": "CSV summary domain logic",
+            "requirements": ["count rows", "list columns", "sum numeric columns", "average numeric columns", "ignore non-numeric values"],
+        },
+        {
+            "module": f"{package}.cli",
+            "path": f"{package}/cli.py",
+            "responsibility": "file-based CSV summary CLI",
+            "requirements": ["read input path", "print JSON summary"],
+        },
+        {
+            "module": "tests.test_processor",
+            "path": "tests/test_processor.py",
+            "responsibility": "CSV summary behavior verification",
+            "requirements": ["prove row and column summary", "prove numeric sums and averages", "prove non-numeric values are ignored"],
         },
     ]

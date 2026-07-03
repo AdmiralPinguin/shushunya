@@ -236,8 +236,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(python_source_semantic_status("def run():\n    return 'ready'\n\nif True:\n    run()\n"), "ok")
 
     def test_greenfield_feature_worker_detects_task_features(self) -> None:
-        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api todo calculator")}
-        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "notes_api"})
+        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api todo calculator csv summary")}
+        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "notes_api", "csv_summary"})
 
     def test_greenfield_architect_owns_project_brief_and_plan(self) -> None:
         project = architect_build_greenfield_project_brief("Создай CLI калькулятор `architect-calc`.")
@@ -436,6 +436,28 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(review["semantic_review"]["status"], "passed", review)
             self.assertEqual(review["status"], "passed", review)
 
+    def test_project_creation_csv_summary_tool_implements_task_feature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(repo, "Создай data csv summary tool `csv-demo` для сводки CSV.")
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "implemented", report)
+            project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
+            self.assertEqual(project["template_id"], "data_processing_tool")
+            self.assertTrue(any(feature["id"] == "csv_summary" for feature in project["acceptance_features"]))
+            self.assertIn("csv_summary", project["implementation_feature_report"]["recognized_feature_ids"])
+            self.assertIn("average numeric columns", json.dumps(project["module_contracts"], ensure_ascii=False))
+            source = (repo / "csv_demo/processor.py").read_text(encoding="utf-8")
+            self.assertIn("numeric_averages", source)
+            self.assertIn("numeric_sums", source)
+            tests = (repo / "tests/test_processor.py").read_text(encoding="utf-8")
+            self.assertIn("test_counts_rows_columns_sums_and_averages", tests)
+            verification = report["execution_result"]["greenfield_project"]["verification"]
+            self.assertEqual(verification["status"], "passed", verification)
+            review = report["execution_result"]["greenfield_project"]["greenfield_review"]
+            self.assertEqual(review["semantic_review"]["status"], "passed", review)
+            self.assertEqual(review["status"], "passed", review)
+
     def test_greenfield_project_brief_contract_and_templates(self) -> None:
         cli = build_greenfield_project_brief("Создай новый CLI проект `forge-tool`.")
         api = build_greenfield_project_brief("Создай FastAPI backend service `api-demo`.")
@@ -478,6 +500,9 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         notes = build_greenfield_project_brief("Создай FastAPI notes API `notes-demo`.")
         self.assertTrue(any(feature["id"] == "notes_api" for feature in notes["acceptance_features"]))
         self.assertGreaterEqual(len(notes["module_contracts"]), 2)
+        csv_summary = build_greenfield_project_brief("Создай data csv summary tool `csv-demo`.")
+        self.assertTrue(any(feature["id"] == "csv_summary" for feature in csv_summary["acceptance_features"]))
+        self.assertGreaterEqual(len(csv_summary["module_contracts"]), 3)
 
 
 if __name__ == "__main__":
