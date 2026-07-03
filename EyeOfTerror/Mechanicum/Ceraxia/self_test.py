@@ -1560,6 +1560,59 @@ class CeraxiaLifecycleTests(unittest.TestCase):
         self.assertEqual(review["decision"], "blocked")
         self.assertTrue(any("output contains failure_text" in item["finding"] for item in review["findings"]))
 
+    def test_review_gate_blocks_passed_report_with_no_tests_ran_surface_output(self) -> None:
+        packet = build_planning_packet({"task": "почини pytest для public API schema", "repo_path": "."})
+        survey = {
+            "repo_exists": True,
+            "repo_path": ".",
+            "candidate_files": ["app.py"],
+            "test_files": ["test_app.py"],
+            "entrypoint_candidates": [],
+            "python_symbols": [],
+            "source_summaries": [],
+            "local_import_edges": [],
+            "suggested_verification_commands": [],
+            "truncated": False,
+            "python_symbols_truncated": False,
+            "source_summaries_truncated": False,
+            "max_files_scanned": 1,
+            "max_python_symbol_files": 1,
+            "max_source_summary_files": 1,
+        }
+        brief = build_implementation_brief(packet, survey)
+        worker_report = {
+            "status": "dry_run_handoff_ready",
+            "dry_run": True,
+            "changed_files": [],
+            "implementation_brief_acknowledged": True,
+        }
+        verification_report = {
+            "status": "passed",
+            "negative_tests_required": [],
+            "broad_verification_required": False,
+            "commands_planned": ["python -m pytest"],
+            "commands_executable": ["python -m pytest"],
+            "commands_executed": [{"command": "python -m pytest", "status": "passed"}],
+            "output_summary": [
+                {
+                    "command": "python -m pytest",
+                    "status": "passed",
+                    "returncode": 0,
+                    "stdout_nonempty": True,
+                    "stderr_nonempty": False,
+                    "output_signal": "output_present",
+                    "has_no_tests_ran": True,
+                }
+            ],
+        }
+        review = review_gate(packet, brief, worker_report, verification_report)
+        self.assertEqual(review["decision"], "blocked")
+        self.assertEqual(review["surface_verification_sufficiency"]["status"], "failed")
+        source_surface = next(row for row in review["surface_verification_sufficiency"]["surface_evidence"] if row["surface"] == "source_behavior")
+        self.assertEqual(source_surface["status"], "failed")
+        self.assertEqual(source_surface["matched_output_diagnostic_counts"]["no_tests_ran"], 1)
+        self.assertTrue(any("surface verification output contains failure semantics" in item["finding"] for item in review["findings"]))
+
     def test_engineering_memory_records_repair_strategy_from_failed_verification(self) -> None:
         packet = build_planning_packet({"task": "почини bugfix без указания файла по failing unittest", "repo_path": "."})
         survey = {

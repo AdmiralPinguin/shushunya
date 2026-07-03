@@ -453,6 +453,16 @@ def output_diagnostic_counts_for_rows(rows: list[dict[str, Any]]) -> dict[str, i
     }
 
 
+def output_rows_have_failure_semantics(rows: list[dict[str, Any]]) -> bool:
+    for row in rows:
+        signal = str(row.get("output_signal") or "")
+        if signal in {"failure_text", "traceback"}:
+            return True
+        if row.get("has_traceback") or row.get("has_assertion_failure") or row.get("has_syntax_error") or row.get("has_no_tests_ran") or row.get("missing_imports"):
+            return True
+    return False
+
+
 def has_test_command(commands: list[dict[str, Any]]) -> bool:
     return any("pytest" in command or "test" in command or "unittest" in command for command in command_texts(commands))
 
@@ -515,6 +525,9 @@ def surface_evidence_rows(surface_rows: list[Any], verification_report: dict[str
             reason = "verification is planned but not executed"
             matched_commands = []
         matched_output_rows = output_summary_for_commands(output_summary, matched_commands)
+        if matched_output_rows and output_rows_have_failure_semantics(matched_output_rows):
+            status = "failed"
+            reason = "matched verification output contains failure or diagnostic signals"
         rows.append(
             {
                 "surface": surface,
@@ -1166,6 +1179,8 @@ def review_gate(
         findings.append({"severity": "blocker", "finding": "surface verification matrix has blockers"})
     if surface_rows and not meaningful_commands_executed:
         warnings.append({"severity": "warning", "finding": "surface verification coverage is planned but not executed"})
+    if surface_status == "failed":
+        findings.append({"severity": "blocker", "finding": "surface verification output contains failure semantics"})
     if surface_status == "partial":
         warnings.append({"severity": "warning", "finding": "surface verification has only partial executed evidence"})
     if brief.get("risk_level") == "high" and surface_status == "partial" and meaningful_commands_executed:

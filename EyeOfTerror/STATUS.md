@@ -22,6 +22,9 @@
   the old monolithic gateway self-test is opt-in through
   `RUN_MONOLITHIC_GATEWAY_SELF_TEST=1` so normal checks do not hang on one huge
   scenario bundle.
+- Ceraxia review gate now treats matched surface verification output with
+  diagnostic failure semantics, including `no_tests_ran`, as failed surface
+  evidence even when the command/report claims `passed`.
 - Ceraxia/CodeBrigade handoffs expose implementation work packages, package
   surface coverage, package statuses, and review blocking for blocked packages.
 - CodeBrigade real source mutation for medium/high-risk tasks now requires a
