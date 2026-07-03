@@ -637,6 +637,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
     role_policy = role_policy_from_request(request)
     task_profile = task_profile_from_request(request)
     worker_brief = worker_brief_from_request(request)
+    model_guidance = code_model_guidance(request, "verification command selection, failure interpretation, and repair-loop guidance")
     blockers = [str(item) for item in patch.get("blockers", [])] if isinstance(patch.get("blockers"), list) else []
     executed: list[dict[str, Any]] = []
     repo_root = target_repo_root(request)
@@ -774,6 +775,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
         ],
         "executed": executed,
         "repairs": repairs,
+        "model_guidance": model_guidance,
         "blockers": blockers,
         "warnings": patch.get("warnings", []),
         "summary": "Verification passed for applied changes." if not blockers else "Verification is blocked or failed.",
@@ -791,6 +793,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
         "worker_brief": worker_brief,
         "repairs_allowed": repairs_allowed,
         "repair_attempts": repairs,
+        "model_guidance": model_guidance,
         "blocked_repairs": blocked_repairs,
         "commands_executed_count": len(executed),
         "failed_commands": failed_commands,
@@ -800,6 +803,7 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
         "summary": "Repair loop state recorded for verification step.",
     }
     diagnostic_extraction = diagnostic_extraction_from_execution(patch, executed, candidate_source_paths, repo_root)
+    diagnostic_extraction["model_guidance"] = model_guidance
     write_json(workspace_root, output_path, report)
     write_json(workspace_root, sibling_artifact(output_path, "repair_loop_state.json"), repair_state)
     write_json(workspace_root, sibling_artifact(output_path, "diagnostic_extraction.json"), diagnostic_extraction)
@@ -815,4 +819,5 @@ def run_verification(request: dict[str, Any], workspace_root: Path, output_path:
             sibling_artifact(output_path, "diagnostic_extraction.json"),
         ],
         "confidence": "medium",
+        "model_guidance": model_guidance,
     }

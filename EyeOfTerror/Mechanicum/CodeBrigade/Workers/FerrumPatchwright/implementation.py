@@ -679,6 +679,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
     dirty_worktree = {"git_repo": False, "dirty_targets": []}
     ambiguity_analysis: dict[str, Any] = {}
     ast_patch_plan: dict[str, Any] = {}
+    model_guidance = code_model_guidance(request, "implementation patch selection, mutation safety, and handoff blockers")
     try:
         patch_resolution = patch_spec_resolution_from_request(request)
         patch_spec = patch_resolution["patch_spec"] if isinstance(patch_resolution.get("patch_spec"), dict) else {}
@@ -730,6 +731,7 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "plan_excerpt": plan[:3000],
         "problem_statement": problem_statement,
         "architecture_options": architecture_options,
+        "model_guidance": model_guidance,
         "role_policy": role_policy,
         "task_profile": task_profile,
         "worker_brief": worker_brief,
@@ -752,6 +754,12 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
             for item in excerpts
         ],
         "implementation_decision_record": [
+            {
+                "check": "model_guidance_loaded",
+                "status": "pass" if model_guidance.get("used_by_worker") else "warn",
+                "detail": model_guidance.get("status"),
+                "risk_markers": model_guidance.get("risk_markers", []),
+            },
             {
                 "check": "source_evidence_loaded",
                 "status": "pass" if any(item.get("status") == "read" for item in excerpts) else "warn",
@@ -798,8 +806,10 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "blockers": blockers,
         "warnings": [
             "Patch was selected from Ceraxia's guarded patch contracts or safe inference modes; broad synthesis still requires explicit evidence.",
+            "Model guidance was used as advisory implementation context; source mutation still requires structured patch evidence.",
         ] if status == "applied" else [
             "The current package is an auditable implementation handoff, not a completed code change.",
+            "Model guidance was recorded for the next implementation attempt.",
         ]
     }
     write_json(workspace_root, output_path, manifest)
@@ -812,4 +822,5 @@ def run_implementation(request: dict[str, Any], workspace_root: Path, output_pat
         "summary": "Patch manifest written with applied changes." if status == "applied" else "Patch manifest written as auditable handoff; source mutation remains blocked.",
         "artifacts": [output_path, sibling_artifact(output_path, "unshaped_repair_plan.json")],
         "confidence": "medium",
+        "model_guidance": model_guidance,
     }

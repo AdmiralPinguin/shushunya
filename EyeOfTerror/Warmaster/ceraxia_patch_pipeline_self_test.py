@@ -72,6 +72,16 @@ CERAXIA_PATCH:
             raise AssertionError(f"Ceraxia final manifest lacks verification evidence: {manifest}")
         if manifest.get("repair_loop_state", {}).get("next_action") != "continue_to_code_review":
             raise AssertionError(f"Ceraxia final manifest should preserve repair loop state: {manifest}")
+        model_guidance = manifest.get("model_guidance", {})
+        if (
+            not isinstance(model_guidance, dict)
+            or model_guidance.get("finalizer", {}).get("status") != "disabled"
+            or model_guidance.get("survey", {}).get("status") != "disabled"
+            or model_guidance.get("patch", {}).get("status") != "disabled"
+            or model_guidance.get("verification", {}).get("status") != "disabled"
+            or model_guidance.get("review", {}).get("status") != "disabled"
+        ):
+            raise AssertionError(f"Ceraxia final manifest should preserve model guidance trail: {manifest}")
         if manifest.get("role_policies", {}).get("verification", {}).get("authority") != "allowlisted_verification_and_narrow_repairs":
             raise AssertionError(f"Ceraxia final manifest should preserve role policies: {manifest}")
         execution_report = manifest.get("execution_report", {})
@@ -99,6 +109,18 @@ CERAXIA_PATCH:
             or summary_manifest.get("engineering_investigation", {}).get("hypothesis_count", 0) < 1
         ):
             raise AssertionError(f"Warmaster summary should expose Ceraxia final evidence: {result}")
+        patch_manifest_path = next((run_root / task_id / "work").rglob("patch_manifest.json"))
+        verification_report_path = next((run_root / task_id / "work").rglob("verification_report.json"))
+        code_review_path = next((run_root / task_id / "work").rglob("code_review.json"))
+        patch_manifest = json.loads(patch_manifest_path.read_text(encoding="utf-8"))
+        verification_report = json.loads(verification_report_path.read_text(encoding="utf-8"))
+        code_review = json.loads(code_review_path.read_text(encoding="utf-8"))
+        if patch_manifest.get("model_guidance", {}).get("status") != "disabled":
+            raise AssertionError(f"patch manifest should include model guidance: {patch_manifest}")
+        if verification_report.get("model_guidance", {}).get("status") != "disabled":
+            raise AssertionError(f"verification report should include model guidance: {verification_report}")
+        if code_review.get("model_guidance_review", {}).get("status") != "disabled":
+            raise AssertionError(f"code review should include model guidance review: {code_review}")
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_root = Path(temp_dir)
         target_repo = temp_root / "repo"

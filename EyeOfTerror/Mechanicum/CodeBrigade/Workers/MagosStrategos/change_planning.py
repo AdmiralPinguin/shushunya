@@ -113,6 +113,7 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
     problem_statement = problem_statement_from_evidence(request, survey)
     architecture_options = architecture_options_from_evidence(request, survey)
     architecture_decision_record = architecture_decision_record_from_evidence(request, survey)
+    model_guidance = code_model_guidance(request, "change planning, architecture options, and verification strategy")
     symbol_lines: list[str] = []
     for item in symbols[:20]:
         if not isinstance(item, dict):
@@ -242,6 +243,12 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
             ],
             f"- rollback: {architecture_decision_record.get('rollback')}",
             "",
+            "## Model Guidance",
+            f"- status: {model_guidance.get('status')}",
+            f"- used_by_worker: {model_guidance.get('used_by_worker')}",
+            f"- risk_markers: {', '.join(str(item) for item in model_guidance.get('risk_markers', [])) if isinstance(model_guidance.get('risk_markers'), list) else ''}",
+            *model_guidance_lines(model_guidance),
+            "",
             "## Repo-Grade Workflow",
             f"- mode: {repo_grade_workflow.get('mode')}",
             *[
@@ -305,6 +312,8 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
         ]
     )
     write_text(workspace_root, output_path, content + "\n")
+    problem_statement["model_guidance"] = model_guidance
+    architecture_options["model_guidance"] = model_guidance
     write_json(workspace_root, sibling_artifact(output_path, "problem_statement.json"), problem_statement)
     write_json(workspace_root, sibling_artifact(output_path, "architecture_options.json"), architecture_options)
     return {
@@ -319,4 +328,5 @@ def run_change_planning(request: dict[str, Any], workspace_root: Path, output_pa
             sibling_artifact(output_path, "architecture_options.json"),
         ],
         "confidence": "medium",
+        "model_guidance": model_guidance,
     }

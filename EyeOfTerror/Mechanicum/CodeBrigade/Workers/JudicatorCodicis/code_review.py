@@ -368,6 +368,7 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
     role_policy = role_policy_from_request(request)
     task_profile = task_profile_from_request(request)
     worker_brief = worker_brief_from_request(request)
+    model_guidance = code_model_guidance(request, "code review, blocker detection, revision planning, and final approval risk")
     blockers = verification.get("blockers") if isinstance(verification.get("blockers"), list) else []
     warnings = verification.get("warnings") if isinstance(verification.get("warnings"), list) else []
     scope = patch.get("patch_scope_evidence") if isinstance(patch.get("patch_scope_evidence"), dict) else {}
@@ -674,6 +675,12 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         "ast_patch_review": focused_revision_context.get("ast_patch_review", {}),
         "repository_investigation_review": investigation_review,
         "public_surface_review": public_surface_review,
+        "model_guidance_review": {
+            "status": model_guidance.get("status"),
+            "used_by_worker": model_guidance.get("used_by_worker"),
+            "risk_markers": model_guidance.get("risk_markers", []),
+            "content_excerpt": str(model_guidance.get("content") or "")[:2000],
+        },
         "decision_record": decision_record,
         "review_repair_loop": review_repair_loop,
         "findings": [
@@ -685,7 +692,12 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
             {
                 "severity": "warning",
                 "message": "Ceraxia supports explicit, marker-synthesized, and guarded test-inferred patches; broader repo-grade synthesis must still block with evidence.",
-            }
+            },
+            {
+                "severity": "warning",
+                "message": "Model guidance was considered as advisory review context; blockers still require structured evidence.",
+                "markers": model_guidance.get("risk_markers", []),
+            },
         ],
         "revision_plan": {
             "required": bool(blockers),
@@ -703,4 +715,5 @@ def run_code_review(request: dict[str, Any], workspace_root: Path, output_path: 
         "artifacts": [output_path],
         "revision_plan": review["revision_plan"],
         "confidence": "medium",
+        "model_guidance": model_guidance,
     }

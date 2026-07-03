@@ -24,6 +24,12 @@
   Worker HTTP services, local pipeline execution, and the Iskandar/Ceraxia
   governor services expose a `model_brain` contract and attach a
   `model_brain` status object to task results/plans.
+- Ceraxia CodeBrigade workers consume model guidance inside their own
+  artifacts: repository survey records model-guided risks, change planning
+  writes model guidance into the plan/problem/options, implementation records
+  model guidance in the mutation decision record, verification preserves it in
+  diagnostic/repair artifacts, review records it as advisory critique, and the
+  final manifest carries the model-guidance trail.
 - `EyeOfTerror/Warmaster/start_brigade.py` enables model-backed service runs by
   default with `EYE_MODEL_ENABLED=1`,
   `EYE_MODEL_BASE_URL=http://127.0.0.1:8080/v1`, and

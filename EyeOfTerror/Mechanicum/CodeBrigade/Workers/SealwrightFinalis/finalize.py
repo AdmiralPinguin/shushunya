@@ -110,6 +110,7 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
     role_policy = role_policy_from_request(request)
     task_profile = task_profile_from_request(request)
     worker_brief = worker_brief_from_request(request)
+    model_guidance = code_model_guidance(request, "final package validation, residual risk summary, and next safe action")
     status = "blocked" if review.get("approved") is False else "ready"
     changed_files = patch.get("changed_files", []) if isinstance(patch.get("changed_files"), list) else []
     repo_grade_workflow = patch.get("repo_grade_workflow") if isinstance(patch.get("repo_grade_workflow"), dict) else repo_grade_workflow_from_request(request, changed_files)
@@ -266,6 +267,13 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
             "revision_required": bool(review.get("revision_plan", {}).get("required")) if isinstance(review.get("revision_plan"), dict) else False,
         },
         "principal_evidence_summary": principal_summary,
+        "model_guidance": {
+            "finalizer": model_guidance,
+            "survey": survey.get("model_guidance", {}) if isinstance(survey.get("model_guidance"), dict) else {},
+            "patch": patch.get("model_guidance", {}) if isinstance(patch.get("model_guidance"), dict) else {},
+            "verification": verification.get("model_guidance", {}) if isinstance(verification.get("model_guidance"), dict) else {},
+            "review": review.get("model_guidance_review", {}) if isinstance(review.get("model_guidance_review"), dict) else {},
+        },
         "review_status": review.get("status", "unknown"),
         "patch_scope_review": review.get("patch_scope_review", {}),
         "review_decision_record": review.get("decision_record", []),
@@ -285,4 +293,5 @@ def run_finalize(request: dict[str, Any], workspace_root: Path, output_path: str
         "artifacts": [output_path],
         "revision_plan": manifest["revision_plan"],
         "confidence": "medium",
+        "model_guidance": model_guidance,
     }

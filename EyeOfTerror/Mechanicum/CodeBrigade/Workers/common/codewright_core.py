@@ -11,6 +11,12 @@ from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[5]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from EyeOfTerror.model_brain import request_model_decision  # noqa: E402
+
 MECHANICUM_ROOT = Path(__file__).resolve().parents[1]
 if str(MECHANICUM_ROOT) not in sys.path:
     sys.path.insert(0, str(MECHANICUM_ROOT))
@@ -112,6 +118,56 @@ def worker_brief_from_request(request: dict[str, Any]) -> dict[str, Any]:
     expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
     brief = expectations.get("worker_brief") if isinstance(expectations.get("worker_brief"), dict) else {}
     return brief
+
+
+def code_model_guidance(request: dict[str, Any], purpose: str) -> dict[str, Any]:
+    existing = request.get("model_brain") if isinstance(request.get("model_brain"), dict) else {}
+    if existing:
+        decision = existing
+    else:
+        decision = request_model_decision(
+            worker_name(),
+            f"CodeBrigade {worker_name()} worker",
+            request,
+            layer="code_worker",
+            instructions=f"Provide role-scoped software-engineering guidance for: {purpose}. Do not invent files or bypass verification.",
+        )
+    content = str(decision.get("content") or "").strip()
+    return {
+        "status": str(decision.get("status") or ""),
+        "ok": bool(decision.get("ok")),
+        "model": str(decision.get("model") or ""),
+        "purpose": purpose,
+        "used_by_worker": bool(content),
+        "content": content[:6000],
+        "error": str(decision.get("error") or ""),
+        "risk_markers": model_risk_markers(content),
+    }
+
+
+def model_risk_markers(content: str) -> list[str]:
+    lowered = content.lower()
+    markers: list[str] = []
+    checks = {
+        "blocker": ("blocker", "blocked", "блок"),
+        "verification": ("verify", "verification", "test", "провер"),
+        "scope": ("scope", "surface", "file", "модул", "файл"),
+        "compatibility": ("compat", "api", "backward", "совмест"),
+        "security": ("security", "path traversal", "auth", "безопас"),
+    }
+    for marker, needles in checks.items():
+        if any(needle in lowered for needle in needles):
+            markers.append(marker)
+    return markers
+
+
+def model_guidance_lines(guidance: dict[str, Any], limit: int = 12) -> list[str]:
+    content = str(guidance.get("content") or "")
+    lines = [line.strip() for line in content.replace("```json", "").replace("```", "").splitlines()]
+    selected = [line for line in lines if line][:limit]
+    if not selected:
+        selected = [str(guidance.get("error") or "no model guidance content")]
+    return [f"- {line[:240]}" for line in selected]
 
 def repo_grade_workflow_from_request(request: dict[str, Any], changed_files: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     task_profile = task_profile_from_request(request)

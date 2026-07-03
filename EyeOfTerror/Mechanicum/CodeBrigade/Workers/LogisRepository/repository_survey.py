@@ -331,9 +331,22 @@ def repo_survey(repo_root: Path, goal: str) -> dict[str, Any]:
 def run_repository_survey(request: dict[str, Any], workspace_root: Path, output_path: str) -> dict[str, Any]:
     goal = request_goal(request)
     survey = repo_survey(target_repo_root(request), goal)
+    model_guidance = code_model_guidance(request, "repository survey, source prioritization, and risk discovery")
     survey["role_policy"] = role_policy_from_request(request)
     survey["task_profile"] = task_profile_from_request(request)
     survey["worker_brief"] = worker_brief_from_request(request)
+    survey["model_guidance"] = model_guidance
+    survey["engineering_investigation"]["model_guidance"] = model_guidance
+    if model_guidance.get("risk_markers"):
+        survey["engineering_readiness"].setdefault("risk_register", [])
+        survey["engineering_readiness"]["risk_register"].append(
+            {
+                "risk": "model_guidance_requires_attention",
+                "severity": "medium",
+                "markers": model_guidance.get("risk_markers", []),
+                "mitigation": "Downstream planning and review must account for the model guidance before approval.",
+            }
+        )
     write_json(workspace_root, output_path, survey)
     return {
         "ok": True,
@@ -343,4 +356,5 @@ def run_repository_survey(request: dict[str, Any], workspace_root: Path, output_
         "summary": survey["summary"],
         "artifacts": [output_path],
         "confidence": "medium",
+        "model_guidance": model_guidance,
     }
