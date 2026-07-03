@@ -37,8 +37,9 @@
   impact, high-impact nodes, and Rust `mod`/`crate::` edges; CodeBrigade
   receives that graph in its implementation plan.
 - Ceraxia run-package audit now compares saved artifact manifest hashes and
-  sizes against current artifacts, and a focused run-report self-test covers
-  that drift check without running the whole Ceraxia suite.
+  sizes against current artifacts, builds an artifact semantic index, and blocks
+  final reports whose human summary disagrees with source JSON decisions even
+  when the manifest was freshly regenerated.
 - CodeBrigade has a focused self-test for active planning handoff, diagnostic
   NameError repair gates, and bounded repair-loop verification/replan behavior;
   the large historical self-test is opt-in from the local Mechanicum check

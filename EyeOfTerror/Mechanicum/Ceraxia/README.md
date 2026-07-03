@@ -160,7 +160,11 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
   verification status counts.
 - `run_audit.json` compares the saved `artifact_manifest.json` against current
   artifact sizes and SHA-256 hashes, so post-manifest file drift blocks package
-  acceptance instead of being hidden by a freshly rebuilt manifest.
+  acceptance instead of being hidden by a freshly rebuilt manifest. It also
+  builds an `artifact_semantic_index` and checks that `final_report.md` agrees
+  with source JSON artifacts on lifecycle state, execution readiness, review
+  decision, verification status, and worker status, so a freshly regenerated
+  manifest cannot hide a misleading human summary.
 - `repo_survey.json.source_summaries` gives shallow multi-language symbol and
   import-like evidence for common source files; Python still has the deeper
   AST symbol/import path used for local dependency edges.

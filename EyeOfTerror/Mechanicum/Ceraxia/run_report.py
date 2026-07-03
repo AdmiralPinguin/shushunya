@@ -286,12 +286,153 @@ def artifact_manifest_drift_findings(run_dir: Path, current_manifest: dict[str, 
     return findings
 
 
+ARTIFACT_SEMANTIC_ROLES = {
+    "task.json": "task_contract",
+    "planning_packet.json": "planning_contract",
+    "repo_survey.json": "repository_evidence",
+    "planning_department.json": "planning_department_handoff",
+    "implementation_brief.json": "implementation_contract",
+    "worker_report.json": "implementation_result",
+    "verification_report.json": "verification_evidence",
+    "review_gate.json": "review_decision",
+    "diagnostic_repair_request.json": "repair_followup",
+    "planning_feedback_request.json": "planning_feedback",
+    "status.json": "lifecycle_state",
+    "final_report.md": "human_summary",
+    "execution_readiness.json": "execution_gate",
+    "run_summary.json": "machine_summary",
+    "evidence_matrix.json": "evidence_trace",
+    "engineering_memory_update.json": "engineering_memory",
+    "artifact_manifest.json": "artifact_integrity",
+    "run_audit.json": "audit_result",
+}
+
+
+def load_json_artifact(run_dir: Path, name: str) -> dict[str, Any]:
+    try:
+        payload = json.loads((run_dir / name).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def artifact_semantic_row(run_dir: Path, name: str) -> dict[str, Any]:
+    path = run_dir / name
+    row: dict[str, Any] = {
+        "path": name,
+        "role": ARTIFACT_SEMANTIC_ROLES.get(name, "unknown"),
+        "exists": path.exists(),
+        "format": "markdown" if name.endswith(".md") else ("json" if name.endswith(".json") else "unknown"),
+        "kind": "",
+        "status": "",
+        "decision": "",
+        "state": "",
+        "evidence_counts": {},
+    }
+    if not path.exists() or not name.endswith(".json"):
+        return row
+    payload = load_json_artifact(run_dir, name)
+    row["kind"] = str(payload.get("kind") or "")
+    row["status"] = str(payload.get("status") or "")
+    row["decision"] = str(payload.get("decision") or "")
+    row["state"] = str(payload.get("state") or "")
+    if name == "worker_report.json":
+        statuses = payload.get("work_package_statuses") if isinstance(payload.get("work_package_statuses"), list) else []
+        row["evidence_counts"] = {
+            "work_package_status_count": len(statuses),
+            "changed_file_count": len(payload.get("changed_files", [])) if isinstance(payload.get("changed_files"), list) else 0,
+        }
+    elif name == "verification_report.json":
+        row["evidence_counts"] = {
+            "commands_planned": len(payload.get("commands_planned", [])) if isinstance(payload.get("commands_planned"), list) else 0,
+            "commands_executed": len(payload.get("commands_executed", [])) if isinstance(payload.get("commands_executed"), list) else 0,
+            "output_summary_rows": len(payload.get("output_summary", [])) if isinstance(payload.get("output_summary"), list) else 0,
+        }
+    elif name == "evidence_matrix.json":
+        row["evidence_counts"] = {
+            "required_evidence_count": int(payload.get("required_evidence_count") or 0),
+            "present_count": int(payload.get("present_count") or 0),
+            "blocked_count": int(payload.get("blocked_count") or 0),
+        }
+    return row
+
+
+def build_artifact_semantic_index(run_dir: Path) -> dict[str, Any]:
+    rows = [artifact_semantic_row(run_dir, name) for name in REQUIRED_RUN_ARTIFACTS]
+    role_counts: dict[str, int] = {}
+    missing_roles: list[str] = []
+    for row in rows:
+        role = str(row.get("role") or "unknown")
+        role_counts[role] = role_counts.get(role, 0) + 1
+        if not row.get("exists"):
+            missing_roles.append(role)
+    return {
+        "kind": "ceraxia_artifact_semantic_index",
+        "contract_version": CONTRACT_VERSION,
+        "artifact_count": len(rows),
+        "role_counts": role_counts,
+        "missing_roles": missing_roles,
+        "rows": rows,
+    }
+
+
+def final_report_semantic_findings(run_dir: Path, artifacts: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
+    try:
+        text = (run_dir / "final_report.md").read_text(encoding="utf-8")
+    except OSError as exc:
+        return [{"severity": "blocker", "finding": f"final_report.md is unreadable for semantic audit: {exc}"}]
+    status = artifacts.get("status", {})
+    review = artifacts.get("review_gate", {})
+    verification = artifacts.get("verification_report", {})
+    readiness = artifacts.get("execution_readiness", {})
+    worker_report = artifacts.get("worker_report", {})
+    expected_lines = {
+        "lifecycle state": f"Lifecycle status: {status.get('state', '')}",
+        "execution readiness": f"Execution readiness: {readiness.get('decision', '')}",
+        "review decision": f"Review decision: {review.get('decision', '')}",
+        "verification status": f"Verification status: {verification.get('status', '')}",
+        "worker status": f"Worker status: {worker_report.get('status', '')}",
+    }
+    findings: list[dict[str, str]] = []
+    for label, expected in expected_lines.items():
+        if expected not in text:
+            findings.append({"severity": "blocker", "finding": f"final_report.md semantic {label} disagrees with source artifacts; expected line `{expected}`"})
+    return findings
+
+
+def artifact_semantic_findings(run_dir: Path) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    semantic_index = build_artifact_semantic_index(run_dir)
+    artifacts = {
+        name: load_json_artifact(run_dir, name)
+        for name in (
+            "status.json",
+            "review_gate.json",
+            "verification_report.json",
+            "execution_readiness.json",
+            "worker_report.json",
+        )
+    }
+    normalized = {
+        "status": artifacts["status.json"],
+        "review_gate": artifacts["review_gate.json"],
+        "verification_report": artifacts["verification_report.json"],
+        "execution_readiness": artifacts["execution_readiness.json"],
+        "worker_report": artifacts["worker_report.json"],
+    }
+    findings = final_report_semantic_findings(run_dir, normalized)
+    if semantic_index.get("missing_roles"):
+        findings.append({"severity": "blocker", "finding": "artifact semantic index has missing roles: " + ", ".join(semantic_index["missing_roles"])})
+    return semantic_index, findings
+
+
 def audit_run_package(run_dir: Path) -> dict[str, Any]:
     manifest = build_artifact_manifest(run_dir)
     findings: list[dict[str, str]] = []
     if manifest["missing"]:
         findings.append({"severity": "blocker", "finding": f"missing artifacts: {', '.join(manifest['missing'])}"})
     findings.extend(artifact_manifest_drift_findings(run_dir, manifest))
+    semantic_index, semantic_findings = artifact_semantic_findings(run_dir)
+    findings.extend(semantic_findings)
     try:
         status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -561,6 +702,7 @@ def audit_run_package(run_dir: Path) -> dict[str, Any]:
         "kind": "ceraxia_run_package_audit",
         "decision": decision,
         "manifest_complete": manifest["complete"],
+        "artifact_semantic_index": semantic_index,
         "findings": findings,
     }
 
