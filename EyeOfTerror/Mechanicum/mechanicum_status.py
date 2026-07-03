@@ -66,6 +66,7 @@ COMPONENTS = {
             "execution_contract.py",
             "execution_preflight.py",
             "execution_preflight.schema.json",
+            "greenfield_project.py",
             "implementation_brief_contract.py",
             "execution_policy.schema.json",
             "execution_result.schema.json",
@@ -77,7 +78,7 @@ COMPONENTS = {
             "focused_self_test.py",
             "self_test.py",
         ],
-        "maturity": "handoff_with_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_worker_output_contract_preflight_explicit_text_ast_guarded_natural_language_test_inferred_literal_patch_adapter_package_statuses_allowlisted_verification_focused_contract_smoke_diagnostic_repair_intake_executor_support_classification_guarded_assertion_failed_command_traceback_missing_import_name_error_repair_executor_and_bounded_verified_repair_loop",
+        "maturity": "handoff_with_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_worker_output_contract_preflight_explicit_text_ast_guarded_natural_language_test_inferred_literal_patch_adapter_greenfield_project_creation_adapter_package_statuses_allowlisted_verification_focused_contract_smoke_diagnostic_repair_intake_executor_support_classification_guarded_assertion_failed_command_traceback_missing_import_name_error_repair_executor_and_bounded_verified_repair_loop",
     },
 }
 

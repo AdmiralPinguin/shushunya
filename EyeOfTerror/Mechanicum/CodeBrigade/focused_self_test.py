@@ -125,6 +125,72 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(result["attempts"][0]["verification_status"], "failed")
             self.assertTrue(result["replan_packet"]["new_hypothesis_required"])
 
+    def test_project_creation_mode_creates_greenfield_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = valid_brief()
+            brief["repo_path"] = str(repo)
+            brief["risk_level"] = "low"
+            brief["controller_execution_mode"] = "project_creation"
+            brief["task"] = (
+                "Создай новый минимальный python проект. "
+                "CERAXIA_PROJECT: "
+                '{"summary":"demo app","files":['
+                '{"path":".ceraxia_greenfield_workspace","content":"created-by=ceraxia-code-brigade\\n"},'
+                '{"path":"app.py","content":"def main():\\n    return \\"ready\\"\\n"},'
+                '{"path":"test_app.py","content":"import unittest\\nimport app\\n\\nclass AppTests(unittest.TestCase):\\n    def test_main(self):\\n        self.assertEqual(app.main(), \\"ready\\")\\n"}'
+                '],"verification_commands":["python -m unittest test_app.py"]}'
+            )
+            brief["execution_intent"] = {
+                "kind": "ceraxia_code_brigade_execution_intent",
+                "contract_version": "eye-mechanicum.v1",
+                "mode": "greenfield_project_creation",
+                "adapter_capability": "greenfield_project_scaffold_adapter",
+                "explicit_patch_present": False,
+                "real_execution_supported": True,
+                "dry_run_requested": False,
+                "blockers": [],
+                "required_next_adapter": "",
+            }
+            brief["repo_survey_evidence"]["candidate_files"] = []
+            brief["repo_survey_evidence"]["test_files"] = []
+            brief["repo_survey_evidence"]["recommended_read_order"] = []
+            brief["suggested_verification_commands"] = ["python -m unittest test_app.py"]
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "implemented", report)
+            self.assertEqual(sorted(report["changed_files"]), [".ceraxia_greenfield_workspace", "app.py", "test_app.py"])
+            self.assertEqual(report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
+            self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), 'def main():\n    return "ready"\n')
+
+    def test_project_creation_mode_blocks_nonempty_unowned_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "important.py").write_text("VALUE = 1\n", encoding="utf-8")
+            brief = valid_brief()
+            brief["repo_path"] = str(repo)
+            brief["risk_level"] = "low"
+            brief["controller_execution_mode"] = "project_creation"
+            brief["task"] = "Создай новый минимальный python проект."
+            brief["execution_intent"] = {
+                "kind": "ceraxia_code_brigade_execution_intent",
+                "contract_version": "eye-mechanicum.v1",
+                "mode": "greenfield_project_creation",
+                "adapter_capability": "greenfield_project_scaffold_adapter",
+                "explicit_patch_present": False,
+                "real_execution_supported": True,
+                "dry_run_requested": False,
+                "blockers": [],
+                "required_next_adapter": "",
+            }
+            brief["repo_survey_evidence"]["candidate_files"] = []
+            brief["repo_survey_evidence"]["test_files"] = []
+            brief["repo_survey_evidence"]["recommended_read_order"] = []
+            brief["suggested_verification_commands"] = ["python -m unittest test_app.py"]
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "blocked", report)
+            self.assertIn("empty directory", " ".join(report["execution_result"]["blockers"]))
+            self.assertFalse((repo / "app.py").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

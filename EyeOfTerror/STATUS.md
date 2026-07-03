@@ -22,6 +22,10 @@
   source repair, reruns the allowlisted failed verification command, records
   attempt history, and returns a Ceraxia/Planning replan packet instead of
   repeating the same failed repair signature.
+- CodeBrigade now also supports Ceraxia `project_creation` runs through a
+  greenfield project adapter: it can create a new file tree in an empty or
+  Ceraxia-marked workspace, run allowlisted verification, and pass the normal
+  review/audit pipeline instead of being limited to repairing existing repos.
 - Warmaster gateway HTTP-governor preparation now has a focused live self-test;
   the old monolithic gateway self-test is opt-in through
   `RUN_MONOLITHIC_GATEWAY_SELF_TEST=1` so normal checks do not hang on one huge
@@ -41,9 +45,10 @@
   final reports whose human summary disagrees with source JSON decisions even
   when the manifest was freshly regenerated.
 - CodeBrigade has a focused self-test for active planning handoff, diagnostic
-  NameError repair gates, and bounded repair-loop verification/replan behavior;
-  the large historical self-test is opt-in from the local Mechanicum check
-  through `RUN_FULL_CODE_BRIGADE_SELF_TEST=1`.
+  NameError repair gates, bounded repair-loop verification/replan behavior, and
+  greenfield project creation workspace boundaries; the large historical
+  self-test is opt-in from the local Mechanicum check through
+  `RUN_FULL_CODE_BRIGADE_SELF_TEST=1`.
 - The local Mechanicum check now runs focused Ceraxia slices by default; the
   full Ceraxia suite and handoff field trials are opt-in through
   `RUN_FULL_CERAXIA_SELF_TEST=1` and `RUN_CERAXIA_HANDOFF_FIELD_TRIALS=1`.

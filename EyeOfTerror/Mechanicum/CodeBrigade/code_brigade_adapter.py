@@ -35,6 +35,15 @@ def sha256_file(path: Path) -> str:
 
 
 def build_edit_plan(brief: dict[str, Any], implementation_plan: dict[str, Any], execution_intent: dict[str, Any]) -> dict[str, Any]:
+    allowed_new_files = implementation_plan.get("missing_path_hints", [])
+    if brief.get("controller_execution_mode") == "project_creation":
+        try:
+            from greenfield_project import extract_project_spec, normalize_project_file_rows
+
+            project_files = [row["path"] for row in normalize_project_file_rows(extract_project_spec(str(brief.get("task") or "")).get("files"))]
+            allowed_new_files = list(dict.fromkeys([*(allowed_new_files if isinstance(allowed_new_files, list) else []), *project_files]))
+        except Exception:
+            allowed_new_files = allowed_new_files if isinstance(allowed_new_files, list) else []
     return {
         "kind": "code_brigade_edit_plan",
         "contract_version": CONTRACT_VERSION,
@@ -42,7 +51,7 @@ def build_edit_plan(brief: dict[str, Any], implementation_plan: dict[str, Any], 
         "execution_intent_mode": execution_intent.get("mode", ""),
         "read_before_edit": implementation_plan.get("recommended_read_order", [])[:12],
         "target_files": implementation_plan.get("target_files_to_inspect", []),
-        "allowed_new_files": implementation_plan.get("missing_path_hints", []),
+        "allowed_new_files": allowed_new_files,
         "test_files": implementation_plan.get("test_files_to_preserve", []),
         "planned_diff_summary": {
             "change_intents": implementation_plan.get("change_allowed_intents", []),
@@ -569,6 +578,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     execution_intent = dict(brief.get("execution_intent") if isinstance(brief.get("execution_intent"), dict) else {})
     controller_mode = str(brief.get("controller_execution_mode") or "dry_run")
     review_only = controller_mode == "review_only"
+    project_creation = controller_mode == "project_creation"
     edit_plan = build_edit_plan(brief, implementation_plan, execution_intent)
     planning_handoff_gate = build_planning_handoff_gate(brief)
     task = str(brief.get("task") or "")
@@ -594,6 +604,21 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
                 ],
             }
         )
+    elif project_creation:
+        execution_intent.update(
+            {
+                "mode": "greenfield_project_creation",
+                "adapter_capability": "greenfield_project_scaffold_adapter",
+                "explicit_patch_present": False,
+                "real_execution_supported": True,
+                "required_next_adapter": "",
+                "blockers": [
+                    blocker
+                    for blocker in (execution_intent.get("blockers") if isinstance(execution_intent.get("blockers"), list) else [])
+                    if "unshaped source mutation" not in str(blocker)
+                ],
+            }
+        )
     execution_intent["dry_run_requested"] = dry_run
     if dry_run and "dry run requested; source mutation is intentionally skipped" not in execution_intent.get("blockers", []):
         blockers = execution_intent.get("blockers") if isinstance(execution_intent.get("blockers"), list) else []
@@ -611,10 +636,10 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     changed_files: list[str] = []
     notes: list[str] = []
     read_evidence = collect_pre_mutation_read_evidence(brief, edit_plan)
-    preflight_blockers = [] if dry_run else mutation_preflight_blockers(implementation_plan, edit_plan)
+    preflight_blockers = [] if dry_run or project_creation else mutation_preflight_blockers(implementation_plan, edit_plan)
     if not dry_run and not review_only and planning_handoff_gate["decision"] == "blocked":
         preflight_blockers.extend(f"PlanningBrigade handoff blocked: {blocker}" for blocker in planning_handoff_gate["blockers"])
-    if not dry_run and read_evidence["blockers"]:
+    if not dry_run and not project_creation and read_evidence["blockers"]:
         preflight_blockers.extend(read_evidence["blockers"])
     if validation_problems:
         status = "blocked"
@@ -632,6 +657,15 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     elif dry_run:
         status = "dry_run_handoff_ready"
         notes.append("CodeBrigade adapter accepted the implementation brief without source mutation")
+    elif project_creation:
+        from greenfield_project import execute_greenfield_project_brief
+
+        execution_result = execute_greenfield_project_brief(brief)
+        status = "implemented" if execution_result.get("status") == "implemented" else "blocked"
+        notes.extend(str(item) for item in execution_result.get("blockers", []))
+        if status == "implemented":
+            changed_files = execution_result.get("changed_files", []) if isinstance(execution_result.get("changed_files"), list) else []
+            notes.append("CodeBrigade created a greenfield project inside the assigned workspace")
     else:
         execution_result, code_worker_pipeline = execute_worker_pipeline_brief(brief)
         status = "implemented" if execution_result.get("status") == "implemented" else "blocked"

@@ -36,6 +36,12 @@ a real Ceraxia run: it prepares the packet, runs Ceraxia, writes
 She owns code-task decomposition, repository survey, scoped implementation
 planning, patch manifest handoff, verification planning, code review, and final
 handoff packaging.
+For new projects, Ceraxia can run with `execution_mode=project_creation`.
+That path routes CodeBrigade through the greenfield project adapter instead of
+the existing-repo repair adapter: the target directory must be empty or already
+marked with `.ceraxia_greenfield_workspace`, `CERAXIA_PROJECT` may provide the
+planned file tree and verification commands, and the resulting run still goes
+through verification, review, readiness, and artifact audit.
 
 ## Mechanicum Controller
 

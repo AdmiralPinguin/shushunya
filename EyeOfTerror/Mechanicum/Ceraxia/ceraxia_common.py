@@ -21,7 +21,7 @@ if CODE_BRIGADE_PATH not in sys.path:
     sys.path.insert(0, CODE_BRIGADE_PATH)
 
 CONTRACT_VERSION = "eye-mechanicum.v1"
-EXECUTION_MODES = {"dry_run", "guarded_patch", "repo_engineer", "review_only"}
+EXECUTION_MODES = {"dry_run", "guarded_patch", "repo_engineer", "review_only", "project_creation"}
 DIAGNOSTIC_REPAIR_MAX_ATTEMPTS = 3
 
 

@@ -68,6 +68,21 @@ def planned_create_paths_from_task(task: str) -> list[str]:
     return [path for path in paths if path]
 
 
+def project_verification_commands_from_task(task: str) -> list[str]:
+    marker = "CERAXIA_PROJECT:"
+    if marker not in task:
+        return []
+    raw = task.split(marker, 1)[1].strip()
+    try:
+        payload, _ = json.JSONDecoder().raw_decode(raw)
+    except json.JSONDecodeError:
+        return []
+    commands = payload.get("verification_commands") if isinstance(payload, dict) else []
+    if not isinstance(commands, list):
+        return []
+    return [str(command).strip() for command in commands if isinstance(command, str) and command.strip()]
+
+
 def build_survey_quality_gate(packet: dict[str, Any], survey: dict[str, Any]) -> dict[str, Any]:
     triage = packet.get("task_triage") if isinstance(packet.get("task_triage"), dict) else {}
     task_kinds = set(triage.get("task_kinds", []) if isinstance(triage.get("task_kinds"), list) else [])
@@ -77,6 +92,7 @@ def build_survey_quality_gate(packet: dict[str, Any], survey: dict[str, Any]) ->
     missing_path_hints = survey.get("missing_path_hints") if isinstance(survey.get("missing_path_hints"), list) else []
     unsafe_path_hints = survey.get("unsafe_path_hints") if isinstance(survey.get("unsafe_path_hints"), list) else []
     planned_create_paths = planned_create_paths_from_task(str(packet.get("task") or ""))
+    project_creation = packet.get("execution_mode") == "project_creation"
     missing_blockers = [str(item) for item in missing_path_hints if str(item) not in planned_create_paths]
     allowed_missing_create_path_hints = [str(item) for item in missing_path_hints if str(item) in planned_create_paths]
     blockers: list[str] = []
@@ -85,13 +101,13 @@ def build_survey_quality_gate(packet: dict[str, Any], survey: dict[str, Any]) ->
         blockers.append("repository does not exist")
     if unsafe_path_hints:
         blockers.append("unsafe explicit path hints: " + ", ".join(str(item) for item in unsafe_path_hints))
-    if missing_blockers:
+    if missing_blockers and not project_creation:
         blockers.append("explicit path hints were not found: " + ", ".join(missing_blockers))
-    if not candidate_files and not allowed_missing_create_path_hints:
+    if not candidate_files and not allowed_missing_create_path_hints and not project_creation:
         blockers.append("repository survey found no candidate source/config/documentation files")
-    if risk_level == "high" and not test_files:
+    if risk_level == "high" and not test_files and not project_creation:
         blockers.append("high-risk task has no discovered test surface")
-    elif not test_files:
+    elif not test_files and not project_creation:
         warnings.append("repository survey found no test files")
     if survey.get("truncated"):
         warnings.append("repository survey reached file limit")
@@ -103,6 +119,7 @@ def build_survey_quality_gate(packet: dict[str, Any], survey: dict[str, Any]) ->
         "kind": "ceraxia_survey_quality_gate",
         "decision": "blocked" if blockers else "passed",
         "risk_level": risk_level,
+        "project_creation": project_creation,
         "task_kinds": sorted(task_kinds),
         "candidate_file_count": len(candidate_files),
         "test_file_count": len(test_files),
@@ -116,6 +133,21 @@ def build_survey_quality_gate(packet: dict[str, Any], survey: dict[str, Any]) ->
 
 def build_execution_intent(packet: dict[str, Any], dry_run: bool | None = None) -> dict[str, Any]:
     task = str(packet.get("task") or "")
+    if packet.get("execution_mode") == "project_creation":
+        blockers = []
+        if dry_run is True:
+            blockers.append("dry run requested; source mutation is intentionally skipped")
+        return {
+            "kind": "ceraxia_code_brigade_execution_intent",
+            "contract_version": CONTRACT_VERSION,
+            "mode": "greenfield_project_creation",
+            "adapter_capability": "greenfield_project_scaffold_adapter",
+            "explicit_patch_present": False,
+            "real_execution_supported": True,
+            "dry_run_requested": bool(dry_run) if dry_run is not None else False,
+            "blockers": blockers,
+            "required_next_adapter": "",
+        }
     has_explicit_patch = "CERAXIA_PATCH:" in task
     has_guarded_inferred_patch = False if has_explicit_patch else can_infer_guarded_natural_language_patch(task)
     mode = "explicit_patch_execution" if has_explicit_patch else ("guarded_inferred_patch_execution" if has_guarded_inferred_patch else "planning_handoff_only")
@@ -156,6 +188,10 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
     planning_problems = validate_planning_packet(packet)
     planning_review = packet.get("planning_review_gate") if isinstance(packet.get("planning_review_gate"), dict) else {}
     survey_quality = build_survey_quality_gate(packet, survey)
+    project_verification_commands = project_verification_commands_from_task(str(packet.get("task") or ""))
+    required_verification = dict(verification)
+    if packet.get("execution_mode") == "project_creation" and project_verification_commands:
+        required_verification["targeted_commands"] = project_verification_commands
     blocked = bool(planning_problems) or not survey["repo_exists"] or planning_review.get("decision") == "blocked" or survey_quality["decision"] == "blocked"
     blockers = [f"planning validation failed: {problem}" for problem in planning_problems]
     if not survey["repo_exists"]:
@@ -176,6 +212,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
             "candidate files identified by repository survey",
             "tests directly covering the requested behavior",
             "documentation only when needed to preserve the contract",
+            "new project files inside an empty or Ceraxia-owned greenfield workspace when controller_execution_mode=project_creation",
         ],
         "forbidden_approaches": [
             "hardcoded one-off behavior",
@@ -188,7 +225,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
             "verification_report.json",
             "final_report.md",
         ],
-        "required_verification": verification,
+        "required_verification": required_verification,
         "diagnostic_repair_plan": packet.get("diagnostic_repair_plan", {}),
         "surface_verification_matrix": packet.get("surface_verification_matrix", {}),
         "surface_package_matrix": packet.get("surface_package_matrix", {}),
@@ -241,7 +278,14 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
             "source_summaries_truncated": bool(survey.get("source_summaries_truncated")),
             "max_source_summary_files": survey.get("max_source_summary_files", 0),
         },
-        "suggested_verification_commands": survey.get("suggested_verification_commands", []),
+        "suggested_verification_commands": [
+            *project_verification_commands,
+            *[
+                command
+                for command in survey.get("suggested_verification_commands", [])
+                if isinstance(command, str) and command not in project_verification_commands
+            ],
+        ],
         "blocked": blocked,
         "blockers": blockers,
     }
