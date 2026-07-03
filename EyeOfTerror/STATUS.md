@@ -43,7 +43,11 @@
   source-without-test scaffolds. The greenfield verification loop can now apply
   bounded repairs before rerunning: it restores missing files only from the
   selected template contract and adds missing README command blocks when those
-  commands are declared in the project brief.
+  commands are declared in the project brief. DependencyWorker now records
+  package-manager availability, validates manifest files, snapshots lockfiles
+  before/after install, blocks non-allowlisted or workspace-escaping install
+  commands, and records package-manager stacks as manifests-only unless explicit
+  install commands are provided.
 - Warmaster gateway HTTP-governor preparation now has a focused live self-test;
   the old monolithic gateway self-test is opt-in through
   `RUN_MONOLITHIC_GATEWAY_SELF_TEST=1` so normal checks do not hang on one huge

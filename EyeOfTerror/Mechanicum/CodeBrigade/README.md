@@ -169,6 +169,12 @@ rerun: it restores missing files only from the selected template contract and
 adds missing README command blocks when they are declared by `run_commands` or
 `verification_commands`. If no bounded repair applies, the loop stops with an
 explicit blocker instead of spinning.
+DependencyWorker records the selected package manager, checks whether the
+manager binary is available, validates declared manifest files, snapshots
+lockfiles before and after install, and blocks install commands that are not
+allowlisted or try to reference paths outside the greenfield workspace. Without
+explicit `install_commands`, package-manager stacks are recorded as manifests
+only, so scaffold tests do not perform network installs by default.
 Adapter results must satisfy
 `execution_result.schema.json`: status, changed files, patch summary, executed
 verification commands, blockers, rollback notes, and per-operation patch

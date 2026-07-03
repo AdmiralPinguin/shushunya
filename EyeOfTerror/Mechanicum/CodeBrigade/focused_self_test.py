@@ -8,7 +8,7 @@ from pathlib import Path
 
 import code_brigade_adapter
 from diagnostic_repair_contract import execute_diagnostic_repair_loop, execute_diagnostic_repair_request
-from greenfield_project import build_greenfield_project_brief, run_greenfield_verification_loop, validate_greenfield_project_brief
+from greenfield_project import build_greenfield_project_brief, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_templates import available_templates
 from self_test import valid_brief
 
@@ -224,6 +224,37 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(repair["status"], "applied")
             self.assertTrue(any(row["path"] == "repair_demo/core.py" for row in repair["repaired_files"]))
             self.assertTrue((repo / "repair_demo/core.py").exists())
+
+    def test_greenfield_dependency_worker_records_node_strategy_without_install(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief("Создай Vite frontend web app `vite-demo`.")
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+            report = run_dependency_worker(repo, project)
+            self.assertEqual(report["status"], "manifest_recorded", report)
+            self.assertEqual(report["package_manager"], "npm")
+            self.assertEqual(report["manager_status"]["binary"], "npm")
+            self.assertIn("package.json", [row["path"] for row in report["manifest_files"]])
+            self.assertEqual(report["dependency_strategy"]["install_default"], "record_manifest_only")
+            self.assertEqual(report["new_lockfiles"], [])
+
+    def test_greenfield_dependency_worker_blocks_workspace_escape_install(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай новый CLI проект `unsafe-demo`.",
+                {"install_commands": ["python -m pip install -r ../requirements.txt"]},
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+            report = run_dependency_worker(repo, project)
+            self.assertEqual(report["status"], "blocked", report)
+            self.assertTrue(any("outside workspace" in item for item in report["blockers"]))
 
     def test_project_creation_mode_blocks_nonempty_unowned_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
