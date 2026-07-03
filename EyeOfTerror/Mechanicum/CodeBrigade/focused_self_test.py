@@ -236,8 +236,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(python_source_semantic_status("def run():\n    return 'ready'\n\nif True:\n    run()\n"), "ok")
 
     def test_greenfield_feature_worker_detects_task_features(self) -> None:
-        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api todo calculator csv summary local agent tool router telegram bot /start /help vite counter app")}
-        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "notes_api", "csv_summary", "local_agent_command_router", "telegram_command_bot", "vite_counter_app"})
+        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api todo calculator csv summary local agent tool router telegram bot /start /help vite counter app text utils library")}
+        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "notes_api", "csv_summary", "local_agent_command_router", "telegram_command_bot", "vite_counter_app", "python_text_utils_library"})
 
     def test_greenfield_architect_owns_project_brief_and_plan(self) -> None:
         project = architect_build_greenfield_project_brief("Создай CLI калькулятор `architect-calc`.")
@@ -533,6 +533,31 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(review["semantic_review"]["status"], "passed", review)
             self.assertEqual(review["status"], "passed", review)
 
+    def test_project_creation_text_utils_library_implements_task_feature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(repo, "Создай python text utils library `text-demo` со slugify и word count.")
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "implemented", report)
+            project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
+            self.assertEqual(project["template_id"], "python_library")
+            self.assertTrue(any(feature["id"] == "python_text_utils_library" for feature in project["acceptance_features"]))
+            self.assertIn("python_text_utils_library", project["implementation_feature_report"]["recognized_feature_ids"])
+            self.assertIn("generate ascii slugs", json.dumps(project["module_contracts"], ensure_ascii=False))
+            source = (repo / "text_demo/core.py").read_text(encoding="utf-8")
+            self.assertIn("def normalize_text", source)
+            self.assertIn("def slugify", source)
+            self.assertIn("def word_count", source)
+            self.assertIn("def summarize_text", source)
+            tests = (repo / "tests/test_library.py").read_text(encoding="utf-8")
+            self.assertIn("test_slugify_generates_ascii_slug", tests)
+            self.assertIn("test_summarize_text", tests)
+            verification = report["execution_result"]["greenfield_project"]["verification"]
+            self.assertEqual(verification["status"], "passed", verification)
+            review = report["execution_result"]["greenfield_project"]["greenfield_review"]
+            self.assertEqual(review["semantic_review"]["status"], "passed", review)
+            self.assertEqual(review["status"], "passed", review)
+
     def test_greenfield_project_brief_contract_and_templates(self) -> None:
         cli = build_greenfield_project_brief("Создай новый CLI проект `forge-tool`.")
         api = build_greenfield_project_brief("Создай FastAPI backend service `api-demo`.")
@@ -587,6 +612,9 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         counter_app = build_greenfield_project_brief("Создай Vite React counter app `counter-demo`.")
         self.assertTrue(any(feature["id"] == "vite_counter_app" for feature in counter_app["acceptance_features"]))
         self.assertGreaterEqual(len(counter_app["module_contracts"]), 3)
+        text_utils = build_greenfield_project_brief("Создай python text utils library `text-demo`.")
+        self.assertTrue(any(feature["id"] == "python_text_utils_library" for feature in text_utils["acceptance_features"]))
+        self.assertGreaterEqual(len(text_utils["module_contracts"]), 3)
 
 
 if __name__ == "__main__":
