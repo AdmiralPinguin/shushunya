@@ -81,7 +81,7 @@ def read_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     return payload
 
 
-def post_json(url: str, payload: dict[str, Any], timeout_sec: float = 10.0) -> dict[str, Any]:
+def post_json(url: str, payload: dict[str, Any], timeout_sec: float = 120.0) -> dict[str, Any]:
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
     with urllib.request.urlopen(request, timeout=timeout_sec) as response:

@@ -2509,7 +2509,7 @@ def run_trial(trial_id: str, root: Path, keep: bool, ledger_draft: bool) -> dict
     task = FIXTURES[trial_id](repo)
     run_root = trial_root / "warmaster_runs"
     prepared = prepare_task(task, run_id, run_root, governor_transport="local")
-    result = research_loop_run(run_root, run_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+    result = research_loop_run(run_root, run_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
     manifest_path = next((run_root / run_id / "work").rglob("final_manifest.json"), None)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path else {}
     checks = trial_specific_checks(trial_id, repo, manifest)

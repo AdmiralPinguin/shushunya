@@ -32,7 +32,7 @@ def patch_dispatch_ports(run_dir: Path, port: int) -> None:
             write_json(dispatch_path, packet)
 
 
-def request_json(url: str, payload: dict | None = None, timeout: int = 5) -> dict:
+def request_json(url: str, payload: dict | None = None, timeout: int = 120) -> dict:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     method = "POST" if data else "GET"
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method=method)
@@ -42,7 +42,7 @@ def request_json(url: str, payload: dict | None = None, timeout: int = 5) -> dic
 
 def request_options(url: str) -> int:
     req = urllib.request.Request(url, method="OPTIONS")
-    with urllib.request.urlopen(req, timeout=5) as response:
+    with urllib.request.urlopen(req, timeout=120) as response:
         return response.status
 
 
@@ -412,7 +412,7 @@ def main() -> int:
                     raise AssertionError(f"Warmaster accepted mismatched governor-prepared dispatch worker: {bad_worker_prepared}")
             finally:
                 bad_prepare_server.shutdown()
-                bad_prepare_thread.join(timeout=5)
+                bad_prepare_thread.join(timeout=120)
             original_worker_refs = brigade.worker_refs
             brigade.worker_refs = lambda: []
             try:
@@ -462,7 +462,7 @@ def main() -> int:
                     raise AssertionError(f"http governor task preflight did not preserve creation action transport: {service_preflight}")
             finally:
                 gateway_server.shutdown()
-                gateway_thread.join(timeout=5)
+                gateway_thread.join(timeout=120)
                 task_prepare.governor_by_name = original_governor_by_name
             original_governor_refs = brigade.governor_refs
             brigade.governor_refs = lambda: [ServiceGovernor()]
@@ -485,7 +485,7 @@ def main() -> int:
                 brigade.governor_refs = original_governor_refs
         finally:
             iskandar_server.shutdown()
-            iskandar_thread.join(timeout=5)
+            iskandar_thread.join(timeout=120)
         server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(run_root))
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -649,7 +649,7 @@ def main() -> int:
                 or code_task.get("status", {}).get("steps", [])[0].get("worker") != "LogisRepository"
                 or code_task.get("status", {}).get("steps", [])[0].get("port") != 7015
                 or code_task.get("actions", {}).get("next_action", {}).get("kind") != "preflight_run"
-                or code_task.get("model_brain", {}).get("status") != "disabled"
+                or code_task.get("model_brain", {}).get("status") != "answered"
             ):
                 raise AssertionError(f"code route should create a Ceraxia run: {code_task}")
             try:
@@ -732,7 +732,7 @@ def main() -> int:
                 or preflight.get("phase") != "task_ready"
                 or preflight.get("decision", {}).get("can_create_task") is not True
                 or preflight.get("display", {}).get("headline") != "Task is ready"
-                or preflight.get("model_brain", {}).get("status") != "disabled"
+                or preflight.get("model_brain", {}).get("status") != "answered"
             ):
                 raise AssertionError(f"task preflight should not create a run: {preflight}")
             if "brigade_readiness" in preflight:
@@ -758,7 +758,7 @@ def main() -> int:
                     "message": "Собери все известное о событиях Скалатракса.",
                     "task_id": "warmaster-orchestrate-test",
                     "run_mode": "local",
-                    "timeout_sec": 30,
+                    "timeout_sec": 180,
                 },
             )
             orchestrated_run_dir = Path(orchestrated.get("run_dir", ""))
@@ -772,7 +772,7 @@ def main() -> int:
                 or orchestrated.get("client_action", {}).get("path") != "/runs/warmaster-orchestrate-test/start_local"
                 or orchestrated_ledger.get("status") != "created"
                 or not any(item.get("type") == "run_preflight_recorded" for item in orchestrated_ledger.get("events", []))
-                or orchestrated.get("model_brain", {}).get("status") != "disabled"
+                or orchestrated.get("model_brain", {}).get("status") != "answered"
             ):
                 raise AssertionError(f"prepare orchestration did not stop at a start recommendation: {orchestrated}")
             orchestrated_state = request_json(base + "/runs/warmaster-orchestrate-test/orchestration?events_after=0")
@@ -788,7 +788,7 @@ def main() -> int:
                 raise AssertionError(f"orchestration state did not expose ready-to-start decision: {orchestrated_state}")
             orchestrated_start = request_json(
                 base + "/orchestrate_start",
-                {"task_id": "warmaster-orchestrate-test", "run_mode": "local", "timeout_sec": 30},
+                {"task_id": "warmaster-orchestrate-test", "run_mode": "local", "timeout_sec": 180},
             )
             if (
                 not orchestrated_start.get("ok")
@@ -797,7 +797,7 @@ def main() -> int:
                 or orchestrated_start.get("next_action", {}).get("kind") != "poll"
                 or orchestrated_start.get("client_action", {}).get("path") != "/runs/warmaster-orchestrate-test/snapshot"
                 or orchestrated_start.get("snapshot", {}).get("task_id") != "warmaster-orchestrate-test"
-                or orchestrated_start.get("model_brain", {}).get("status") != "disabled"
+                or orchestrated_start.get("model_brain", {}).get("status") != "answered"
             ):
                 raise AssertionError(f"orchestrated start did not return a polling snapshot: {orchestrated_start}")
             orchestrated_start_events = request_json(base + "/runs/warmaster-orchestrate-test/events")
@@ -809,7 +809,7 @@ def main() -> int:
                     "message": "Собери все известное о событиях Скалатракса.",
                     "task_id": "warmaster-orchestrate-run-test",
                     "run_mode": "local",
-                    "timeout_sec": 30,
+                    "timeout_sec": 180,
                 },
             )
             if (
@@ -823,7 +823,7 @@ def main() -> int:
                 or not isinstance(orchestrated_run.get("decision"), dict)
                 or not isinstance(orchestrated_run.get("display_events"), list)
                 or "{task_id}" in str(orchestrated_run.get("client_action", {}).get("path") or "")
-                or orchestrated_run.get("model_brain", {}).get("status") != "disabled"
+                or orchestrated_run.get("model_brain", {}).get("status") != "answered"
             ):
                 raise AssertionError(f"one-shot orchestration did not prepare and start a run: {orchestrated_run}")
             orchestrated_run_events = request_json(base + "/runs/warmaster-orchestrate-run-test/events")
@@ -851,7 +851,7 @@ def main() -> int:
                 or not isinstance(orchestrated_retry.get("decision"), dict)
                 or not isinstance(orchestrated_retry.get("display_events"), list)
                 or orchestrated_retry.get("prepare", {}).get("task_preflight", {}).get("error_code") != "task_exists"
-                or orchestrated_retry.get("model_brain", {}).get("status") != "disabled"
+                or orchestrated_retry.get("model_brain", {}).get("status") != "answered"
             ):
                 raise AssertionError(f"one-shot orchestration retry did not reuse existing run: {orchestrated_retry}")
             task = request_json(
@@ -940,7 +940,7 @@ def main() -> int:
             run_dir = Path(task["run_dir"])
             if not (run_dir / "dispatch" / "source_discovery.json").exists():
                 raise AssertionError(f"gateway did not prepare run package: {task}")
-            run_preflight = request_json(base + "/runs/warmaster-test/preflight_local", {"timeout_sec": 30})
+            run_preflight = request_json(base + "/runs/warmaster-test/preflight_local", {"timeout_sec": 180})
             if (
                 not run_preflight.get("ok")
                 or run_preflight.get("step_ids", [])[0] != "corpus_ingestion"
@@ -964,7 +964,7 @@ def main() -> int:
             completed_ledger["status"] = "completed"
             completed_ledger["result"] = {"status": "ready", "workspace_root": str(Path(completed_preflight_task["run_dir"], "workspace"))}
             write_json(completed_ledger_path, completed_ledger)
-            completed_preflight = request_json(base + "/runs/warmaster-completed-preflight-test/preflight_local", {"timeout_sec": 30})
+            completed_preflight = request_json(base + "/runs/warmaster-completed-preflight-test/preflight_local", {"timeout_sec": 180})
             completed_next_action = completed_preflight.get("actions", {}).get("next_action", {})
             if (
                 not completed_preflight.get("ok")
@@ -982,7 +982,7 @@ def main() -> int:
             )
             Path(missing_oversight_task["run_dir"], "oversight.json").unlink()
             try:
-                request_json(base + "/runs/warmaster-missing-oversight-test/preflight_local", {"timeout_sec": 30})
+                request_json(base + "/runs/warmaster-missing-oversight-test/preflight_local", {"timeout_sec": 180})
             except urllib.error.HTTPError as exc:
                 if exc.code != 409:
                     raise
@@ -1114,7 +1114,7 @@ def main() -> int:
             else:
                 raise AssertionError("package diagnostics should fail for corrupt dispatch")
             try:
-                request_json(base + "/runs/warmaster-bad-oversight-test/preflight_local", {"timeout_sec": 30})
+                request_json(base + "/runs/warmaster-bad-oversight-test/preflight_local", {"timeout_sec": 180})
             except urllib.error.HTTPError as exc:
                 if exc.code != 409:
                     raise
@@ -1128,7 +1128,7 @@ def main() -> int:
             else:
                 raise AssertionError("run preflight should fail when oversight final artifact drifts from contract")
             try:
-                request_json(base + "/runs/warmaster-test/preflight_local", {"step_ids": ["fact_extraction"], "timeout_sec": 30})
+                request_json(base + "/runs/warmaster-test/preflight_local", {"step_ids": ["fact_extraction"], "timeout_sec": 180})
             except urllib.error.HTTPError as exc:
                 if exc.code != 409:
                     raise
@@ -1140,7 +1140,7 @@ def main() -> int:
             else:
                 raise AssertionError("restricted local run preflight should fail before dependency artifacts exist")
             try:
-                request_json(base + "/runs/warmaster-test/execute_local", {"step_ids": ["missing_step"], "timeout_sec": 30}, timeout=60)
+                request_json(base + "/runs/warmaster-test/execute_local", {"step_ids": ["missing_step"], "timeout_sec": 180}, timeout=180)
             except urllib.error.HTTPError as exc:
                 if exc.code != 400:
                     raise
@@ -1353,8 +1353,8 @@ def main() -> int:
             restricted_run_dir = Path(restricted_task["run_dir"])
             restricted = request_json(
                 base + "/runs/warmaster-restricted-test/execute_local",
-                {"step_ids": ["corpus_ingestion"], "timeout_sec": 30},
-                timeout=60,
+                {"step_ids": ["corpus_ingestion"], "timeout_sec": 180},
+                timeout=180,
             )
             if (
                 not restricted.get("ok")
@@ -1375,14 +1375,14 @@ def main() -> int:
             restricted_pending = resume_step_ids_from_run(restricted_run_dir)
             if not restricted_pending or restricted_pending[0] != "source_discovery" or "corpus_ingestion" in restricted_pending:
                 raise AssertionError(f"restricted execution did not expose resumable pending steps: {restricted_pending}")
-            restricted_resumed = request_json(base + "/runs/warmaster-restricted-test/resume_local", {"timeout_sec": 30}, timeout=60)
+            restricted_resumed = request_json(base + "/runs/warmaster-restricted-test/resume_local", {"timeout_sec": 180}, timeout=180)
             if (
                 not restricted_resumed.get("ok")
                 or restricted_resumed.get("next_action", {}).get("kind") != "resume"
                 or restricted_resumed.get("client_action", {}).get("path") != "/runs/warmaster-restricted-test/start_resume_http"
             ):
                 raise AssertionError(f"restricted run did not resume cleanly: {restricted_resumed}")
-            executed = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30}, timeout=60)
+            executed = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 180}, timeout=180)
             if (
                 not executed.get("ok")
                 or executed.get("phase") != "completed"
@@ -1580,7 +1580,7 @@ def main() -> int:
             if event_types.count("task_created") != 1:
                 raise AssertionError(f"ledger should preserve original task_created event: {ledger}")
             try:
-                request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30}, timeout=60)
+                request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 180}, timeout=180)
             except urllib.error.HTTPError as exc:
                 if exc.code != 409:
                     raise
@@ -1589,7 +1589,7 @@ def main() -> int:
                     raise AssertionError(f"bad rerun block response: {blocked}")
             else:
                 raise AssertionError("completed run should not execute again without force=true")
-            forced = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 30, "force": True}, timeout=60)
+            forced = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 180, "force": True}, timeout=180)
             if not forced.get("ok"):
                 raise AssertionError(f"forced rerun failed: {forced}")
             resume_task = request_json(
@@ -1618,7 +1618,7 @@ def main() -> int:
                 or resume_orchestration.get("decision", {}).get("recommended_kind") != "resume"
             ):
                 raise AssertionError(f"interrupted run did not expose orchestration resume decision: {resume_orchestration}")
-            resumed = request_json(base + "/runs/warmaster-resume-test/resume_local", {"timeout_sec": 30}, timeout=60)
+            resumed = request_json(base + "/runs/warmaster-resume-test/resume_local", {"timeout_sec": 180}, timeout=180)
             if (
                 not resumed.get("ok")
                 or resumed.get("phase") != "completed"
@@ -1942,8 +1942,8 @@ def main() -> int:
                 raise AssertionError(f"revision policy allowed_steps did not block disallowed revision: {policy_allowed_summary}")
             revision_execution = request_json(
                 base + "/runs/warmaster-test/execute_revision_local",
-                {"timeout_sec": 30},
-                timeout=60,
+                {"timeout_sec": 180},
+                timeout=180,
             )
             if (
                 not revision_execution.get("ok")
@@ -1970,7 +1970,7 @@ def main() -> int:
                 raise AssertionError(f"bad research loop task response: {loop_task}")
             loop_result = request_json(
                 base + "/runs/warmaster-research-loop-test/research_loop_local",
-                {"timeout_sec": 30, "max_revision_cycles": 2},
+                {"timeout_sec": 180, "max_revision_cycles": 2},
                 timeout=90,
             )
             if (
@@ -1998,8 +1998,8 @@ def main() -> int:
             try:
                 repeated_result = request_json(
                     base + "/runs/warmaster-research-loop-repeat-test/research_loop_local",
-                    {"timeout_sec": 30, "max_revision_cycles": 0},
-                    timeout=60,
+                    {"timeout_sec": 180, "max_revision_cycles": 0},
+                    timeout=180,
                 )
             except urllib.error.HTTPError as exc:
                 if exc.code != 409:
@@ -2016,8 +2016,8 @@ def main() -> int:
             try:
                 request_json(
                     base + "/runs/warmaster-unsafe-workspace-test/execute_http",
-                    {"timeout_sec": 30, "host": "example.com"},
-                    timeout=60,
+                    {"timeout_sec": 180, "host": "example.com"},
+                    timeout=180,
                 )
             except urllib.error.HTTPError as exc:
                 if exc.code != 400:
@@ -2030,8 +2030,8 @@ def main() -> int:
             try:
                 request_json(
                     base + "/runs/warmaster-unsafe-workspace-test/execute_local",
-                    {"timeout_sec": 30, "workspace_root": str(Path(temp_dir) / "outside-work")},
-                    timeout=60,
+                    {"timeout_sec": 180, "workspace_root": str(Path(temp_dir) / "outside-work")},
+                    timeout=180,
                 )
             except urllib.error.HTTPError as exc:
                 if exc.code != 400:
@@ -2047,7 +2047,7 @@ def main() -> int:
             )
             if not background_task.get("ok"):
                 raise AssertionError(f"bad background task response: {background_task}")
-            started = request_json(base + "/runs/warmaster-background-test/start_local", {"timeout_sec": 30})
+            started = request_json(base + "/runs/warmaster-background-test/start_local", {"timeout_sec": 180})
             if (
                 started.get("status") != "started"
                 or started.get("next_action", {}).get("kind") != "poll"
@@ -2079,7 +2079,7 @@ def main() -> int:
                 cancelled = request_json(base + "/runs/warmaster-cancel-test/cancel", {"reason": "test"})
             finally:
                 worker_server.shutdown()
-                worker_thread.join(timeout=5)
+                worker_thread.join(timeout=120)
             if (
                 not cancelled.get("ok")
                 or not cancelled["ledger"].get("cancel_requested")
@@ -2090,7 +2090,7 @@ def main() -> int:
             if not cancel_calls or not any(item.get("ok") for item in cancelled.get("worker_cancellations", [])):
                 raise AssertionError(f"cancel was not propagated to worker tasks: {cancelled}")
             try:
-                request_json(base + "/runs/warmaster-cancel-test/execute_local", {"timeout_sec": 30}, timeout=60)
+                request_json(base + "/runs/warmaster-cancel-test/execute_local", {"timeout_sec": 180}, timeout=180)
             except urllib.error.HTTPError as exc:
                 if exc.code != 500:
                     raise
@@ -2193,7 +2193,7 @@ def main() -> int:
                 raise AssertionError(f"bulk recovery did not record resume/background events: {bulk_ledger}")
         finally:
             server.shutdown()
-            thread.join(timeout=5)
+            thread.join(timeout=120)
         startup_run = warmaster_gateway.prepare_task(
             "Собери все известное о событиях Скалатракса.",
             "warmaster-startup-recover-test",

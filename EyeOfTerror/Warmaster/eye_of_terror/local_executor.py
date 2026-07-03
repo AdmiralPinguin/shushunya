@@ -252,6 +252,17 @@ def run_step(
         layer="local_executor",
         instructions="You are the model brain for a local pipeline worker subprocess. Stay inside the worker role and return guidance for this exact step.",
     )
+    if model_decision.get("status") != "answered":
+        payload = {
+            "ok": False,
+            "worker": worker,
+            "task_id": str(request.get("task_id") or ""),
+            "status": "failed",
+            "error_code": "model_brain_unavailable",
+            "error": str(model_decision.get("error") or "model brain did not answer"),
+            "summary": f"{worker} cannot run without a live model-brain answer.",
+        }
+        return StepResult(step_id, worker, 2, False, attach_model_brain(payload, model_decision), "", payload["error"])
     execution_request["model_brain"] = model_decision
     execution_packet["request"] = execution_request
     temp_dispatch_path = write_execution_dispatch(dispatch_path, execution_packet)

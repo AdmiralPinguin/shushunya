@@ -17,13 +17,13 @@ def request_json(url: str, payload: dict | None = None) -> dict:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     method = "POST" if data else "GET"
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method=method)
-    with urllib.request.urlopen(req, timeout=5) as response:
+    with urllib.request.urlopen(req, timeout=60) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
 def request_options(url: str) -> int:
     req = urllib.request.Request(url, method="OPTIONS")
-    with urllib.request.urlopen(req, timeout=5) as response:
+    with urllib.request.urlopen(req, timeout=60) as response:
         return response.status
 
 
@@ -123,7 +123,7 @@ def main() -> int:
                 or plan.get("decision", {}).get("can_prepare_run") is not True
                 or plan.get("display", {}).get("headline") != "Plan is ready"
                 or plan.get("client_action", {}).get("path") != "/prepare_run"
-                or plan.get("model_brain", {}).get("status") != "disabled"
+                or plan.get("model_brain", {}).get("status") != "answered"
             ):
                 raise AssertionError(f"bad plan: {plan}")
             run_dir = root / "runs" / "custom-run"
@@ -140,7 +140,7 @@ def main() -> int:
                 or prepared.get("decision", {}).get("can_handoff_to_warmaster") is not True
                 or prepared.get("display", {}).get("headline") != "Run package prepared"
                 or prepared.get("client_action") != {}
-                or prepared.get("model_brain", {}).get("status") != "disabled"
+                or prepared.get("model_brain", {}).get("status") != "answered"
             ):
                 raise AssertionError(f"bad prepared run: {prepared}")
             prepared_oversight = json.loads((run_dir / "oversight.json").read_text(encoding="utf-8"))

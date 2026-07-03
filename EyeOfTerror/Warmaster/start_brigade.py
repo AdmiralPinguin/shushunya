@@ -49,7 +49,6 @@ def pythonpath(repo_root: Path) -> str:
 
 def model_env_defaults() -> dict[str, str]:
     return {
-        "EYE_MODEL_ENABLED": os.environ.get("EYE_MODEL_ENABLED", "1"),
         "EYE_MODEL_BASE_URL": os.environ.get("EYE_MODEL_BASE_URL", os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8080/v1")),
         "EYE_MODEL_NAME": os.environ.get("EYE_MODEL_NAME", os.environ.get("LLM_MODEL", os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"))),
         "EYE_MODEL_TIMEOUT_SEC": os.environ.get("EYE_MODEL_TIMEOUT_SEC", "45"),
@@ -294,7 +293,7 @@ def brigade_plan(
         "readiness_urls": readiness_urls,
         "worker_contract": brigade_worker_contract(commands, workers, readiness_urls),
         "model_brain": {
-            "enabled": env_value(commands, "EYE_MODEL_ENABLED"),
+            "required": True,
             "base_url": env_value(commands, "EYE_MODEL_BASE_URL"),
             "model": env_value(commands, "EYE_MODEL_NAME"),
         },

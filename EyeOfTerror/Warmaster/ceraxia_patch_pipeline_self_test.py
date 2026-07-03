@@ -73,7 +73,7 @@ CERAXIA_PATCH:
             or role_policy.get("may_mutate_source") is not True
         ):
             raise AssertionError(f"Ceraxia dispatch should carry implementation role policy: {dispatch}")
-        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
         if not result.get("ok") or result.get("phase") != "completed":
             raise AssertionError(f"Ceraxia patch pipeline did not complete: {result}")
         manifests = list((run_root / task_id / "work").rglob("final_manifest.json"))
@@ -94,11 +94,11 @@ CERAXIA_PATCH:
         model_guidance = manifest.get("model_guidance", {})
         if (
             not isinstance(model_guidance, dict)
-            or model_guidance.get("finalizer", {}).get("status") != "disabled"
-            or model_guidance.get("survey", {}).get("status") != "disabled"
-            or model_guidance.get("patch", {}).get("status") != "disabled"
-            or model_guidance.get("verification", {}).get("status") != "disabled"
-            or model_guidance.get("review", {}).get("status") != "disabled"
+            or model_guidance.get("finalizer", {}).get("status") != "answered"
+            or model_guidance.get("survey", {}).get("status") != "answered"
+            or model_guidance.get("patch", {}).get("status") != "answered"
+            or model_guidance.get("verification", {}).get("status") != "answered"
+            or model_guidance.get("review", {}).get("status") != "answered"
         ):
             raise AssertionError(f"Ceraxia final manifest should preserve model guidance trail: {manifest}")
         if manifest.get("role_policies", {}).get("verification", {}).get("authority") != "allowlisted_verification_and_narrow_repairs":
@@ -134,11 +134,11 @@ CERAXIA_PATCH:
         patch_manifest = json.loads(patch_manifest_path.read_text(encoding="utf-8"))
         verification_report = json.loads(verification_report_path.read_text(encoding="utf-8"))
         code_review = json.loads(code_review_path.read_text(encoding="utf-8"))
-        if patch_manifest.get("model_guidance", {}).get("status") != "disabled":
+        if patch_manifest.get("model_guidance", {}).get("status") != "answered":
             raise AssertionError(f"patch manifest should include model guidance: {patch_manifest}")
-        if verification_report.get("model_guidance", {}).get("status") != "disabled":
+        if verification_report.get("model_guidance", {}).get("status") != "answered":
             raise AssertionError(f"verification report should include model guidance: {verification_report}")
-        if code_review.get("model_guidance_review", {}).get("status") != "disabled":
+        if code_review.get("model_guidance_review", {}).get("status") != "answered":
             raise AssertionError(f"code review should include model guidance review: {code_review}")
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_root = Path(temp_dir)
@@ -156,7 +156,7 @@ CERAXIA_TARGET_REPO: {target_repo}
         prepared = prepare_task(task, task_id, run_root, governor_transport="local")
         if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
             raise AssertionError(f"Ceraxia inferred replace task did not prepare correctly: {prepared}")
-        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
         if not result.get("ok") or result.get("phase") != "completed":
             raise AssertionError(f"Ceraxia inferred replace pipeline did not complete: {result}")
         manifest_path = next((run_root / task_id / "work").rglob("final_manifest.json"))
@@ -194,7 +194,7 @@ CERAXIA_TARGET_REPO: {target_repo}
         prepared = prepare_task(task, task_id, run_root, governor_transport="local")
         if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
             raise AssertionError(f"Ceraxia inferred add-function task did not prepare correctly: {prepared}")
-        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
         if not result.get("ok") or result.get("phase") != "completed":
             raise AssertionError(f"Ceraxia inferred add-function pipeline did not complete: {result}")
         manifest_path = next((run_root / task_id / "work").rglob("final_manifest.json"))
@@ -223,7 +223,7 @@ CERAXIA_TARGET_REPO: {target_repo}
         prepared = prepare_task(task, task_id, run_root, governor_transport="local")
         if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
             raise AssertionError(f"Ceraxia duplicate add-function task did not prepare correctly: {prepared}")
-        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
         run_summary = result.get("run_summary") if isinstance(result.get("run_summary"), dict) else {}
         if result.get("ok") or run_summary.get("status") != "blocked":
             raise AssertionError(f"Ceraxia duplicate add-function pipeline should stop as blocked: {result}")
@@ -253,7 +253,7 @@ CERAXIA_TARGET_REPO: {target_repo}
         prepared = prepare_task(task, task_id, run_root, governor_transport="local")
         if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
             raise AssertionError(f"Ceraxia test-inferred task did not prepare correctly: {prepared}")
-        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
         if not result.get("ok") or result.get("phase") != "completed":
             raise AssertionError(f"Ceraxia test-inferred pipeline did not complete: {result}")
         manifest_path = next((run_root / task_id / "work").rglob("final_manifest.json"))
@@ -290,7 +290,7 @@ CERAXIA_TARGET_REPO: {target_repo}
         prepared = prepare_task(task, task_id, run_root, governor_transport="local")
         if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
             raise AssertionError(f"Ceraxia arithmetic-inferred task did not prepare correctly: {prepared}")
-        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
         if not result.get("ok") or result.get("phase") != "completed":
             raise AssertionError(f"Ceraxia arithmetic-inferred pipeline did not complete: {result}")
         manifest_path = next((run_root / task_id / "work").rglob("final_manifest.json"))
@@ -330,7 +330,7 @@ CERAXIA_TARGET_REPO: {target_repo}
         prepared = prepare_task(task, task_id, run_root, governor_transport="local")
         if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
             raise AssertionError(f"Ceraxia test-inferred return task did not prepare correctly: {prepared}")
-        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
         if not result.get("ok") or result.get("phase") != "completed":
             raise AssertionError(f"Ceraxia test-inferred return pipeline did not complete: {result}")
         manifest_path = next((run_root / task_id / "work").rglob("final_manifest.json"))
@@ -361,7 +361,7 @@ CERAXIA_VERIFY: python -m py_compile generated.py
         prepared = prepare_task(task, task_id, run_root, governor_transport="local")
         if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
             raise AssertionError(f"Ceraxia marker task did not prepare correctly: {prepared}")
-        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
         if not result.get("ok") or result.get("phase") != "completed":
             raise AssertionError(f"Ceraxia marker pipeline did not complete: {result}")
         manifests = list((run_root / task_id / "work").rglob("final_manifest.json"))
@@ -402,7 +402,7 @@ CERAXIA_PATCH:
         prepared = prepare_task(task, task_id, run_root, governor_transport="local")
         if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
             raise AssertionError(f"Ceraxia atomic failure task did not prepare correctly: {prepared}")
-        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
         run_summary = result.get("run_summary") if isinstance(result.get("run_summary"), dict) else {}
         if result.get("ok") or run_summary.get("status") != "blocked":
             raise AssertionError(f"Ceraxia atomic failure pipeline should stop as blocked: {result}")
@@ -443,7 +443,7 @@ CERAXIA_FILES:
         prepared = prepare_task(task, task_id, run_root, governor_transport="local")
         if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
             raise AssertionError(f"Ceraxia multi-file task did not prepare correctly: {prepared}")
-        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
         if not result.get("ok") or result.get("phase") != "completed":
             raise AssertionError(f"Ceraxia multi-file pipeline did not complete: {result}")
         manifest_path = next((run_root / task_id / "work").rglob("final_manifest.json"))
@@ -466,7 +466,7 @@ CERAXIA_FILES:
         repeated_prepared = prepare_task(task, repeated_task_id, run_root, governor_transport="local")
         if not repeated_prepared.get("ok") or repeated_prepared.get("governor") != "Ceraxia":
             raise AssertionError(f"Ceraxia repeated multi-file task did not prepare correctly: {repeated_prepared}")
-        repeated_result = research_loop_run(run_root, repeated_task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        repeated_result = research_loop_run(run_root, repeated_task_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
         if not repeated_result.get("ok") or repeated_result.get("phase") != "completed":
             raise AssertionError(f"Ceraxia repeated multi-file pipeline did not complete: {repeated_result}")
         repeated_manifest_path = next((run_root / repeated_task_id / "work").rglob("final_manifest.json"))
@@ -494,7 +494,7 @@ CERAXIA_VERIFY: python -m py_compile repair_me.py
         prepared = prepare_task(task, task_id, run_root, governor_transport="local")
         if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
             raise AssertionError(f"Ceraxia repair task did not prepare correctly: {prepared}")
-        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
         if not result.get("ok") or result.get("phase") != "completed":
             raise AssertionError(f"Ceraxia repair pipeline did not complete: {result}")
         manifest_path = next((run_root / task_id / "work").rglob("final_manifest.json"))
@@ -531,7 +531,7 @@ CERAXIA_VERIFY: python -m unittest test_sample.py
         prepared = prepare_task(task, task_id, run_root, governor_transport="local")
         if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
             raise AssertionError(f"Ceraxia assertion repair task did not prepare correctly: {prepared}")
-        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
         if not result.get("ok") or result.get("phase") != "completed":
             raise AssertionError(f"Ceraxia assertion repair pipeline did not complete: {result}")
         manifest_path = next((run_root / task_id / "work").rglob("final_manifest.json"))
@@ -568,7 +568,7 @@ CERAXIA_VERIFY: python -m unittest test_sample.py
         prepared = prepare_task(task, task_id, run_root, governor_transport="local")
         if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
             raise AssertionError(f"Ceraxia NameError repair task did not prepare correctly: {prepared}")
-        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
         if not result.get("ok") or result.get("phase") != "completed":
             raise AssertionError(f"Ceraxia NameError repair pipeline did not complete: {result}")
         manifest_path = next((run_root / task_id / "work").rglob("final_manifest.json"))
@@ -603,7 +603,7 @@ CERAXIA_VERIFY: python -m unittest test_sample.py
         prepared = prepare_task(task, task_id, run_root, governor_transport="local")
         if not prepared.get("ok") or prepared.get("governor") != "Ceraxia":
             raise AssertionError(f"Ceraxia ImportError repair task did not prepare correctly: {prepared}")
-        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=120, max_revision_cycles=1)
+        result = research_loop_run(run_root, task_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
         if not result.get("ok") or result.get("phase") != "completed":
             raise AssertionError(f"Ceraxia ImportError repair pipeline did not complete: {result}")
         manifest_path = next((run_root / task_id / "work").rglob("final_manifest.json"))

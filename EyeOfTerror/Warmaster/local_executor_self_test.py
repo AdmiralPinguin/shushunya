@@ -214,7 +214,7 @@ def main() -> int:
         timeout_payload = timeout_summary.get("steps", [{}])[0].get("payload", {})
         if timeout_summary.get("ok") or timeout_payload.get("error_code") != "worker_timeout":
             raise AssertionError(f"local executor did not record worker timeout: {timeout_summary}")
-        if timeout_payload.get("model_brain", {}).get("status") != "disabled":
+        if timeout_payload.get("model_brain", {}).get("status") != "answered":
             raise AssertionError(f"local executor did not attach model brain status: {timeout_summary}")
         if timeout_payload.get("attempt_count") != 1 or timeout_payload.get("timeout_retries") != 0:
             raise AssertionError(f"zero-second timeout should not be retried: {timeout_summary}")

@@ -12,13 +12,6 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8080/v1"
 DEFAULT_MODEL = "gemma-4-12b-it-UD-Q5_K_XL.gguf"
 
 
-def _bool_env(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on", "enabled", "active"}
-
-
 def _int_env(name: str, default: int, minimum: int, maximum: int) -> int:
     try:
         value = int(os.environ.get(name, str(default)))
@@ -45,7 +38,7 @@ def model_settings() -> dict[str, Any]:
     if not base_url.endswith("/v1"):
         base_url = f"{base_url}/v1"
     return {
-        "enabled": _bool_env("EYE_MODEL_ENABLED", False),
+        "enabled": True,
         "base_url": base_url,
         "model": os.environ.get("EYE_MODEL_NAME") or os.environ.get("ARCHIVE_DEFAULT_MODEL") or os.environ.get("LLM_MODEL") or DEFAULT_MODEL,
         "timeout_sec": _float_env("EYE_MODEL_TIMEOUT_SEC", 45.0, 1.0, 600.0),
@@ -64,13 +57,13 @@ def model_contract(owner: str, role: str, *, layer: str = "worker") -> dict[str,
         "layer": layer,
         "required_for_autonomous_mode": True,
         "provider": "openai_compatible_chat_completions",
-        "mode": "active" if settings["enabled"] else "disabled_until_EYE_MODEL_ENABLED=1",
+        "mode": "active",
         "base_url": settings["base_url"],
         "model": settings["model"],
         "request_fields": ["task_id", "contract", "step", "input_artifacts", "quality_expectations", "revision_context"],
         "response_field": "model_brain",
         "thinking_mode": "disabled_for_command_outputs",
-        "failure_policy": "fail_soft_record_status_unavailable_or_error",
+        "failure_policy": "model_answer_required_for_autonomous_worker_execution",
     }
 
 
@@ -139,15 +132,6 @@ def request_model_decision(
     settings = model_settings()
     started = time.monotonic()
     contract = model_contract(owner, role, layer=layer)
-    if not settings["enabled"]:
-        return {
-            **contract,
-            "ok": False,
-            "status": "disabled",
-            "elapsed_ms": 0,
-            "content": "",
-            "error": "set EYE_MODEL_ENABLED=1 to activate model-backed decisions",
-        }
     payload = {
         "model": settings["model"],
         "messages": _messages(owner, role, request, instructions, int(settings["max_context_chars"])),

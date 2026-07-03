@@ -21,7 +21,7 @@ from start_worker import load_services  # noqa: E402
 from worker_runtime import load_worker, make_handler as make_worker_handler  # noqa: E402
 
 
-def request_json(url: str, payload: dict | None = None, timeout: int = 5) -> dict:
+def request_json(url: str, payload: dict | None = None, timeout: int = 120) -> dict:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     method = "POST" if data else "GET"
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method=method)
@@ -82,10 +82,10 @@ def main() -> int:
                 worker_threads.append(thread)
                 ports_by_worker[worker] = server.server_port
             patch_dispatch_ports(run_dir, ports_by_worker)
-            preflight = request_json(base + "/runs/warmaster-http-test/preflight_http", {"timeout_sec": 30}, timeout=60)
+            preflight = request_json(base + "/runs/warmaster-http-test/preflight_http", {"timeout_sec": 180}, timeout=180)
             if not preflight.get("ok") or len(preflight.get("steps", [])) != len(status["steps"]):
                 raise AssertionError(f"gateway HTTP preflight failed: {preflight}")
-            executed = request_json(base + "/runs/warmaster-http-test/execute_http", {"timeout_sec": 30}, timeout=60)
+            executed = request_json(base + "/runs/warmaster-http-test/execute_http", {"timeout_sec": 180}, timeout=180)
             if not executed.get("ok"):
                 raise AssertionError(f"gateway HTTP execution failed: {executed}")
             ledger = request_json(base + "/runs/warmaster-http-test/ledger")
@@ -96,11 +96,11 @@ def main() -> int:
                 raise AssertionError(f"final manifest is not ready: {manifest}")
         finally:
             gateway.shutdown()
-            gateway_thread.join(timeout=5)
+            gateway_thread.join(timeout=120)
             for server in worker_servers:
                 server.shutdown()
             for thread in worker_threads:
-                thread.join(timeout=5)
+                thread.join(timeout=120)
     print("[ok] Warmaster HTTP execution")
     return 0
 
