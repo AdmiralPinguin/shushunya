@@ -22,6 +22,8 @@
     "file_tree_plan",
     "module_contracts",
     "implementation_plan",
+    "implementation_trace",
+    "implementation_feature_report",
     "verification_plan",
     "dependency_plan"
   ],
@@ -105,6 +107,40 @@
     "implementation_plan": {
       "type": "object",
       "required": ["kind", "module_sequence", "milestones", "anti_stub_policy", "source_files", "test_files"]
+    },
+    "implementation_trace": {
+      "type": "object",
+      "required": ["kind", "contract_version", "status", "requirement_trace_count", "module_count", "rows"],
+      "properties": {
+        "kind": {
+          "const": "code_brigade_greenfield_implementation_trace"
+        },
+        "contract_version": {
+          "const": "eye-mechanicum.v1"
+        },
+        "status": {
+          "enum": ["complete", "empty"]
+        },
+        "requirement_trace_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "module_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["module", "requirement", "file", "function_or_component", "verification_files", "paired_tests", "status"]
+          }
+        }
+      }
+    },
+    "implementation_feature_report": {
+      "type": "object",
+      "required": ["kind", "contract_version", "template_id", "recognized_feature_ids", "feature_count", "features", "changed_file_paths", "changed_module_contract_paths", "implementation_strategy"]
     },
     "verification_plan": {
       "type": "object",

@@ -165,6 +165,13 @@ def validate_greenfield_project_brief(brief: dict[str, Any]) -> list[str]:
         problems.append("greenfield_project_brief module_contracts are required")
     if not isinstance(brief.get("implementation_plan"), dict) or not brief.get("implementation_plan"):
         problems.append("greenfield_project_brief implementation_plan is required")
+    implementation_trace = brief.get("implementation_trace") if isinstance(brief.get("implementation_trace"), dict) else {}
+    if not implementation_trace:
+        problems.append("greenfield_project_brief implementation_trace is required")
+    elif implementation_trace.get("kind") != "code_brigade_greenfield_implementation_trace":
+        problems.append("greenfield_project_brief implementation_trace kind is required")
+    elif not isinstance(implementation_trace.get("rows"), list):
+        problems.append("greenfield_project_brief implementation_trace rows are required")
     if not isinstance(brief.get("implementation_feature_report"), dict) or not brief.get("implementation_feature_report"):
         problems.append("greenfield_project_brief implementation_feature_report is required")
     if not isinstance(brief.get("verification_plan"), dict) or not brief.get("verification_plan"):

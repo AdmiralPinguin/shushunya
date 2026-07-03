@@ -686,6 +686,18 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertTrue(any(feature["id"] == "python_text_utils_library" for feature in text_utils["acceptance_features"]))
         self.assertGreaterEqual(len(text_utils["module_contracts"]), 3)
 
+    def test_greenfield_project_brief_schema_tracks_runtime_contract(self) -> None:
+        schema_path = Path(__file__).with_name("greenfield_project_brief.schema.json")
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        required = set(schema["required"])
+        self.assertIn("implementation_plan", required)
+        self.assertIn("implementation_trace", required)
+        self.assertIn("implementation_feature_report", required)
+        trace_required = set(schema["properties"]["implementation_trace"]["required"])
+        self.assertTrue({"kind", "contract_version", "status", "requirement_trace_count", "module_count", "rows"}.issubset(trace_required))
+        feature_required = set(schema["properties"]["implementation_feature_report"]["required"])
+        self.assertTrue({"kind", "recognized_feature_ids", "changed_file_paths", "changed_module_contract_paths", "implementation_strategy"}.issubset(feature_required))
+
 
 if __name__ == "__main__":
     unittest.main()
