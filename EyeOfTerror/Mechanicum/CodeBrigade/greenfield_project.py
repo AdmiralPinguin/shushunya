@@ -227,6 +227,7 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         "file_tree_plan": project_brief.get("file_tree_plan", []) if isinstance(project_brief, dict) else [],
         "module_contracts": project_brief.get("module_contracts", []) if isinstance(project_brief, dict) else [],
         "implementation_plan": project_brief.get("implementation_plan", {}) if isinstance(project_brief, dict) else {},
+        "implementation_trace": project_brief.get("implementation_trace", {}) if isinstance(project_brief, dict) else {},
         "implementation_feature_report": project_brief.get("implementation_feature_report", {}) if isinstance(project_brief, dict) else {},
         "dependency_plan": project_brief.get("dependency_plan", {}) if isinstance(project_brief, dict) else {},
         "verification_plan": project_brief.get("verification_plan", {}) if isinstance(project_brief, dict) else {},

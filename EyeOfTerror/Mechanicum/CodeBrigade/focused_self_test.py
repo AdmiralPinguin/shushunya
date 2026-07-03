@@ -183,6 +183,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
                     "architecture_plan.json",
                     "file_tree_plan.json",
                     "greenfield_project_brief.json",
+                    "implementation_trace.json",
                     "module_contracts.json",
                     "test_app.py",
                     "verification_plan.json",
@@ -193,6 +194,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(project_brief["kind"], "code_brigade_greenfield_project_brief")
             self.assertEqual(project_brief["implementation_plan"]["kind"], "code_brigade_greenfield_implementation_plan")
             self.assertEqual(project_brief["implementation_feature_report"]["kind"], "code_brigade_greenfield_implementation_feature_report")
+            self.assertEqual(project_brief["implementation_trace"]["kind"], "code_brigade_greenfield_implementation_trace")
+            self.assertGreater(project_brief["implementation_trace"]["requirement_trace_count"], 0)
             self.assertTrue(project_brief["implementation_plan"]["module_sequence"])
             memory = report["execution_result"]["greenfield_project"]["greenfield_memory_record"]
             self.assertEqual(memory["kind"], "code_brigade_greenfield_memory_record")
@@ -208,6 +211,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             review = report["execution_result"]["greenfield_project"]["greenfield_review"]
             self.assertIn("model_guidance", review)
             self.assertEqual(review["semantic_review"]["status"], "passed")
+            self.assertEqual(review["semantic_review"]["implementation_trace_status"], "complete")
 
     def test_project_creation_blocks_placeholder_semantics(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -251,7 +255,10 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(project["architecture_plan"]["selected_template"], "python_cli_basic")
         self.assertEqual(project["implementation_plan"]["kind"], "code_brigade_greenfield_implementation_plan")
         self.assertEqual(project["implementation_feature_report"]["kind"], "code_brigade_greenfield_implementation_feature_report")
+        self.assertEqual(project["implementation_trace"]["kind"], "code_brigade_greenfield_implementation_trace")
+        self.assertGreater(project["implementation_trace"]["requirement_trace_count"], 0)
         self.assertIn("architecture_plan.json", project["expected_files"])
+        self.assertIn("implementation_trace.json", project["expected_files"])
         self.assertTrue(project["implementation_plan"]["module_sequence"])
 
     def test_greenfield_dependency_worker_reports_manager_status(self) -> None:
@@ -623,6 +630,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertIn("requirements.txt", api["expected_files"])
         self.assertIn("architecture_plan.json", cli["expected_files"])
         self.assertIn("file_tree_plan.json", cli["expected_files"])
+        self.assertIn("implementation_trace.json", cli["expected_files"])
         self.assertIn("module_contracts.json", cli["expected_files"])
         self.assertIn("verification_plan.json", cli["expected_files"])
         self.assertIn("package.json", vite["expected_files"])

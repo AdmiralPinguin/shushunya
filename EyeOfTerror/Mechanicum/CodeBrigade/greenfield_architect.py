@@ -130,6 +130,7 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         "Review the greenfield architecture plan, identify missing modules, verification gaps, and scaffold risks. Return concise guidance.",
     )
     implementation_plan = build_implementation_worker_plan(task, template_id, module_contracts, expected_files)
+    implementation_trace = build_implementation_trace(implementation_plan)
     implementation_feature_report = build_implementation_feature_report(
         task,
         template_id,
@@ -185,6 +186,7 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         "file_tree_plan": [{"path": path, "role": "planned_project_file"} for path in expected_files],
         "module_contracts": module_contracts,
         "implementation_plan": implementation_plan,
+        "implementation_trace": implementation_trace,
         "implementation_feature_report": implementation_feature_report,
         "verification_plan": {
             "commands": verification_commands,
@@ -261,6 +263,7 @@ def attach_greenfield_plan_artifacts(brief: dict[str, Any]) -> None:
         ("architecture_plan.json", "architecture_plan"),
         ("file_tree_plan.json", "file_tree_plan"),
         ("module_contracts.json", "module_contracts"),
+        ("implementation_trace.json", "implementation_trace"),
         ("verification_plan.json", "verification_plan"),
     ]
     files = brief.get("files") if isinstance(brief.get("files"), list) else []
@@ -358,6 +361,38 @@ def build_implementation_worker_plan(
         "source_files": source_files,
         "test_files": test_files,
         "model_guidance": implementation_guidance,
+    }
+
+
+def build_implementation_trace(implementation_plan: dict[str, Any]) -> dict[str, Any]:
+    module_sequence = implementation_plan.get("module_sequence") if isinstance(implementation_plan.get("module_sequence"), list) else []
+    rows: list[dict[str, Any]] = []
+    for module in module_sequence:
+        if not isinstance(module, dict):
+            continue
+        trace_rows = module.get("requirement_trace") if isinstance(module.get("requirement_trace"), list) else []
+        paired_tests = [str(path) for path in module.get("paired_tests", []) if isinstance(path, str)]
+        for trace in trace_rows:
+            if not isinstance(trace, dict):
+                continue
+            rows.append(
+                {
+                    "module": str(module.get("module") or ""),
+                    "requirement": str(trace.get("requirement") or ""),
+                    "file": str(trace.get("file") or module.get("path") or ""),
+                    "function_or_component": str(trace.get("function_or_component") or ""),
+                    "verification_files": [str(path) for path in trace.get("verification_files", []) if isinstance(path, str)],
+                    "paired_tests": paired_tests,
+                    "status": "planned",
+                }
+            )
+    return {
+        "kind": "code_brigade_greenfield_implementation_trace",
+        "contract_version": "eye-mechanicum.v1",
+        "status": "complete" if rows else "empty",
+        "requirement_trace_count": len(rows),
+        "module_count": len([row for row in module_sequence if isinstance(row, dict)]),
+        "rows": rows,
     }
 
 

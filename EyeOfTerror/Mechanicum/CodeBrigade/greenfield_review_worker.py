@@ -74,6 +74,34 @@ def semantic_review_greenfield_files(repo: Path, project_brief: dict[str, Any]) 
         if requirements and not traced:
             blockers.append(f"module contract has no implementation trace: {rel_path}")
         module_rows.append({"path": rel_path, "exists": exists, "requirement_count": len(requirements), "trace_count": len(traced)})
+    trace = project_brief.get("implementation_trace") if isinstance(project_brief.get("implementation_trace"), dict) else {}
+    trace_rows_raw = trace.get("rows") if isinstance(trace.get("rows"), list) else []
+    trace_rows: list[dict[str, Any]] = []
+    if not trace_rows_raw:
+        blockers.append("implementation trace has no requirement rows")
+    for index, trace_row in enumerate(trace_rows_raw, start=1):
+        if not isinstance(trace_row, dict):
+            blockers.append(f"implementation trace row {index} is not an object")
+            continue
+        rel_path = str(trace_row.get("file") or "")
+        verification_files = [str(path) for path in trace_row.get("verification_files", []) if isinstance(path, str)]
+        source_exists = bool(rel_path) and (repo / rel_path).is_file()
+        verification_exists = [path for path in verification_files if (repo / path).is_file()]
+        if not trace_row.get("requirement"):
+            blockers.append(f"implementation trace row {index} has no requirement")
+        if not source_exists:
+            blockers.append(f"implementation trace source file is missing: {rel_path}")
+        if test_files and not verification_exists:
+            blockers.append(f"implementation trace row has no existing verification file: {rel_path}")
+        trace_rows.append(
+            {
+                "requirement": str(trace_row.get("requirement") or ""),
+                "file": rel_path,
+                "source_exists": source_exists,
+                "verification_file_count": len(verification_files),
+                "existing_verification_file_count": len(verification_exists),
+            }
+        )
     if source_files and not test_files:
         blockers.append("semantic review found source files without test files")
     return {
@@ -85,6 +113,8 @@ def semantic_review_greenfield_files(repo: Path, project_brief: dict[str, Any]) 
         "manifest_file_count": len(manifest_files),
         "rows": rows,
         "module_contract_rows": module_rows,
+        "implementation_trace_status": "complete" if trace_rows and not any(not row["source_exists"] or row["existing_verification_file_count"] == 0 for row in trace_rows if test_files) else "blocked",
+        "implementation_trace_rows": trace_rows,
         "blockers": blockers,
         "warnings": warnings,
     }

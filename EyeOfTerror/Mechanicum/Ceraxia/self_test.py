@@ -996,6 +996,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                     "greenfield_memory_record.json",
                     "greenfield_project_brief.json",
                     "greenfield_run_report.json",
+                    "implementation_trace.json",
                     "module_contracts.json",
                     "test_app.py",
                     "verification_plan.json",
@@ -1015,12 +1016,15 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                     "architecture_plan.json",
                     "file_tree_plan.json",
                     "greenfield_project_brief.json",
+                    "implementation_trace.json",
                     "module_contracts.json",
                     "test_app.py",
                     "verification_plan.json",
                 ],
             )
             self.assertEqual(worker_report["greenfield_implementation_plan"]["kind"], "code_brigade_greenfield_implementation_plan")
+            self.assertEqual(worker_report["greenfield_implementation_trace"]["kind"], "code_brigade_greenfield_implementation_trace")
+            self.assertGreater(worker_report["greenfield_implementation_trace"]["requirement_trace_count"], 0)
             self.assertEqual(worker_report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
             self.assertEqual(worker_report["execution_result"]["greenfield_project"]["greenfield_review"]["semantic_review"]["status"], "passed")
             self.assertEqual(worker_report["greenfield_memory_record"]["kind"], "code_brigade_greenfield_memory_record")
@@ -1033,6 +1037,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(project_brief["project_type"], "cli_tool")
             self.assertTrue(project_brief["definition_of_done"])
             self.assertEqual(json.loads((repo / "architecture_plan.json").read_text(encoding="utf-8")), project_brief["architecture_plan"])
+            self.assertEqual(json.loads((repo / "implementation_trace.json").read_text(encoding="utf-8")), project_brief["implementation_trace"])
             self.assertEqual(json.loads((repo / "module_contracts.json").read_text(encoding="utf-8")), project_brief["module_contracts"])
             self.assertEqual(json.loads((repo / "verification_plan.json").read_text(encoding="utf-8")), project_brief["verification_plan"])
             verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
