@@ -108,6 +108,11 @@ Ceraxia handoff, so diagnostic repair cannot bypass package-status auditing.
 Diagnostic repair scope budgets are normalized with required replan triggers,
 so partial request budgets cannot accidentally bypass the implementation brief
 contract.
+`focused_self_test.py` covers the fast non-LLM contract smoke for the active
+adapter gates: medium/high-risk mutation requires a ready planning handoff, and
+NameError diagnostic repair still routes through guarded source repair. The
+large historical `self_test.py` remains available through
+`RUN_FULL_CODE_BRIGADE_SELF_TEST=1` for opt-in full regression runs.
 Use it directly when inspecting a run package:
 
 ```bash

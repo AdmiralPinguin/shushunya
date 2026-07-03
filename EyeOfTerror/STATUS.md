@@ -28,6 +28,15 @@
 - Ceraxia repository survey now resolves Go module imports rooted in `go.mod`
   into local dependency edges, so CodeBrigade handoffs and reverse dependency
   indexes can see Go package impact instead of only JS/TS/Python edges.
+- Ceraxia run-package audit now compares saved artifact manifest hashes and
+  sizes against current artifacts, and a focused run-report self-test covers
+  that drift check without running the whole Ceraxia suite.
+- CodeBrigade has a focused self-test for active planning handoff and
+  diagnostic NameError repair gates; the large historical self-test is opt-in
+  from the local Mechanicum check through `RUN_FULL_CODE_BRIGADE_SELF_TEST=1`.
+- The local Mechanicum check now runs focused Ceraxia slices by default; the
+  full Ceraxia suite and handoff field trials are opt-in through
+  `RUN_FULL_CERAXIA_SELF_TEST=1` and `RUN_CERAXIA_HANDOFF_FIELD_TRIALS=1`.
 - Ceraxia/CodeBrigade handoffs expose implementation work packages, package
   surface coverage, package statuses, and review blocking for blocked packages.
 - CodeBrigade real source mutation for medium/high-risk tasks now requires a

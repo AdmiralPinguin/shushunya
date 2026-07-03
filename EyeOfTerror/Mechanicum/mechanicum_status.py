@@ -24,8 +24,9 @@ COMPONENTS = {
             "contracts/evidence_matrix.schema.json",
             "contracts/run_artifacts.schema.json",
             "contracts/run_summary.schema.json",
+            "run_report_self_test.py",
         ],
-        "maturity": "controller_with_planning_quality_survey_gate_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_definition_of_done_trace_audit_caller_contract_package_manifest_evidence_generic_edges_per_surface_verification_counts_work_package_review_worker_output_acceptance_requirement_contract_audit_diagnostic_repair_requests_planning_feedback_requests_and_optional_guarded_repair_execution",
+        "maturity": "controller_with_planning_quality_survey_gate_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_definition_of_done_trace_audit_caller_contract_package_manifest_evidence_generic_edges_per_surface_verification_counts_work_package_review_worker_output_acceptance_requirement_contract_audit_artifact_manifest_hash_drift_diagnostic_repair_requests_planning_feedback_requests_and_optional_guarded_repair_execution",
     },
     "PlanningBrigade": {
         "kind": "advisory_planning_brigade",
@@ -70,9 +71,10 @@ COMPONENTS = {
             "verification_policy.json",
             "verification_policy.schema.json",
             "verification_execution.schema.json",
+            "focused_self_test.py",
             "self_test.py",
         ],
-        "maturity": "handoff_with_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_worker_output_contract_preflight_explicit_text_ast_guarded_natural_language_test_inferred_literal_patch_adapter_package_statuses_allowlisted_verification_diagnostic_repair_intake_executor_support_classification_and_guarded_assertion_failed_command_traceback_missing_import_repair_executor",
+        "maturity": "handoff_with_read_order_assumption_register_investigation_playbook_change_control_acceptance_trace_worker_output_contract_preflight_explicit_text_ast_guarded_natural_language_test_inferred_literal_patch_adapter_package_statuses_allowlisted_verification_focused_contract_smoke_diagnostic_repair_intake_executor_support_classification_and_guarded_assertion_failed_command_traceback_missing_import_name_error_repair_executor",
     },
 }
 
@@ -93,7 +95,7 @@ ROADMAP = [
     {
         "priority": 3,
         "item": "match per-surface verification to command output and artifact evidence",
-        "reason": "Review now reports per-surface executed, partial, planned, failed, or blocked evidence, tracks work-package statuses, audits worker-output contract sufficiency, and blocks high-risk partial execution; it still does not deeply inspect command stdout/stderr or generated artifacts for surface-specific assertions.",
+        "reason": "Review now reports per-surface executed, partial, planned, failed, or blocked evidence, tracks work-package statuses, audits worker-output contract sufficiency, blocks high-risk partial execution, and run package audit checks saved artifact-manifest hashes; it still does not deeply inspect generated artifacts for surface-specific assertions.",
         "owner": "Ceraxia",
     },
     {

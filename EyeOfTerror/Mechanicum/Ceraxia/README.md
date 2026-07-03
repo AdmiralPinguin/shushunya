@@ -158,6 +158,9 @@ Current `EyeOfTerror/Mechanicum` planning quality gates:
   quality, implementation package dependency, worker-output sufficiency, and
   execution evidence decisions for orchestration history, including per-surface
   verification status counts.
+- `run_audit.json` compares the saved `artifact_manifest.json` against current
+  artifact sizes and SHA-256 hashes, so post-manifest file drift blocks package
+  acceptance instead of being hidden by a freshly rebuilt manifest.
 - `repo_survey.json.source_summaries` gives shallow multi-language symbol and
   import-like evidence for common source files; Python still has the deeper
   AST symbol/import path used for local dependency edges.
@@ -182,6 +185,16 @@ Smoke command:
 ```bash
 python3 EyeOfTerror/Mechanicum/Ceraxia/ceraxia.py --task "почини security bug и добавь pytest negative tests" --repo-path /absolute/repo
 ```
+
+Focused audit smoke:
+
+```bash
+PYTHONPATH=EyeOfTerror/Mechanicum/Ceraxia:EyeOfTerror/Mechanicum/PlanningBrigade:EyeOfTerror/Mechanicum/CodeBrigade python3 EyeOfTerror/Mechanicum/Ceraxia/run_report_self_test.py
+```
+
+`EyeOfTerror/Mechanicum/check-mechanicum-local.sh` runs focused Ceraxia
+regression slices by default. Use `RUN_FULL_CERAXIA_SELF_TEST=1` for the full
+long suite and `RUN_CERAXIA_HANDOFF_FIELD_TRIALS=1` for handoff field trials.
 
 Generated run artifacts live under `runs/` and are intentionally ignored by
 git. Curated live benchmark evidence bundles live under `live_evidence/` and

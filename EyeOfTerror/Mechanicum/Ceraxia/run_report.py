@@ -249,11 +249,49 @@ def build_artifact_manifest(run_dir: Path) -> dict[str, Any]:
     }
 
 
+def artifact_manifest_drift_findings(run_dir: Path, current_manifest: dict[str, Any]) -> list[dict[str, str]]:
+    manifest_path = run_dir / "artifact_manifest.json"
+    try:
+        stored_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except (OSError, json.JSONDecodeError) as exc:
+        return [{"severity": "blocker", "finding": f"artifact_manifest.json is unreadable: {exc}"}]
+    findings: list[dict[str, str]] = []
+    if stored_manifest.get("kind") != "ceraxia_run_artifact_manifest":
+        findings.append({"severity": "blocker", "finding": "artifact_manifest.json has invalid kind"})
+    if stored_manifest.get("required_artifacts") != current_manifest.get("required_artifacts"):
+        findings.append({"severity": "blocker", "finding": "artifact_manifest.json required_artifacts drifted from runtime contract"})
+    stored_entries = {
+        str(entry.get("path") or ""): entry
+        for entry in stored_manifest.get("entries", [])
+        if isinstance(entry, dict) and entry.get("path")
+    }
+    current_entries = {
+        str(entry.get("path") or ""): entry
+        for entry in current_manifest.get("entries", [])
+        if isinstance(entry, dict) and entry.get("path")
+    }
+    for path, current_entry in current_entries.items():
+        stored_entry = stored_entries.get(path)
+        if not stored_entry:
+            findings.append({"severity": "blocker", "finding": f"artifact_manifest.json missing entry for {path}"})
+            continue
+        for key in ("exists", "size_bytes", "sha256"):
+            if stored_entry.get(key) != current_entry.get(key):
+                findings.append({"severity": "blocker", "finding": f"artifact_manifest.json {path} {key} disagrees with current artifact"})
+    extra_entries = sorted(set(stored_entries) - set(current_entries))
+    if extra_entries:
+        findings.append({"severity": "blocker", "finding": "artifact_manifest.json has unknown entries: " + ", ".join(extra_entries[:8])})
+    return findings
+
+
 def audit_run_package(run_dir: Path) -> dict[str, Any]:
     manifest = build_artifact_manifest(run_dir)
     findings: list[dict[str, str]] = []
     if manifest["missing"]:
         findings.append({"severity": "blocker", "finding": f"missing artifacts: {', '.join(manifest['missing'])}"})
+    findings.extend(artifact_manifest_drift_findings(run_dir, manifest))
     try:
         status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
