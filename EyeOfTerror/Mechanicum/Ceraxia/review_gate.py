@@ -963,6 +963,25 @@ def source_mutation_scope_sufficiency_from_worker(worker_report: dict[str, Any])
         values = implementation_plan.get("test_files_to_preserve")
         if isinstance(values, list):
             allowed_files.update(str(item) for item in values if isinstance(item, str) and item in explicit_existing)
+    intent = worker_report.get("execution_intent") if isinstance(worker_report.get("execution_intent"), dict) else {}
+    if intent.get("mode") == "greenfield_project_creation":
+        greenfield = worker_report.get("execution_result", {}).get("greenfield_project", {}) if isinstance(worker_report.get("execution_result"), dict) else {}
+        project_brief = greenfield.get("greenfield_project_brief") if isinstance(greenfield.get("greenfield_project_brief"), dict) else {}
+        allowed_files.update(str(path) for path in project_brief.get("expected_files", []) if isinstance(path, str) and path)
+        allowed_files.update(
+            {
+                "architecture_plan.json",
+                "file_tree_plan.json",
+                "greenfield_memory_record.json",
+                "greenfield_model_guidance_ledger.json",
+                "greenfield_module_synthesis_report.json",
+                "greenfield_project_brief.json",
+                "greenfield_run_report.json",
+                "implementation_trace.json",
+                "module_contracts.json",
+                "verification_plan.json",
+            }
+        )
     escaping_files = [
         path for path in changed_files
         if path.startswith("/") or path == ".." or path.startswith("../") or "/../" in path

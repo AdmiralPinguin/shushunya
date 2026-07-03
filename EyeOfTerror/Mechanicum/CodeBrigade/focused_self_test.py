@@ -11,6 +11,7 @@ from diagnostic_repair_contract import execute_diagnostic_repair_loop, execute_d
 from greenfield_architect import build_greenfield_project_brief as architect_build_greenfield_project_brief
 from greenfield_dependency_worker import dependency_manager_status
 from greenfield_feature_worker import infer_acceptance_features
+from greenfield_implementation_worker import execute_module_synthesis_contracts
 from greenfield_implementation_worker import build_implementation_trace as worker_build_implementation_trace
 from greenfield_implementation_worker import build_implementation_worker_plan as worker_build_implementation_worker_plan
 from greenfield_memory_worker import build_greenfield_memory_record
@@ -184,6 +185,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
                     "app.py",
                     "architecture_plan.json",
                     "file_tree_plan.json",
+                    "greenfield_module_synthesis_report.json",
                     "greenfield_project_brief.json",
                     "implementation_trace.json",
                     "module_contracts.json",
@@ -212,6 +214,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertTrue(memory["reusable_learnings"])
             self.assertTrue((repo / "greenfield_memory_record.json").exists())
             self.assertTrue((repo / "greenfield_model_guidance_ledger.json").exists())
+            self.assertTrue((repo / "greenfield_module_synthesis_report.json").exists())
             self.assertTrue((repo / "greenfield_run_report.json").exists())
             ledger = json.loads((repo / "greenfield_model_guidance_ledger.json").read_text(encoding="utf-8"))
             self.assertEqual(ledger["kind"], "code_brigade_greenfield_model_guidance_ledger")
@@ -220,6 +223,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertIn("GreenfieldReviewer", ledger["roles"])
             run_report = json.loads((repo / "greenfield_run_report.json").read_text(encoding="utf-8"))
             self.assertEqual(run_report["kind"], "code_brigade_greenfield_run_report")
+            self.assertIn(run_report["implementation_synthesis_status"], {"applied", "model_unavailable", "skipped"})
             self.assertEqual(run_report["definition_of_done_status"]["status"], "passed")
             self.assertEqual(run_report["model_guidance_ledger_status"], ledger["status"])
             review = report["execution_result"]["greenfield_project"]["greenfield_review"]
@@ -308,6 +312,66 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(trace["status"], "complete")
         self.assertGreaterEqual(trace["requirement_trace_count"], 2)
         self.assertTrue(all(row["synthesis_contract_kind"] == "code_brigade_greenfield_module_synthesis_contract" for row in trace["rows"]))
+
+    def test_greenfield_module_synthesis_applies_valid_model_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = architect_build_greenfield_project_brief("Создай CLI калькулятор `synthesis-calc`.")
+            module = project["implementation_plan"]["module_sequence"][0]
+            path = repo / module["path"]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("def old():\n    return 'old'\n", encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                contract = payload["module_synthesis_contract"]
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "path": contract["path"],
+                            "content": "def main():\n    return 'model-generated'\n",
+                            "requirements_satisfied": contract["requirements"],
+                            "tests_to_update": contract["paired_tests"],
+                            "notes": "valid module synthesis",
+                        }
+                    ),
+                }
+
+            report = execute_module_synthesis_contracts(repo, project, guidance)
+            self.assertEqual(report["status"], "applied", report)
+            self.assertEqual(report["applied_count"], len(project["implementation_plan"]["module_sequence"]))
+            self.assertIn(module["path"], report["changed_files"])
+            self.assertEqual(path.read_text(encoding="utf-8"), "def main():\n    return 'model-generated'\n")
+
+    def test_greenfield_module_synthesis_rejects_bad_model_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = architect_build_greenfield_project_brief("Создай CLI калькулятор `bad-synthesis-calc`.")
+            module = project["implementation_plan"]["module_sequence"][0]
+            path = repo / module["path"]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("def keep():\n    return 'safe'\n", encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "path": "../outside.py",
+                            "content": "# TODO placeholder\n",
+                            "requirements_satisfied": [],
+                            "tests_to_update": [],
+                            "notes": "bad module synthesis",
+                        }
+                    ),
+                }
+
+            report = execute_module_synthesis_contracts(repo, project, guidance)
+            self.assertEqual(report["status"], "blocked", report)
+            self.assertEqual(path.read_text(encoding="utf-8"), "def keep():\n    return 'safe'\n")
+            self.assertTrue(any(row["status"] == "rejected" for row in report["rows"]))
 
     def test_greenfield_contract_requires_module_synthesis_contracts(self) -> None:
         project = architect_build_greenfield_project_brief("Создай CLI калькулятор `contract-calc`.")

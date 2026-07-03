@@ -8,8 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from execution_contract import build_blocked_execution_result, build_implemented_execution_result, build_patch_manifest
-from greenfield_architect import build_greenfield_project_brief
+from greenfield_architect import build_greenfield_project_brief, request_greenfield_model_guidance
 from greenfield_dependency_worker import run_dependency_worker
+from greenfield_implementation_worker import execute_module_synthesis_contracts
 from greenfield_memory_worker import build_greenfield_memory_record
 from greenfield_review_worker import forbidden_placeholder_markers_found, review_greenfield_project
 from greenfield_scaffold_worker import greenfield_workspace_status, normalize_project_file_rows, scaffold_greenfield_files
@@ -35,6 +36,7 @@ def write_greenfield_json_artifact(repo: Path, rel_path: str, payload: dict[str,
 
 def build_greenfield_run_report(
     project_brief: dict[str, Any],
+    implementation_synthesis_report: dict[str, Any],
     dependency_report: dict[str, Any],
     verification_loop: dict[str, Any],
     greenfield_review: dict[str, Any],
@@ -48,6 +50,9 @@ def build_greenfield_run_report(
         "project_type": project_brief.get("project_type", ""),
         "template_id": project_brief.get("template_id", ""),
         "acceptance_feature_ids": memory_record.get("acceptance_feature_ids", []),
+        "implementation_synthesis_status": implementation_synthesis_report.get("status", ""),
+        "implementation_synthesis_applied_count": implementation_synthesis_report.get("applied_count", 0),
+        "implementation_synthesis_model_unavailable_count": implementation_synthesis_report.get("model_unavailable_count", 0),
         "definition_of_done_status": memory_record.get("definition_of_done_status", {}),
         "dependency_status": dependency_report.get("status", ""),
         "verification_status": verification_loop.get("status", ""),
@@ -70,6 +75,7 @@ def _guidance_status(payload: Any) -> str:
 
 def build_greenfield_model_guidance_ledger(
     project_brief: dict[str, Any],
+    implementation_synthesis_report: dict[str, Any],
     verification_loop: dict[str, Any],
     greenfield_review: dict[str, Any],
 ) -> dict[str, Any]:
@@ -93,6 +99,11 @@ def build_greenfield_model_guidance_ledger(
             "role": "GreenfieldImplementationWorker",
             "stage": "implementation_feature_report",
             "status": _guidance_status(project_brief.get("implementation_feature_report", {}).get("model_guidance", {})),
+        },
+        {
+            "role": "GreenfieldImplementationWorker",
+            "stage": "module_synthesis_execution",
+            "status": str(implementation_synthesis_report.get("status") or "missing"),
         },
         {
             "role": "GreenfieldReviewer",
@@ -291,14 +302,24 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         return scaffold_report
     operation_results = scaffold_report.get("operation_results", []) if isinstance(scaffold_report.get("operation_results"), list) else []
     changed_files = [str(path) for path in scaffold_report.get("changed_files", []) if isinstance(path, str)]
+    implementation_synthesis_report = execute_module_synthesis_contracts(repo, project_brief, request_greenfield_model_guidance)
+    operation_results.extend(
+        item
+        for item in implementation_synthesis_report.get("operation_results", [])
+        if isinstance(item, dict)
+    )
+    changed_files = sorted(set(changed_files + [str(path) for path in implementation_synthesis_report.get("changed_files", []) if isinstance(path, str)]))
+    operation_results.append(write_greenfield_json_artifact(repo, "greenfield_module_synthesis_report.json", implementation_synthesis_report))
+    if "greenfield_module_synthesis_report.json" not in changed_files:
+        changed_files.append("greenfield_module_synthesis_report.json")
     dependency_report = run_dependency_worker(repo, project_brief)
     commands = spec.get("verification_commands") if isinstance(spec.get("verification_commands"), list) else []
     verification_loop = run_greenfield_verification_loop(repo, [str(command) for command in commands if isinstance(command, str)], project_brief)
     verification = verification_loop.get("final_verification", {}) if isinstance(verification_loop.get("final_verification"), dict) else {}
     greenfield_review = review_greenfield_project(repo, project_brief, dependency_report, verification)
-    greenfield_memory_record = build_greenfield_memory_record(project_brief, dependency_report, verification_loop, greenfield_review)
-    greenfield_model_guidance_ledger = build_greenfield_model_guidance_ledger(project_brief, verification_loop, greenfield_review)
-    greenfield_run_report = build_greenfield_run_report(project_brief, dependency_report, verification_loop, greenfield_review, greenfield_memory_record, greenfield_model_guidance_ledger)
+    greenfield_memory_record = build_greenfield_memory_record(project_brief, dependency_report, verification_loop, greenfield_review, implementation_synthesis_report)
+    greenfield_model_guidance_ledger = build_greenfield_model_guidance_ledger(project_brief, implementation_synthesis_report, verification_loop, greenfield_review)
+    greenfield_run_report = build_greenfield_run_report(project_brief, implementation_synthesis_report, dependency_report, verification_loop, greenfield_review, greenfield_memory_record, greenfield_model_guidance_ledger)
     for artifact_path, artifact_payload in (
         ("greenfield_memory_record.json", greenfield_memory_record),
         ("greenfield_model_guidance_ledger.json", greenfield_model_guidance_ledger),
@@ -324,6 +345,7 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         "implementation_plan": project_brief.get("implementation_plan", {}) if isinstance(project_brief, dict) else {},
         "implementation_trace": project_brief.get("implementation_trace", {}) if isinstance(project_brief, dict) else {},
         "implementation_feature_report": project_brief.get("implementation_feature_report", {}) if isinstance(project_brief, dict) else {},
+        "implementation_synthesis_report": implementation_synthesis_report,
         "dependency_plan": project_brief.get("dependency_plan", {}) if isinstance(project_brief, dict) else {},
         "verification_plan": project_brief.get("verification_plan", {}) if isinstance(project_brief, dict) else {},
         "dependency_report": dependency_report,

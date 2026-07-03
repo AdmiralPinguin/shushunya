@@ -39,7 +39,9 @@ def build_greenfield_memory_record(
     dependency_report: dict[str, Any],
     verification_loop: dict[str, Any],
     greenfield_review: dict[str, Any],
+    implementation_synthesis_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    implementation_synthesis_report = implementation_synthesis_report or {}
     repair_attempts = [
         attempt.get("repair_execution", {})
         for attempt in verification_loop.get("attempts", [])
@@ -67,6 +69,11 @@ def build_greenfield_memory_record(
             "feature_ids": feature_ids,
             "implementation_strategy": project_brief.get("implementation_feature_report", {}).get("implementation_strategy", ""),
         },
+        "implementation_synthesis_status": implementation_synthesis_report.get("status", ""),
+        "implementation_synthesis_applied_count": implementation_synthesis_report.get("applied_count", 0),
+        "implementation_synthesis_changed_files": implementation_synthesis_report.get("changed_files", []),
+        "implementation_synthesis_model_unavailable_count": implementation_synthesis_report.get("model_unavailable_count", 0),
+        "implementation_synthesis_blocked_count": implementation_synthesis_report.get("blocked_count", 0),
         "definition_of_done_status": dod_status,
         "dependency_status": dependency_report.get("status", ""),
         "dependency_blockers": dependency_report.get("blockers", []),
@@ -95,5 +102,6 @@ def build_greenfield_memory_record(
             "preserve greenfield workspace marker before writing generated files",
             "keep README commands identical to run_commands and verification_commands",
             "keep implementation modules and tests separate for non-trivial projects",
+            "treat module synthesis as applied only when model JSON passes path, requirement, test, and placeholder validation",
         ],
     }
