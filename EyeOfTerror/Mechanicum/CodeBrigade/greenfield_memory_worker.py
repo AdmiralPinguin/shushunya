@@ -62,6 +62,7 @@ def build_greenfield_memory_record(
     ]
     feature_ids = _feature_ids(project_brief)
     dod_status = _definition_of_done_status(project_brief, verification_loop, greenfield_review)
+    scenario_review = greenfield_review.get("scenario_review", {}) if isinstance(greenfield_review.get("scenario_review"), dict) else {}
     return {
         "kind": "code_brigade_greenfield_memory_record",
         "contract_version": "eye-mechanicum.v1",
@@ -103,6 +104,10 @@ def build_greenfield_memory_record(
         "review_warnings": greenfield_review.get("warnings", []),
         "semantic_review_status": greenfield_review.get("semantic_review", {}).get("status", ""),
         "semantic_review_blockers": greenfield_review.get("semantic_review", {}).get("blockers", []),
+        "scenario_review_status": scenario_review.get("status", ""),
+        "scenario_count": scenario_review.get("scenario_count", 0),
+        "scenario_blocked_count": scenario_review.get("blocked_count", 0),
+        "scenario_review_blockers": scenario_review.get("blockers", []),
         "verification_results": _verification_results(verification_loop),
         "commands": {
             "install": project_brief.get("dependency_plan", {}).get("install_commands", []),
@@ -117,5 +122,6 @@ def build_greenfield_memory_record(
             "treat module synthesis as applied only when model JSON passes path, requirement, test, and placeholder validation",
             "prefer coordinated file-set synthesis when source and tests must evolve together",
             "reject generated source/test sets when semantic quality gates identify weak source or assertionless tests",
+            "treat scenario_plan as the user-workflow contract and block review when source/test evidence misses required behavior markers",
         ],
     }

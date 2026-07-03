@@ -10,6 +10,7 @@ from typing import Any
 
 from greenfield_feature_worker import apply_task_feature_overrides
 from greenfield_implementation_worker import build_implementation_trace, build_implementation_worker_plan
+from greenfield_scenario_worker import build_greenfield_scenario_plan
 from greenfield_templates import GREENFIELD_MARKER, PROJECT_TYPES, STACK_DEFAULTS, template_for, template_id_for_project_type
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -141,6 +142,7 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         base_contract_paths,
         module_contracts,
     )
+    scenario_plan = build_greenfield_scenario_plan(project_type, template_id, acceptance_features, expected_files)
     brief = {
         "kind": "code_brigade_greenfield_project_brief",
         "contract_version": "eye-mechanicum.v1",
@@ -176,6 +178,7 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         },
         "definition_of_done": definition_of_done,
         "acceptance_features": acceptance_features,
+        "scenario_plan": scenario_plan,
         "architecture_plan": {
             "summary": str(payload.get("summary") or template.get("summary") or f"{template_id} scaffold"),
             "selected_template": template_id,
@@ -192,7 +195,8 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         "verification_plan": {
             "commands": verification_commands,
             "run_commands": run_commands,
-            "smoke_checks": ["entrypoint paths exist", "README mentions run/test commands"],
+            "smoke_checks": ["entrypoint paths exist", "README mentions run/test commands", "scenario_plan evidence markers are present"],
+            "scenario_plan": scenario_plan,
             "loop_stop_conditions": [
                 "same verification failure repeats",
                 "dependency is unavailable",
@@ -265,6 +269,7 @@ def attach_greenfield_plan_artifacts(brief: dict[str, Any]) -> None:
         ("file_tree_plan.json", "file_tree_plan"),
         ("module_contracts.json", "module_contracts"),
         ("implementation_trace.json", "implementation_trace"),
+        ("scenario_plan.json", "scenario_plan"),
         ("verification_plan.json", "verification_plan"),
     ]
     files = brief.get("files") if isinstance(brief.get("files"), list) else []

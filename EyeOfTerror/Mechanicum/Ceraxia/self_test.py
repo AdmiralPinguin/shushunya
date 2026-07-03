@@ -1001,6 +1001,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                     "greenfield_run_report.json",
                     "implementation_trace.json",
                     "module_contracts.json",
+                    "scenario_plan.json",
                     "test_app.py",
                     "verification_plan.json",
                 ],
@@ -1023,15 +1024,18 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                     "greenfield_project_brief.json",
                     "implementation_trace.json",
                     "module_contracts.json",
+                    "scenario_plan.json",
                     "test_app.py",
                     "verification_plan.json",
                 ],
             )
             self.assertEqual(worker_report["greenfield_implementation_plan"]["kind"], "code_brigade_greenfield_implementation_plan")
             self.assertEqual(worker_report["greenfield_implementation_trace"]["kind"], "code_brigade_greenfield_implementation_trace")
+            self.assertEqual(worker_report["greenfield_scenario_plan"]["kind"], "code_brigade_greenfield_scenario_plan")
             self.assertGreater(worker_report["greenfield_implementation_trace"]["requirement_trace_count"], 0)
             self.assertEqual(worker_report["execution_result"]["greenfield_project"]["verification"]["status"], "passed")
             self.assertEqual(worker_report["execution_result"]["greenfield_project"]["greenfield_review"]["semantic_review"]["status"], "passed")
+            self.assertEqual(worker_report["execution_result"]["greenfield_project"]["greenfield_review"]["scenario_review"]["status"], "passed")
             self.assertEqual(worker_report["greenfield_file_set_synthesis_report"]["kind"], "code_brigade_greenfield_file_set_synthesis_report")
             self.assertEqual(worker_report["greenfield_memory_record"]["kind"], "code_brigade_greenfield_memory_record")
             self.assertEqual(worker_report["greenfield_model_guidance_ledger"]["kind"], "code_brigade_greenfield_model_guidance_ledger")
@@ -1043,6 +1047,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             run_report = json.loads((repo / "greenfield_run_report.json").read_text(encoding="utf-8"))
             self.assertEqual(run_report["kind"], "code_brigade_greenfield_run_report")
             self.assertEqual(run_report["definition_of_done_status"]["status"], "passed")
+            self.assertEqual(run_report["scenario_review_status"], "passed")
             self.assertEqual(run_report["model_guidance_ledger_status"], ledger["status"])
             project_brief = json.loads((repo / "greenfield_project_brief.json").read_text(encoding="utf-8"))
             self.assertEqual(project_brief["kind"], "code_brigade_greenfield_project_brief")
@@ -1051,6 +1056,7 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(json.loads((repo / "architecture_plan.json").read_text(encoding="utf-8")), project_brief["architecture_plan"])
             self.assertEqual(json.loads((repo / "implementation_trace.json").read_text(encoding="utf-8")), project_brief["implementation_trace"])
             self.assertEqual(json.loads((repo / "module_contracts.json").read_text(encoding="utf-8")), project_brief["module_contracts"])
+            self.assertEqual(json.loads((repo / "scenario_plan.json").read_text(encoding="utf-8")), project_brief["scenario_plan"])
             self.assertEqual(json.loads((repo / "verification_plan.json").read_text(encoding="utf-8")), project_brief["verification_plan"])
             verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
             self.assertEqual(verification["status"], "passed")

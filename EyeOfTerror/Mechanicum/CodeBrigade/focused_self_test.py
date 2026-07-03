@@ -17,6 +17,7 @@ from greenfield_implementation_worker import build_implementation_worker_plan as
 from greenfield_memory_worker import build_greenfield_memory_record
 from greenfield_project import build_greenfield_project_brief, forbidden_placeholder_markers_found, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_review_worker import python_source_semantic_status
+from greenfield_scenario_worker import review_greenfield_scenarios
 from greenfield_scaffold_worker import greenfield_workspace_status, normalize_project_file_rows, scaffold_greenfield_files
 from greenfield_verification_worker import verification_failure_signature
 from greenfield_templates import available_templates
@@ -190,6 +191,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
                     "greenfield_project_brief.json",
                     "implementation_trace.json",
                     "module_contracts.json",
+                    "scenario_plan.json",
                     "test_app.py",
                     "verification_plan.json",
                 ],
@@ -202,6 +204,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(project_brief["implementation_plan"]["synthesis_policy"]["mode"], "module_by_module_llm_contract")
             self.assertEqual(project_brief["implementation_feature_report"]["kind"], "code_brigade_greenfield_implementation_feature_report")
             self.assertEqual(project_brief["implementation_trace"]["kind"], "code_brigade_greenfield_implementation_trace")
+            self.assertEqual(project_brief["scenario_plan"]["kind"], "code_brigade_greenfield_scenario_plan")
+            self.assertGreater(project_brief["scenario_plan"]["scenario_count"], 0)
             self.assertGreater(project_brief["implementation_trace"]["requirement_trace_count"], 0)
             self.assertTrue(project_brief["implementation_plan"]["module_sequence"])
             first_module = project_brief["implementation_plan"]["module_sequence"][0]
@@ -211,6 +215,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(memory["kind"], "code_brigade_greenfield_memory_record")
             self.assertEqual(memory["template_id"], project_brief["template_id"])
             self.assertEqual(memory["semantic_review_status"], "passed")
+            self.assertEqual(memory["scenario_review_status"], "passed")
             self.assertEqual(memory["definition_of_done_status"]["status"], "passed")
             self.assertTrue(memory["reusable_learnings"])
             self.assertTrue((repo / "greenfield_memory_record.json").exists())
@@ -228,10 +233,12 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertIn(run_report["file_set_synthesis_status"], {"applied", "model_unavailable", "skipped", "rejected"})
             self.assertIn(run_report["implementation_synthesis_status"], {"applied", "model_unavailable", "skipped"})
             self.assertEqual(run_report["definition_of_done_status"]["status"], "passed")
+            self.assertEqual(run_report["scenario_review_status"], "passed")
             self.assertEqual(run_report["model_guidance_ledger_status"], ledger["status"])
             review = report["execution_result"]["greenfield_project"]["greenfield_review"]
             self.assertIn("model_guidance", review)
             self.assertEqual(review["semantic_review"]["status"], "passed")
+            self.assertEqual(review["scenario_review"]["status"], "passed")
             self.assertEqual(review["semantic_review"]["implementation_trace_status"], "complete")
 
     def test_project_creation_blocks_placeholder_semantics(self) -> None:
@@ -266,6 +273,26 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(python_source_semantic_status("VALUE = 1\n"), "weak")
         self.assertEqual(python_source_semantic_status("def run():\n    return 'ready'\n\nif True:\n    run()\n"), "ok")
 
+    def test_greenfield_scenario_review_blocks_missing_behavior_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = architect_build_greenfield_project_brief("Создай CLI калькулятор `scenario-calc`.")
+            for item in project["files"]:
+                if not isinstance(item, dict) or not item.get("path"):
+                    continue
+                path = repo / str(item["path"])
+                path.parent.mkdir(parents=True, exist_ok=True)
+                content = str(item.get("content") or "")
+                if str(item["path"]).endswith("core.py"):
+                    content = content.replace("division by zero", "zero divisor")
+                if str(item["path"]) == "tests/test_core.py":
+                    content = content.replace("test_division_by_zero_is_rejected", "test_zero_rejection")
+                    content = content.replace("division by zero", "zero divisor")
+                path.write_text(content, encoding="utf-8")
+            review = review_greenfield_scenarios(repo, project)
+            self.assertEqual(review["status"], "blocked", review)
+            self.assertTrue(any("calculator_error_handling" in blocker for blocker in review["blockers"]))
+
     def test_greenfield_feature_worker_detects_task_features(self) -> None:
         feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api todo calculator csv summary local agent tool router telegram bot /start /help vite counter app text utils library")}
         self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "notes_api", "csv_summary", "local_agent_command_router", "telegram_command_bot", "vite_counter_app", "python_text_utils_library"})
@@ -279,9 +306,12 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(project["implementation_plan"]["synthesis_policy"]["mode"], "module_by_module_llm_contract")
         self.assertEqual(project["implementation_feature_report"]["kind"], "code_brigade_greenfield_implementation_feature_report")
         self.assertEqual(project["implementation_trace"]["kind"], "code_brigade_greenfield_implementation_trace")
+        self.assertEqual(project["scenario_plan"]["kind"], "code_brigade_greenfield_scenario_plan")
+        self.assertGreaterEqual(project["scenario_plan"]["scenario_count"], 2)
         self.assertGreater(project["implementation_trace"]["requirement_trace_count"], 0)
         self.assertIn("architecture_plan.json", project["expected_files"])
         self.assertIn("implementation_trace.json", project["expected_files"])
+        self.assertIn("scenario_plan.json", project["expected_files"])
         self.assertTrue(project["implementation_plan"]["module_sequence"])
         self.assertTrue(all("code_synthesis_contract" in row for row in project["implementation_plan"]["module_sequence"]))
 
@@ -987,6 +1017,7 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertIn("implementation_plan", required)
         self.assertIn("implementation_trace", required)
         self.assertIn("implementation_feature_report", required)
+        self.assertIn("scenario_plan", required)
         implementation_required = set(schema["properties"]["implementation_plan"]["required"])
         self.assertTrue({"role", "synthesis_policy", "module_sequence"}.issubset(implementation_required))
         module_required = set(schema["properties"]["implementation_plan"]["properties"]["module_sequence"]["items"]["required"])
@@ -997,6 +1028,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertIn("synthesis_contract_kind", trace_row_required)
         feature_required = set(schema["properties"]["implementation_feature_report"]["required"])
         self.assertTrue({"kind", "recognized_feature_ids", "changed_file_paths", "changed_module_contract_paths", "implementation_strategy"}.issubset(feature_required))
+        scenario_required = set(schema["properties"]["scenario_plan"]["required"])
+        self.assertTrue({"kind", "scenario_count", "rows"}.issubset(scenario_required))
 
     def test_greenfield_capability_audit_tracks_objective_scope(self) -> None:
         audit_path = Path(__file__).with_name("greenfield_capability_audit.json")

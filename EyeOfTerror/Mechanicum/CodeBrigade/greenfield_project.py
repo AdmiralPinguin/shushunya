@@ -64,6 +64,9 @@ def build_greenfield_run_report(
         "verification_stop_condition_evidence": verification_loop.get("stop_condition_evidence", {}),
         "review_status": greenfield_review.get("status", ""),
         "semantic_review_status": greenfield_review.get("semantic_review", {}).get("status", ""),
+        "scenario_review_status": greenfield_review.get("scenario_review", {}).get("status", ""),
+        "scenario_count": greenfield_review.get("scenario_review", {}).get("scenario_count", 0),
+        "scenario_blocked_count": greenfield_review.get("scenario_review", {}).get("blocked_count", 0),
         "commands": memory_record.get("commands", {}),
         "model_guidance_ledger_status": model_guidance_ledger.get("status", ""),
         "model_guidance_role_count": model_guidance_ledger.get("role_count", 0),
@@ -280,6 +283,13 @@ def validate_greenfield_project_brief(brief: dict[str, Any]) -> list[str]:
                 problems.append(f"greenfield_project_brief implementation_trace synthesis contract is required: {row.get('file') or ''}")
     if not isinstance(brief.get("implementation_feature_report"), dict) or not brief.get("implementation_feature_report"):
         problems.append("greenfield_project_brief implementation_feature_report is required")
+    scenario_plan = brief.get("scenario_plan") if isinstance(brief.get("scenario_plan"), dict) else {}
+    if not scenario_plan:
+        problems.append("greenfield_project_brief scenario_plan is required")
+    elif scenario_plan.get("kind") != "code_brigade_greenfield_scenario_plan":
+        problems.append("greenfield_project_brief scenario_plan kind is required")
+    elif not isinstance(scenario_plan.get("rows"), list) or not scenario_plan.get("rows"):
+        problems.append("greenfield_project_brief scenario_plan rows are required")
     if not isinstance(brief.get("verification_plan"), dict) or not brief.get("verification_plan"):
         problems.append("greenfield_project_brief verification_plan is required")
     return problems
@@ -365,6 +375,7 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         "implementation_plan": project_brief.get("implementation_plan", {}) if isinstance(project_brief, dict) else {},
         "implementation_trace": project_brief.get("implementation_trace", {}) if isinstance(project_brief, dict) else {},
         "implementation_feature_report": project_brief.get("implementation_feature_report", {}) if isinstance(project_brief, dict) else {},
+        "scenario_plan": project_brief.get("scenario_plan", {}) if isinstance(project_brief, dict) else {},
         "file_set_synthesis_report": file_set_synthesis_report,
         "implementation_synthesis_report": implementation_synthesis_report,
         "dependency_plan": project_brief.get("dependency_plan", {}) if isinstance(project_brief, dict) else {},

@@ -2,7 +2,7 @@
   "kind": "code_brigade_greenfield_capability_audit",
   "contract_version": "eye-mechanicum.v1",
   "status": "in_progress",
-  "summary": "Ceraxia CodeBrigade has a working greenfield pipeline with contracts, role modules, templates, verification, review, reports, memory, coordinated file-set synthesis for source/test sets, mandatory module-by-module synthesis contracts, executable module synthesis, verification-driven module synthesis repair, and semantic/domain quality gates for generated source/tests. The remaining risk is depth: curated templates/features still provide the baseline source, and arbitrary large project code synthesis needs richer scoring and real-world scenario coverage before this objective is complete.",
+  "summary": "Ceraxia CodeBrigade has a working greenfield pipeline with contracts, role modules, templates, verification, review, reports, memory, coordinated file-set synthesis for source/test sets, mandatory module-by-module synthesis contracts, executable module synthesis, verification-driven module synthesis repair, semantic/domain quality gates for generated source/tests, and scenario-plan review for user workflows. The remaining risk is depth: curated templates/features still provide the baseline source, and arbitrary large project code synthesis needs stronger real-world integration trials before this objective is complete.",
   "requirements": [
     {
       "id": "greenfield_contract",
@@ -48,11 +48,12 @@
         "greenfield_implementation_worker.py execute_module_synthesis_contracts calls the GreenfieldImplementationWorker model path per module and writes source only after JSON, path, requirement, test, placeholder, and workspace validation",
         "greenfield_implementation_worker.py generated_file_quality rejects weak generated Python source and assertionless generated tests before writing model output",
         "greenfield_implementation_worker.py domain_specific_quality_findings adds template-aware checks for FastAPI, frontend, Telegram bot, data processing, and local agent tool outputs",
+        "greenfield_scenario_worker.py builds scenario_plan rows from task-derived acceptance features and GreenfieldReview blocks missing behavior markers",
         "greenfield_verification_worker.py can call verification_repair module synthesis with failure context when bounded template repair is not applicable",
         "greenfield_feature_worker.py applies task-derived feature implementations for calculator, todo, notes API, CSV summary, local agent tool, Telegram bot, Vite counter, and text utils library",
         "implementation_trace.json records requirement to file/function/test mapping with synthesis_contract_kind and GreenfieldReview checks it"
       ],
-      "remaining_risk": "Implementation now has executable validated LLM file-set synthesis, module synthesis, verification-driven synthesis repair, and semantic/domain quality gates, but curated feature overrides/templates still provide the reliable baseline; arbitrary large code synthesis still needs real-world scenario scoring."
+      "remaining_risk": "Implementation now has executable validated LLM file-set synthesis, module synthesis, verification-driven synthesis repair, semantic/domain quality gates, and scenario scoring, but curated feature overrides/templates still provide the reliable baseline; arbitrary large code synthesis still needs long-form real-world integration trials."
     },
     {
       "id": "dependency_worker",
@@ -80,9 +81,10 @@
       "status": "implemented",
       "evidence": [
         "greenfield_review_worker.py checks expected files, README run/test commands, entrypoints, dependency status, verification status, module contracts, placeholders, source/test presence, and implementation_trace",
+        "greenfield_review_worker.py includes scenario_review from greenfield_scenario_worker.py and blocks projects whose declared workflows lack source/test evidence",
         "focused_self_test.py covers placeholder blocking and semantic review status"
       ],
-      "remaining_risk": "Generated artifact meaning is checked by contract/semantic heuristics, not a deep domain-specific reviewer for every possible application."
+      "remaining_risk": "Generated artifact meaning is checked by contract, semantic, domain, and scenario heuristics, not a deep domain-specific reviewer for every possible application."
     },
     {
       "id": "project_templates",
@@ -115,7 +117,7 @@
       "objective_item": 10,
       "status": "implemented",
       "evidence": [
-        "greenfield_memory_worker.py records stack, dependencies, verification, stop evidence, repaired files, review status, acceptance features, and reusable learnings",
+        "greenfield_memory_worker.py records stack, dependencies, verification, stop evidence, repaired files, review status, acceptance features, scenario status, and reusable learnings",
         "greenfield_project.py writes greenfield_memory_record.json and greenfield_run_report.json after each run",
         "focused_self_test.py and Ceraxia self tests verify report artifacts"
       ],
@@ -123,7 +125,7 @@
     }
   ],
   "next_recommended_work": [
-    "Strengthen ImplementationWorker synthesis with real-world scenario coverage and richer acceptance traces for larger generated applications.",
+    "Run long-form integration trials where scenario_plan covers multi-step workflows across several modules and generated artifacts.",
     "Add deeper generated artifact review for frontend/API behavior beyond static contract checks.",
     "Add a long-form integration test that creates a larger multi-module app and verifies several independent workflows.",
     "Decide whether Android/game templates belong in this goal now or should remain explicitly deferred."

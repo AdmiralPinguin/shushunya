@@ -980,6 +980,7 @@ def source_mutation_scope_sufficiency_from_worker(worker_report: dict[str, Any])
                 "greenfield_run_report.json",
                 "implementation_trace.json",
                 "module_contracts.json",
+                "scenario_plan.json",
                 "verification_plan.json",
             }
         )

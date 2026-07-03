@@ -24,6 +24,7 @@
     "implementation_plan",
     "implementation_trace",
     "implementation_feature_report",
+    "scenario_plan",
     "verification_plan",
     "dependency_plan"
   ],
@@ -183,6 +184,33 @@
                 "const": "code_brigade_greenfield_module_synthesis_contract"
               }
             }
+          }
+        }
+      }
+    },
+    "scenario_plan": {
+      "type": "object",
+      "required": ["kind", "contract_version", "status", "scenario_count", "rows"],
+      "properties": {
+        "kind": {
+          "const": "code_brigade_greenfield_scenario_plan"
+        },
+        "contract_version": {
+          "const": "eye-mechanicum.v1"
+        },
+        "status": {
+          "enum": ["planned", "empty"]
+        },
+        "scenario_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "description", "steps", "required_markers", "evidence_files"]
           }
         }
       }

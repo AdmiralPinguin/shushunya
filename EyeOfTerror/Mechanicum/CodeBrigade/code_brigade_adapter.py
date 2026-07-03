@@ -737,6 +737,7 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
             report["greenfield_architecture_plan"] = greenfield.get("architecture_plan", {})
             report["greenfield_implementation_plan"] = greenfield.get("implementation_plan", {})
             report["greenfield_implementation_trace"] = greenfield.get("implementation_trace", {})
+            report["greenfield_scenario_plan"] = greenfield.get("scenario_plan", {})
             report["greenfield_dependency_plan"] = greenfield.get("dependency_plan", {})
             report["greenfield_verification_plan"] = greenfield.get("verification_plan", {})
             report["greenfield_file_set_synthesis_report"] = greenfield.get("file_set_synthesis_report", {})

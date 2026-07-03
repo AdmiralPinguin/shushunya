@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from greenfield_architect import request_greenfield_model_guidance
+from greenfield_scenario_worker import review_greenfield_scenarios
 from greenfield_templates import GREENFIELD_MARKER
 
 
@@ -189,6 +190,10 @@ def review_greenfield_project(repo: Path, project_brief: dict[str, Any], depende
     if semantic_review.get("status") == "blocked":
         blockers.extend(str(item) for item in semantic_review.get("blockers", []))
     warnings.extend(str(item) for item in semantic_review.get("warnings", []))
+    scenario_review = review_greenfield_scenarios(repo, project_brief)
+    if scenario_review.get("status") == "blocked":
+        blockers.extend(str(item) for item in scenario_review.get("blockers", []))
+    warnings.extend(str(item) for item in scenario_review.get("warnings", []))
     reviewer_guidance = request_greenfield_model_guidance(
         "GreenfieldReviewer",
         {
@@ -199,6 +204,7 @@ def review_greenfield_project(repo: Path, project_brief: dict[str, Any], depende
             "dependency_status": dependency_report.get("status"),
             "verification_status": verification.get("status"),
             "semantic_review": semantic_review,
+            "scenario_review": scenario_review,
             "blockers": blockers,
             "warnings": warnings,
         },
@@ -215,6 +221,7 @@ def review_greenfield_project(repo: Path, project_brief: dict[str, Any], depende
         "dependency_status": dependency_report.get("status", ""),
         "verification_status": verification.get("status", ""),
         "semantic_review": semantic_review,
+        "scenario_review": scenario_review,
         "blockers": blockers,
         "warnings": warnings,
         "model_guidance": reviewer_guidance,
