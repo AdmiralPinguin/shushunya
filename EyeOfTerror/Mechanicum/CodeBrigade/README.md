@@ -142,6 +142,9 @@ inside an empty directory or a directory marked with
 allowlisted verification, and reports the created files through the same patch
 manifest and review gates. `greenfield_templates.py` owns the template registry
 so the scaffold catalog is not buried inside the executor.
+`greenfield_architect.py` owns GreenfieldArchitect project-brief creation,
+project type inference, architecture/file/module/verification plan artifacts,
+and the implementation-plan trace rows.
 `greenfield_feature_worker.py` owns task-derived ImplementationWorker behavior,
 including functional requirement detection and feature-specific file/contract
 overrides, so the greenfield orchestrator does not become a single role pile. The current

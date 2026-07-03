@@ -8,6 +8,7 @@ from pathlib import Path
 
 import code_brigade_adapter
 from diagnostic_repair_contract import execute_diagnostic_repair_loop, execute_diagnostic_repair_request
+from greenfield_architect import build_greenfield_project_brief as architect_build_greenfield_project_brief
 from greenfield_feature_worker import infer_acceptance_features
 from greenfield_project import build_greenfield_project_brief, forbidden_placeholder_markers_found, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_templates import available_templates
@@ -227,6 +228,14 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
     def test_greenfield_feature_worker_detects_task_features(self) -> None:
         feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api todo calculator")}
         self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "notes_api"})
+
+    def test_greenfield_architect_owns_project_brief_and_plan(self) -> None:
+        project = architect_build_greenfield_project_brief("Создай CLI калькулятор `architect-calc`.")
+        self.assertEqual(project["kind"], "code_brigade_greenfield_project_brief")
+        self.assertEqual(project["architecture_plan"]["selected_template"], "python_cli_basic")
+        self.assertEqual(project["implementation_plan"]["kind"], "code_brigade_greenfield_implementation_plan")
+        self.assertIn("architecture_plan.json", project["expected_files"])
+        self.assertTrue(project["implementation_plan"]["module_sequence"])
 
     def test_greenfield_verification_loop_repairs_missing_template_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
