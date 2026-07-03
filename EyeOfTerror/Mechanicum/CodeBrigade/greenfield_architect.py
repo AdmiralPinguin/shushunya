@@ -48,7 +48,7 @@ def infer_project_type(task: str) -> str:
     lowered = task.lower()
     if any(word in lowered for word in ("fastapi", "api", "http", "server", "сервер", "апи", "endpoint")):
         return "api_service"
-    if any(word in lowered for word in ("site", "website", "frontend", "html", "css", "сайт", "страниц")):
+    if any(word in lowered for word in ("site", "website", "frontend", "html", "css", "vite", "react", "vue", "сайт", "страниц")):
         return "web_app"
     if any(word in lowered for word in ("library", "package", "sdk", "библиот")):
         return "library"

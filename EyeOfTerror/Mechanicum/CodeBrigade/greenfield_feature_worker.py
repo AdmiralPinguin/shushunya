@@ -61,6 +61,15 @@ def infer_acceptance_features(task: str) -> list[dict[str, Any]]:
                 "operations": ["start", "help", "status", "echo", "unknown_command"],
             }
         )
+    if any(word in lowered for word in ("react counter", "vite counter", "counter app", "счетчик", "счётчик")):
+        features.append(
+            {
+                "id": "vite_counter_app",
+                "kind": "functional_requirement",
+                "description": "provide a Vite frontend counter app with increment, decrement, reset, and visible state",
+                "operations": ["increment", "decrement", "reset", "render_count"],
+            }
+        )
     return features
 
 
@@ -86,6 +95,8 @@ def apply_task_feature_overrides(
         return apply_local_agent_command_router_feature(project_name, files), local_agent_command_router_module_contracts(project_name), features
     if template_id == "telegram_bot_python" and any(feature.get("id") == "telegram_command_bot" for feature in features):
         return apply_telegram_command_bot_feature(project_name, files), telegram_command_bot_module_contracts(project_name), features
+    if template_id == "node_vite_app" and any(feature.get("id") == "vite_counter_app" for feature in features):
+        return apply_vite_counter_app_feature(project_name, files), vite_counter_app_module_contracts(), features
     return files, module_contracts, features
 
 
@@ -773,5 +784,95 @@ def telegram_command_bot_module_contracts(project_name: str) -> list[dict[str, A
             "path": "tests/test_bot.py",
             "responsibility": "Telegram command behavior verification",
             "requirements": ["prove command routing", "prove unknown command fallback", "prove token requirement without network"],
+        },
+    ]
+
+
+def apply_vite_counter_app_feature(project_name: str, files: list[Any]) -> list[Any]:
+    main = (
+        "import React, { useState } from 'react';\n"
+        "import { createRoot } from 'react-dom/client';\n"
+        "import './styles.css';\n\n\n"
+        "export function CounterApp() {\n"
+        "  const [count, setCount] = useState(0);\n"
+        "  const increment = () => setCount((value) => value + 1);\n"
+        "  const decrement = () => setCount((value) => value - 1);\n"
+        "  const reset = () => setCount(0);\n\n"
+        "  return (\n"
+        "    <main className=\"counter-shell\">\n"
+        f"      <h1>{project_name} Counter</h1>\n"
+        "      <output aria-live=\"polite\" className=\"counter-value\">{count}</output>\n"
+        "      <div className=\"counter-actions\">\n"
+        "        <button type=\"button\" onClick={decrement}>Decrement</button>\n"
+        "        <button type=\"button\" onClick={reset}>Reset</button>\n"
+        "        <button type=\"button\" onClick={increment}>Increment</button>\n"
+        "      </div>\n"
+        "    </main>\n"
+        "  );\n"
+        "}\n\n\n"
+        "createRoot(document.getElementById('root')).render(<CounterApp />);\n"
+    )
+    css = (
+        ":root { font-family: Inter, system-ui, sans-serif; color: #191b21; background: #f5f7fb; }\n"
+        "body { margin: 0; }\n"
+        ".counter-shell { max-width: 680px; margin: 10vh auto; padding: 24px; display: grid; gap: 18px; }\n"
+        "h1 { margin: 0; font-size: 2rem; }\n"
+        ".counter-value { font-size: 4rem; font-weight: 700; line-height: 1; }\n"
+        ".counter-actions { display: flex; flex-wrap: wrap; gap: 8px; }\n"
+        "button { min-width: 112px; border: 1px solid #b9c3d3; border-radius: 6px; background: #ffffff; padding: 10px 14px; font: inherit; cursor: pointer; }\n"
+        "button:hover { background: #e9eef7; }\n"
+    )
+    tests = (
+        "from pathlib import Path\n"
+        "import json\n"
+        "import unittest\n\n\n"
+        "class ViteCounterContractTests(unittest.TestCase):\n"
+        "    def test_manifest_and_entrypoint(self):\n"
+        "        manifest = json.loads(Path('package.json').read_text(encoding='utf-8'))\n"
+        "        self.assertEqual(manifest['scripts']['dev'], 'vite')\n"
+        "        self.assertIn('/src/main.jsx', Path('index.html').read_text(encoding='utf-8'))\n\n"
+        "    def test_counter_behaviors_are_implemented(self):\n"
+        "        source = Path('src/main.jsx').read_text(encoding='utf-8')\n"
+        "        self.assertIn('useState(0)', source)\n"
+        "        self.assertIn('const increment', source)\n"
+        "        self.assertIn('const decrement', source)\n"
+        "        self.assertIn('const reset', source)\n"
+        "        self.assertIn('aria-live', source)\n"
+        "        self.assertIn('Increment', source)\n"
+        "        self.assertIn('Decrement', source)\n"
+        "        self.assertIn('Reset', source)\n"
+    )
+    readme = (
+        f"# {project_name}\n\nA Vite React counter app with increment, decrement, reset, and visible count state.\n\n"
+        "## Install\n\n```bash\nnpm install\n```\n\n"
+        "## Run\n\n```bash\nnpm run dev\n```\n\n"
+        "## Test\n\n```bash\npython -m unittest discover tests\n```\n"
+    )
+    rows = replace_project_file(files, "src/main.jsx", main)
+    rows = replace_project_file(rows, "src/styles.css", css)
+    rows = replace_project_file(rows, "tests/test_vite_contract.py", tests)
+    rows = replace_project_file(rows, "README.md", readme)
+    return rows
+
+
+def vite_counter_app_module_contracts() -> list[dict[str, Any]]:
+    return [
+        {
+            "module": "src.main",
+            "path": "src/main.jsx",
+            "responsibility": "React counter application entrypoint",
+            "requirements": ["render count state", "increment count", "decrement count", "reset count", "expose accessible live output"],
+        },
+        {
+            "module": "src.styles",
+            "path": "src/styles.css",
+            "responsibility": "counter app layout and control styling",
+            "requirements": ["style counter shell", "style action buttons"],
+        },
+        {
+            "module": "tests.test_vite_contract",
+            "path": "tests/test_vite_contract.py",
+            "responsibility": "Vite counter behavior-contract verification",
+            "requirements": ["prove manifest entrypoint", "prove counter behaviors are present"],
         },
     ]
