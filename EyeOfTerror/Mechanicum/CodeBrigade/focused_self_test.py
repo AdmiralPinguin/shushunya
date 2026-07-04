@@ -16,7 +16,7 @@ from greenfield_feature_worker import infer_acceptance_features
 from greenfield_implementation_worker import execute_file_set_synthesis_contract, execute_module_synthesis_contracts, extract_json_object, forbidden_markers_found as implementation_forbidden_markers_found, generated_file_quality, task_behavior_markers
 from greenfield_implementation_worker import build_implementation_trace as worker_build_implementation_trace
 from greenfield_implementation_worker import build_implementation_worker_plan as worker_build_implementation_worker_plan
-from greenfield_live_trial import allocate_live_trial_root, compact_greenfield_result
+from greenfield_live_trial import allocate_live_trial_root, apply_scenario_expectations, compact_greenfield_result, scenario_spec as live_scenario_spec
 from greenfield_memory_worker import build_greenfield_memory_index, build_greenfield_memory_record, update_greenfield_memory_index
 from greenfield_project import build_greenfield_project_brief, execute_greenfield_project_brief, forbidden_placeholder_markers_found, model_synthesis_blockers, reconcile_module_synthesis_with_file_set, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_repair_live_trial import compact_repair_result, scenario_spec
@@ -706,6 +706,17 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         kanban_feature_ids = {feature["id"] for feature in infer_acceptance_features("kanban project board with todo doing done columns and column counters")}
         self.assertEqual(kanban_feature_ids, {"kanban_board_frontend"})
 
+    def test_greenfield_feature_worker_does_not_treat_russian_modular_separation_as_division(self) -> None:
+        feature_ids = {
+            feature["id"]
+            for feature in infer_acceptance_features(
+                "Создай FastAPI operations dashboard с разделением domain/store/metrics/events/routes/main."
+            )
+        }
+        self.assertEqual(feature_ids, {"operations_dashboard_api"})
+        calculator_ids = {feature["id"] for feature in infer_acceptance_features("Создай калькулятор с делением и умножением.")}
+        self.assertEqual(calculator_ids, {"calculator_operations"})
+
     def test_greenfield_feature_worker_does_not_treat_todo_remaining_counter_as_vite_app(self) -> None:
         feature_ids = {feature["id"] for feature in infer_acceptance_features("Создай todo list со счетчиком оставшихся задач и фильтром active/completed.")}
         self.assertEqual(feature_ids, {"todo_list"})
@@ -919,6 +930,71 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(first_row["status"], "applied", first_row)
             self.assertEqual(first_row["reformat_guidance_status"], "answered")
             self.assertIn("model output required JSON reformat retry", first_row["warnings"])
+
+    def test_greenfield_module_synthesis_retries_parseable_output_that_fails_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = architect_build_greenfield_project_brief("Создай CLI калькулятор `validation-retry-calc`.")
+            module = next(row for row in project["implementation_plan"]["module_sequence"] if row["path"] in project["implementation_plan"]["source_files"])
+            path = repo / module["path"]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("def old():\n    return 'old'\n", encoding="utf-8")
+            calls: list[str] = []
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                contract = payload["module_synthesis_contract"]
+                if "validation_problems" in payload:
+                    calls.append("validation_retry")
+                    self.assertTrue(any("syntax error" in problem for problem in payload["validation_problems"]))
+                    return {
+                        "ok": True,
+                        "status": "answered",
+                        "content": json.dumps(
+                            {
+                                "path": contract["path"],
+                                "content": "def main():\n    return 'validation-fixed'\n",
+                                "requirements_satisfied": contract["requirements"],
+                                "tests_to_update": contract["paired_tests"],
+                                "notes": "fixed validation failure",
+                            }
+                        ),
+                    }
+                calls.append("initial")
+                if contract["path"] != module["path"]:
+                    return {
+                        "ok": True,
+                        "status": "answered",
+                        "content": json.dumps(
+                            {
+                                "path": contract["path"],
+                                "content": "import unittest\n\nclass GeneratedTests(unittest.TestCase):\n    def test_generated(self):\n        self.assertTrue(True)\n",
+                                "requirements_satisfied": contract["requirements"],
+                                "tests_to_update": contract["paired_tests"],
+                                "notes": "valid test module",
+                            }
+                        ),
+                    }
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "path": contract["path"],
+                            "content": "def broken(:\n    return 'bad'\n",
+                            "requirements_satisfied": contract["requirements"],
+                            "tests_to_update": contract["paired_tests"],
+                            "notes": "parseable JSON but invalid Python",
+                        }
+                    ),
+                }
+
+            report = execute_module_synthesis_contracts(repo, project, guidance)
+            self.assertEqual(report["status"], "applied", report)
+            self.assertIn("validation_retry", calls)
+            self.assertEqual(path.read_text(encoding="utf-8"), "def main():\n    return 'validation-fixed'\n")
+            source_row = next(row for row in report["rows"] if row["path"] == module["path"])
+            self.assertEqual(source_row["validation_retry_guidance_status"], "answered")
+            self.assertIn("model output required validation retry", source_row["warnings"])
 
     def test_greenfield_file_set_synthesis_applies_source_and_tests_together(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3147,6 +3223,14 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
                     "status": "blocked",
                     "blockers": ["greenfield module model synthesis did not produce accepted code: model_unavailable"],
                     "greenfield_project": {
+                        "greenfield_project_brief": {
+                            "project_type": "api_service",
+                            "template_id": "python_fastapi_service",
+                            "expected_files": ["app/main.py", "tests/test_ops.py"],
+                            "module_contracts": [{"path": "app/main.py"}, {"path": "tests/test_ops.py"}],
+                            "scenario_plan": {"scenario_count": 4},
+                            "acceptance_features": [{"id": "operations_dashboard_api"}],
+                        },
                         "file_set_synthesis_report": {"status": "model_unavailable", "blockers": ["model down"]},
                         "implementation_synthesis_report": {
                             "status": "model_unavailable",
@@ -3169,6 +3253,29 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(result["module_synthesis_status"], "model_unavailable")
             self.assertEqual(result["module_synthesis_model_unavailable_count"], 2)
             self.assertEqual(result["model_guidance_ledger_status"], "partial")
+            self.assertEqual(result["template_id"], "python_fastapi_service")
+            self.assertEqual(result["module_contract_count"], 2)
+            self.assertEqual(result["scenario_count"], 4)
+            self.assertEqual(result["acceptance_features"], ["operations_dashboard_api"])
+
+    def test_greenfield_live_trial_named_scenarios_define_expected_contracts(self) -> None:
+        ops = live_scenario_spec("operations_dashboard")
+        self.assertEqual(ops["expected_template_id"], "python_fastapi_service")
+        self.assertEqual(ops["expected_features"], ["operations_dashboard_api"])
+        self.assertIn("event timeline", ops["task"])
+        result = apply_scenario_expectations(
+            {
+                "status": "accepted",
+                "template_id": "python_cli_basic",
+                "acceptance_features": [],
+            },
+            "operations_dashboard",
+            ops,
+        )
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["scenario_expectation_status"], "blocked")
+        self.assertTrue(any("expected template_id" in item for item in result["scenario_expectation_blockers"]))
+        self.assertTrue(any("missing expected acceptance features" in item for item in result["scenario_expectation_blockers"]))
 
     def test_greenfield_live_trial_allocator_avoids_parallel_workspace_collisions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

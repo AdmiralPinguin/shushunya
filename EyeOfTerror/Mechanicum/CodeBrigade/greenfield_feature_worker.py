@@ -1,14 +1,39 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import re
 from typing import Any
+
+
+def task_tokens(task: str) -> set[str]:
+    return set(re.findall(r"[a-zа-яё0-9/_-]+", task.lower()))
+
+
+def calculator_requested(task: str) -> bool:
+    lowered = task.lower()
+    tokens = task_tokens(task)
+    english_markers = ("calculator", "calculate", "arithmetic", "add ", "subtract", "multiply", "divide")
+    russian_tokens = {
+        "калькулятор",
+        "арифметика",
+        "арифметический",
+        "сложение",
+        "сложить",
+        "вычитание",
+        "вычесть",
+        "умножение",
+        "умножить",
+        "деление",
+        "делить",
+    }
+    return any(marker in lowered for marker in english_markers) or bool(tokens & russian_tokens)
 
 
 def infer_acceptance_features(task: str) -> list[dict[str, Any]]:
     lowered = task.lower()
     features: list[dict[str, Any]] = []
     kanban_requested = any(word in lowered for word in ("kanban", "project board", "task board", "status board", "канбан", "доска задач", "проектная доска"))
-    if any(word in lowered for word in ("calculator", "calculate", "калькулятор", "слож", "вычит", "умнож", "делен", "делить")):
+    if calculator_requested(task):
         features.append(
             {
                 "id": "calculator_operations",

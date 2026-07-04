@@ -803,10 +803,44 @@ def execute_module_synthesis_contracts(
             row["warnings"].append("model output required JSON reformat retry")
         problems = validate_module_synthesis_output(output, module, forbidden_markers, project_brief)
         if problems:
-            row["status"] = "rejected"
-            row["blockers"].extend(problems)
-            rows.append(row)
-            continue
+            validation_retry_guidance = request_guidance(
+                "GreenfieldImplementationWorker",
+                {
+                    "project_name": project_brief.get("project_name"),
+                    "project_type": project_brief.get("project_type"),
+                    "template_id": project_brief.get("template_id"),
+                    "module_synthesis_contract": synthesis_contract,
+                    "previous_module_output": output,
+                    "validation_problems": problems,
+                    "existing_content": target.read_text(encoding="utf-8") if target.exists() and target.is_file() else "",
+                    "verification_context": verification_context or {},
+                },
+                "The previous module implementation JSON was parseable but failed validation. Correct the same module only. Return JSON only with the same path, valid content, complete requirements_satisfied, tests_to_update, and notes. Do not change unrelated files or weaken tests.",
+            )
+            row["validation_retry_guidance_status"] = str(validation_retry_guidance.get("status") or "")
+            row["validation_retry_guidance_ok"] = bool(validation_retry_guidance.get("ok"))
+            if validation_retry_guidance.get("ok"):
+                try:
+                    retry_output = extract_json_object(str(validation_retry_guidance.get("content") or ""))
+                except (ValueError, json.JSONDecodeError) as retry_exc:
+                    row["validation_retry_error"] = f"validation retry output is not valid JSON object: {retry_exc}"
+                else:
+                    retry_problems = validate_module_synthesis_output(retry_output, module, forbidden_markers, project_brief)
+                    if not retry_problems:
+                        output = retry_output
+                        row["warnings"].append("model output required validation retry")
+                        problems = []
+                    else:
+                        row["validation_retry_blockers"] = retry_problems
+            if problems:
+                row["status"] = "rejected"
+                row["blockers"].extend(problems)
+                if isinstance(row.get("validation_retry_blockers"), list):
+                    row["blockers"].extend(f"validation retry: {item}" for item in row["validation_retry_blockers"] if isinstance(item, str))
+                if row.get("validation_retry_error"):
+                    row["blockers"].append(str(row["validation_retry_error"]))
+                rows.append(row)
+                continue
         before = target.read_bytes() if target.exists() else b""
         rendered_content = str(output["content"])
         target.parent.mkdir(parents=True, exist_ok=True)
