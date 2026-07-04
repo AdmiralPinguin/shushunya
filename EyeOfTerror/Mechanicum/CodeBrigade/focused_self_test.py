@@ -531,6 +531,33 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(review["architecture_guidance_review"]["status"], "blocked")
             self.assertTrue(any("app/models.py" in blocker for blocker in review["blockers"]))
 
+    def test_greenfield_architecture_guidance_resolves_expected_file_suffixes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            tests = repo / "tests"
+            tests.mkdir()
+            (repo / "game.js").write_text("requestAnimationFrame(gameLoop);\n", encoding="utf-8")
+            (tests / "test_browser_game.py").write_text("def test_game():\n    assert True\n", encoding="utf-8")
+            project = {
+                "expected_files": ["game.js", "tests/test_browser_game.py"],
+                "architecture_plan": {
+                    "model_guidance": {
+                        "content": json.dumps({"evidence_required": ["game.js loop structure", "test_browser_game.py execution plan"]})
+                    }
+                },
+            }
+            review = review_greenfield_project(
+                repo,
+                project,
+                {"status": "not_required", "blockers": [], "warnings": []},
+                {"status": "passed", "results": [{"command": "python -m unittest discover tests", "status": "passed"}]},
+                lambda role, payload, instructions: {"ok": True, "status": "answered", "content": "{}"},
+            )
+            self.assertNotIn("architecture guidance required missing evidence file: test_browser_game.py", review["blockers"])
+            arch_review = review["architecture_guidance_review"]
+            self.assertEqual(arch_review["status"], "passed", arch_review)
+            self.assertIn("tests/test_browser_game.py", {row["path"] for row in arch_review["rows"]})
+
     def test_greenfield_artifact_review_blocks_unwired_frontend_assets_and_weak_tests(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -2709,6 +2736,10 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(vite["template_id"], "node_vite_app")
         self.assertEqual(game["project_type"], "game")
         self.assertEqual(game["template_id"], "static_browser_game")
+        game_scenarios = game["scenario_plan"]["rows"]
+        self.assertEqual(game_scenarios[0]["id"], "browser_game_loop")
+        self.assertIn("requestAnimationFrame", game_scenarios[0]["required_markers"])
+        self.assertNotIn("ready", game_scenarios[0]["required_markers"])
         self.assertEqual(bot["template_id"], "telegram_bot_python")
         self.assertEqual(data_tool["template_id"], "data_processing_tool")
         self.assertEqual(agent_tool["template_id"], "local_agent_tool")

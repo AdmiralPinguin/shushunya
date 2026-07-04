@@ -485,6 +485,7 @@ def reviewer_model_findings(guidance: dict[str, Any]) -> dict[str, Any]:
 def architecture_guidance_review(repo: Path, project_brief: dict[str, Any]) -> dict[str, Any]:
     guidance = project_brief.get("architecture_plan", {}).get("model_guidance", {}) if isinstance(project_brief.get("architecture_plan"), dict) else {}
     content = str(guidance.get("content") or "") if isinstance(guidance, dict) else ""
+    expected_files = [str(path) for path in project_brief.get("expected_files", []) if isinstance(path, str)]
     blockers: list[str] = []
     warnings: list[str] = []
     evidence_rows: list[dict[str, Any]] = []
@@ -518,10 +519,15 @@ def architecture_guidance_review(repo: Path, project_brief: dict[str, Any]) -> d
         if not file_match:
             continue
         rel_path = file_match.group(1).strip("./")
-        exists = (repo / rel_path).is_file()
-        evidence_rows.append({"required_evidence": item, "path": rel_path, "exists": exists})
+        resolved_path = rel_path
+        if not (repo / resolved_path).is_file():
+            suffix_matches = [path for path in expected_files if path == rel_path or path.endswith(f"/{rel_path}")]
+            if suffix_matches:
+                resolved_path = suffix_matches[0]
+        exists = (repo / resolved_path).is_file()
+        evidence_rows.append({"required_evidence": item, "path": resolved_path, "requested_path": rel_path, "exists": exists})
         if not exists:
-            blockers.append(f"architecture guidance required missing evidence file: {rel_path}")
+            blockers.append(f"architecture guidance required missing evidence file: {resolved_path}")
     return {
         "kind": "code_brigade_greenfield_architecture_guidance_review",
         "contract_version": "eye-mechanicum.v1",
