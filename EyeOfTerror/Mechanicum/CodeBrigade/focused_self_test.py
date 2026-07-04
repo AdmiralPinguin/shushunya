@@ -353,8 +353,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertTrue(any("calculator_error_handling" in blocker for blocker in review["blockers"]))
 
     def test_greenfield_feature_worker_detects_task_features(self) -> None:
-        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api issue tracker todo kanban project board calculator csv summary sales analytics pipeline local agent tool router telegram bot /start /help vite counter app text utils library")}
-        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "kanban_board_frontend", "notes_api", "issue_tracker_api", "csv_summary", "sales_analytics_pipeline", "local_agent_command_router", "telegram_command_bot", "vite_counter_app", "python_text_utils_library"})
+        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api issue tracker operations dashboard todo kanban project board calculator csv summary sales analytics pipeline local agent tool router telegram bot /start /help vite counter app text utils library")}
+        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "kanban_board_frontend", "notes_api", "issue_tracker_api", "operations_dashboard_api", "csv_summary", "sales_analytics_pipeline", "local_agent_command_router", "telegram_command_bot", "vite_counter_app", "python_text_utils_library"})
 
     def test_greenfield_architect_owns_project_brief_and_plan(self) -> None:
         project = architect_build_greenfield_project_brief("Создай CLI калькулятор `architect-calc`.")
@@ -977,6 +977,51 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(review["scenario_review"]["status"], "passed", review)
             self.assertEqual(review["status"], "passed", review)
 
+    def test_project_creation_operations_dashboard_api_implements_long_form_multi_workflow_feature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(repo, "Создай FastAPI operations dashboard API `ops-demo` для сервисов, инцидентов, метрик и event timeline.")
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "implemented", report)
+            project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
+            self.assertEqual(project["template_id"], "python_fastapi_service")
+            self.assertTrue(any(feature["id"] == "operations_dashboard_api" for feature in project["acceptance_features"]))
+            self.assertIn("operations_dashboard_api", project["implementation_feature_report"]["recognized_feature_ids"])
+            self.assertGreaterEqual(len(project["module_contracts"]), 7)
+            self.assertGreaterEqual(project["scenario_plan"]["scenario_count"], 4)
+            expected = {
+                "app/domain.py",
+                "app/store.py",
+                "app/metrics.py",
+                "app/events.py",
+                "app/routes.py",
+                "app/main.py",
+                "tests/test_operations_dashboard.py",
+            }
+            self.assertTrue(expected.issubset(set(project["expected_files"])))
+            self.assertIn("def register_service", (repo / "app/domain.py").read_text(encoding="utf-8"))
+            self.assertIn("class OperationsStore", (repo / "app/store.py").read_text(encoding="utf-8"))
+            self.assertIn("def build_dashboard_metrics", (repo / "app/metrics.py").read_text(encoding="utf-8"))
+            self.assertIn("def build_event_timeline", (repo / "app/events.py").read_text(encoding="utf-8"))
+            self.assertIn("def dashboard_response", (repo / "app/routes.py").read_text(encoding="utf-8"))
+            self.assertIn("include_router", (repo / "app/main.py").read_text(encoding="utf-8"))
+            tests = (repo / "tests/test_operations_dashboard.py").read_text(encoding="utf-8")
+            self.assertIn("test_domain_service_incident_lifecycle", tests)
+            self.assertIn("test_store_metrics_and_filters_workflow", tests)
+            self.assertIn("test_events_and_route_adapters_workflow", tests)
+            module_rows = {row["path"]: row for row in project["implementation_plan"]["module_sequence"]}
+            for module_path in ("app/domain.py", "app/store.py", "app/metrics.py", "app/events.py", "app/routes.py", "app/main.py"):
+                self.assertEqual(module_rows[module_path]["paired_tests"], ["tests/test_operations_dashboard.py"])
+            trace_rows = project["implementation_trace"]["rows"]
+            self.assertTrue(all(row["verification_files"] == ["tests/test_operations_dashboard.py"] for row in trace_rows if row["file"].startswith("app/") and row["file"] != "app/main.py"))
+            verification = report["execution_result"]["greenfield_project"]["verification"]
+            self.assertEqual(verification["status"], "passed", verification)
+            review = report["execution_result"]["greenfield_project"]["greenfield_review"]
+            self.assertEqual(review["semantic_review"]["status"], "passed", review)
+            self.assertEqual(review["scenario_review"]["status"], "passed", review)
+            self.assertEqual(review["artifact_review"]["status"], "passed", review)
+            self.assertEqual(review["status"], "passed", review)
+
     def test_project_creation_csv_summary_tool_implements_task_feature(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -1218,6 +1263,10 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertTrue(any(feature["id"] == "issue_tracker_api" for feature in issue_tracker["acceptance_features"]))
         self.assertGreaterEqual(len(issue_tracker["module_contracts"]), 5)
         self.assertGreaterEqual(issue_tracker["scenario_plan"]["scenario_count"], 3)
+        operations_dashboard = build_greenfield_project_brief("Создай FastAPI operations dashboard API `ops-demo`.")
+        self.assertTrue(any(feature["id"] == "operations_dashboard_api" for feature in operations_dashboard["acceptance_features"]))
+        self.assertGreaterEqual(len(operations_dashboard["module_contracts"]), 7)
+        self.assertGreaterEqual(operations_dashboard["scenario_plan"]["scenario_count"], 4)
         csv_summary = build_greenfield_project_brief("Создай data csv summary tool `csv-demo`.")
         self.assertTrue(any(feature["id"] == "csv_summary" for feature in csv_summary["acceptance_features"]))
         self.assertGreaterEqual(len(csv_summary["module_contracts"]), 3)

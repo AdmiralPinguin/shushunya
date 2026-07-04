@@ -741,6 +741,13 @@ def paired_tests_for_module(source_path: str, requirements: list[str], test_file
     direct = [test for test in test_files if paired_test_matches(source_path, test)]
     if direct:
         return direct
+    integration_tests = [
+        test
+        for test in test_files
+        if any(marker in Path(test).stem.lower() for marker in ("integration", "workflow", "pipeline", "contract", "tracker", "kanban", "board", "operations", "dashboard"))
+    ]
+    if integration_tests:
+        return integration_tests
     requirement_tokens = {
         token
         for requirement in requirements
@@ -754,11 +761,4 @@ def paired_tests_for_module(source_path: str, requirements: list[str], test_file
     ]
     if keyword_matches:
         return keyword_matches
-    integration_tests = [
-        test
-        for test in test_files
-        if any(marker in Path(test).stem.lower() for marker in ("integration", "workflow", "pipeline", "contract", "tracker", "kanban", "board"))
-    ]
-    if integration_tests:
-        return integration_tests
     return test_files[:1]
