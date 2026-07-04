@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from greenfield_architect import request_greenfield_model_guidance
+from greenfield_implementation_worker import extract_json_object
 from greenfield_scenario_worker import review_greenfield_scenarios
 from greenfield_templates import GREENFIELD_MARKER
 
@@ -422,6 +423,53 @@ def review_definition_of_done(
     }
 
 
+def reviewer_model_findings(guidance: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(guidance, dict) or not guidance.get("ok"):
+        return {
+            "kind": "code_brigade_greenfield_reviewer_model_findings",
+            "contract_version": "eye-mechanicum.v1",
+            "status": "unavailable",
+            "blockers": [],
+            "warnings": [],
+            "parse_error": str(guidance.get("error") or "") if isinstance(guidance, dict) else "missing guidance",
+        }
+    content = str(guidance.get("content") or "").strip()
+    if not content:
+        return {
+            "kind": "code_brigade_greenfield_reviewer_model_findings",
+            "contract_version": "eye-mechanicum.v1",
+            "status": "empty",
+            "blockers": [],
+            "warnings": [],
+            "parse_error": "empty reviewer guidance",
+        }
+    try:
+        parsed = extract_json_object(content)
+    except ValueError as exc:
+        return {
+            "kind": "code_brigade_greenfield_reviewer_model_findings",
+            "contract_version": "eye-mechanicum.v1",
+            "status": "advisory_unparsed",
+            "blockers": [],
+            "warnings": ["GreenfieldReviewer model guidance was not structured JSON"],
+            "parse_error": str(exc),
+        }
+    raw_status = str(parsed.get("status") or parsed.get("decision") or "advisory").lower()
+    raw_blockers = parsed.get("blockers") if isinstance(parsed.get("blockers"), list) else []
+    raw_warnings = parsed.get("warnings") if isinstance(parsed.get("warnings"), list) else []
+    blockers = [str(item) for item in raw_blockers if isinstance(item, str) and item.strip()]
+    warnings = [str(item) for item in raw_warnings if isinstance(item, str) and item.strip()]
+    blocking_status = raw_status in {"blocked", "reject", "rejected", "fail", "failed"}
+    return {
+        "kind": "code_brigade_greenfield_reviewer_model_findings",
+        "contract_version": "eye-mechanicum.v1",
+        "status": "blocked" if blocking_status and blockers else "passed" if raw_status in {"passed", "accepted", "ok"} else "advisory",
+        "blockers": blockers if blocking_status else [],
+        "warnings": warnings,
+        "parse_error": "",
+    }
+
+
 def review_greenfield_project(
     repo: Path,
     project_brief: dict[str, Any],
@@ -498,8 +546,12 @@ def review_greenfield_project(
             "blockers": blockers,
             "warnings": warnings,
         },
-        "Critique the finished greenfield project against definition of done. Flag missing launchability, fake stubs, weak tests, and template mismatch.",
+        "Critique the finished greenfield project against definition of done. Return JSON only with status, blockers, warnings, and evidence_notes. Use status=blocked only for concrete missing launchability, fake stubs, weak tests, template mismatch, or incomplete definition_of_done evidence.",
     )
+    model_findings = reviewer_model_findings(reviewer_guidance)
+    if model_findings.get("status") == "blocked":
+        blockers.extend(f"GreenfieldReviewer model blocker: {item}" for item in model_findings.get("blockers", []) if isinstance(item, str))
+    warnings.extend(str(item) for item in model_findings.get("warnings", []) if isinstance(item, str))
     return {
         "kind": "code_brigade_greenfield_review",
         "contract_version": "eye-mechanicum.v1",
@@ -514,6 +566,7 @@ def review_greenfield_project(
         "scenario_review": scenario_review,
         "artifact_review": artifact_review,
         "definition_of_done_review": definition_of_done_review,
+        "model_findings": model_findings,
         "blockers": blockers,
         "warnings": warnings,
         "model_guidance": reviewer_guidance,
