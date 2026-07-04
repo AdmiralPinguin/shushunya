@@ -145,13 +145,17 @@ so the scaffold catalog is not buried inside the executor.
 `greenfield_architect.py` owns GreenfieldArchitect project-brief creation,
 project type inference, architecture/file/module/verification plan artifacts,
 and the implementation-plan trace rows.
-`greenfield_feature_worker.py` owns task-derived ImplementationWorker behavior,
-including functional requirement detection and feature-specific file/contract
-overrides. `greenfield_dependency_worker.py` owns DependencyWorker package
-manager discovery, manifest checks, install allowlisting, and lockfile
-snapshots. `greenfield_review_worker.py` owns GreenfieldReview launchability,
-README, entrypoint, verification-status, module-contract, semantic anti-stub,
-and reviewer model-guidance gates. `greenfield_verification_worker.py` owns the
+`greenfield_feature_worker.py` is now a compatibility facade; task-derived
+ImplementationWorker behavior lives in `greenfield_features/`. The feature
+package separates detection, registry routing, common file helpers, CLI
+features, static frontend features, Vite frontend features, FastAPI workflow
+features, data tools, local-agent tools, Telegram bots, and library features so
+new project recipes do not accumulate in one generated-code monolith.
+`greenfield_dependency_worker.py` owns DependencyWorker package manager
+discovery, manifest checks, install allowlisting, and lockfile snapshots.
+`greenfield_review_worker.py` owns GreenfieldReview launchability, README,
+entrypoint, verification-status, module-contract, semantic anti-stub, and
+reviewer model-guidance gates. `greenfield_verification_worker.py` owns the
 greenfield verification loop, failure signatures, GreenfieldRepairWorker model
 guidance, bounded template repairs, reruns, and semantic stop reasons.
 `greenfield_memory_worker.py` owns the run memory record, repaired-file history,
@@ -173,6 +177,14 @@ records module order, requirement-to-file and
 function/component trace rows, paired tests, milestones, source/test file lists,
 and an anti-stub policy. The implementation feature report records recognized
 task-derived feature ids, changed generated files, changed module contracts,
+
+Patch-mode and greenfield-mode intentionally remain different execution paths:
+patch-mode mutates existing owned files through guarded patch contracts, while
+greenfield-mode creates a new owned workspace from a project brief. They must
+not drift in result semantics. Both paths return `code_brigade_execution_result`
+data, patch manifests, verification evidence, review-gate decisions, blockers,
+rollback notes, and memory/report artifacts through the same outer Ceraxia
+handoff contract.
 implementation strategy, and ImplementationWorker model guidance for the
 feature override. For recognized task features, ImplementationWorker can
 override the generic scaffold with task-specific behavior; covered cases now
