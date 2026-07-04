@@ -110,6 +110,18 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             report,
         )
 
+    def test_greenfield_project_creation_does_not_require_planning_handoff_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(repo, "Создай telegram bot `gate-demo` с TELEGRAM_BOT_TOKEN runtime config.")
+            brief["risk_level"] = "high"
+            brief.pop("planning_department", None)
+            brief.pop("planning_department_handoff", None)
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["planning_handoff_gate"]["decision"], "passed", report["planning_handoff_gate"])
+            self.assertFalse(report["planning_handoff_gate"]["required"])
+            self.assertFalse(any("PlanningBrigade handoff blocked" in note for note in report.get("notes", [])))
+
     def test_name_error_diagnostic_repair_uses_guarded_source_repair(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

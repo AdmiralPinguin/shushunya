@@ -883,6 +883,56 @@ def planning_department_sufficiency_from_worker(worker_report: dict[str, Any]) -
     }
 
 
+def greenfield_project_acceptance_from_worker(
+    worker_report: dict[str, Any],
+    verification_report: dict[str, Any],
+) -> dict[str, Any]:
+    execution_intent = worker_report.get("execution_intent") if isinstance(worker_report.get("execution_intent"), dict) else {}
+    execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
+    greenfield_project = execution_result.get("greenfield_project") if isinstance(execution_result.get("greenfield_project"), dict) else {}
+    verification = greenfield_project.get("verification") if isinstance(greenfield_project.get("verification"), dict) else {}
+    greenfield_review = greenfield_project.get("greenfield_review") if isinstance(greenfield_project.get("greenfield_review"), dict) else {}
+    run_report = greenfield_project.get("greenfield_run_report") if isinstance(greenfield_project.get("greenfield_run_report"), dict) else {}
+    file_set_synthesis = greenfield_project.get("file_set_synthesis_report") if isinstance(greenfield_project.get("file_set_synthesis_report"), dict) else {}
+    module_synthesis = greenfield_project.get("implementation_synthesis_report") if isinstance(greenfield_project.get("implementation_synthesis_report"), dict) else {}
+    dod_status = run_report.get("definition_of_done_status") if isinstance(run_report.get("definition_of_done_status"), dict) else {}
+    result_blockers = execution_result.get("blockers") if isinstance(execution_result.get("blockers"), list) else []
+    blockers: list[str] = []
+    if execution_intent.get("mode") != "greenfield_project_creation":
+        blockers.append("worker execution intent is not greenfield project creation")
+    if worker_report.get("status") != "implemented":
+        blockers.append(f"worker report status is {worker_report.get('status')}")
+    if execution_result.get("status") != "implemented":
+        blockers.append(f"execution result status is {execution_result.get('status')}")
+    if result_blockers:
+        blockers.append("execution result has blockers: " + "; ".join(str(item) for item in result_blockers if item))
+    if not greenfield_project:
+        blockers.append("greenfield project result is missing")
+    if file_set_synthesis.get("status") in {"blocked", "model_unavailable"}:
+        blockers.append(f"file set synthesis status is {file_set_synthesis.get('status')}")
+    if module_synthesis.get("status") != "applied":
+        blockers.append(f"module synthesis status is {module_synthesis.get('status')}")
+    if verification.get("status") != "passed":
+        blockers.append(f"greenfield verification status is {verification.get('status')}")
+    if verification_report.get("status") != "passed":
+        blockers.append(f"Ceraxia verification report status is {verification_report.get('status')}")
+    if greenfield_review.get("status") != "passed":
+        blockers.append(f"greenfield review status is {greenfield_review.get('status')}")
+    if dod_status.get("status") != "passed":
+        blockers.append(f"definition of done status is {dod_status.get('status')}")
+    return {
+        "status": "accepted" if not blockers else "blocked",
+        "blockers": blockers,
+        "execution_intent_mode": execution_intent.get("mode", ""),
+        "execution_result_status": execution_result.get("status", ""),
+        "file_set_synthesis_status": file_set_synthesis.get("status", ""),
+        "module_synthesis_status": module_synthesis.get("status", ""),
+        "verification_status": verification.get("status", ""),
+        "review_status": greenfield_review.get("status", ""),
+        "definition_of_done_status": dod_status.get("status", ""),
+    }
+
+
 def pre_mutation_read_sufficiency_from_worker(worker_report: dict[str, Any]) -> dict[str, Any]:
     evidence = worker_report.get("pre_mutation_read_evidence") if isinstance(worker_report.get("pre_mutation_read_evidence"), dict) else {}
     blockers: list[str] = []
@@ -1150,6 +1200,66 @@ def review_gate(
     source_mutation_scope_sufficiency = source_mutation_scope_sufficiency_from_worker(worker_report)
     verification_after_mutation = verification_after_mutation_sufficiency(worker_report, verification_report)
     diagnostic_repair_queue = build_diagnostic_repair_queue(brief, verification_report, worker_report)
+    greenfield_project_acceptance = greenfield_project_acceptance_from_worker(worker_report, verification_report)
+    if greenfield_project_acceptance["execution_intent_mode"] == "greenfield_project_creation":
+        greenfield_findings = [
+            {"severity": "blocker", "finding": problem}
+            for problem in validate_planning_packet(packet)
+        ]
+        if not worker_report.get("implementation_brief_acknowledged", False):
+            greenfield_findings.append({"severity": "blocker", "finding": "implementation brief was not acknowledged"})
+        for blocker in greenfield_project_acceptance["blockers"]:
+            greenfield_findings.append({"severity": "blocker", "finding": blocker})
+        decision = "blocked" if greenfield_findings else "ready"
+        if worker_report["dry_run"] and decision == "ready":
+            decision = "dry_run_ready"
+        not_required = {
+            "status": "not_required_for_greenfield_project_creation",
+            "blockers": [],
+            "reason": "greenfield project creation is reviewed through the generated project contract, verification loop, greenfield review, and definition of done",
+        }
+        return {
+            "kind": "ceraxia_review_gate",
+            "decision": decision,
+            "source": "greenfield_project_review",
+            "findings": greenfield_findings,
+            "warnings": warnings,
+            "verification_sufficiency": verification_sufficiency,
+            "surface_verification_sufficiency": surface_verification_sufficiency,
+            "package_status_sufficiency": package_status_sufficiency,
+            "surface_package_sufficiency": surface_package_sufficiency,
+            "investigation_sufficiency": investigation_sufficiency,
+            "change_control_sufficiency": change_control_sufficiency,
+            "acceptance_trace_sufficiency": acceptance_trace_sufficiency,
+            "constraint_trace_sufficiency": constraint_trace_sufficiency,
+            "assumption_sufficiency": assumption_sufficiency,
+            "worker_output_contract_sufficiency": worker_output_contract_sufficiency,
+            "planning_department_sufficiency": {
+                **not_required,
+                "role_count": 0,
+                "handoff_role_count": 0,
+                "phase_count": 0,
+                "package_count": 0,
+                "missing_phase_ids": [],
+                "missing_handoff_roles": [],
+            },
+            "pre_mutation_read_sufficiency": not_required,
+            "source_mutation_scope_sufficiency": not_required,
+            "verification_after_mutation_sufficiency": not_required,
+            "diagnostic_repair_queue": diagnostic_repair_queue,
+            "greenfield_project_acceptance": greenfield_project_acceptance,
+            "checked_against": [
+                "planning packet completeness",
+                "greenfield project execution intent",
+                "greenfield project execution result",
+                "greenfield file set synthesis",
+                "greenfield module synthesis",
+                "greenfield verification loop",
+                "greenfield semantic and scenario review",
+                "greenfield definition of done",
+                "worker report honesty",
+            ],
+        }
     for problem in validate_planning_packet(packet):
         findings.append({"severity": "blocker", "finding": problem})
     if not worker_report.get("implementation_brief_acknowledged", False):

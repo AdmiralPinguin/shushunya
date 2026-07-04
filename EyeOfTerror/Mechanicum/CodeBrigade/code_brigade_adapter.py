@@ -67,7 +67,8 @@ def build_edit_plan(brief: dict[str, Any], implementation_plan: dict[str, Any], 
 
 def build_planning_handoff_gate(brief: dict[str, Any]) -> dict[str, Any]:
     risk_level = str(brief.get("risk_level") or "high")
-    required = risk_level in PLANNING_HANDOFF_REQUIRED_RISKS
+    project_creation = str(brief.get("controller_execution_mode") or "") == "project_creation"
+    required = risk_level in PLANNING_HANDOFF_REQUIRED_RISKS and not project_creation
     planning_department = brief.get("planning_department") if isinstance(brief.get("planning_department"), dict) else {}
     work_handoff = brief.get("planning_department_handoff") if isinstance(brief.get("planning_department_handoff"), dict) else {}
     brigade_handoff = planning_department.get("brigade_handoff_contract") if isinstance(planning_department.get("brigade_handoff_contract"), dict) else {}

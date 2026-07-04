@@ -1159,6 +1159,51 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertIn("python -m unittest discover tests", commands)
             self.assertFalse(any("app/main.py" in command for command in commands))
 
+    def test_project_creation_mode_uses_greenfield_review_as_outer_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "bot_project"
+            repo.mkdir()
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task=(
+                        "Создай telegram bot `gate-bot-demo`: pure command handlers /start /help /status /echo, "
+                        "unknown command fallback, runtime config требует TELEGRAM_BOT_TOKEN только для live mode, тесты без сети."
+                    ),
+                    repo_path=str(repo),
+                    execution_mode="project_creation",
+                    dry_run=False,
+                    execute_verification=True,
+                    greenfield_model_guidance_replay={
+                        "kind": "code_brigade_greenfield_model_guidance_replay",
+                        "mode": "scaffold_files_as_model_output",
+                    },
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            self.assertTrue(result["ok"], result)
+            self.assertTrue(result["package_ok"], result)
+            self.assertTrue(result["ready_for_execution"], result)
+            self.assertEqual(result["state"], "finalized", result)
+            run_dir = Path(result["run_dir"])
+            review = json.loads((run_dir / "review_gate.json").read_text(encoding="utf-8"))
+            self.assertEqual(review["decision"], "ready", review)
+            self.assertEqual(review["source"], "greenfield_project_review")
+            self.assertEqual(review["greenfield_project_acceptance"]["status"], "accepted")
+            self.assertEqual(
+                review["planning_department_sufficiency"]["status"],
+                "not_required_for_greenfield_project_creation",
+            )
+            self.assertFalse(
+                any("planning department handoff is incomplete" in item["finding"] for item in review["findings"]),
+                review["findings"],
+            )
+            summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
+            self.assertTrue(summary["package_ok"], summary)
+            self.assertTrue(summary["ready_for_execution"], summary)
+            self.assertEqual(summary["review_decision"], "ready")
+            audit = json.loads((run_dir / "run_audit.json").read_text(encoding="utf-8"))
+            self.assertEqual(audit["decision"], "passed", audit)
+
     def test_review_only_mode_builds_review_package_without_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
