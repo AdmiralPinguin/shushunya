@@ -362,6 +362,10 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api issue tracker operations dashboard todo kanban project board calculator csv summary sales analytics pipeline local agent tool router telegram bot /start /help vite counter app text utils library")}
         self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "kanban_board_frontend", "notes_api", "issue_tracker_api", "operations_dashboard_api", "csv_summary", "sales_analytics_pipeline", "local_agent_command_router", "telegram_command_bot", "vite_counter_app", "python_text_utils_library"})
 
+    def test_greenfield_feature_worker_does_not_treat_todo_remaining_counter_as_vite_app(self) -> None:
+        feature_ids = {feature["id"] for feature in infer_acceptance_features("Создай todo list со счетчиком оставшихся задач и фильтром active/completed.")}
+        self.assertEqual(feature_ids, {"todo_list"})
+
     def test_greenfield_architect_owns_project_brief_and_plan(self) -> None:
         project = architect_build_greenfield_project_brief("Создай CLI калькулятор `architect-calc`.")
         self.assertEqual(project["kind"], "code_brigade_greenfield_project_brief")
@@ -974,6 +978,52 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(repair["repair_strategy"], "module_synthesis_repair")
             self.assertEqual(repair["synthesis_repair_report"]["synthesis_stage"], "verification_repair")
             self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), "def main():\n    return 'ready'\n")
+
+    def test_greenfield_verification_loop_reruns_after_final_allowed_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай новый CLI проект `final-repair-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "app.py", "content": "def main():\n    return 'broken'\n"},
+                        {
+                            "path": "test_app.py",
+                            "content": "import unittest\nimport app\n\nclass AppTests(unittest.TestCase):\n    def test_main(self):\n        self.assertEqual(app.main(), 'ready')\n",
+                        },
+                    ],
+                    "verification_commands": ["python -m unittest test_app.py"],
+                    "module_contracts": [{"module": "app", "path": "app.py", "responsibility": "return ready", "requirements": ["return ready"]}],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                contract = payload.get("module_synthesis_contract", {})
+                if not contract:
+                    return {"ok": True, "status": "answered", "content": "{\"hypothesis\":\"repair final failed assertion\"}"}
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "path": contract["path"],
+                            "content": "def main():\n    return 'ready'\n",
+                            "requirements_satisfied": contract["requirements"],
+                            "tests_to_update": contract["paired_tests"],
+                            "notes": "fixed on final allowed repair",
+                        }
+                    ),
+                }
+
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=1, request_guidance=guidance)
+            self.assertEqual(loop["status"], "passed", loop)
+            self.assertEqual(loop["stop_reason"], "verification passed after final repair")
+            self.assertTrue(loop["attempts"][-1]["post_repair_verification"])
 
     def test_greenfield_verification_loop_records_repeated_failure_stop_condition(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

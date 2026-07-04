@@ -97,7 +97,10 @@ def infer_acceptance_features(task: str) -> list[dict[str, Any]]:
                 "operations": ["start", "help", "status", "echo", "unknown_command"],
             }
         )
-    if any(word in lowered for word in ("react counter", "vite counter", "counter app", "счетчик", "счётчик")):
+    has_todo_feature = any(feature.get("id") == "todo_list" for feature in features)
+    explicit_counter_app = any(word in lowered for word in ("react counter", "vite counter", "counter app", "counter application", "приложение счетчик", "приложение счётчик"))
+    generic_counter = any(word in lowered for word in ("счетчик", "счётчик")) and not has_todo_feature
+    if explicit_counter_app or generic_counter:
         features.append(
             {
                 "id": "vite_counter_app",

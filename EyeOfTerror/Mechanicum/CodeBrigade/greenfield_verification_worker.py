@@ -201,4 +201,10 @@ def run_greenfield_verification_loop(repo: Path, commands: list[str], project_br
         if repair_execution.get("status") != "applied":
             return verification_loop_result("blocked", attempts, verification, "no bounded repair applicable")
         previous_signature = signature
+    if attempts and isinstance(attempts[-1].get("repair_execution"), dict) and attempts[-1]["repair_execution"].get("status") == "applied":
+        verification = run_verification_commands(commands, str(repo), execute=True)
+        final_verification = verification
+        if verification.get("status") == "passed":
+            attempts.append({"cycle": max_cycles + 1, "status": verification.get("status", ""), "failure_signature": "", "repair_guidance": {}, "post_repair_verification": True})
+            return verification_loop_result("passed", attempts, verification, "verification passed after final repair")
     return verification_loop_result("blocked", attempts, final_verification, "max verification cycles reached")
