@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import ast
+import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -117,12 +118,14 @@ def build_module_code_synthesis_contract(
     requirements: list[str],
     test_files: list[str],
 ) -> dict[str, Any]:
+    behavior_markers = task_behavior_markers(task)
     return {
         "kind": "code_brigade_greenfield_module_synthesis_contract",
         "contract_version": "eye-mechanicum.v1",
         "role": "GreenfieldImplementationWorker",
         "template_id": template_id,
         "task_excerpt": task[:500],
+        "required_behavior_markers": behavior_markers,
         "module": module,
         "path": path,
         "responsibility": responsibility,
@@ -134,6 +137,7 @@ def build_module_code_synthesis_contract(
                 "type": "object",
                 "required": ["path", "content", "requirements_satisfied", "tests_to_update", "notes"],
             },
+            "behavior_marker_policy": "When required_behavior_markers is not empty, source or test output must preserve the user-visible behavior markers relevant to this module.",
         },
         "validation_gates": [
             "path matches module contract path",
@@ -141,6 +145,7 @@ def build_module_code_synthesis_contract(
             "all requirements are listed in requirements_satisfied",
             "paired tests are listed in tests_to_update when tests exist",
             "forbidden placeholder markers are absent",
+            "required behavior markers from the task are present in generated tests and direct behavior modules",
         ],
         "rollback_scope": {
             "max_source_files": 1,
@@ -148,6 +153,37 @@ def build_module_code_synthesis_contract(
             "allowed_test_files": test_files,
         },
     }
+
+
+def task_behavior_markers(task: str) -> list[str]:
+    markers: list[str] = []
+    literal_patterns = [
+        r"(?:print(?:s|ing)?|prints|return(?:s|ing)?|outputs?|emit(?:s|ting)?|echo(?:es|ing)?|печата(?:ет|ть)|вывод(?:ит|ить)|верн(?:ет|уть|и))\s+([A-Za-z0-9][A-Za-z0-9_.:-]{2,})",
+    ]
+    for pattern in literal_patterns:
+        for match in re.finditer(pattern, task, flags=re.IGNORECASE):
+            markers.append(match.group(1).strip(".,;:!?\"'()[]{}"))
+    ignored = {"python", "cli", "api", "fastapi", "vite", "react", "telegram"}
+    unique: list[str] = []
+    for marker in markers:
+        normalized = marker.strip()
+        if not normalized or normalized.lower() in ignored:
+            continue
+        if normalized not in unique:
+            unique.append(normalized)
+    return unique[:8]
+
+
+def module_required_behavior_markers(module_contract: dict[str, Any], project_brief: dict[str, Any] | None = None) -> list[str]:
+    synthesis_contract = module_contract.get("code_synthesis_contract") if isinstance(module_contract.get("code_synthesis_contract"), dict) else {}
+    markers = [
+        str(item)
+        for item in synthesis_contract.get("required_behavior_markers", [])
+        if isinstance(item, str) and item.strip()
+    ]
+    if not markers and project_brief is not None:
+        markers = task_behavior_markers(str(project_brief.get("task") or ""))
+    return markers
 
 
 def build_implementation_trace(implementation_plan: dict[str, Any]) -> dict[str, Any]:
@@ -368,6 +404,12 @@ def validate_module_synthesis_output(
         quality = generated_file_quality(expected_path, content, requirements, project_brief)
         if quality["status"] == "blocked":
             problems.append("semantic quality blocked: " + "; ".join(str(item) for item in quality["blockers"]))
+        is_test = "test" in Path(expected_path).name.lower() or "/tests/" in f"/{expected_path}"
+        required_markers = module_required_behavior_markers(module_contract, project_brief)
+        if is_test and required_markers:
+            missing_markers = [marker for marker in required_markers if marker not in content]
+            if missing_markers:
+                problems.append("generated test omits task behavior markers: " + ", ".join(missing_markers))
     paired_tests = [str(item) for item in module_contract.get("paired_tests", []) if isinstance(item, str)]
     tests_to_update = [str(item) for item in output.get("tests_to_update", []) if isinstance(item, str)] if isinstance(output.get("tests_to_update"), list) else []
     if paired_tests and not tests_to_update:
@@ -398,6 +440,23 @@ def module_requirements_by_path(project_brief: dict[str, Any]) -> dict[str, list
     return requirements
 
 
+def source_to_paired_tests(project_brief: dict[str, Any]) -> dict[str, list[str]]:
+    implementation_plan = project_brief.get("implementation_plan") if isinstance(project_brief.get("implementation_plan"), dict) else {}
+    module_sequence = implementation_plan.get("module_sequence") if isinstance(implementation_plan.get("module_sequence"), list) else []
+    test_files = {str(path) for path in implementation_plan.get("test_files", []) if isinstance(path, str)}
+    pairs: dict[str, list[str]] = {}
+    for module in module_sequence:
+        if not isinstance(module, dict):
+            continue
+        path = str(module.get("path") or "")
+        if not path or path in test_files:
+            continue
+        paired_tests = [str(item) for item in module.get("paired_tests", []) if isinstance(item, str)]
+        if paired_tests:
+            pairs[path] = paired_tests
+    return pairs
+
+
 def validate_file_set_synthesis_output(
     output: dict[str, Any],
     project_brief: dict[str, Any],
@@ -409,6 +468,7 @@ def validate_file_set_synthesis_output(
         return ["files list is required"]
     allowed_paths = file_set_allowed_paths(project_brief)
     requirements_by_path = module_requirements_by_path(project_brief)
+    paired_tests_by_source = source_to_paired_tests(project_brief)
     seen: set[str] = set()
     for index, row in enumerate(rows, start=1):
         if not isinstance(row, dict):
@@ -435,6 +495,23 @@ def validate_file_set_synthesis_output(
             quality = generated_file_quality(path, content, requirements, project_brief)
             if quality["status"] == "blocked":
                 problems.append(f"semantic quality blocked for {path}: " + "; ".join(str(item) for item in quality["blockers"]))
+            is_test = "test" in Path(path).name.lower() or "/tests/" in f"/{path}"
+            required_markers = task_behavior_markers(str(project_brief.get("task") or ""))
+            if is_test and required_markers:
+                missing_markers = [marker for marker in required_markers if marker not in content]
+                if missing_markers:
+                    problems.append(f"generated test omits task behavior markers for {path}: " + ", ".join(missing_markers))
+    changed_sources = sorted(path for path in seen if path in paired_tests_by_source)
+    missing_paired_tests = sorted(
+        {
+            test_path
+            for source_path in changed_sources
+            for test_path in paired_tests_by_source.get(source_path, [])
+            if test_path not in seen
+        }
+    )
+    if missing_paired_tests:
+        problems.append("file-set synthesis omitted paired tests for changed source files: " + ", ".join(missing_paired_tests))
     return problems
 
 

@@ -2,7 +2,7 @@
   "kind": "code_brigade_greenfield_capability_audit",
   "contract_version": "eye-mechanicum.v1",
   "status": "in_progress",
-  "summary": "Ceraxia CodeBrigade has a working greenfield pipeline with contracts, role modules, templates, verification, review, reports, memory, injectable model guidance, replayable model guidance for deterministic contract tests, coordinated file-set synthesis for source/test sets, mandatory module-by-module synthesis contracts, executable module synthesis, verification-driven module synthesis repair, semantic/domain/artifact quality gates for generated source/tests, scenario-plan review for user workflows, plus multi-module API, data pipeline, frontend, local-agent, operations-dashboard, and full executor model-synthesis integration trials. Greenfield success now requires accepted per-module model synthesis instead of quietly passing on templates when the model is unavailable. The remaining risk is depth: curated templates/features still provide the reliable baseline source, and arbitrary large project code synthesis needs live model-backed real-world trials before this objective is complete.",
+  "summary": "Ceraxia CodeBrigade has a working greenfield pipeline with contracts, role modules, templates, verification, review, reports, memory, injectable model guidance, replayable model guidance for deterministic contract tests, coordinated file-set synthesis for source/test sets, mandatory module-by-module synthesis contracts, executable module synthesis, first-class test module contracts, stale-test rejection for source-only model output, task-derived behavior marker validation for generated tests, verification-driven module synthesis repair, semantic/domain/artifact quality gates for generated source/tests, scenario-plan review for user workflows, plus multi-module API, data pipeline, frontend, local-agent, operations-dashboard, and full executor model-synthesis integration trials. Greenfield success now requires accepted per-module model synthesis instead of quietly passing on templates when the model is unavailable. A live model trial harness exists; live trials exposed stale-test failure modes that are now covered by contract validation, and a follow-up no-replay local-model CLI trial reached accepted status with source/test synthesis, verification, review, and model ledger all passing. The remaining risk is depth: curated templates/features still provide the reliable baseline source, and arbitrary large project code synthesis needs broader live model-backed real-world trials before this objective is complete.",
   "requirements": [
     {
       "id": "greenfield_contract",
@@ -48,6 +48,9 @@
         "greenfield_implementation_worker.py execute_module_synthesis_contracts calls the GreenfieldImplementationWorker model path per module and writes source only after JSON, path, requirement, test, placeholder, and workspace validation",
         "greenfield_project.py execute_greenfield_project_brief accepts an injected guidance provider and passes it through architect, file-set synthesis, module synthesis, verification repair, and review instead of forcing a global model singleton",
         "greenfield_project.py model_synthesis_blockers prevents greenfield success when per-module model synthesis is unavailable, rejected, blocked, skipped, or applies no module implementations",
+        "greenfield_templates.py declares tests as first-class module_contracts for baseline greenfield templates, so model synthesis must treat generated tests as owned implementation work instead of passive scaffold files",
+        "greenfield_implementation_worker.py source_to_paired_tests and validate_file_set_synthesis_output reject coordinated file-set model output when a changed source file omits its paired tests, preventing stale template tests from surviving source behavior changes",
+        "greenfield_implementation_worker.py task_behavior_markers and module_required_behavior_markers make explicit user-visible literals such as printed CLI output part of generated test validation",
         "greenfield_implementation_worker.py generated_file_quality rejects weak generated Python source and assertionless generated tests before writing model output",
         "greenfield_implementation_worker.py domain_specific_quality_findings adds template-aware checks for FastAPI, frontend, Telegram bot, data processing, and local agent tool outputs",
         "greenfield_review_worker.py artifact_review_greenfield_project blocks assertionless tests, unreferenced frontend assets, unwired FastAPI routes, unwired local-agent modules, and disconnected data pipeline CLIs",
@@ -61,11 +64,15 @@
         "focused_self_test.py test_project_creation_kanban_board_frontend_implements_multi_workflow_feature verifies a multi-file static frontend with state/render/app modules, filters, metrics, persistence, and workflow tests",
         "focused_self_test.py test_project_creation_local_agent_tool_implements_command_router_feature verifies a multi-module local-agent tool with registry/schema/session/runner/CLI workflow tests",
         "focused_self_test.py test_greenfield_project_executor_uses_injected_model_for_full_synthesis_path verifies the full greenfield executor route with model-generated source/test files, module synthesis, verification, review, reports, and model guidance ledger",
+        "focused_self_test.py test_greenfield_file_set_synthesis_rejects_source_without_paired_tests reproduces and blocks the live-trial stale-test gap where model-generated source changed behavior but tests remained scaffold-stale",
+        "focused_self_test.py test_greenfield_module_synthesis_rejects_stale_test_behavior_marker reproduces and blocks the live-trial case where a generated test file was rewritten but still asserted the old template value instead of the user-requested output",
+        "focused_self_test.py test_greenfield_project_brief_contract_and_templates verifies every baseline template test file is present in module_contracts and implementation_plan.module_sequence",
         "focused_self_test.py test_greenfield_project_executor_blocks_when_model_synthesis_is_unavailable verifies that a dead model cannot produce a successful greenfield run through template fallback",
+        "greenfield_live_trial.py accepted a no-replay local-model Python CLI run after stale-test and behavior-marker validation fixes: file_set_synthesis=applied, module_synthesis=applied for core/cli/tests, verification=passed, review=passed, ledger=complete",
         "focused_self_test.py test_greenfield_implementation_trace_uses_precise_workflow_tests proves multi-module source contracts pair with the relevant workflow test",
         "implementation_trace.json records requirement to file/function/test mapping with synthesis_contract_kind and GreenfieldReview checks it"
       ],
-      "remaining_risk": "Implementation now has executable validated LLM file-set synthesis, mandatory module synthesis, verification-driven synthesis repair, semantic/domain/artifact quality gates, scenario scoring, full executor model-synthesis coverage, and API/data/frontend/local-agent plus long-form operations dashboard integration trials. Curated feature overrides/templates still provide the reliable baseline, and arbitrary large code synthesis still needs live model-backed real-world synthesis trials."
+      "remaining_risk": "Implementation now has executable validated LLM file-set synthesis, mandatory module synthesis, first-class test contracts, stale-test rejection, task behavior marker validation, verification-driven synthesis repair, semantic/domain/artifact quality gates, scenario scoring, full executor model-synthesis coverage, one accepted no-replay live-model CLI trial, and API/data/frontend/local-agent plus long-form operations dashboard integration trials. Arbitrary large code synthesis still needs broader successful live model-backed real-world synthesis trials."
     },
     {
       "id": "dependency_worker",
@@ -121,14 +128,19 @@
         "greenfield_project.py, greenfield_architect.py, and greenfield_review_worker.py accept injected model guidance so the same full pipeline can be tested with deterministic model answers and run with the real model provider in production",
         "greenfield_project.py build_greenfield_replay_guidance_provider provides an explicit recorded-guidance path for tests without making production silently succeed when the real model is unavailable",
         "greenfield_project.py model_synthesis_blockers makes accepted per-module model synthesis a required success gate",
+        "greenfield_architect.py greenfield_model_runtime_defaults gives ImplementationWorker and RepairWorker longer timeouts, larger max tokens, and larger context windows than planning/review roles so real local model code synthesis is not forced through short planning defaults",
+        "greenfield_live_trial.py runs a real no-replay greenfield trial against the configured OpenAI-compatible model endpoint and writes compact synthesis, verification, review, and ledger status for debugging",
         "greenfield_verification_worker.py passes verification failure signatures and results into GreenfieldImplementationWorker synthesis repair",
         "greenfield_review_worker.py calls model guidance for GreenfieldReviewer",
         "greenfield_verification_worker.py calls model guidance for GreenfieldRepairWorker",
         "greenfield_project.py writes greenfield_model_guidance_ledger.json so each run records role, stage, and guidance status",
         "focused_self_test.py test_greenfield_project_executor_uses_injected_model_for_full_synthesis_path proves a model-provided file-set and per-module implementation can pass executor verification, GreenfieldReview, reports, and ledger checks",
-        "focused_self_test.py test_greenfield_project_executor_blocks_when_model_synthesis_is_unavailable proves template fallback no longer masks a dead model"
+        "focused_self_test.py test_greenfield_model_runtime_defaults_allow_code_synthesis_latency_and_tokens covers the longer runtime defaults for implementation synthesis",
+        "focused_self_test.py test_greenfield_live_trial_compact_result_exposes_model_synthesis_status covers the live-trial report shape used to diagnose real model failures",
+        "focused_self_test.py test_greenfield_project_executor_blocks_when_model_synthesis_is_unavailable proves template fallback no longer masks a dead model",
+        "greenfield_live_trial.py accepted a no-replay local-model CLI run with GreenfieldArchitect, GreenfieldImplementationWorker file-set synthesis, GreenfieldImplementationWorker module synthesis, and GreenfieldReviewer all recorded in the model guidance ledger"
       ],
-      "remaining_risk": "LLM file-set and module code generation are executable through the full greenfield executor and validated with semantic/domain quality gates, and successful greenfield runs require accepted module synthesis. The system still needs live real-world scenario coverage before it can rely on arbitrary synthesis as the primary implementation path."
+      "remaining_risk": "LLM file-set and module code generation are executable through the full greenfield executor and validated with semantic/domain quality gates, and successful greenfield runs require accepted module synthesis. One no-replay live model CLI trial is accepted; the system still needs broader live real-world scenario coverage before it can rely on arbitrary synthesis as the primary implementation path."
     },
     {
       "id": "reports_and_memory",
@@ -143,6 +155,8 @@
     }
   ],
   "next_recommended_work": [
+    "Run broader live no-replay greenfield trials for FastAPI, static/Vite frontend, data pipeline, and local-agent templates and require source, tests, verification, review, and model ledger to pass together.",
+    "Add deeper RepairWorker behavior for semantic verification failures instead of only missing files and README command repairs.",
     "Decide whether Android/game templates belong in this goal now or should remain explicitly deferred."
   ]
 }

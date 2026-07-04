@@ -20,10 +20,33 @@ if str(PROJECT_ROOT) not in sys.path:
 from EyeOfTerror.model_brain import request_model_decision  # noqa: E402
 
 
+def greenfield_model_runtime_defaults(role: str, payload: dict[str, Any]) -> dict[str, str]:
+    synthesis_payload = isinstance(payload.get("synthesis_contract"), dict) or isinstance(payload.get("module_synthesis_contract"), dict)
+    if role in {"GreenfieldImplementationWorker", "GreenfieldRepairWorker"} or synthesis_payload:
+        return {
+            "EYE_MODEL_TIMEOUT_SEC": "120",
+            "EYE_MODEL_MAX_TOKENS": "4096",
+            "EYE_MODEL_MAX_CONTEXT_CHARS": "50000",
+        }
+    if role == "GreenfieldReviewer":
+        return {
+            "EYE_MODEL_TIMEOUT_SEC": "45",
+            "EYE_MODEL_MAX_TOKENS": "1024",
+            "EYE_MODEL_MAX_CONTEXT_CHARS": "30000",
+        }
+    return {
+        "EYE_MODEL_TIMEOUT_SEC": "30",
+        "EYE_MODEL_MAX_TOKENS": "1024",
+        "EYE_MODEL_MAX_CONTEXT_CHARS": "30000",
+    }
+
+
 def request_greenfield_model_guidance(role: str, payload: dict[str, Any], instructions: str) -> dict[str, Any]:
-    previous_timeout = os.environ.get("EYE_MODEL_TIMEOUT_SEC")
-    if previous_timeout is None:
-        os.environ["EYE_MODEL_TIMEOUT_SEC"] = "3"
+    runtime_defaults = greenfield_model_runtime_defaults(role, payload)
+    previous_values = {key: os.environ.get(key) for key in runtime_defaults}
+    for key, value in runtime_defaults.items():
+        if previous_values[key] is None:
+            os.environ[key] = value
     try:
         return request_model_decision(
             "CodeBrigade",
@@ -33,10 +56,11 @@ def request_greenfield_model_guidance(role: str, payload: dict[str, Any], instru
             instructions=instructions,
         )
     finally:
-        if previous_timeout is None:
-            os.environ.pop("EYE_MODEL_TIMEOUT_SEC", None)
-        else:
-            os.environ["EYE_MODEL_TIMEOUT_SEC"] = previous_timeout
+        for key, previous in previous_values.items():
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
 
 
 def project_name_from_task(task: str) -> str:
@@ -151,6 +175,7 @@ def build_greenfield_project_brief(
     brief = {
         "kind": "code_brigade_greenfield_project_brief",
         "contract_version": "eye-mechanicum.v1",
+        "task": task,
         "project_name": project_name,
         "project_type": project_type,
         "template_id": template_id,

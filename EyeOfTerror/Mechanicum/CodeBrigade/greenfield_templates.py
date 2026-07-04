@@ -61,6 +61,7 @@ def python_cli_template(project_name: str) -> dict[str, Any]:
         "module_contracts": [
             {"module": f"{package}.core", "path": f"{package}/core.py", "responsibility": "domain behavior", "requirements": ["return stable ready result"]},
             {"module": f"{package}.cli", "path": f"{package}/cli.py", "responsibility": "command-line entrypoint", "requirements": ["print core result"]},
+            {"module": "tests.test_core", "path": "tests/test_core.py", "responsibility": "CLI behavior verification", "requirements": ["prove core result matches requested CLI behavior"]},
         ],
         "common_failure_fixes": [
             {"failure": "ModuleNotFoundError", "fix": "ensure package directory has __init__.py and tests run from workspace root"},
@@ -135,6 +136,7 @@ def node_vite_app_template(project_name: str) -> dict[str, Any]:
         "module_contracts": [
             {"module": "src/main.jsx", "path": "src/main.jsx", "responsibility": "frontend application entrypoint", "requirements": ["render ready first screen"]},
             {"module": "package.json", "path": "package.json", "responsibility": "Node/Vite package contract", "requirements": ["define dev and build scripts"]},
+            {"module": "tests.test_vite_contract", "path": "tests/test_vite_contract.py", "responsibility": "frontend contract verification", "requirements": ["prove manifest and browser entrypoint are wired"]},
         ],
         "common_failure_fixes": [{"failure": "npm missing", "fix": "block dependency install with an explicit package-manager blocker"}],
     }
@@ -156,6 +158,7 @@ def static_site_template(project_name: str) -> dict[str, Any]:
         "verification_commands": ["python -m unittest discover tests"],
         "module_contracts": [
             {"module": "static_page", "path": "index.html", "responsibility": "first screen content", "requirements": ["loads stylesheet and script", "shows ready state"]},
+            {"module": "tests.test_static_site", "path": "tests/test_static_site.py", "responsibility": "static site contract verification", "requirements": ["prove entrypoint references required assets and visible state"]},
         ],
         "common_failure_fixes": [{"failure": "asset not referenced", "fix": "ensure index.html links styles.css and app.js"}],
     }
@@ -203,6 +206,7 @@ def data_processing_template(project_name: str) -> dict[str, Any]:
         "module_contracts": [
             {"module": f"{package}.processor", "path": f"{package}/processor.py", "responsibility": "data transformation logic", "requirements": ["parse CSV text", "return row summary"]},
             {"module": f"{package}.cli", "path": f"{package}/cli.py", "responsibility": "file-based CLI", "requirements": ["read input path and print summary"]},
+            {"module": "tests.test_processor", "path": "tests/test_processor.py", "responsibility": "data processing verification", "requirements": ["prove CSV processor behavior"]},
         ],
         "common_failure_fixes": [{"failure": "input file missing", "fix": "keep CLI argument validation explicit and test processor separately"}],
     }
@@ -234,6 +238,7 @@ def local_agent_tool_template(project_name: str) -> dict[str, Any]:
         "module_contracts": [
             {"module": f"{package}.contract", "path": f"{package}/contract.py", "responsibility": "tool input/output contract", "requirements": ["return structured result"]},
             {"module": f"{package}.tool", "path": f"{package}/tool.py", "responsibility": "local command entrypoint", "requirements": ["print structured result"]},
+            {"module": "tests.test_contract", "path": "tests/test_contract.py", "responsibility": "local agent tool verification", "requirements": ["prove structured contract behavior"]},
         ],
         "common_failure_fixes": [{"failure": "unstructured output", "fix": "keep contract module returning serializable dictionaries"}],
     }

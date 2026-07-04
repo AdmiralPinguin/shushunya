@@ -9,11 +9,13 @@ from pathlib import Path
 import code_brigade_adapter
 from diagnostic_repair_contract import execute_diagnostic_repair_loop, execute_diagnostic_repair_request
 from greenfield_architect import build_greenfield_project_brief as architect_build_greenfield_project_brief
+from greenfield_architect import greenfield_model_runtime_defaults
 from greenfield_dependency_worker import dependency_manager_status
 from greenfield_feature_worker import infer_acceptance_features
-from greenfield_implementation_worker import execute_file_set_synthesis_contract, execute_module_synthesis_contracts, generated_file_quality
+from greenfield_implementation_worker import execute_file_set_synthesis_contract, execute_module_synthesis_contracts, generated_file_quality, task_behavior_markers
 from greenfield_implementation_worker import build_implementation_trace as worker_build_implementation_trace
 from greenfield_implementation_worker import build_implementation_worker_plan as worker_build_implementation_worker_plan
+from greenfield_live_trial import compact_greenfield_result
 from greenfield_memory_worker import build_greenfield_memory_record
 from greenfield_project import build_greenfield_project_brief, execute_greenfield_project_brief, forbidden_placeholder_markers_found, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_review_worker import artifact_review_greenfield_project, python_source_semantic_status
@@ -429,6 +431,17 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             if row["file"] in {"sales/loader.py", "sales/analyzer.py"}:
                 self.assertEqual(row["verification_files"], ["tests/test_sales_pipeline.py"])
 
+    def test_greenfield_model_runtime_defaults_allow_code_synthesis_latency_and_tokens(self) -> None:
+        implementation_defaults = greenfield_model_runtime_defaults(
+            "GreenfieldImplementationWorker",
+            {"module_synthesis_contract": {"path": "demo/core.py"}},
+        )
+        self.assertGreaterEqual(int(implementation_defaults["EYE_MODEL_TIMEOUT_SEC"]), 120)
+        self.assertGreaterEqual(int(implementation_defaults["EYE_MODEL_MAX_TOKENS"]), 4096)
+        architect_defaults = greenfield_model_runtime_defaults("GreenfieldArchitect", {})
+        self.assertGreaterEqual(int(architect_defaults["EYE_MODEL_TIMEOUT_SEC"]), 30)
+        self.assertGreaterEqual(int(architect_defaults["EYE_MODEL_MAX_TOKENS"]), 1024)
+
     def test_greenfield_module_synthesis_applies_valid_model_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -511,6 +524,84 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertIn("return 'ready'", (repo / source_path).read_text(encoding="utf-8"))
             self.assertIn("GeneratedTests", (repo / test_path).read_text(encoding="utf-8"))
 
+    def test_greenfield_file_set_synthesis_rejects_source_without_paired_tests(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = architect_build_greenfield_project_brief("Создай CLI проект `stale-test-calc`, который печатает model-ready.")
+            source_module = next(row for row in project["implementation_plan"]["module_sequence"] if row["path"].endswith("/core.py"))
+            source_path = source_module["path"]
+            test_path = source_module["paired_tests"][0]
+            for rel_path, content in (
+                (source_path, "def run() -> str:\n    return 'ready'\n"),
+                (test_path, "import unittest\n\nclass OldTests(unittest.TestCase):\n    def test_old(self):\n        self.assertTrue(True)\n"),
+            ):
+                path = repo / rel_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "files": [
+                                {
+                                    "path": source_path,
+                                    "content": "def run() -> str:\n    return 'model-ready'\n",
+                                    "requirements_satisfied": source_module["requirements"],
+                                    "notes": "source only",
+                                }
+                            ],
+                            "notes": "omitted paired tests",
+                        }
+                    ),
+                }
+
+            report = execute_file_set_synthesis_contract(repo, project, guidance)
+            self.assertEqual(report["status"], "rejected", report)
+            self.assertTrue(any("omitted paired tests" in blocker for blocker in report["blockers"]), report)
+            self.assertIn("return 'ready'", (repo / source_path).read_text(encoding="utf-8"))
+            self.assertIn("OldTests", (repo / test_path).read_text(encoding="utf-8"))
+
+    def test_greenfield_module_synthesis_rejects_stale_test_behavior_marker(self) -> None:
+        self.assertEqual(task_behavior_markers("Создай CLI проект `demo`, который печатает model-ready."), ["model-ready"])
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = architect_build_greenfield_project_brief("Создай CLI проект `marker-calc`, который печатает model-ready.")
+            test_module = next(row for row in project["implementation_plan"]["module_sequence"] if row["path"] == "tests/test_core.py")
+            test_path = repo / test_module["path"]
+            test_path.parent.mkdir(parents=True, exist_ok=True)
+            test_path.write_text("old\n", encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                contract = payload["module_synthesis_contract"]
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "path": contract["path"],
+                            "content": (
+                                "import unittest\n\n"
+                                "from marker_calc.core import run\n\n\n"
+                                "class CoreTests(unittest.TestCase):\n"
+                                "    def test_run(self):\n"
+                                "        self.assertEqual(run(), \"ready\")\n"
+                            ),
+                            "requirements_satisfied": contract["requirements"],
+                            "tests_to_update": contract["paired_tests"],
+                            "notes": "stale test behavior",
+                        }
+                    ),
+                }
+
+            report = execute_module_synthesis_contracts(repo, project, guidance)
+            stale_row = next(row for row in report["rows"] if row["path"] == "tests/test_core.py")
+            self.assertEqual(stale_row["status"], "rejected", report)
+            self.assertTrue(any("task behavior markers" in blocker for blocker in stale_row["blockers"]), report)
+            self.assertEqual(test_path.read_text(encoding="utf-8"), "old\n")
+
     def test_greenfield_project_executor_uses_injected_model_for_full_synthesis_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -576,13 +667,21 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
                     rel_path = str(contract["path"])
                     if rel_path == core_path:
                         content = "def run() -> str:\n    return \"model-ready\"\n"
-                    else:
+                    elif rel_path == cli_path:
                         content = (
                             "from .core import run\n\n\n"
                             "def main() -> None:\n"
                             "    print(run())\n\n\n"
                             "if __name__ == \"__main__\":\n"
                             "    main()\n"
+                        )
+                    else:
+                        content = (
+                            "import unittest\n\n"
+                            f"from {package}.core import run\n\n\n"
+                            "class CoreTests(unittest.TestCase):\n"
+                            "    def test_run_uses_model_generated_behavior(self):\n"
+                            "        self.assertEqual(run(), \"model-ready\")\n"
                         )
                     return {
                         "ok": True,
@@ -1369,6 +1468,12 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertIn("pyproject.toml", data_tool["expected_files"])
         self.assertIn("pyproject.toml", agent_tool["expected_files"])
         self.assertIn("tests/test_static_site.py", static["expected_files"])
+        for project in (cli, api, static, library, vite, bot, data_tool, agent_tool):
+            contract_paths = {str(row.get("path") or "") for row in project["module_contracts"]}
+            plan_paths = {str(row.get("path") or "") for row in project["implementation_plan"]["module_sequence"]}
+            for test_file in project["implementation_plan"]["test_files"]:
+                self.assertIn(test_file, contract_paths, project["template_id"])
+                self.assertIn(test_file, plan_paths, project["template_id"])
         todo = build_greenfield_project_brief("Создай static frontend website todo list `todo-demo`.")
         self.assertTrue(any(feature["id"] == "todo_list" for feature in todo["acceptance_features"]))
         self.assertGreaterEqual(len(todo["module_contracts"]), 3)
@@ -1441,6 +1546,41 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(by_id["model_integration"]["status"], "partial")
         self.assertTrue(all(row["evidence"] for row in rows))
         self.assertTrue(audit["next_recommended_work"])
+
+    def test_greenfield_live_trial_compact_result_exposes_model_synthesis_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run"
+            run_dir.mkdir()
+            (run_dir / "task.json").write_text(json.dumps({"task": "live trial"}), encoding="utf-8")
+            worker_report = {
+                "status": "blocked",
+                "execution_result": {
+                    "status": "blocked",
+                    "blockers": ["greenfield module model synthesis did not produce accepted code: model_unavailable"],
+                    "greenfield_project": {
+                        "file_set_synthesis_report": {"status": "model_unavailable", "blockers": ["model down"]},
+                        "implementation_synthesis_report": {
+                            "status": "model_unavailable",
+                            "applied_count": 0,
+                            "model_unavailable_count": 2,
+                            "blocked_count": 0,
+                            "rows": [{"module": "demo.core", "path": "demo/core.py", "status": "model_unavailable", "model_guidance_status": "unavailable", "blockers": ["model down"]}],
+                        },
+                        "verification": {"status": "planned", "results": []},
+                        "greenfield_review": {"status": "blocked", "blockers": ["verification did not pass"]},
+                        "greenfield_model_guidance_ledger": {"status": "partial", "entries": [{"role": "GreenfieldImplementationWorker", "status": "model_unavailable"}]},
+                        "greenfield_run_report": {"implementation_synthesis_status": "model_unavailable"},
+                    },
+                },
+            }
+            (run_dir / "worker_report.json").write_text(json.dumps(worker_report), encoding="utf-8")
+            result = compact_greenfield_result({"ok": False, "package_ok": False, "ready_for_execution": False, "state": "failed", "review_decision": "blocked", "run_dir": str(run_dir)}, root / "workspace")
+            self.assertEqual(result["kind"], "code_brigade_greenfield_live_model_trial_result")
+            self.assertEqual(result["status"], "blocked")
+            self.assertEqual(result["module_synthesis_status"], "model_unavailable")
+            self.assertEqual(result["module_synthesis_model_unavailable_count"], 2)
+            self.assertEqual(result["model_guidance_ledger_status"], "partial")
 
 
 if __name__ == "__main__":
