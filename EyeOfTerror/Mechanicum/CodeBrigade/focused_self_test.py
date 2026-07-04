@@ -19,11 +19,11 @@ from greenfield_implementation_worker import build_implementation_worker_plan as
 from greenfield_live_trial import allocate_live_trial_root, apply_scenario_expectations, compact_greenfield_result, scenario_spec as live_scenario_spec
 from greenfield_memory_worker import build_greenfield_memory_index, build_greenfield_memory_record, update_greenfield_memory_index
 from greenfield_project import build_greenfield_project_brief, execute_greenfield_project_brief, forbidden_placeholder_markers_found, model_synthesis_blockers, reconcile_module_synthesis_with_file_set, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
-from greenfield_repair_live_trial import compact_repair_result, scenario_spec
+from greenfield_repair_live_trial import build_repair_trial_project, compact_repair_result, scenario_spec
 from greenfield_review_worker import artifact_review_greenfield_project, browser_game_render_contract, python_source_semantic_status, review_greenfield_project
 from greenfield_scenario_worker import review_greenfield_scenarios
 from greenfield_scaffold_worker import greenfield_workspace_status, normalize_project_file_rows, scaffold_greenfield_files
-from greenfield_verification_worker import repair_guidance_for_verification, verification_failure_signature
+from greenfield_verification_worker import repair_guidance_for_verification, run_greenfield_verification_loop, verification_failure_signature, workspace_file_snapshots
 from greenfield_templates import available_templates
 from self_test import valid_brief
 
@@ -1522,6 +1522,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertIn("return JSON only", str(captured["instructions"]))
         self.assertIn("derive old_text", str(captured["instructions"]))
         self.assertIn("workspace_file_snapshots", str(captured["instructions"]))
+        self.assertIn("module_contracts", payload)
+        self.assertIn("module_contracts", str(captured["instructions"]))
 
     def test_greenfield_repair_guidance_includes_workspace_file_snapshots(self) -> None:
         captured: dict[str, object] = {}
@@ -1544,8 +1546,39 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         payload = captured["payload"]
         self.assertIsInstance(payload, dict)
         snapshots = payload["workspace_file_snapshots"]
-        self.assertEqual([row["path"] for row in snapshots], ["calc.py", "test_calc.py"])
-        self.assertIn("return left - right", snapshots[0]["content"])
+        self.assertEqual([row["path"] for row in snapshots], ["test_calc.py", "calc.py"])
+        self.assertIn("return left - right", snapshots[1]["content"])
+
+    def test_greenfield_repair_snapshots_prioritize_failure_and_tests_for_large_projects(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            expected_files: list[str] = []
+            module_contracts: list[dict[str, str]] = []
+            for index in range(25):
+                path = f"pkg/module_{index}.py"
+                (repo / path).parent.mkdir(parents=True, exist_ok=True)
+                (repo / path).write_text(f"VALUE_{index} = {index}\n", encoding="utf-8")
+                expected_files.append(path)
+                module_contracts.append({"path": path, "module": f"pkg.module_{index}"})
+            (repo / "tests").mkdir(exist_ok=True)
+            (repo / "tests/test_contract.py").write_text("from pkg import module_24\n", encoding="utf-8")
+            expected_files.append("tests/test_contract.py")
+            module_contracts.append({"path": "tests/test_contract.py", "module": "tests.test_contract"})
+            project = {"expected_files": expected_files, "module_contracts": module_contracts}
+            verification = {
+                "results": [
+                    {
+                        "stderr": f'File "{repo / "pkg/module_24.py"}", line 1, in <module>\nAssertionError: contract mismatch\n',
+                    }
+                ]
+            }
+
+            snapshots = workspace_file_snapshots(repo, project, verification, max_files=2)
+
+        paths = [row["path"] for row in snapshots]
+        self.assertEqual(paths[0], "pkg/module_24.py")
+        self.assertIn("tests/test_contract.py", paths)
+        self.assertNotIn("pkg/module_0.py", paths)
 
     def test_greenfield_memory_worker_records_repair_learning(self) -> None:
         memory = build_greenfield_memory_record(
@@ -2398,6 +2431,52 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
                 repair["repaired_files"],
             )
             self.assertEqual((repo / "grades.py").read_text(encoding="utf-8"), "def grade(score):\n    if score >= 90:\n        return 'A'\n    return 'C'\n")
+
+    def test_greenfield_verification_loop_normalizes_literal_backslash_newlines_in_function_body_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай CLI проект `body-newline-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "router.py", "content": "def route(flag):\n    return {'flag': flag}\n"},
+                        {
+                            "path": "test_router.py",
+                            "content": "import unittest\nimport router\n\nclass RouterTests(unittest.TestCase):\n    def test_route(self):\n        self.assertEqual(router.route(True)['status'], 'ready')\n",
+                        },
+                    ],
+                    "verification_commands": ["python -m unittest test_router.py"],
+                    "module_contracts": [{"module": "router", "path": "router.py", "responsibility": "build route result", "requirements": ["include status"]}],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "operations": [
+                                {
+                                    "type": "replace_function_body",
+                                    "path": "router.py",
+                                    "function_name": "route",
+                                    "old_body": "return {'flag': flag}",
+                                    "new_body": "result = {'flag': flag}\\nresult['status'] = 'ready'\\nreturn result",
+                                }
+                            ]
+                        }
+                    ),
+                }
+
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=2, request_guidance=guidance)
+            self.assertEqual(loop["status"], "passed", loop)
+            self.assertIn("result['status'] = 'ready'", (repo / "router.py").read_text(encoding="utf-8"))
 
     def test_greenfield_verification_loop_retries_function_body_with_old_body_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3442,6 +3521,38 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertTrue(result["module_synthesis_repair_applied"])
             self.assertFalse(result["multi_file_repair_applied"])
 
+    def test_greenfield_repair_live_trial_blocks_when_required_bounded_marker_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            loop = {
+                "status": "passed",
+                "stop_reason": "verification passed",
+                "attempts": [
+                    {
+                        "repair_execution": {
+                            "status": "applied",
+                            "repair_strategy": "module_synthesis_repair",
+                            "repaired_files": [{"path": "src/config.js", "repair": "verification_repair_module_synthesis"}],
+                            "blockers": [],
+                        }
+                    }
+                ],
+                "final_verification": {"status": "passed"},
+            }
+            result = compact_repair_result(
+                "large_exact_replace",
+                workspace,
+                {
+                    "verification_commands": ["python -m unittest discover tests"],
+                    "required_repair_markers": ["guided_exact_replace"],
+                    "forbid_module_synthesis_repair": True,
+                },
+                loop,
+            )
+            self.assertEqual(result["status"], "blocked")
+            self.assertFalse(result["required_repair_markers_satisfied"])
+            self.assertFalse(result["forbidden_module_synthesis_satisfied"])
+
     def test_greenfield_repair_live_trial_compact_result_marks_multi_file_repair(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -3506,6 +3617,71 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         module_paths = {row["path"] for row in project["implementation_plan"]["module_sequence"]}
         self.assertTrue(expected_sources.issubset(module_paths))
         self.assertFalse(any(path.startswith("ceraxia_project/") for path in module_paths))
+
+    def test_greenfield_repair_live_trial_large_bounded_scenarios_require_precise_repairs(self) -> None:
+        exact = scenario_spec("large_exact_replace")
+        self.assertEqual(exact["required_repair_markers"], ["guided_exact_replace"])
+        self.assertTrue(exact["forbid_module_synthesis_repair"])
+        exact_paths = {item["path"] for item in exact["files"]}
+        self.assertGreaterEqual(len(exact_paths), 7)
+        self.assertIn("src/config.js", exact_paths)
+        exact_tests = next(item["content"] for item in exact["files"] if item["path"] == "tests/test_frontend_contract.py")
+        self.assertIn('/api/v1', exact_tests)
+        self.assertIn('/api/dev', next(item["content"] for item in exact["files"] if item["path"] == "src/config.js"))
+
+        function_body = scenario_spec("large_function_body")
+        self.assertEqual(function_body["required_repair_markers"], ["guided_replace_function_body"])
+        self.assertTrue(function_body["forbid_module_synthesis_repair"])
+        body_paths = {item["path"] for item in function_body["files"]}
+        self.assertGreaterEqual(len(body_paths), 8)
+        routing = next(item["content"] for item in function_body["files"] if item["path"] == "incident_router/routing.py")
+        self.assertIn("def route_incident", routing)
+        self.assertIn("from .reporting import summarize_route", routing)
+        tests = next(item["content"] for item in function_body["files"] if item["path"] == "tests/test_routing.py")
+        self.assertIn("route['sla_hours']", tests)
+        self.assertIn("with self.assertRaises(ValueError)", tests)
+
+    def test_greenfield_repair_live_trial_project_preserves_prebroken_workspace(self) -> None:
+        spec = scenario_spec("large_exact_replace")
+        project = build_repair_trial_project(spec)
+        self.assertEqual(project["required_repair_markers"], ["guided_exact_replace"])
+        self.assertTrue(project["forbid_module_synthesis_repair"])
+        self.assertEqual(project["verification_commands"], ["python -m unittest discover tests"])
+        self.assertIn("src/config.js", project["expected_files"])
+        self.assertNotIn("app/main.py", project["expected_files"])
+        config = next(item["content"] for item in project["files"] if item["path"] == "src/config.js")
+        self.assertIn("/api/dev", config)
+
+    def test_greenfield_verification_loop_honors_forbidden_module_synthesis_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / ".ceraxia_greenfield_workspace").write_text("created-by=ceraxia-code-brigade\n", encoding="utf-8")
+            (repo / "demo.py").write_text("def value():\n    return 'broken'\n", encoding="utf-8")
+            (repo / "test_demo.py").write_text(
+                "import unittest\nimport demo\n\nclass DemoTests(unittest.TestCase):\n    def test_value(self):\n        self.assertEqual(demo.value(), 'ready')\n",
+                encoding="utf-8",
+            )
+
+            def blocked_guidance(role: str, payload: dict, instructions: str) -> dict:
+                return {"ok": True, "status": "answered", "content": '{"status":"blocked","blockers":["no bounded repair"]}'}
+
+            loop = run_greenfield_verification_loop(
+                repo,
+                ["python -m unittest test_demo.py"],
+                {
+                    "project_name": "demo",
+                    "expected_files": ["demo.py", "test_demo.py"],
+                    "module_contracts": [{"path": "demo.py", "module": "demo"}],
+                    "files": [{"path": "demo.py", "content": "def value():\n    return 'ready'\n"}],
+                    "forbid_module_synthesis_repair": True,
+                },
+                request_guidance=blocked_guidance,
+            )
+
+        self.assertEqual(loop["status"], "blocked")
+        repair = loop["attempts"][0]["repair_execution"]
+        self.assertEqual(repair["status"], "not_applicable")
+        self.assertIn("module synthesis repair forbidden", "; ".join(repair["blockers"]))
 
     def test_greenfield_model_json_parser_repairs_code_regex_escapes(self) -> None:
         payload = """```json

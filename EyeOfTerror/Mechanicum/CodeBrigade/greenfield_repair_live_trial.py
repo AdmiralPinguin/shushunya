@@ -155,6 +155,102 @@ def scenario_spec(scenario: str) -> dict[str, Any]:
                 {"module": "tests.test_agent_router", "path": "tests/test_agent_router.py", "responsibility": "agent router workflow verification", "requirements": ["prove action routing", "prove payload validation", "prove session sequence history"]},
             ],
         }
+    if scenario == "large_exact_replace":
+        return {
+            "task": "Repair a generated operations dashboard project by making the frontend API contract point at /api/v1 while preserving the larger project structure. The safe repair is one exact text replacement in src/config.js.",
+            "project_name": "ops-dashboard-large-exact",
+            "required_repair_markers": ["guided_exact_replace"],
+            "forbid_module_synthesis_repair": True,
+            "files": [
+                {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                {"path": "src/config.js", "content": "export const API_BASE = \"/api/dev\";\nexport const REFRESH_SECONDS = 30;\nexport const DASHBOARD_TITLE = \"Forge Operations\";\n"},
+                {"path": "src/api.js", "content": "import { API_BASE } from './config.js';\n\nexport function endpoint(path) {\n  return `${API_BASE}${path}`;\n}\n"},
+                {"path": "src/metrics.js", "content": "export function summarizeMetrics(rows) {\n  return rows.map((row) => `${row.name}:${row.value}`).join(', ');\n}\n"},
+                {"path": "src/events.js", "content": "export function newestEvent(events) {\n  return events.slice().sort((a, b) => b.ts - a.ts)[0] || null;\n}\n"},
+                {"path": "src/render.js", "content": "import { DASHBOARD_TITLE } from './config.js';\n\nexport function renderHeader() {\n  return `<h1>${DASHBOARD_TITLE}</h1>`;\n}\n"},
+                {"path": "README.md", "content": "# Operations Dashboard\n\nRun contract checks with `python -m unittest discover tests`.\n"},
+                {
+                    "path": "tests/test_frontend_contract.py",
+                    "content": (
+                        "import unittest\nfrom pathlib import Path\n\n\n"
+                        "class FrontendContractTests(unittest.TestCase):\n"
+                        "    def test_api_base_uses_versioned_contract(self):\n"
+                        "        config = Path('src/config.js').read_text(encoding='utf-8')\n"
+                        "        self.assertIn('export const API_BASE = \"/api/v1\";', config)\n"
+                        "        self.assertNotIn('/api/dev', config)\n\n"
+                        "    def test_larger_project_files_are_still_present(self):\n"
+                        "        for path in ['src/api.js', 'src/metrics.js', 'src/events.js', 'src/render.js']:\n"
+                        "            self.assertTrue(Path(path).exists(), path)\n"
+                    ),
+                },
+            ],
+            "verification_commands": ["python -m unittest discover tests"],
+            "module_contracts": [
+                {"module": "src.config", "path": "src/config.js", "responsibility": "frontend runtime configuration", "requirements": ["API_BASE must be /api/v1"]},
+                {"module": "src.api", "path": "src/api.js", "responsibility": "endpoint construction", "requirements": ["use API_BASE"]},
+                {"module": "src.metrics", "path": "src/metrics.js", "responsibility": "dashboard metric summaries", "requirements": ["summarize metrics"]},
+                {"module": "src.events", "path": "src/events.js", "responsibility": "event timeline helpers", "requirements": ["select newest event"]},
+                {"module": "src.render", "path": "src/render.js", "responsibility": "render dashboard header", "requirements": ["render configured title"]},
+                {"module": "tests.test_frontend_contract", "path": "tests/test_frontend_contract.py", "responsibility": "frontend contract verification", "requirements": ["prove API contract", "prove project structure remains intact"]},
+            ],
+        }
+    if scenario == "large_function_body":
+        return {
+            "task": "Repair a generated incident routing service by replacing only route_incident() with complete severity/team validation, SLA selection, and escalation behavior. Preserve the larger package and tests.",
+            "project_name": "incident-router-large-function",
+            "required_repair_markers": ["guided_replace_function_body"],
+            "forbid_module_synthesis_repair": True,
+            "files": [
+                {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                {"path": "incident_router/__init__.py", "content": "from .routing import route_incident\n\n__all__ = ['route_incident']\n"},
+                {"path": "incident_router/models.py", "content": "VALID_TEAMS = {'ops', 'security', 'platform'}\nSEVERITY_SLA = {'low': 72, 'medium': 24, 'high': 4, 'critical': 1}\n"},
+                {"path": "incident_router/audit.py", "content": "def audit_row(incident_id, team, severity):\n    return {'incident_id': incident_id, 'team': team, 'severity': severity}\n"},
+                {"path": "incident_router/notifications.py", "content": "def notification_channel(team):\n    return f'{team}-alerts'\n"},
+                {"path": "incident_router/reporting.py", "content": "def summarize_route(route):\n    return f\"{route['incident_id']}->{route['team']}:{route['severity']}\"\n"},
+                {
+                    "path": "incident_router/routing.py",
+                    "content": (
+                        "from .models import SEVERITY_SLA, VALID_TEAMS\n"
+                        "from .notifications import notification_channel\n"
+                        "from .reporting import summarize_route\n\n\n"
+                        "def route_incident(incident_id, severity, team):\n"
+                        "    return {'incident_id': incident_id, 'severity': severity, 'team': team}\n"
+                    ),
+                },
+                {
+                    "path": "tests/test_routing.py",
+                    "content": (
+                        "import unittest\n\n"
+                        "from incident_router.routing import route_incident\n\n\n"
+                        "class IncidentRoutingTests(unittest.TestCase):\n"
+                        "    def test_critical_incident_escalates_with_one_hour_sla(self):\n"
+                        "        route = route_incident('INC-7', 'critical', 'security')\n"
+                        "        self.assertEqual(route['sla_hours'], 1)\n"
+                        "        self.assertEqual(route['channel'], 'security-alerts')\n"
+                        "        self.assertTrue(route['escalate'])\n"
+                        "        self.assertEqual(route['summary'], 'INC-7->security:critical')\n\n"
+                        "    def test_low_incident_does_not_escalate(self):\n"
+                        "        route = route_incident('INC-8', 'low', 'ops')\n"
+                        "        self.assertEqual(route['sla_hours'], 72)\n"
+                        "        self.assertFalse(route['escalate'])\n\n"
+                        "    def test_invalid_team_and_severity_are_rejected(self):\n"
+                        "        with self.assertRaises(ValueError):\n"
+                        "            route_incident('INC-9', 'unknown', 'ops')\n"
+                        "        with self.assertRaises(ValueError):\n"
+                        "            route_incident('INC-10', 'high', 'finance')\n"
+                    ),
+                },
+            ],
+            "verification_commands": ["python -m unittest discover tests"],
+            "module_contracts": [
+                {"module": "incident_router.models", "path": "incident_router/models.py", "responsibility": "routing constants", "requirements": ["valid teams", "severity SLA table"]},
+                {"module": "incident_router.audit", "path": "incident_router/audit.py", "responsibility": "audit row helper", "requirements": ["build incident audit rows"]},
+                {"module": "incident_router.notifications", "path": "incident_router/notifications.py", "responsibility": "notification channel helper", "requirements": ["team alert channel"]},
+                {"module": "incident_router.reporting", "path": "incident_router/reporting.py", "responsibility": "route summary helper", "requirements": ["summarize route"]},
+                {"module": "incident_router.routing", "path": "incident_router/routing.py", "responsibility": "incident route construction", "requirements": ["validate severity", "validate team", "set SLA", "set escalation", "include channel", "include summary"]},
+                {"module": "tests.test_routing", "path": "tests/test_routing.py", "responsibility": "incident routing verification", "requirements": ["prove critical escalation", "prove low severity", "prove invalid inputs"]},
+            ],
+        }
     if scenario == "exact_replace":
         return {
             "task": "Repair a generated demo module so value() returns ready as required by the tests.",
@@ -189,6 +285,23 @@ def write_project(workspace: Path, project: dict[str, Any]) -> None:
         path.write_text(str(item.get("content") or ""), encoding="utf-8")
 
 
+def build_repair_trial_project(spec: dict[str, Any]) -> dict[str, Any]:
+    project = build_greenfield_project_brief(spec["task"], spec)
+    files = [item for item in spec.get("files", []) if isinstance(item, dict)]
+    if files:
+        project["files"] = files
+        project["expected_files"] = [str(item.get("path") or "") for item in files if item.get("path")]
+    if isinstance(spec.get("module_contracts"), list):
+        project["module_contracts"] = spec["module_contracts"]
+    if isinstance(spec.get("verification_commands"), list):
+        project["verification_commands"] = spec["verification_commands"]
+    if isinstance(spec.get("required_repair_markers"), list):
+        project["required_repair_markers"] = spec["required_repair_markers"]
+    if "forbid_module_synthesis_repair" in spec:
+        project["forbid_module_synthesis_repair"] = bool(spec.get("forbid_module_synthesis_repair"))
+    return project
+
+
 def compact_repair_result(scenario: str, workspace: Path, project: dict[str, Any], loop: dict[str, Any]) -> dict[str, Any]:
     attempts = loop.get("attempts", []) if isinstance(loop.get("attempts"), list) else []
     repair_attempts = [
@@ -217,12 +330,17 @@ def compact_repair_result(scenario: str, workspace: Path, project: dict[str, Any
         for row in repaired_files
         if isinstance(row, dict)
     )
+    repair_markers = sorted({str(row.get("repair") or "") for row in repaired_files if isinstance(row, dict) and row.get("repair")})
+    required_markers = [str(marker) for marker in project.get("required_repair_markers", []) if isinstance(marker, str)]
+    required_markers_satisfied = all(marker in repair_markers for marker in required_markers)
+    forbidden_module_synthesis_satisfied = not (project.get("forbid_module_synthesis_repair") and module_synthesis_repair_applied)
     repaired_paths = sorted({str(row.get("path") or "") for row in repaired_files if isinstance(row, dict) and row.get("path")})
+    status = "accepted" if loop.get("status") == "passed" and repaired_files and required_markers_satisfied and forbidden_module_synthesis_satisfied else "blocked"
     return {
         "kind": "code_brigade_greenfield_live_repair_trial_result",
         "contract_version": "eye-mechanicum.v1",
         "scenario": scenario,
-        "status": "accepted" if loop.get("status") == "passed" and repaired_files else "blocked",
+        "status": status,
         "model_settings": model_settings(),
         "workspace": str(workspace),
         "verification_commands": project.get("verification_commands", []),
@@ -232,6 +350,10 @@ def compact_repair_result(scenario: str, workspace: Path, project: dict[str, Any
         "repair_attempt_count": len(repair_attempts),
         "bounded_repair_applied": bounded_repair_applied,
         "module_synthesis_repair_applied": module_synthesis_repair_applied,
+        "required_repair_markers": required_markers,
+        "required_repair_markers_satisfied": required_markers_satisfied,
+        "forbid_module_synthesis_repair": bool(project.get("forbid_module_synthesis_repair")),
+        "forbidden_module_synthesis_satisfied": forbidden_module_synthesis_satisfied,
         "multi_file_repair_applied": len(repaired_paths) > 1,
         "repaired_path_count": len(repaired_paths),
         "repaired_files": repaired_files,
@@ -247,7 +369,7 @@ def run_live_repair_trial(scenario: str, run_root: Path) -> dict[str, Any]:
     workspace = trial_root / "workspace"
     workspace.mkdir(parents=True, exist_ok=False)
     spec = scenario_spec(scenario)
-    project = build_greenfield_project_brief(spec["task"], spec)
+    project = build_repair_trial_project(spec)
     write_project(workspace, project)
     loop = run_greenfield_verification_loop(workspace, project["verification_commands"], project, max_cycles=int(spec.get("max_cycles") or 2))
     result = compact_repair_result(scenario, workspace, project, loop)
@@ -258,7 +380,7 @@ def run_live_repair_trial(scenario: str, run_root: Path) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a live-model GreenfieldRepairWorker verification repair trial.")
-    parser.add_argument("--scenario", choices=["name_error", "exact_replace", "return_expression", "constant", "function_body", "multi_file", "agent_router_multi_file"], default="return_expression")
+    parser.add_argument("--scenario", choices=["name_error", "exact_replace", "return_expression", "constant", "function_body", "multi_file", "agent_router_multi_file", "large_exact_replace", "large_function_body"], default="return_expression")
     parser.add_argument("--run-root", type=Path, default=DEFAULT_RUN_ROOT)
     parser.add_argument("--require-accepted", action="store_true")
     args = parser.parse_args()

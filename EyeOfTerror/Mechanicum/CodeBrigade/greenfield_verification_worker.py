@@ -12,12 +12,51 @@ from greenfield_implementation_worker import execute_module_synthesis_contracts,
 from verification_adapter import run_verification_commands
 
 
-def workspace_file_snapshots(repo: Path | None, project_brief: dict[str, Any], *, max_files: int = 12, max_chars_per_file: int = 4000) -> list[dict[str, Any]]:
+def _verification_referenced_paths(verification: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    for result in verification.get("results", []):
+        if not isinstance(result, dict):
+            continue
+        combined = "\n".join(str(result.get(key) or "") for key in ("stdout", "stderr"))
+        for match in re.finditer(r'File "([^"]+)"', combined):
+            raw_path = match.group(1)
+            if raw_path.startswith("<"):
+                continue
+            paths.append(raw_path)
+        for match in re.finditer(r"\b([A-Za-z0-9_./-]+\.(?:py|js|jsx|ts|tsx|html|css))\b", combined):
+            paths.append(match.group(1))
+    return list(dict.fromkeys(paths))
+
+
+def _workspace_snapshot_order(repo: Path, project_brief: dict[str, Any], verification: dict[str, Any] | None) -> list[str]:
+    expected_files = [str(path) for path in project_brief.get("expected_files", []) if isinstance(path, str)]
+    contract_files = [
+        str(contract.get("path") or "")
+        for contract in project_brief.get("module_contracts", [])
+        if isinstance(contract, dict) and isinstance(contract.get("path"), str)
+    ]
+    referenced_files: list[str] = []
+    if verification:
+        root = repo.resolve()
+        for raw_path in _verification_referenced_paths(verification):
+            candidate = Path(raw_path)
+            if candidate.is_absolute():
+                try:
+                    referenced_files.append(str(candidate.resolve().relative_to(root)))
+                except (OSError, ValueError):
+                    continue
+            else:
+                referenced_files.append(raw_path)
+    test_files = [path for path in [*contract_files, *expected_files] if path.startswith("test") or "/test" in path or path.startswith("tests/")]
+    source_files = [path for path in [*contract_files, *expected_files] if path not in test_files]
+    return list(dict.fromkeys([*referenced_files, *test_files, *source_files]))
+
+
+def workspace_file_snapshots(repo: Path | None, project_brief: dict[str, Any], verification: dict[str, Any] | None = None, *, max_files: int = 18, max_chars_per_file: int = 5000) -> list[dict[str, Any]]:
     if repo is None:
         return []
     snapshots: list[dict[str, Any]] = []
-    expected_files = [str(path) for path in project_brief.get("expected_files", []) if isinstance(path, str)]
-    for rel_path in expected_files:
+    for rel_path in _workspace_snapshot_order(repo, project_brief, verification):
         if len(snapshots) >= max_files:
             break
         if not rel_path.endswith((".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css")):
@@ -72,11 +111,13 @@ def repair_guidance_for_verification(project_brief: dict[str, Any], verification
             "verification_status": verification.get("status"),
             "verification_results": verification.get("results", []),
             "failure_signature": signature,
+            "module_contracts": project_brief.get("module_contracts", []),
+            "definition_of_done": project_brief.get("definition_of_done", []),
             "common_failure_fixes": project_brief.get("template_contract", {}).get("common_failure_fixes", []),
             "supported_repair_operations": supported_operations,
-            "workspace_file_snapshots": workspace_file_snapshots(repo, project_brief),
+            "workspace_file_snapshots": workspace_file_snapshots(repo, project_brief, verification),
         },
-        "Given the failed greenfield verification output, return JSON only. Choose one supported bounded repair operation when the evidence is clear, or return {\"status\":\"blocked\",\"blockers\":[...]} when no safe bounded repair applies. Use replace_function_body for multi-statement fixes inside one function, including adding branches and raising exceptions; one replace_function_body operation is allowed to replace the whole body of that single function. A minimal current function body is valid old_body evidence: for example old_body can be one current statement when workspace_file_snapshots show that statement and tests define the intended replacement behavior. Use replace_return_expression only when exactly one return expression changes. workspace_file_snapshots contain the current source and tests; derive old_text, old_expression, old_literal, or old_body from those snapshots and set the matching new_* value from the failing test evidence. Do not claim old_* is missing when the current code is present in workspace_file_snapshots. Do not invent unrelated scope.",
+        "Given the failed greenfield verification output, return JSON only. Choose one supported bounded repair operation when the evidence is clear, or return {\"status\":\"blocked\",\"blockers\":[...]} when no safe bounded repair applies. Treat verification tests, module_contracts, definition_of_done, and workspace_file_snapshots as the authoritative behavior contract; implementing behavior explicitly required there is not invented scope. Use replace_function_body for multi-statement fixes inside one function, including adding branches and raising exceptions; one replace_function_body operation is allowed to replace the whole body of that single function. A minimal current function body is valid old_body evidence: for example old_body can be one current statement when workspace_file_snapshots show that statement and tests define the intended replacement behavior. Use replace_return_expression only when exactly one return expression changes. workspace_file_snapshots contain the current source and tests; derive old_text, old_expression, old_literal, or old_body from those snapshots and set the matching new_* value from the failing test evidence. Do not claim old_* is missing when the current code is present in workspace_file_snapshots. Do not invent unrelated scope beyond the failed tests and module contracts.",
     )
 
 
@@ -143,13 +184,16 @@ def repair_function_body_retry_guidance(
             "verification_results": verification.get("results", []),
             "failure_signature": signature,
             "previous_guidance_content": previous_guidance.get("content", "") if isinstance(previous_guidance, dict) else "",
+            "module_contracts": project_brief.get("module_contracts", []),
+            "definition_of_done": project_brief.get("definition_of_done", []),
+            "workspace_file_snapshots": workspace_file_snapshots(repo, project_brief, verification),
             "function_body_candidates": candidates,
             "supported_repair_operation": {
                 "type": "replace_function_body",
                 "shape": {"operations": [{"type": "replace_function_body", "path": "candidate path", "function_name": "candidate function_name", "old_body": "candidate old_body", "new_body": "replacement statements"}]},
             },
         },
-        "Return JSON only. The previous bounded repair guidance did not apply. If the failing tests define a safe replacement for one listed function_body_candidate, return a replace_function_body operation using that candidate's exact path, function_name, and old_body. new_body may contain multiple statements, branches, and raises. Return blocked only when no listed function can satisfy the failing tests.",
+        "Return JSON only. The previous bounded repair guidance did not apply. If the failing tests and module_contracts define a safe replacement for one listed function_body_candidate, return a replace_function_body operation using that candidate's exact path, function_name, and old_body. Do not return a blocked diagnostic that merely says replace_function_body is required; emit the operation when the target candidate and required behavior are identifiable. new_body may contain multiple statements, branches, and raises. Treat tests, module_contracts, definition_of_done, and workspace_file_snapshots as the behavior contract. Return blocked only when no listed function can satisfy that contract.",
     )
 
 
@@ -389,6 +433,16 @@ def _parse_python_body(body: str) -> list[ast.stmt]:
     return parsed.body
 
 
+def _normalize_model_code_body_if_needed(body: str) -> str:
+    try:
+        _parse_python_body(body)
+        return body
+    except SyntaxError:
+        repaired = body.replace("\\n", "\n")
+        _parse_python_body(repaired)
+        return repaired
+
+
 def _ast_body_equal(left: list[ast.stmt], right: list[ast.stmt]) -> bool:
     return ast.dump(ast.Module(body=left, type_ignores=[]), include_attributes=False) == ast.dump(ast.Module(body=right, type_ignores=[]), include_attributes=False)
 
@@ -534,6 +588,12 @@ def _guided_ast_repair(repo: Path, repair_guidance: dict[str, Any] | None) -> di
             new_body = operation.get("new_body")
             if not target_file or not function_name or not isinstance(old_body, str) or not isinstance(new_body, str):
                 blockers.append(f"replace_function_body operation {index} is incomplete")
+                continue
+            try:
+                old_body = _normalize_model_code_body_if_needed(old_body)
+                new_body = _normalize_model_code_body_if_needed(new_body)
+            except SyntaxError as exc:
+                blockers.append(f"replace_function_body operation {index} has invalid Python body: {exc}")
                 continue
             try:
                 _replace_function_body_in_file(path, function_name, old_body, new_body)
@@ -767,7 +827,19 @@ def run_greenfield_verification_loop(repo: Path, commands: list[str], project_br
             retry_execution = apply_greenfield_repair(repo, project_brief, verification, repair_guidance_retry)
             if retry_execution.get("status") == "applied":
                 repair_execution = retry_execution
-        if repair_execution.get("status") != "applied":
+        if repair_execution.get("status") != "applied" and project_brief.get("forbid_module_synthesis_repair"):
+            repair_execution = {
+                "kind": "code_brigade_greenfield_repair_execution",
+                "contract_version": "eye-mechanicum.v1",
+                "status": "not_applicable",
+                "repaired_files": [],
+                "blockers": [
+                    *[str(item) for item in repair_execution.get("blockers", []) if isinstance(item, str)],
+                    "module synthesis repair forbidden by repair trial contract",
+                ],
+                "verification_status_before": verification.get("status", ""),
+            }
+        elif repair_execution.get("status") != "applied":
             synthesis_repair = apply_greenfield_synthesis_repair(repo, project_brief, verification, signature, request_guidance)
             repair_execution = {
                 "kind": "code_brigade_greenfield_repair_execution",
