@@ -40,6 +40,7 @@ import code_brigade_adapter  # noqa: E402
 from planning_brigade import build_planning_packet  # noqa: E402
 from planning_feedback_contract import build_planning_feedback_intake  # noqa: E402
 from planning_packet_contract import validate_planning_packet  # noqa: E402
+from review_gate import greenfield_project_acceptance_from_worker  # noqa: E402
 
 
 class CeraxiaLifecycleTests(unittest.TestCase):
@@ -1203,6 +1204,28 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(summary["review_decision"], "ready")
             audit = json.loads((run_dir / "run_audit.json").read_text(encoding="utf-8"))
             self.assertEqual(audit["decision"], "passed", audit)
+
+    def test_greenfield_acceptance_treats_file_set_synthesis_as_advisory_when_modules_pass(self) -> None:
+        worker_report = {
+            "status": "implemented",
+            "execution_intent": {"mode": "greenfield_project_creation"},
+            "execution_result": {
+                "status": "implemented",
+                "blockers": [],
+                "greenfield_project": {
+                    "file_set_synthesis_report": {"status": "model_unavailable", "blockers": ["model timeout"]},
+                    "implementation_synthesis_report": {"status": "applied", "applied_count": 4},
+                    "verification": {"status": "passed"},
+                    "greenfield_review": {"status": "passed"},
+                    "greenfield_run_report": {"definition_of_done_status": {"status": "passed"}},
+                },
+            },
+        }
+        verification_report = {"status": "passed"}
+        acceptance = greenfield_project_acceptance_from_worker(worker_report, verification_report)
+        self.assertEqual(acceptance["status"], "accepted", acceptance)
+        self.assertEqual(acceptance["file_set_synthesis_status"], "model_unavailable")
+        self.assertEqual(acceptance["module_synthesis_status"], "applied")
 
     def test_review_only_mode_builds_review_package_without_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

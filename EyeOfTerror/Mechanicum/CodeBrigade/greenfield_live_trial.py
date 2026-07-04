@@ -7,6 +7,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 
 CODE_BRIGADE_ROOT = Path(__file__).resolve().parent
@@ -97,8 +98,24 @@ def compact_greenfield_result(result: dict[str, Any], workspace: Path) -> dict[s
     }
 
 
+def allocate_live_trial_root(run_root: Path) -> Path:
+    run_root.mkdir(parents=True, exist_ok=True)
+    base = f"greenfield-live-{utc_stamp()}"
+    for attempt in range(100):
+        suffix = "" if attempt == 0 else f"-{attempt:02d}"
+        trial_root = run_root / f"{base}{suffix}"
+        try:
+            trial_root.mkdir(parents=True, exist_ok=False)
+            return trial_root
+        except FileExistsError:
+            continue
+    trial_root = run_root / f"{base}-{uuid4().hex[:8]}"
+    trial_root.mkdir(parents=True, exist_ok=False)
+    return trial_root
+
+
 def run_live_trial(task: str, run_root: Path) -> dict[str, Any]:
-    trial_root = run_root / f"greenfield-live-{utc_stamp()}"
+    trial_root = allocate_live_trial_root(run_root)
     workspace = trial_root / "workspace"
     runs_root = trial_root / "ceraxia_runs"
     workspace.mkdir(parents=True, exist_ok=False)

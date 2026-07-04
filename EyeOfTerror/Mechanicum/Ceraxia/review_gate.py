@@ -908,8 +908,6 @@ def greenfield_project_acceptance_from_worker(
         blockers.append("execution result has blockers: " + "; ".join(str(item) for item in result_blockers if item))
     if not greenfield_project:
         blockers.append("greenfield project result is missing")
-    if file_set_synthesis.get("status") in {"blocked", "model_unavailable"}:
-        blockers.append(f"file set synthesis status is {file_set_synthesis.get('status')}")
     if module_synthesis.get("status") != "applied":
         blockers.append(f"module synthesis status is {module_synthesis.get('status')}")
     if verification.get("status") != "passed":

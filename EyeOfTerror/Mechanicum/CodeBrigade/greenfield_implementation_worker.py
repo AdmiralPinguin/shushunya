@@ -237,10 +237,129 @@ def extract_json_object(text: str) -> dict[str, Any]:
         end = stripped.rfind("}")
         if start < 0 or end <= start:
             raise
-        parsed = json.loads(stripped[start : end + 1])
+        candidate = stripped[start : end + 1]
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError as nested_exc:
+            if "Invalid \\escape" not in str(nested_exc) and "Invalid control character" not in str(nested_exc):
+                parsed = extract_module_synthesis_fields(candidate)
+            else:
+                try:
+                    parsed = json.loads(repair_model_json_code_payload(candidate))
+                except json.JSONDecodeError:
+                    parsed = extract_module_synthesis_fields(candidate)
     if not isinstance(parsed, dict):
         raise ValueError("model content must be a JSON object")
     return parsed
+
+
+def repair_model_json_code_payload(text: str) -> str:
+    valid_escapes = {'"', "\\", "/", "b", "f", "n", "r", "t", "u"}
+    repaired: list[str] = []
+    in_string = False
+    escaped = False
+    for char in text:
+        if not in_string:
+            repaired.append(char)
+            if char == '"':
+                in_string = True
+            continue
+        if escaped:
+            if char in valid_escapes:
+                repaired.append(char)
+            else:
+                repaired.append("\\")
+                repaired.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            repaired.append("\\")
+            escaped = True
+            continue
+        if char == '"':
+            repaired.append(char)
+            in_string = False
+            continue
+        if char == "\n":
+            repaired.append("\\n")
+        elif char == "\r":
+            repaired.append("\\r")
+        elif char == "\t":
+            repaired.append("\\t")
+        elif ord(char) < 0x20:
+            repaired.append(f"\\u{ord(char):04x}")
+        else:
+            repaired.append(char)
+    if escaped:
+        repaired.append("\\")
+    return "".join(repaired)
+
+
+def extract_module_synthesis_fields(text: str) -> dict[str, Any]:
+    if '"content"' not in text or '"requirements_satisfied"' not in text or '"tests_to_update"' not in text:
+        raise ValueError("model content is not a recognizable module synthesis object")
+    path_match = re.search(r'"path"\s*:\s*"([^"]+)"', text, flags=re.DOTALL)
+    content_match = re.search(r'"content"\s*:\s*"', text, flags=re.DOTALL)
+    requirements_match = re.search(r'"\s*,\s*"requirements_satisfied"\s*:', text, flags=re.DOTALL)
+    if not path_match or not content_match or not requirements_match or requirements_match.start() <= content_match.end():
+        raise ValueError("module synthesis fields are not recoverable")
+    content_raw = text[content_match.end() : requirements_match.start()]
+    suffix = text[requirements_match.end() :]
+    requirements = extract_json_array_field(suffix)
+    tests_key = re.search(r'"tests_to_update"\s*:', suffix, flags=re.DOTALL)
+    if not tests_key:
+        raise ValueError("tests_to_update field is not recoverable")
+    tests_suffix = suffix[tests_key.end() :]
+    tests_to_update = extract_json_array_field(tests_suffix)
+    notes = ""
+    notes_match = re.search(r'"notes"\s*:\s*"(.*)"\s*\}?[\s`]*$', tests_suffix, flags=re.DOTALL)
+    if notes_match:
+        notes = decode_json_string_fragment(notes_match.group(1))
+    return {
+        "path": path_match.group(1),
+        "content": decode_json_string_fragment(content_raw),
+        "requirements_satisfied": requirements,
+        "tests_to_update": tests_to_update,
+        "notes": notes,
+    }
+
+
+def extract_json_array_field(text: str) -> list[Any]:
+    start = text.find("[")
+    if start < 0:
+        raise ValueError("JSON array field is missing")
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+            if depth == 0:
+                parsed = json.loads(repair_model_json_code_payload(text[start : index + 1]))
+                return parsed if isinstance(parsed, list) else []
+    raise ValueError("JSON array field is unterminated")
+
+
+def decode_json_string_fragment(text: str) -> str:
+    repaired = repair_model_json_code_payload('"' + text + '"')
+    try:
+        decoded = json.loads(repaired)
+    except json.JSONDecodeError:
+        decoded = text
+    return str(decoded)
 
 
 def forbidden_markers_found(content: str, markers: list[str]) -> list[str]:
@@ -585,10 +704,35 @@ def execute_module_synthesis_contracts(
         try:
             output = extract_json_object(content)
         except (ValueError, json.JSONDecodeError) as exc:
-            row["status"] = "rejected"
-            row["blockers"].append(f"model output is not valid JSON object: {exc}")
-            rows.append(row)
-            continue
+            reformat_guidance = request_guidance(
+                "GreenfieldImplementationWorker",
+                {
+                    "project_name": project_brief.get("project_name"),
+                    "project_type": project_brief.get("project_type"),
+                    "template_id": project_brief.get("template_id"),
+                    "module_synthesis_contract": synthesis_contract,
+                    "invalid_model_content": content,
+                    "parse_error": str(exc),
+                },
+                "The previous module implementation response was not valid JSON. Reformat the same implementation as valid JSON only with path, content, requirements_satisfied, tests_to_update, and notes. Do not change the module contract or add unrelated files.",
+            )
+            row["reformat_guidance_status"] = str(reformat_guidance.get("status") or "")
+            row["reformat_guidance_ok"] = bool(reformat_guidance.get("ok"))
+            if not reformat_guidance.get("ok"):
+                row["status"] = "rejected"
+                row["blockers"].append(f"model output is not valid JSON object: {exc}")
+                row["blockers"].append(str(reformat_guidance.get("error") or "model reformat guidance unavailable"))
+                rows.append(row)
+                continue
+            try:
+                output = extract_json_object(str(reformat_guidance.get("content") or ""))
+            except (ValueError, json.JSONDecodeError) as reformat_exc:
+                row["status"] = "rejected"
+                row["blockers"].append(f"model output is not valid JSON object: {exc}")
+                row["blockers"].append(f"model reformat output is not valid JSON object: {reformat_exc}")
+                rows.append(row)
+                continue
+            row["warnings"].append("model output required JSON reformat retry")
         problems = validate_module_synthesis_output(output, module, forbidden_markers, project_brief)
         if problems:
             row["status"] = "rejected"

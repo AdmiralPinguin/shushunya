@@ -7,6 +7,7 @@ from typing import Any
 def infer_acceptance_features(task: str) -> list[dict[str, Any]]:
     lowered = task.lower()
     features: list[dict[str, Any]] = []
+    kanban_requested = any(word in lowered for word in ("kanban", "project board", "task board", "status board", "канбан", "доска задач", "проектная доска"))
     if any(word in lowered for word in ("calculator", "calculate", "калькулятор", "слож", "вычит", "умнож", "делен", "делить")):
         features.append(
             {
@@ -21,7 +22,7 @@ def infer_acceptance_features(task: str) -> list[dict[str, Any]]:
         and any(word in lowered for word in ("task", "tasks", "todo", "done", "active", "задач", "дел"))
         and any(word in lowered for word in ("filter", "filters", "active/done", "toggle", "localstorage", "фильтр", "переключ", "сохран"))
     )
-    if task_dashboard or any(word in lowered for word in ("todo", "to-do", "task list", "задачник", "список задач", "список дел", "тасклист")):
+    if not kanban_requested and (task_dashboard or any(word in lowered for word in ("todo", "to-do", "task list", "задачник", "список задач", "список дел", "тасклист"))):
         features.append(
             {
                 "id": "todo_list",
@@ -30,7 +31,7 @@ def infer_acceptance_features(task: str) -> list[dict[str, Any]]:
                 "operations": ["add", "complete", "delete", "persist"],
             }
         )
-    if any(word in lowered for word in ("kanban", "project board", "task board", "status board", "канбан", "доска задач", "проектная доска")):
+    if kanban_requested:
         features.append(
             {
                 "id": "kanban_board_frontend",
@@ -55,6 +56,15 @@ def infer_acceptance_features(task: str) -> list[dict[str, Any]]:
                 "kind": "multi_workflow_requirement",
                 "description": "provide issue creation, assignment, status transitions, filtering, and HTTP route wiring through separated domain, store, routes, and tests",
                 "operations": ["create_issue", "assign_issue", "transition_issue", "filter_issues", "http_routes"],
+            }
+        )
+    if any(word in lowered for word in ("inventory", "stock adjustment", "stock ledger", "low-stock", "low stock", "sku", "склад", "остатк", "инвентар")):
+        features.append(
+            {
+                "id": "inventory_ops_api",
+                "kind": "multi_workflow_requirement",
+                "description": "provide inventory CRUD, stock adjustment ledger, low-stock reporting, SKU/category/status filtering, JSON error payloads, and HTTP route wiring",
+                "operations": ["create_item", "update_item", "adjust_stock", "low_stock_report", "filter_inventory", "json_errors", "http_routes"],
             }
         )
     if any(word in lowered for word in ("operations dashboard", "service dashboard", "ops dashboard", "incident dashboard", "операционный дашборд", "дашборд операций", "дашборд сервисов")):
@@ -104,7 +114,7 @@ def infer_acceptance_features(task: str) -> list[dict[str, Any]]:
         )
     has_todo_feature = any(feature.get("id") == "todo_list" for feature in features)
     explicit_counter_app = any(word in lowered for word in ("react counter", "vite counter", "counter app", "counter application", "приложение счетчик", "приложение счётчик"))
-    generic_counter = any(word in lowered for word in ("счетчик", "счётчик")) and not has_todo_feature
+    generic_counter = any(word in lowered for word in ("счетчик", "счётчик")) and not has_todo_feature and not kanban_requested
     if explicit_counter_app or generic_counter:
         features.append(
             {
@@ -142,8 +152,12 @@ def apply_task_feature_overrides(
         return apply_static_site_kanban_board_feature(project_name, files), static_kanban_board_module_contracts(), features
     if template_id == "static_site" and any(feature.get("id") == "todo_list" for feature in features):
         return apply_static_site_todo_feature(project_name, files), static_todo_module_contracts(), features
+    if template_id == "node_vite_app" and any(feature.get("id") == "kanban_board_frontend" for feature in features):
+        return apply_vite_kanban_board_feature(project_name, files), vite_kanban_board_module_contracts(), features
     if template_id == "node_vite_app" and any(feature.get("id") == "todo_list" for feature in features):
         return apply_vite_todo_dashboard_feature(project_name, files), vite_todo_dashboard_module_contracts(), features
+    if template_id == "python_fastapi_service" and any(feature.get("id") == "inventory_ops_api" for feature in features):
+        return apply_fastapi_inventory_ops_feature(project_name, files), fastapi_inventory_ops_module_contracts(), features
     if template_id == "python_fastapi_service" and any(feature.get("id") == "issue_tracker_api" for feature in features):
         return apply_fastapi_issue_tracker_feature(project_name, files), fastapi_issue_tracker_module_contracts(), features
     if template_id == "python_fastapi_service" and any(feature.get("id") == "operations_dashboard_api" for feature in features):
@@ -671,6 +685,307 @@ def static_kanban_board_module_contracts() -> list[dict[str, Any]]:
             "path": "tests/test_kanban_board.py",
             "responsibility": "kanban frontend workflow contract verification",
             "requirements": ["prove HTML contract", "prove state workflow", "prove rendering and app wiring"],
+        },
+    ]
+
+
+def apply_fastapi_inventory_ops_feature(project_name: str, files: list[Any]) -> list[Any]:
+    domain = (
+        "from dataclasses import dataclass, replace\n"
+        "from typing import Literal\n\n\n"
+        "ItemStatus = Literal['active', 'archived']\n\n\n"
+        "@dataclass(frozen=True)\n"
+        "class InventoryItem:\n"
+        "    sku: str\n"
+        "    name: str\n"
+        "    category: str\n"
+        "    quantity: int\n"
+        "    reorder_level: int\n"
+        "    status: ItemStatus = 'active'\n\n\n"
+        "@dataclass(frozen=True)\n"
+        "class StockAdjustment:\n"
+        "    sku: str\n"
+        "    delta: int\n"
+        "    reason: str\n"
+        "    resulting_quantity: int\n\n\n"
+        "def json_error(code: str, message: str) -> dict[str, str]:\n"
+        "    return {'error': code, 'message': message}\n\n\n"
+        "def create_item(sku: str, name: str, category: str, quantity: int = 0, reorder_level: int = 0) -> InventoryItem:\n"
+        "    clean_sku = sku.strip().upper()\n"
+        "    clean_name = name.strip()\n"
+        "    clean_category = category.strip().lower()\n"
+        "    if not clean_sku:\n"
+        "        raise ValueError('sku is required')\n"
+        "    if not clean_name:\n"
+        "        raise ValueError('name is required')\n"
+        "    if quantity < 0:\n"
+        "        raise ValueError('quantity cannot be negative')\n"
+        "    if reorder_level < 0:\n"
+        "        raise ValueError('reorder level cannot be negative')\n"
+        "    return InventoryItem(clean_sku, clean_name, clean_category, quantity, reorder_level)\n\n\n"
+        "def update_item(item: InventoryItem, *, name: str | None = None, category: str | None = None, status: ItemStatus | None = None) -> InventoryItem:\n"
+        "    next_status = status or item.status\n"
+        "    if next_status not in {'active', 'archived'}:\n"
+        "        raise ValueError(f'unsupported item status: {next_status}')\n"
+        "    return replace(\n"
+        "        item,\n"
+        "        name=item.name if name is None else name.strip(),\n"
+        "        category=item.category if category is None else category.strip().lower(),\n"
+        "        status=next_status,\n"
+        "    )\n\n\n"
+        "def adjust_stock(item: InventoryItem, delta: int, reason: str) -> tuple[InventoryItem, StockAdjustment]:\n"
+        "    clean_reason = reason.strip()\n"
+        "    if not clean_reason:\n"
+        "        raise ValueError('stock adjustment reason is required')\n"
+        "    next_quantity = item.quantity + delta\n"
+        "    if next_quantity < 0:\n"
+        "        raise ValueError('stock adjustment would make quantity negative')\n"
+        "    next_item = replace(item, quantity=next_quantity)\n"
+        "    return next_item, StockAdjustment(item.sku, delta, clean_reason, next_quantity)\n\n\n"
+        "def is_low_stock(item: InventoryItem) -> bool:\n"
+        "    return item.status == 'active' and item.quantity <= item.reorder_level\n"
+    )
+    store = (
+        "from __future__ import annotations\n\n"
+        "from .domain import InventoryItem, ItemStatus, StockAdjustment, adjust_stock, create_item, is_low_stock, update_item\n\n\n"
+        "class InventoryStore:\n"
+        "    def __init__(self) -> None:\n"
+        "        self._items: dict[str, InventoryItem] = {}\n"
+        "        self._ledger: list[StockAdjustment] = []\n\n"
+        "    def reset(self) -> None:\n"
+        "        self._items = {}\n"
+        "        self._ledger = []\n\n"
+        "    def create(self, sku: str, name: str, category: str, quantity: int = 0, reorder_level: int = 0) -> InventoryItem:\n"
+        "        item = create_item(sku, name, category, quantity, reorder_level)\n"
+        "        if item.sku in self._items:\n"
+        "            raise ValueError('sku already exists')\n"
+        "        self._items[item.sku] = item\n"
+        "        return item\n\n"
+        "    def get(self, sku: str) -> InventoryItem:\n"
+        "        clean_sku = sku.strip().upper()\n"
+        "        if clean_sku not in self._items:\n"
+        "            raise KeyError(clean_sku)\n"
+        "        return self._items[clean_sku]\n\n"
+        "    def update(self, sku: str, *, name: str | None = None, category: str | None = None, status: ItemStatus | None = None) -> InventoryItem:\n"
+        "        item = update_item(self.get(sku), name=name, category=category, status=status)\n"
+        "        self._items[item.sku] = item\n"
+        "        return item\n\n"
+        "    def adjust(self, sku: str, delta: int, reason: str) -> StockAdjustment:\n"
+        "        next_item, adjustment = adjust_stock(self.get(sku), delta, reason)\n"
+        "        self._items[next_item.sku] = next_item\n"
+        "        self._ledger.append(adjustment)\n"
+        "        return adjustment\n\n"
+        "    def list(self, *, sku: str | None = None, category: str | None = None, status: ItemStatus | None = None, search: str | None = None) -> list[InventoryItem]:\n"
+        "        rows = list(self._items.values())\n"
+        "        if sku:\n"
+        "            rows = [item for item in rows if item.sku == sku.strip().upper()]\n"
+        "        if category:\n"
+        "            rows = [item for item in rows if item.category == category.strip().lower()]\n"
+        "        if status:\n"
+        "            rows = [item for item in rows if item.status == status]\n"
+        "        if search:\n"
+        "            needle = search.strip().lower()\n"
+        "            rows = [item for item in rows if needle in item.name.lower() or needle in item.sku.lower()]\n"
+        "        return rows\n\n"
+        "    def low_stock(self) -> list[InventoryItem]:\n"
+        "        return [item for item in self._items.values() if is_low_stock(item)]\n\n"
+        "    def ledger(self, *, sku: str | None = None) -> list[StockAdjustment]:\n"
+        "        if not sku:\n"
+        "            return list(self._ledger)\n"
+        "        clean_sku = sku.strip().upper()\n"
+        "        return [row for row in self._ledger if row.sku == clean_sku]\n\n\n"
+        "STORE = InventoryStore()\n"
+    )
+    reports = (
+        "from .domain import InventoryItem, StockAdjustment\n\n\n"
+        "def item_to_dict(item: InventoryItem) -> dict[str, object]:\n"
+        "    return {\n"
+        "        'sku': item.sku,\n"
+        "        'name': item.name,\n"
+        "        'category': item.category,\n"
+        "        'quantity': item.quantity,\n"
+        "        'reorder_level': item.reorder_level,\n"
+        "        'status': item.status,\n"
+        "    }\n\n\n"
+        "def adjustment_to_dict(adjustment: StockAdjustment) -> dict[str, object]:\n"
+        "    return {\n"
+        "        'sku': adjustment.sku,\n"
+        "        'delta': adjustment.delta,\n"
+        "        'reason': adjustment.reason,\n"
+        "        'resulting_quantity': adjustment.resulting_quantity,\n"
+        "    }\n\n\n"
+        "def low_stock_report(items: list[InventoryItem]) -> dict[str, object]:\n"
+        "    return {'count': len(items), 'items': [item_to_dict(item) for item in items]}\n"
+    )
+    routes = (
+        "try:\n"
+        "    from fastapi import APIRouter, HTTPException\n"
+        "    from pydantic import BaseModel\n"
+        "except ModuleNotFoundError:\n"
+        "    APIRouter = None\n"
+        "    HTTPException = None\n"
+        "    BaseModel = object\n\n"
+        "from .domain import json_error\n"
+        "from .reports import adjustment_to_dict, item_to_dict, low_stock_report\n"
+        "from .store import STORE, InventoryStore\n\n\n"
+        "class InventoryCreate(BaseModel):\n"
+        "    sku: str\n"
+        "    name: str\n"
+        "    category: str\n"
+        "    quantity: int = 0\n"
+        "    reorder_level: int = 0\n\n\n"
+        "class InventoryUpdate(BaseModel):\n"
+        "    name: str | None = None\n"
+        "    category: str | None = None\n"
+        "    status: str | None = None\n\n\n"
+        "class StockAdjustmentPayload(BaseModel):\n"
+        "    delta: int\n"
+        "    reason: str\n\n\n"
+        "def create_item_response(payload: dict[str, object], store: InventoryStore = STORE) -> dict[str, object]:\n"
+        "    return item_to_dict(store.create(str(payload.get('sku', '')), str(payload.get('name', '')), str(payload.get('category', '')), int(payload.get('quantity', 0)), int(payload.get('reorder_level', 0))))\n\n\n"
+        "def update_item_response(sku: str, payload: dict[str, object], store: InventoryStore = STORE) -> dict[str, object]:\n"
+        "    return item_to_dict(store.update(sku, name=payload.get('name'), category=payload.get('category'), status=payload.get('status')))\n\n\n"
+        "def list_inventory_response(*, sku: str | None = None, category: str | None = None, status: str | None = None, search: str | None = None, store: InventoryStore = STORE) -> list[dict[str, object]]:\n"
+        "    return [item_to_dict(item) for item in store.list(sku=sku, category=category, status=status, search=search)]\n\n\n"
+        "def adjust_stock_response(sku: str, payload: dict[str, object], store: InventoryStore = STORE) -> dict[str, object]:\n"
+        "    return adjustment_to_dict(store.adjust(sku, int(payload.get('delta', 0)), str(payload.get('reason', ''))))\n\n\n"
+        "def low_stock_response(store: InventoryStore = STORE) -> dict[str, object]:\n"
+        "    return low_stock_report(store.low_stock())\n\n\n"
+        "def error_response(code: str, message: str) -> dict[str, str]:\n"
+        "    return json_error(code, message)\n\n\n"
+        "router = APIRouter(prefix='/inventory') if APIRouter is not None else None\n"
+        "if router is not None:\n"
+        "    @router.post('/items')\n"
+        "    def create_item_endpoint(payload: InventoryCreate) -> dict[str, object]:\n"
+        "        try:\n"
+        "            return create_item_response(payload.model_dump())\n"
+        "        except ValueError as exc:\n"
+        "            raise HTTPException(status_code=400, detail=error_response('invalid_item', str(exc))) from exc\n\n"
+        "    @router.patch('/items/{sku}')\n"
+        "    def update_item_endpoint(sku: str, payload: InventoryUpdate) -> dict[str, object]:\n"
+        "        try:\n"
+        "            return update_item_response(sku, payload.model_dump(exclude_none=True))\n"
+        "        except (KeyError, ValueError) as exc:\n"
+        "            raise HTTPException(status_code=404 if isinstance(exc, KeyError) else 400, detail=error_response('inventory_error', str(exc))) from exc\n\n"
+        "    @router.get('/items')\n"
+        "    def list_inventory_endpoint(sku: str | None = None, category: str | None = None, status: str | None = None, search: str | None = None) -> list[dict[str, object]]:\n"
+        "        return list_inventory_response(sku=sku, category=category, status=status, search=search)\n\n"
+        "    @router.post('/items/{sku}/adjustments')\n"
+        "    def adjust_stock_endpoint(sku: str, payload: StockAdjustmentPayload) -> dict[str, object]:\n"
+        "        try:\n"
+        "            return adjust_stock_response(sku, payload.model_dump())\n"
+        "        except (KeyError, ValueError) as exc:\n"
+        "            raise HTTPException(status_code=404 if isinstance(exc, KeyError) else 400, detail=error_response('stock_adjustment_error', str(exc))) from exc\n\n"
+        "    @router.get('/reports/low-stock')\n"
+        "    def low_stock_endpoint() -> dict[str, object]:\n"
+        "        return low_stock_response()\n"
+    )
+    main = (
+        "try:\n"
+        "    from fastapi import FastAPI\n"
+        "except ModuleNotFoundError:\n"
+        "    FastAPI = None\n\n"
+        "from .routes import router\n\n\n"
+        "def health() -> dict[str, bool]:\n"
+        "    return {'ok': True}\n\n\n"
+        "if FastAPI is not None:\n"
+        f"    app = FastAPI(title='{project_name} Inventory API')\n\n"
+        "    @app.get('/health')\n"
+        "    def health_endpoint() -> dict[str, bool]:\n"
+        "        return health()\n\n"
+        "    if router is not None:\n"
+        "        app.include_router(router)\n"
+        "else:\n"
+        "    app = None\n"
+    )
+    tests = (
+        "import unittest\n\n"
+        "from app.domain import adjust_stock, create_item, json_error, update_item\n"
+        "from app.reports import low_stock_report\n"
+        "from app.routes import adjust_stock_response, create_item_response, error_response, list_inventory_response, low_stock_response, update_item_response\n"
+        "from app.store import InventoryStore\n\n\n"
+        "class InventoryOpsWorkflowTests(unittest.TestCase):\n"
+        "    def test_inventory_crud_and_stock_adjustment_ledger(self):\n"
+        "        store = InventoryStore()\n"
+        "        created = create_item_response({'sku': ' abc-1 ', 'name': ' Bolt ', 'category': 'Hardware', 'quantity': 5, 'reorder_level': 2}, store)\n"
+        "        self.assertEqual(created['sku'], 'ABC-1')\n"
+        "        updated = update_item_response('abc-1', {'name': 'Steel bolt', 'status': 'active'}, store)\n"
+        "        self.assertEqual(updated['name'], 'Steel bolt')\n"
+        "        adjustment = adjust_stock_response('abc-1', {'delta': -4, 'reason': 'picked for order'}, store)\n"
+        "        self.assertEqual(adjustment['resulting_quantity'], 1)\n"
+        "        self.assertEqual(len(store.ledger(sku='ABC-1')), 1)\n\n"
+        "    def test_low_stock_report_and_filters(self):\n"
+        "        store = InventoryStore()\n"
+        "        store.create('SKU-1', 'Widget', 'tools', 1, 2)\n"
+        "        store.create('SKU-2', 'Cable', 'electronics', 8, 2)\n"
+        "        self.assertEqual([item['sku'] for item in list_inventory_response(category='tools', store=store)], ['SKU-1'])\n"
+        "        self.assertEqual([item['sku'] for item in list_inventory_response(search='cab', store=store)], ['SKU-2'])\n"
+        "        report = low_stock_response(store)\n"
+        "        self.assertEqual(report['count'], 1)\n"
+        "        self.assertEqual(report['items'][0]['sku'], 'SKU-1')\n\n"
+        "    def test_domain_validation_and_json_errors(self):\n"
+        "        item = create_item('SKU-3', 'Part', 'tools', 4, 2)\n"
+        "        updated = update_item(item, status='archived')\n"
+        "        self.assertEqual(updated.status, 'archived')\n"
+        "        with self.assertRaises(ValueError):\n"
+        "            adjust_stock(item, -10, 'bad adjustment')\n"
+        "        self.assertEqual(json_error('invalid_item', 'bad'), {'error': 'invalid_item', 'message': 'bad'})\n"
+        "        self.assertEqual(error_response('missing', 'not found')['error'], 'missing')\n"
+        "        self.assertEqual(low_stock_report([])['count'], 0)\n"
+    )
+    readme = (
+        f"# {project_name}\n\nA multi-module FastAPI inventory operations API with item CRUD, stock adjustment ledger, low-stock reports, filters, JSON error payloads, and workflow tests.\n\n"
+        "## Run\n\n```bash\nuvicorn app.main:app --reload\n```\n\n"
+        "## Test\n\n```bash\npython -m unittest discover tests\n```\n\n"
+        "```bash\npython -m py_compile app/main.py app/domain.py app/store.py app/reports.py app/routes.py\n```\n"
+    )
+    rows = replace_project_file(files, "app/domain.py", domain)
+    rows = replace_project_file(rows, "app/store.py", store)
+    rows = replace_project_file(rows, "app/reports.py", reports)
+    rows = replace_project_file(rows, "app/routes.py", routes)
+    rows = replace_project_file(rows, "app/main.py", main)
+    rows = replace_project_file(rows, "tests/test_inventory_ops.py", tests)
+    rows = replace_project_file(rows, "README.md", readme)
+    return rows
+
+
+def fastapi_inventory_ops_module_contracts() -> list[dict[str, Any]]:
+    return [
+        {
+            "module": "app.domain",
+            "path": "app/domain.py",
+            "responsibility": "inventory item domain model, stock adjustment, and JSON error payload helpers",
+            "requirements": ["create_item", "update_item", "adjust_stock", "json_error", "low stock predicate"],
+        },
+        {
+            "module": "app.store",
+            "path": "app/store.py",
+            "responsibility": "inventory repository, SKU/category/status/search filters, and stock adjustment ledger",
+            "requirements": ["create stored item", "update stored item", "adjust stock", "filter_inventory", "ledger by SKU", "low_stock report source"],
+        },
+        {
+            "module": "app.reports",
+            "path": "app/reports.py",
+            "responsibility": "inventory JSON serialization and low-stock report construction",
+            "requirements": ["item_to_dict", "adjustment_to_dict", "low_stock_report"],
+        },
+        {
+            "module": "app.routes",
+            "path": "app/routes.py",
+            "responsibility": "FastAPI route adapters for CRUD, stock adjustment, low-stock report, filters, and JSON error responses",
+            "requirements": ["create_item_response", "update_item_response", "list_inventory_response", "adjust_stock_response", "low_stock_response", "error_response"],
+        },
+        {
+            "module": "app.main",
+            "path": "app/main.py",
+            "responsibility": "FastAPI inventory app assembly and health endpoint",
+            "requirements": ["expose health", "include inventory router when FastAPI is installed"],
+        },
+        {
+            "module": "tests.test_inventory_ops",
+            "path": "tests/test_inventory_ops.py",
+            "responsibility": "inventory operations workflow verification",
+            "requirements": ["prove CRUD and stock adjustment ledger", "prove low-stock reports and filters", "prove JSON error payload helpers"],
         },
     ]
 
@@ -2028,6 +2343,181 @@ def vite_counter_app_module_contracts() -> list[dict[str, Any]]:
             "path": "tests/test_vite_contract.py",
             "responsibility": "Vite counter behavior-contract verification",
             "requirements": ["prove manifest entrypoint", "prove counter behaviors are present"],
+        },
+    ]
+
+
+def apply_vite_kanban_board_feature(project_name: str, files: list[Any]) -> list[Any]:
+    main = (
+        "import React, { useMemo, useState } from 'react';\n"
+        "import { createRoot } from 'react-dom/client';\n"
+        "import './styles.css';\n\n"
+        "const STORAGE_KEY = 'ceraxia.vite.kanban.board';\n"
+        "const STATUSES = ['backlog', 'doing', 'done'];\n"
+        "const STATUS_LABELS = { backlog: 'Todo', doing: 'Doing', done: 'Done' };\n\n"
+        "function defaultBoard() {\n"
+        "  return { activeFilter: '', cards: [] };\n"
+        "}\n\n"
+        "function loadBoard() {\n"
+        "  try {\n"
+        "    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');\n"
+        "    return parsed && Array.isArray(parsed.cards) ? parsed : defaultBoard();\n"
+        "  } catch (_error) {\n"
+        "    return defaultBoard();\n"
+        "  }\n"
+        "}\n\n"
+        "function saveBoard(board) {\n"
+        "  localStorage.setItem(STORAGE_KEY, JSON.stringify(board));\n"
+        "  return board;\n"
+        "}\n\n"
+        "function createCard(board, title) {\n"
+        "  const cleanTitle = title.trim();\n"
+        "  if (!cleanTitle) return board;\n"
+        "  const card = { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, title: cleanTitle, status: 'backlog' };\n"
+        "  return { ...board, cards: [...board.cards, card] };\n"
+        "}\n\n"
+        "function moveCard(board, cardId, nextStatus) {\n"
+        "  if (!STATUSES.includes(nextStatus)) return board;\n"
+        "  return { ...board, cards: board.cards.map((card) => card.id === cardId ? { ...card, status: nextStatus } : card) };\n"
+        "}\n\n"
+        "function filterCards(board, query) {\n"
+        "  const needle = query.trim().toLowerCase();\n"
+        "  if (!needle) return board.cards;\n"
+        "  return board.cards.filter((card) => card.title.toLowerCase().includes(needle));\n"
+        "}\n\n"
+        "function boardMetrics(board) {\n"
+        "  const counts = Object.fromEntries(STATUSES.map((status) => [status, 0]));\n"
+        "  for (const card of board.cards) counts[card.status] = (counts[card.status] || 0) + 1;\n"
+        "  return { total: board.cards.length, ...counts };\n"
+        "}\n\n"
+        "function renderMetrics(board) {\n"
+        "  const metrics = boardMetrics(board);\n"
+        "  return <dl className=\"metrics\">{Object.entries(metrics).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;\n"
+        "}\n\n"
+        "function renderBoard(board, visibleCards, onMove) {\n"
+        "  return <section className=\"board\" aria-label=\"Kanban board\">{STATUSES.map((status) => (\n"
+        "    <section className=\"column\" data-status={status} key={status}>\n"
+        "      <h2>{STATUS_LABELS[status]}</h2>\n"
+        "      <ol>{visibleCards.filter((card) => card.status === status).map((card) => (\n"
+        "        <li className=\"kanban-card\" key={card.id} data-card-id={card.id}>\n"
+        "          <strong>{card.title}</strong>\n"
+        "          <div className=\"card-actions\">{STATUSES.filter((target) => target !== card.status).map((target) => <button type=\"button\" key={target} onClick={() => onMove(card.id, target)}>Move to {STATUS_LABELS[target]}</button>)}</div>\n"
+        "        </li>\n"
+        "      ))}</ol>\n"
+        "    </section>\n"
+        "  ))}</section>;\n"
+        "}\n\n"
+        "function App() {\n"
+        "  const [board, setBoard] = useState(() => loadBoard());\n"
+        "  const [title, setTitle] = useState('');\n"
+        "  const [query, setQuery] = useState(board.activeFilter || '');\n"
+        "  const visibleCards = useMemo(() => filterCards({ ...board, activeFilter: query }, query), [board, query]);\n"
+        "  function commit(nextBoard) {\n"
+        "    const saved = saveBoard({ ...nextBoard, activeFilter: query });\n"
+        "    setBoard(saved);\n"
+        "  }\n"
+        "  function addCard(event) {\n"
+        "    event.preventDefault();\n"
+        "    commit(createCard(board, title));\n"
+        "    setTitle('');\n"
+        "  }\n"
+        "  function handleMoveCard(cardId, nextStatus) {\n"
+        "    commit(moveCard(board, cardId, nextStatus));\n"
+        "  }\n"
+        "  React.useEffect(() => {\n"
+        "    const listener = () => setBoard(loadBoard());\n"
+        "    window.addEventListener('storage', listener);\n"
+        "    return () => window.removeEventListener('storage', listener);\n"
+        "  }, []);\n"
+        "  return <main className=\"app-shell\">\n"
+        "    <header><h1>{PROJECT_TITLE}</h1><p>{visibleCards.length} visible cards</p>{renderMetrics(board)}</header>\n"
+        "    <form id=\"kanban-form\" onSubmit={addCard}>\n"
+        "      <input id=\"card-title\" value={title} onChange={(event) => setTitle(event.target.value)} aria-label=\"Card title\" />\n"
+        "      <button type=\"submit\">Add card</button>\n"
+        "    </form>\n"
+        "    <label className=\"filter-label\">Filter<input id=\"card-filter\" value={query} onChange={(event) => setQuery(event.target.value)} /></label>\n"
+        "    {renderBoard(board, visibleCards, handleMoveCard)}\n"
+        "  </main>;\n"
+        "}\n\n"
+        f"const PROJECT_TITLE = '{project_name} Kanban';\n"
+        "createRoot(document.getElementById('root')).render(<App />);\n"
+    )
+    styles = (
+        "body { margin: 0; background: #f4f6f8; color: #17191f; font-family: Inter, system-ui, sans-serif; }\n"
+        ".app-shell { width: min(1120px, calc(100% - 32px)); margin: 32px auto; display: grid; gap: 18px; }\n"
+        "header { display: grid; gap: 10px; }\n"
+        "h1, h2, p { margin: 0; }\n"
+        ".metrics { display: flex; flex-wrap: wrap; gap: 10px; margin: 0; }\n"
+        ".metrics div { background: white; border: 1px solid #d8dee8; border-radius: 8px; min-width: 88px; padding: 8px 10px; }\n"
+        ".metrics dt { color: #5f6b7a; font-size: .8rem; }\n"
+        ".metrics dd { margin: 0; font-weight: 700; }\n"
+        "#kanban-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; }\n"
+        "input, button { min-height: 40px; border: 1px solid #bfc9d6; border-radius: 6px; font: inherit; padding: 8px 10px; }\n"
+        "button { cursor: pointer; background: #233a58; color: white; }\n"
+        ".filter-label { display: grid; gap: 6px; max-width: 420px; }\n"
+        ".board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }\n"
+        ".column { background: white; border: 1px solid #d8dee8; border-radius: 8px; padding: 12px; min-height: 280px; }\n"
+        ".column ol { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }\n"
+        ".kanban-card { display: grid; gap: 8px; border: 1px solid #d4dbe7; border-left: 4px solid #526a8a; border-radius: 8px; padding: 10px; }\n"
+        ".card-actions { display: flex; flex-wrap: wrap; gap: 6px; }\n"
+        ".card-actions button { min-height: 32px; padding: 5px 8px; }\n"
+        "@media (max-width: 760px) { .board, #kanban-form { grid-template-columns: 1fr; } }\n"
+    )
+    tests = (
+        "from pathlib import Path\n"
+        "import json\n"
+        "import unittest\n\n\n"
+        "class ViteKanbanContractTests(unittest.TestCase):\n"
+        "    def test_manifest_and_entrypoint(self):\n"
+        "        manifest = json.loads(Path('package.json').read_text(encoding='utf-8'))\n"
+        "        self.assertIn('dev', manifest['scripts'])\n"
+        "        html = Path('index.html').read_text(encoding='utf-8')\n"
+        "        self.assertIn('/src/main.jsx', html)\n\n"
+        "    def test_kanban_workflow_markers(self):\n"
+        "        source = Path('src/main.jsx').read_text(encoding='utf-8')\n"
+        "        for marker in ('function createCard', 'function moveCard', 'function filterCards', 'function boardMetrics', 'function renderMetrics', 'function renderBoard'):\n"
+        "            self.assertIn(marker, source)\n"
+        "        for marker in ('localStorage', 'loadBoard', 'saveBoard', 'addEventListener', 'backlog', 'doing', 'done'):\n"
+        "            self.assertIn(marker, source)\n"
+        "        self.assertIn('card-filter', source)\n"
+        "        self.assertIn('Move to', source)\n\n"
+        "    def test_styles_define_board_columns(self):\n"
+        "        styles = Path('src/styles.css').read_text(encoding='utf-8')\n"
+        "        self.assertIn('.board', styles)\n"
+        "        self.assertIn('.column', styles)\n"
+    )
+    readme = (
+        f"# {project_name}\n\nA Vite kanban board with card creation, movement, filtering, column counters, and localStorage persistence.\n\n"
+        "## Install\n\n```bash\nnpm install\n```\n\n"
+        "## Run\n\n```bash\nnpm run dev\n```\n\n"
+        "## Test\n\n```bash\npython -m unittest discover tests\n```\n"
+    )
+    rows = replace_project_file(files, "src/main.jsx", main)
+    rows = replace_project_file(rows, "src/styles.css", styles)
+    rows = replace_project_file(rows, "tests/test_vite_contract.py", tests)
+    rows = replace_project_file(rows, "README.md", readme)
+    return rows
+
+
+def vite_kanban_board_module_contracts() -> list[dict[str, Any]]:
+    return [
+        {
+            "module": "src.main",
+            "path": "src/main.jsx",
+            "responsibility": "Vite React kanban board state, rendering, interactions, filtering, metrics, and persistence",
+            "requirements": ["createCard", "moveCard", "filterCards", "boardMetrics", "renderMetrics", "renderBoard", "loadBoard", "saveBoard", "addEventListener"],
+        },
+        {
+            "module": "src.styles",
+            "path": "src/styles.css",
+            "responsibility": "responsive kanban board layout and card styling",
+            "requirements": ["style board columns", "style cards", "support narrow screens"],
+        },
+        {
+            "module": "tests.test_vite_contract",
+            "path": "tests/test_vite_contract.py",
+            "responsibility": "Vite kanban workflow contract verification",
+            "requirements": ["prove manifest and entrypoint", "prove kanban behavior markers", "prove board styling markers"],
         },
     ]
 

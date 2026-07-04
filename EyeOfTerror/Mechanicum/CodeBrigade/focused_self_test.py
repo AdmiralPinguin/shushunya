@@ -12,10 +12,10 @@ from greenfield_architect import build_greenfield_project_brief as architect_bui
 from greenfield_architect import greenfield_model_runtime_defaults
 from greenfield_dependency_worker import dependency_manager_status
 from greenfield_feature_worker import infer_acceptance_features
-from greenfield_implementation_worker import execute_file_set_synthesis_contract, execute_module_synthesis_contracts, forbidden_markers_found as implementation_forbidden_markers_found, generated_file_quality, task_behavior_markers
+from greenfield_implementation_worker import execute_file_set_synthesis_contract, execute_module_synthesis_contracts, extract_json_object, forbidden_markers_found as implementation_forbidden_markers_found, generated_file_quality, task_behavior_markers
 from greenfield_implementation_worker import build_implementation_trace as worker_build_implementation_trace
 from greenfield_implementation_worker import build_implementation_worker_plan as worker_build_implementation_worker_plan
-from greenfield_live_trial import compact_greenfield_result
+from greenfield_live_trial import allocate_live_trial_root, compact_greenfield_result
 from greenfield_memory_worker import build_greenfield_memory_record
 from greenfield_project import build_greenfield_project_brief, execute_greenfield_project_brief, forbidden_placeholder_markers_found, model_synthesis_blockers, reconcile_module_synthesis_with_file_set, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_review_worker import artifact_review_greenfield_project, python_source_semantic_status
@@ -373,8 +373,10 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertTrue(any("calculator_error_handling" in blocker for blocker in review["blockers"]))
 
     def test_greenfield_feature_worker_detects_task_features(self) -> None:
-        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api issue tracker operations dashboard todo kanban project board calculator csv summary sales analytics pipeline local agent tool router telegram bot /start /help vite counter app text utils library")}
-        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "kanban_board_frontend", "notes_api", "issue_tracker_api", "operations_dashboard_api", "csv_summary", "sales_analytics_pipeline", "local_agent_command_router", "telegram_command_bot", "vite_counter_app", "python_text_utils_library"})
+        feature_ids = {feature["id"] for feature in infer_acceptance_features("notes api issue tracker operations dashboard todo calculator csv summary sales analytics pipeline local agent tool router telegram bot /start /help vite counter app text utils library")}
+        self.assertEqual(feature_ids, {"calculator_operations", "todo_list", "notes_api", "issue_tracker_api", "operations_dashboard_api", "csv_summary", "sales_analytics_pipeline", "local_agent_command_router", "telegram_command_bot", "vite_counter_app", "python_text_utils_library"})
+        kanban_feature_ids = {feature["id"] for feature in infer_acceptance_features("kanban project board with todo doing done columns and column counters")}
+        self.assertEqual(kanban_feature_ids, {"kanban_board_frontend"})
 
     def test_greenfield_feature_worker_does_not_treat_todo_remaining_counter_as_vite_app(self) -> None:
         feature_ids = {feature["id"] for feature in infer_acceptance_features("Создай todo list со счетчиком оставшихся задач и фильтром active/completed.")}
@@ -502,6 +504,53 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(report["applied_count"], len(project["implementation_plan"]["module_sequence"]))
             self.assertIn(module["path"], report["changed_files"])
             self.assertEqual(path.read_text(encoding="utf-8"), "def main():\n    return 'model-generated'\n")
+
+    def test_greenfield_module_synthesis_reformats_invalid_model_json_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = architect_build_greenfield_project_brief("Создай CLI калькулятор `reformat-calc`.")
+            module = project["implementation_plan"]["module_sequence"][0]
+            path = repo / module["path"]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("def old():\n    return 'old'\n", encoding="utf-8")
+            calls: list[str] = []
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                contract = payload["module_synthesis_contract"]
+                calls.append("reformat" if "invalid_model_content" in payload else "initial")
+                if "invalid_model_content" in payload:
+                    is_test = "test" in Path(contract["path"]).name.lower() or "/tests/" in f"/{contract['path']}"
+                    return {
+                        "ok": True,
+                        "status": "answered",
+                        "content": json.dumps(
+                            {
+                                "path": contract["path"],
+                                "content": (
+                                    "import unittest\n\nclass ReformattedTests(unittest.TestCase):\n    def test_reformatted(self):\n        self.assertTrue(True)\n"
+                                    if is_test
+                                    else "def main():\n    return 'reformatted'\n"
+                                ),
+                                "requirements_satisfied": contract["requirements"],
+                                "tests_to_update": contract["paired_tests"],
+                                "notes": "reformatted valid JSON",
+                            }
+                        ),
+                    }
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": '{"path": "' + contract["path"] + '", "content": "const root = document.getElementById("root");"}',
+                }
+
+            report = execute_module_synthesis_contracts(repo, project, guidance)
+            self.assertEqual(report["status"], "applied", report)
+            self.assertIn("reformat", calls)
+            self.assertEqual(path.read_text(encoding="utf-8"), "def main():\n    return 'reformatted'\n")
+            first_row = report["rows"][0]
+            self.assertEqual(first_row["status"], "applied", first_row)
+            self.assertEqual(first_row["reformat_guidance_status"], "answered")
+            self.assertIn("model output required JSON reformat retry", first_row["warnings"])
 
     def test_greenfield_file_set_synthesis_applies_source_and_tests_together(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1327,6 +1376,34 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(review["scenario_review"]["status"], "passed", review)
             self.assertEqual(review["status"], "passed", review)
 
+    def test_project_creation_vite_kanban_board_implements_multi_workflow_feature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(
+                repo,
+                "Создай Vite frontend web app `project-board-demo`: kanban-доска с колонками todo/doing/done, добавлением карточек, переносом карточек между колонками, фильтром по тексту, счетчиками по колонкам, localStorage persistence и тестами контракта.",
+            )
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "implemented", report)
+            project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
+            self.assertEqual(project["template_id"], "node_vite_app")
+            self.assertTrue(any(feature["id"] == "kanban_board_frontend" for feature in project["acceptance_features"]))
+            self.assertIn("kanban_board_frontend", project["implementation_feature_report"]["recognized_feature_ids"])
+            self.assertGreaterEqual(project["scenario_plan"]["scenario_count"], 3)
+            self.assertIn("src/main.jsx", project["expected_files"])
+            source = (repo / "src/main.jsx").read_text(encoding="utf-8")
+            for marker in ("function createCard", "function moveCard", "function filterCards", "function boardMetrics", "function renderMetrics", "function renderBoard"):
+                self.assertIn(marker, source)
+            for marker in ("localStorage", "loadBoard", "saveBoard", "addEventListener", "backlog", "doing", "done"):
+                self.assertIn(marker, source)
+            self.assertIn("test_kanban_workflow_markers", (repo / "tests/test_vite_contract.py").read_text(encoding="utf-8"))
+            verification = report["execution_result"]["greenfield_project"]["verification"]
+            self.assertEqual(verification["status"], "passed", verification)
+            review = report["execution_result"]["greenfield_project"]["greenfield_review"]
+            self.assertEqual(review["semantic_review"]["status"], "passed", review)
+            self.assertEqual(review["scenario_review"]["status"], "passed", review)
+            self.assertEqual(review["status"], "passed", review)
+
     def test_project_creation_notes_api_implements_task_feature(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -1377,6 +1454,40 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             for module_path in ("app/domain.py", "app/store.py", "app/routes.py"):
                 self.assertEqual(module_rows[module_path]["paired_tests"], ["tests/test_issue_tracker.py"])
             self.assertIn("tests/test_issue_tracker.py", module_rows["app/main.py"]["paired_tests"])
+            verification = report["execution_result"]["greenfield_project"]["verification"]
+            self.assertEqual(verification["status"], "passed", verification)
+            review = report["execution_result"]["greenfield_project"]["greenfield_review"]
+            self.assertEqual(review["semantic_review"]["status"], "passed", review)
+            self.assertEqual(review["scenario_review"]["status"], "passed", review)
+            self.assertEqual(review["status"], "passed", review)
+
+    def test_project_creation_inventory_ops_api_implements_multi_workflow_feature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(
+                repo,
+                "Создай FastAPI backend service `inventory-ops-demo`: inventory items CRUD, stock adjustment ledger, low-stock report endpoint, search/filter by sku/category/status, JSON error responses, tests without network.",
+            )
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "implemented", report)
+            project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
+            self.assertEqual(project["template_id"], "python_fastapi_service")
+            self.assertTrue(any(feature["id"] == "inventory_ops_api" for feature in project["acceptance_features"]))
+            self.assertIn("inventory_ops_api", project["implementation_feature_report"]["recognized_feature_ids"])
+            self.assertGreaterEqual(len(project["module_contracts"]), 6)
+            self.assertGreaterEqual(project["scenario_plan"]["scenario_count"], 3)
+            expected = {"app/domain.py", "app/store.py", "app/reports.py", "app/routes.py", "app/main.py", "tests/test_inventory_ops.py"}
+            self.assertTrue(expected.issubset(set(project["expected_files"])))
+            self.assertIn("def create_item", (repo / "app/domain.py").read_text(encoding="utf-8"))
+            self.assertIn("def adjust_stock", (repo / "app/domain.py").read_text(encoding="utf-8"))
+            self.assertIn("class InventoryStore", (repo / "app/store.py").read_text(encoding="utf-8"))
+            self.assertIn("def low_stock_report", (repo / "app/reports.py").read_text(encoding="utf-8"))
+            self.assertIn("def create_item_response", (repo / "app/routes.py").read_text(encoding="utf-8"))
+            self.assertIn("include_router", (repo / "app/main.py").read_text(encoding="utf-8"))
+            tests = (repo / "tests/test_inventory_ops.py").read_text(encoding="utf-8")
+            self.assertIn("test_inventory_crud_and_stock_adjustment_ledger", tests)
+            self.assertIn("test_low_stock_report_and_filters", tests)
+            self.assertIn("test_domain_validation_and_json_errors", tests)
             verification = report["execution_result"]["greenfield_project"]["verification"]
             self.assertEqual(verification["status"], "passed", verification)
             review = report["execution_result"]["greenfield_project"]["greenfield_review"]
@@ -1806,6 +1917,58 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(result["module_synthesis_status"], "model_unavailable")
             self.assertEqual(result["module_synthesis_model_unavailable_count"], 2)
             self.assertEqual(result["model_guidance_ledger_status"], "partial")
+
+    def test_greenfield_live_trial_allocator_avoids_parallel_workspace_collisions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            first = allocate_live_trial_root(run_root)
+            second = allocate_live_trial_root(run_root)
+            self.assertNotEqual(first, second)
+            self.assertTrue(first.exists())
+            self.assertTrue(second.exists())
+            self.assertTrue(first.name.startswith("greenfield-live-"))
+            self.assertTrue(second.name.startswith("greenfield-live-"))
+
+    def test_greenfield_model_json_parser_repairs_code_regex_escapes(self) -> None:
+        payload = """```json
+{"path":"src/main.jsx","content":"const compact = value.replace(/\\s+/g, ' ');\\nconst id = value.match(/\\d+/)?.[0];","requirements_satisfied":["render board"],"tests_to_update":["tests/test_vite_contract.py"],"notes":"ok"}
+```"""
+        output = extract_json_object(payload)
+        self.assertEqual(output["path"], "src/main.jsx")
+        self.assertIn(r"/\s+/g", output["content"])
+        self.assertIn(r"/\d+/", output["content"])
+
+    def test_greenfield_model_json_parser_repairs_literal_newlines_inside_code_content(self) -> None:
+        payload = """{
+  "path": "src/main.jsx",
+  "content": "function createCard(title) {
+  return { title };
+}",
+  "requirements_satisfied": ["render board"],
+  "tests_to_update": ["tests/test_vite_contract.py"],
+  "notes": "ok"
+}"""
+        output = extract_json_object(payload)
+        self.assertEqual(output["path"], "src/main.jsx")
+        self.assertIn("function createCard", output["content"])
+        self.assertIn("\n  return", output["content"])
+
+    def test_greenfield_model_json_parser_recovers_unescaped_code_quotes(self) -> None:
+        payload = """{
+  "path": "src/main.jsx",
+  "content": "function renderBoard() {
+  const root = document.getElementById("root");
+  root.textContent = "ready";
+}",
+  "requirements_satisfied": ["render board"],
+  "tests_to_update": ["tests/test_vite_contract.py"],
+  "notes": "ok"
+}"""
+        output = extract_json_object(payload)
+        self.assertEqual(output["path"], "src/main.jsx")
+        self.assertIn('document.getElementById("root")', output["content"])
+        self.assertEqual(output["requirements_satisfied"], ["render board"])
+        self.assertEqual(output["tests_to_update"], ["tests/test_vite_contract.py"])
 
 
 if __name__ == "__main__":
