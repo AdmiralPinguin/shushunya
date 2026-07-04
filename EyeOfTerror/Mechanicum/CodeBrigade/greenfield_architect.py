@@ -122,6 +122,62 @@ def ensure_readme_documents_commands(
     return files
 
 
+def extract_guidance_json(content: str) -> dict[str, Any]:
+    text = content.strip()
+    if not text:
+        return {}
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            return {}
+        try:
+            parsed = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def normalize_guidance_strings(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if isinstance(item, str) and item.strip()]
+
+
+def architecture_model_constraints(model_guidance: dict[str, Any]) -> dict[str, Any]:
+    content = str(model_guidance.get("content") or "") if isinstance(model_guidance, dict) else ""
+    parsed = extract_guidance_json(content)
+    guidance = parsed.get("guidance") if isinstance(parsed.get("guidance"), dict) else {}
+    evidence_required = normalize_guidance_strings(parsed.get("evidence_required"))
+    return {
+        "kind": "code_brigade_greenfield_architecture_model_constraints",
+        "status": "parsed" if parsed else "unparsed" if content.strip() else "not_requested",
+        "missing_modules": normalize_guidance_strings(guidance.get("missing_modules")),
+        "verification_gaps": normalize_guidance_strings(guidance.get("verification_gaps")),
+        "scaffold_risks": normalize_guidance_strings(guidance.get("scaffold_risks")),
+        "next_steps": normalize_guidance_strings(guidance.get("next_steps")),
+        "evidence_required": evidence_required,
+        "constraint_count": sum(
+            len(row)
+            for row in (
+                normalize_guidance_strings(guidance.get("missing_modules")),
+                normalize_guidance_strings(guidance.get("verification_gaps")),
+                normalize_guidance_strings(guidance.get("scaffold_risks")),
+                evidence_required,
+            )
+        ),
+    }
+
+
 def build_greenfield_project_brief(
     task: str,
     payload: dict[str, Any] | None = None,
@@ -197,6 +253,7 @@ def build_greenfield_project_brief(
         },
         "Review the greenfield architecture plan, identify missing modules, verification gaps, and scaffold risks. Return concise guidance.",
     )
+    model_constraints = architecture_model_constraints(model_guidance)
     implementation_plan = build_implementation_worker_plan(task, template_id, module_contracts, expected_files, request_guidance)
     implementation_trace = build_implementation_trace(implementation_plan)
     implementation_feature_report = build_implementation_feature_report(
@@ -254,6 +311,7 @@ def build_greenfield_project_brief(
             "mvp_boundaries": ["working entrypoint", "focused tests", "README with real commands", "task-derived acceptance features implemented when detected"],
             "anti_stub_policy": "non-trivial projects must expose separate entrypoint, implementation module, and tests",
             "model_guidance": model_guidance,
+            "model_constraints": model_constraints,
         },
         "file_tree_plan": [{"path": path, "role": "planned_project_file"} for path in expected_files],
         "module_contracts": module_contracts,

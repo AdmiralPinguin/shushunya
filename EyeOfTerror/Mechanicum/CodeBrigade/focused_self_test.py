@@ -558,6 +558,34 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(arch_review["status"], "passed", arch_review)
             self.assertIn("tests/test_browser_game.py", {row["path"] for row in arch_review["rows"]})
 
+    def test_greenfield_architecture_guidance_review_uses_model_constraints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "domain.py").write_text("class Ledger: pass\n", encoding="utf-8")
+            tests = repo / "tests"
+            tests.mkdir()
+            (tests / "test_domain.py").write_text("def test_domain():\n    assert True\n", encoding="utf-8")
+            project = {
+                "expected_files": ["domain.py", "tests/test_domain.py"],
+                "architecture_plan": {
+                    "model_guidance": {"content": "unstructured prose retained for humans"},
+                    "model_constraints": {
+                        "status": "parsed",
+                        "evidence_required": ["domain.py ledger model", "test_domain.py domain verification"],
+                    },
+                },
+            }
+            review = review_greenfield_project(
+                repo,
+                project,
+                {"status": "not_required", "blockers": [], "warnings": []},
+                {"status": "passed", "results": [{"command": "python -m unittest discover tests", "status": "passed"}]},
+                lambda role, payload, instructions: {"ok": True, "status": "answered", "content": "{}"},
+            )
+            arch_review = review["architecture_guidance_review"]
+            self.assertEqual(arch_review["status"], "passed", arch_review)
+            self.assertIn("tests/test_domain.py", {row["path"] for row in arch_review["rows"]})
+
     def test_greenfield_artifact_review_blocks_unwired_frontend_assets_and_weak_tests(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -681,9 +709,35 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertTrue(any(feature["id"] == "sales_analytics_pipeline" for feature in project["acceptance_features"]))
 
     def test_greenfield_architect_owns_project_brief_and_plan(self) -> None:
-        project = architect_build_greenfield_project_brief("Создай CLI калькулятор `architect-calc`.")
+        def guidance(role: str, payload: dict, instructions: str) -> dict:
+            if role == "GreenfieldArchitect":
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": "```json\n"
+                    + json.dumps(
+                        {
+                            "guidance": {
+                                "missing_modules": ["CalculatorCore"],
+                                "verification_gaps": ["CLI smoke command"],
+                                "scaffold_risks": ["argument parsing drift"],
+                                "next_steps": ["keep tests paired with core"],
+                            },
+                            "evidence_required": ["tests/test_core.py proves calculator behavior"],
+                        }
+                    )
+                    + "\n```",
+                }
+            return {"ok": True, "status": "answered", "content": "{}"}
+
+        project = architect_build_greenfield_project_brief("Создай CLI калькулятор `architect-calc`.", request_guidance=guidance)
         self.assertEqual(project["kind"], "code_brigade_greenfield_project_brief")
         self.assertEqual(project["architecture_plan"]["selected_template"], "python_cli_basic")
+        constraints = project["architecture_plan"]["model_constraints"]
+        self.assertEqual(constraints["status"], "parsed")
+        self.assertEqual(constraints["missing_modules"], ["CalculatorCore"])
+        self.assertEqual(constraints["verification_gaps"], ["CLI smoke command"])
+        self.assertEqual(constraints["evidence_required"], ["tests/test_core.py proves calculator behavior"])
         self.assertEqual(project["implementation_plan"]["kind"], "code_brigade_greenfield_implementation_plan")
         self.assertEqual(project["implementation_plan"]["role"], "GreenfieldImplementationWorker")
         self.assertEqual(project["implementation_plan"]["synthesis_policy"]["mode"], "module_by_module_llm_contract")

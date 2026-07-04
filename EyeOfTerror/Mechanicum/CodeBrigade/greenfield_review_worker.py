@@ -483,13 +483,16 @@ def reviewer_model_findings(guidance: dict[str, Any]) -> dict[str, Any]:
 
 
 def architecture_guidance_review(repo: Path, project_brief: dict[str, Any]) -> dict[str, Any]:
-    guidance = project_brief.get("architecture_plan", {}).get("model_guidance", {}) if isinstance(project_brief.get("architecture_plan"), dict) else {}
+    architecture_plan = project_brief.get("architecture_plan", {}) if isinstance(project_brief.get("architecture_plan"), dict) else {}
+    guidance = architecture_plan.get("model_guidance", {}) if isinstance(architecture_plan.get("model_guidance"), dict) else {}
+    model_constraints = architecture_plan.get("model_constraints", {}) if isinstance(architecture_plan.get("model_constraints"), dict) else {}
     content = str(guidance.get("content") or "") if isinstance(guidance, dict) else ""
     expected_files = [str(path) for path in project_brief.get("expected_files", []) if isinstance(path, str)]
     blockers: list[str] = []
     warnings: list[str] = []
     evidence_rows: list[dict[str, Any]] = []
-    if not content.strip():
+    structured_evidence_required = [str(item) for item in model_constraints.get("evidence_required", []) if isinstance(item, str) and item.strip()]
+    if not content.strip() and not structured_evidence_required:
         return {
             "kind": "code_brigade_greenfield_architecture_guidance_review",
             "contract_version": "eye-mechanicum.v1",
@@ -499,19 +502,33 @@ def architecture_guidance_review(repo: Path, project_brief: dict[str, Any]) -> d
             "blockers": [],
             "warnings": [],
         }
-    try:
-        parsed = extract_json_object(content)
-    except ValueError as exc:
+    evidence_required = structured_evidence_required
+    if not evidence_required:
+        try:
+            parsed = extract_json_object(content)
+        except ValueError as exc:
+            return {
+                "kind": "code_brigade_greenfield_architecture_guidance_review",
+                "contract_version": "eye-mechanicum.v1",
+                "status": "advisory_unparsed",
+                "evidence_file_count": 0,
+                "rows": [],
+                "blockers": [],
+                "warnings": [f"GreenfieldArchitect model guidance was not structured JSON: {exc}"],
+            }
+        evidence_required = parsed.get("evidence_required") if isinstance(parsed.get("evidence_required"), list) else []
+    if model_constraints and model_constraints.get("status") == "unparsed" and content.strip():
+        warnings.append("GreenfieldArchitect model guidance constraints were not parsed; raw guidance was retained as advisory")
+    if not evidence_required:
         return {
             "kind": "code_brigade_greenfield_architecture_guidance_review",
             "contract_version": "eye-mechanicum.v1",
-            "status": "advisory_unparsed",
+            "status": "not_applicable",
             "evidence_file_count": 0,
             "rows": [],
             "blockers": [],
-            "warnings": [f"GreenfieldArchitect model guidance was not structured JSON: {exc}"],
+            "warnings": warnings,
         }
-    evidence_required = parsed.get("evidence_required") if isinstance(parsed.get("evidence_required"), list) else []
     for item in evidence_required:
         if not isinstance(item, str):
             continue

@@ -23,10 +23,11 @@
       "evidence": [
         "greenfield_architect.py owns project type inference, template selection, stack, architecture_plan, file_tree_plan, module_contracts, implementation_plan, implementation_trace, and verification_plan",
         "architecture_plan.json, file_tree_plan.json, module_contracts.json, implementation_trace.json, and verification_plan.json are attached as project artifacts",
+        "greenfield_architect.py parses structured GreenfieldArchitect model guidance into architecture_plan.model_constraints with missing_modules, verification_gaps, scaffold_risks, next_steps, and evidence_required rows",
         "greenfield_architect.py ensure_readme_documents_commands synchronizes README command documentation from actual run_commands and verification_commands after template and feature overrides",
         "focused_self_test.py test_greenfield_architect_owns_project_brief_and_plan covers the role boundary"
       ],
-      "remaining_risk": "Stack selection is deterministic with short LLM guidance, not yet a fully exploratory architect for unknown domains."
+      "remaining_risk": "Stack selection is deterministic with short LLM guidance, but structured model constraints are now captured and reviewed instead of remaining only raw prose."
     },
     {
       "id": "scaffold_worker",
@@ -152,7 +153,7 @@
         "greenfield_review_worker.py includes artifact_review_greenfield_project for cross-file launch/test/module wiring checks",
         "greenfield_review_worker.py includes definition_of_done_review with per-item evidence and missing_evidence rows, and blocks greenfield completion when a declared DoD item is not proven",
         "greenfield_review_worker.py consumes structured GreenfieldReviewer model JSON blockers as acceptance blockers while treating unstructured/prose guidance as advisory only",
-        "greenfield_review_worker.py architecture_guidance_review blocks accepted projects when structured GreenfieldArchitect evidence_required files are missing",
+        "greenfield_review_worker.py architecture_guidance_review blocks accepted projects when structured GreenfieldArchitect evidence_required files are missing and resolves model-supplied file suffixes against expected_files",
         "focused_self_test.py test_greenfield_review_blocks_unproven_definition_of_done_item proves README command drift blocks DoD instead of passing as a warning",
         "focused_self_test.py test_greenfield_review_consumes_structured_model_blockers proves a model reviewer can block acceptance with concrete structured blockers",
         "focused_self_test.py test_greenfield_review_blocks_missing_architecture_guidance_evidence proves ignored architecture evidence requirements block review",

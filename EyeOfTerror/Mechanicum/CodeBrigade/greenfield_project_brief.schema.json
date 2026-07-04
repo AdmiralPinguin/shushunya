@@ -95,7 +95,7 @@
     },
     "architecture_plan": {
       "type": "object",
-      "required": ["summary", "selected_template", "selection_reason", "mvp_boundaries", "anti_stub_policy"]
+      "required": ["summary", "selected_template", "selection_reason", "mvp_boundaries", "anti_stub_policy", "model_constraints"]
     },
     "file_tree_plan": {
       "type": "array",
