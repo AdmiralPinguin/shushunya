@@ -61,7 +61,11 @@ def infer_project_type(task: str) -> str:
     return "cli_tool"
 
 
-def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_greenfield_project_brief(
+    task: str,
+    payload: dict[str, Any] | None = None,
+    request_guidance=request_greenfield_model_guidance,
+) -> dict[str, Any]:
     payload = payload or {}
     project_name = str(payload.get("project_name") or project_name_from_task(task))
     project_type = str(payload.get("project_type") or infer_project_type(task))
@@ -118,7 +122,7 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         "allowlisted verification commands pass or blockers are explicit",
         "README documents real run and verification commands",
     ]
-    model_guidance = request_greenfield_model_guidance(
+    model_guidance = request_guidance(
         "GreenfieldArchitect",
         {
             "task": task,
@@ -131,7 +135,7 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         },
         "Review the greenfield architecture plan, identify missing modules, verification gaps, and scaffold risks. Return concise guidance.",
     )
-    implementation_plan = build_implementation_worker_plan(task, template_id, module_contracts, expected_files, request_greenfield_model_guidance)
+    implementation_plan = build_implementation_worker_plan(task, template_id, module_contracts, expected_files, request_guidance)
     implementation_trace = build_implementation_trace(implementation_plan)
     implementation_feature_report = build_implementation_feature_report(
         task,
@@ -141,6 +145,7 @@ def build_greenfield_project_brief(task: str, payload: dict[str, Any] | None = N
         files,
         base_contract_paths,
         module_contracts,
+        request_guidance,
     )
     scenario_plan = build_greenfield_scenario_plan(project_type, template_id, acceptance_features, expected_files)
     brief = {
@@ -229,6 +234,7 @@ def build_implementation_feature_report(
     files: list[Any],
     base_contract_paths: list[str],
     module_contracts: list[Any],
+    request_guidance=request_greenfield_model_guidance,
 ) -> dict[str, Any]:
     generated_paths = [str(item.get("path") or "") for item in files if isinstance(item, dict) and item.get("path")]
     contract_paths = [str(item.get("path") or "") for item in module_contracts if isinstance(item, dict) and item.get("path")]
@@ -237,7 +243,7 @@ def build_implementation_feature_report(
     changed_file_paths = sorted(set(generated_paths) - set(base_file_paths))
     if feature_ids and not changed_file_paths:
         changed_file_paths = sorted(set(generated_paths))
-    guidance = request_greenfield_model_guidance(
+    guidance = request_guidance(
         "GreenfieldImplementationWorker",
         {
             "task": task,

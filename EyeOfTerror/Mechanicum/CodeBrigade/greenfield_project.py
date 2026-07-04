@@ -145,10 +145,10 @@ def build_greenfield_model_guidance_ledger(
     }
 
 
-def extract_project_spec(task: str) -> dict[str, Any]:
+def extract_project_spec(task: str, request_guidance=request_greenfield_model_guidance) -> dict[str, Any]:
     marker = "CERAXIA_PROJECT:"
     if marker not in task:
-        brief = build_greenfield_project_brief(task)
+        brief = build_greenfield_project_brief(task, request_guidance=request_guidance)
         return {
             "source": "greenfield_project_brief",
             "files": brief["files"],
@@ -160,7 +160,7 @@ def extract_project_spec(task: str) -> dict[str, Any]:
     payload, _ = json.JSONDecoder().raw_decode(raw)
     if not isinstance(payload, dict):
         raise ValueError("CERAXIA_PROJECT payload must be a JSON object")
-    brief = build_greenfield_project_brief(task, payload)
+    brief = build_greenfield_project_brief(task, payload, request_guidance)
     return {
         "source": "explicit_ceraxia_project",
         "files": brief["files"],
@@ -295,7 +295,7 @@ def validate_greenfield_project_brief(brief: dict[str, Any]) -> list[str]:
     return problems
 
 
-def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
+def execute_greenfield_project_brief(brief: dict[str, Any], request_guidance=request_greenfield_model_guidance) -> dict[str, Any]:
     repo = Path(str(brief.get("repo_path") or ""))
     workspace = greenfield_workspace_status(repo)
     if not workspace["repo_exists"] or not workspace["repo_is_dir"]:
@@ -306,7 +306,7 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
             workspace,
         )
     try:
-        spec = extract_project_spec(str(brief.get("task") or ""))
+        spec = extract_project_spec(str(brief.get("task") or ""), request_guidance)
         project_brief = spec.get("greenfield_project_brief") if isinstance(spec.get("greenfield_project_brief"), dict) else {}
         contract_problems = validate_greenfield_project_brief(project_brief)
         if contract_problems:
@@ -322,7 +322,7 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         return scaffold_report
     operation_results = scaffold_report.get("operation_results", []) if isinstance(scaffold_report.get("operation_results"), list) else []
     changed_files = [str(path) for path in scaffold_report.get("changed_files", []) if isinstance(path, str)]
-    file_set_synthesis_report = execute_file_set_synthesis_contract(repo, project_brief, request_greenfield_model_guidance)
+    file_set_synthesis_report = execute_file_set_synthesis_contract(repo, project_brief, request_guidance)
     operation_results.extend(
         item
         for item in file_set_synthesis_report.get("operation_results", [])
@@ -332,7 +332,7 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
     operation_results.append(write_greenfield_json_artifact(repo, "greenfield_file_set_synthesis_report.json", file_set_synthesis_report))
     if "greenfield_file_set_synthesis_report.json" not in changed_files:
         changed_files.append("greenfield_file_set_synthesis_report.json")
-    implementation_synthesis_report = execute_module_synthesis_contracts(repo, project_brief, request_greenfield_model_guidance)
+    implementation_synthesis_report = execute_module_synthesis_contracts(repo, project_brief, request_guidance)
     operation_results.extend(
         item
         for item in implementation_synthesis_report.get("operation_results", [])
@@ -344,9 +344,9 @@ def execute_greenfield_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         changed_files.append("greenfield_module_synthesis_report.json")
     dependency_report = run_dependency_worker(repo, project_brief)
     commands = spec.get("verification_commands") if isinstance(spec.get("verification_commands"), list) else []
-    verification_loop = run_greenfield_verification_loop(repo, [str(command) for command in commands if isinstance(command, str)], project_brief)
+    verification_loop = run_greenfield_verification_loop(repo, [str(command) for command in commands if isinstance(command, str)], project_brief, request_guidance=request_guidance)
     verification = verification_loop.get("final_verification", {}) if isinstance(verification_loop.get("final_verification"), dict) else {}
-    greenfield_review = review_greenfield_project(repo, project_brief, dependency_report, verification)
+    greenfield_review = review_greenfield_project(repo, project_brief, dependency_report, verification, request_guidance)
     greenfield_memory_record = build_greenfield_memory_record(project_brief, dependency_report, verification_loop, greenfield_review, implementation_synthesis_report, file_set_synthesis_report)
     greenfield_model_guidance_ledger = build_greenfield_model_guidance_ledger(project_brief, file_set_synthesis_report, implementation_synthesis_report, verification_loop, greenfield_review)
     greenfield_run_report = build_greenfield_run_report(project_brief, file_set_synthesis_report, implementation_synthesis_report, dependency_report, verification_loop, greenfield_review, greenfield_memory_record, greenfield_model_guidance_ledger)

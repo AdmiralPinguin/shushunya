@@ -296,7 +296,13 @@ def artifact_requirement_tokens(contract: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(tokens))
 
 
-def review_greenfield_project(repo: Path, project_brief: dict[str, Any], dependency_report: dict[str, Any], verification: dict[str, Any]) -> dict[str, Any]:
+def review_greenfield_project(
+    repo: Path,
+    project_brief: dict[str, Any],
+    dependency_report: dict[str, Any],
+    verification: dict[str, Any],
+    request_guidance=request_greenfield_model_guidance,
+) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
     expected_files = [str(path) for path in project_brief.get("expected_files", []) if isinstance(path, str)]
@@ -339,7 +345,7 @@ def review_greenfield_project(repo: Path, project_brief: dict[str, Any], depende
     if artifact_review.get("status") == "blocked":
         blockers.extend(str(item) for item in artifact_review.get("blockers", []))
     warnings.extend(str(item) for item in artifact_review.get("warnings", []))
-    reviewer_guidance = request_greenfield_model_guidance(
+    reviewer_guidance = request_guidance(
         "GreenfieldReviewer",
         {
             "project_name": project_brief.get("project_name"),

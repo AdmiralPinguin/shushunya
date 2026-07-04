@@ -15,7 +15,7 @@ from greenfield_implementation_worker import execute_file_set_synthesis_contract
 from greenfield_implementation_worker import build_implementation_trace as worker_build_implementation_trace
 from greenfield_implementation_worker import build_implementation_worker_plan as worker_build_implementation_worker_plan
 from greenfield_memory_worker import build_greenfield_memory_record
-from greenfield_project import build_greenfield_project_brief, forbidden_placeholder_markers_found, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
+from greenfield_project import build_greenfield_project_brief, execute_greenfield_project_brief, forbidden_placeholder_markers_found, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_review_worker import artifact_review_greenfield_project, python_source_semantic_status
 from greenfield_scenario_worker import review_greenfield_scenarios
 from greenfield_scaffold_worker import greenfield_workspace_status, normalize_project_file_rows, scaffold_greenfield_files
@@ -506,6 +506,107 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(set(report["changed_files"]), {source_path, test_path})
             self.assertIn("return 'ready'", (repo / source_path).read_text(encoding="utf-8"))
             self.assertIn("GeneratedTests", (repo / test_path).read_text(encoding="utf-8"))
+
+    def test_greenfield_project_executor_uses_injected_model_for_full_synthesis_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            task = "Создай новый Python CLI проект `model-synth-demo`."
+            brief = project_creation_brief(repo, task)
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                project_name = str(payload.get("project_name") or "model-synth-demo")
+                package = project_name.replace("-", "_")
+                core_path = f"{package}/core.py"
+                cli_path = f"{package}/cli.py"
+                test_path = "tests/test_core.py"
+                module_sequence = payload.get("synthesis_contract", {}).get("module_sequence", [])
+                requirements_by_path = {
+                    str(row.get("path") or ""): [str(item) for item in row.get("requirements", []) if isinstance(item, str)]
+                    for row in module_sequence
+                    if isinstance(row, dict)
+                }
+                if role == "GreenfieldImplementationWorker" and isinstance(payload.get("synthesis_contract"), dict):
+                    return {
+                        "ok": True,
+                        "status": "answered",
+                        "content": json.dumps(
+                            {
+                                "files": [
+                                    {
+                                        "path": core_path,
+                                        "content": "def run() -> str:\n    return \"model-ready\"\n",
+                                        "requirements_satisfied": requirements_by_path.get(core_path, []),
+                                        "notes": "model generated core behavior",
+                                    },
+                                    {
+                                        "path": cli_path,
+                                        "content": (
+                                            "from .core import run\n\n\n"
+                                            "def main() -> None:\n"
+                                            "    print(run())\n\n\n"
+                                            "if __name__ == \"__main__\":\n"
+                                            "    main()\n"
+                                        ),
+                                        "requirements_satisfied": requirements_by_path.get(cli_path, []),
+                                        "notes": "model generated CLI behavior",
+                                    },
+                                    {
+                                        "path": test_path,
+                                        "content": (
+                                            "import unittest\n\n"
+                                            f"from {package}.core import run\n\n\n"
+                                            "class CoreTests(unittest.TestCase):\n"
+                                            "    def test_run_uses_model_generated_behavior(self):\n"
+                                            "        self.assertEqual(run(), \"model-ready\")\n"
+                                        ),
+                                        "requirements_satisfied": requirements_by_path.get(test_path, []),
+                                        "notes": "model generated test behavior",
+                                    },
+                                ],
+                                "notes": "coordinated model file-set synthesis",
+                            }
+                        ),
+                    }
+                if role == "GreenfieldImplementationWorker" and isinstance(payload.get("module_synthesis_contract"), dict):
+                    contract = payload["module_synthesis_contract"]
+                    rel_path = str(contract["path"])
+                    if rel_path == core_path:
+                        content = "def run() -> str:\n    return \"model-ready\"\n"
+                    else:
+                        content = (
+                            "from .core import run\n\n\n"
+                            "def main() -> None:\n"
+                            "    print(run())\n\n\n"
+                            "if __name__ == \"__main__\":\n"
+                            "    main()\n"
+                        )
+                    return {
+                        "ok": True,
+                        "status": "answered",
+                        "content": json.dumps(
+                            {
+                                "path": rel_path,
+                                "content": content,
+                                "requirements_satisfied": contract["requirements"],
+                                "tests_to_update": contract["paired_tests"],
+                                "notes": "model generated module implementation",
+                            }
+                        ),
+                    }
+                return {"ok": True, "status": "answered", "content": "{}"}
+
+            result = execute_greenfield_project_brief(brief, guidance)
+            self.assertEqual(result["status"], "implemented", result)
+            project = result["greenfield_project"]
+            self.assertEqual(project["file_set_synthesis_report"]["status"], "applied")
+            self.assertEqual(project["implementation_synthesis_report"]["status"], "applied")
+            self.assertEqual(project["verification"]["status"], "passed")
+            self.assertEqual(project["greenfield_review"]["status"], "passed")
+            self.assertEqual(project["greenfield_run_report"]["model_guidance_ledger_status"], "complete")
+            self.assertEqual((repo / f"model_synth_demo/core.py").read_text(encoding="utf-8"), "def run() -> str:\n    return \"model-ready\"\n")
+            self.assertIn("model-ready", (repo / "tests/test_core.py").read_text(encoding="utf-8"))
+            ledger = json.loads((repo / "greenfield_model_guidance_ledger.json").read_text(encoding="utf-8"))
+            self.assertTrue(all(row["status"] != "missing" for row in ledger["entries"]))
 
     def test_greenfield_file_set_synthesis_rejects_out_of_scope_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
