@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import code_brigade_adapter
 from diagnostic_repair_contract import execute_diagnostic_repair_loop, execute_diagnostic_repair_request
@@ -650,7 +651,21 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertTrue(none_status["available"])
         pip_status = dependency_manager_status("pip")
         self.assertTrue(pip_status["required"])
-        self.assertEqual(pip_status["binary"], "python")
+        self.assertIn(pip_status["binary"], {"python", "python3", str(Path(pip_status["path"]))})
+        self.assertTrue(pip_status["candidates"])
+
+    def test_greenfield_dependency_worker_falls_back_to_python3_for_pip(self) -> None:
+        def fake_which(binary: str) -> str | None:
+            if binary == "python3":
+                return "/usr/bin/python3"
+            return None
+
+        with patch("greenfield_dependency_worker.shutil.which", fake_which):
+            pip_status = dependency_manager_status("pip")
+        self.assertTrue(pip_status["required"])
+        self.assertTrue(pip_status["available"])
+        self.assertEqual(pip_status["binary"], "python3")
+        self.assertEqual(pip_status["path"], "/usr/bin/python3")
 
     def test_greenfield_implementation_worker_owns_plan_and_trace(self) -> None:
         plan = worker_build_implementation_worker_plan(
@@ -2123,6 +2138,21 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertFalse(report["install_policy_evidence"]["explicit_install_requested"])
             self.assertEqual(report["new_lockfiles"], [])
             self.assertEqual(report["lockfile_status"], "unchanged")
+
+    def test_greenfield_dependency_worker_recognizes_python3_pip_stack_without_install(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief("Создай FastAPI service `api-demo`.")
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+            report = run_dependency_worker(repo, project)
+            self.assertEqual(report["status"], "manifest_recorded", report)
+            self.assertEqual(report["package_manager"], "pip")
+            self.assertTrue(report["manager_status"]["available"], report)
+            self.assertNotIn("package manager is unavailable until install/run is requested: pip", report["warnings"])
+            self.assertEqual(report["manifest_status"], "complete")
 
     def test_greenfield_dependency_worker_blocks_workspace_escape_install(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

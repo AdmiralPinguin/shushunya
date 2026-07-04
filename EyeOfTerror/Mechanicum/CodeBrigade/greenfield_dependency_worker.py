@@ -5,6 +5,7 @@ import hashlib
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -32,20 +33,35 @@ def lockfile_snapshot(repo: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def package_manager_binary(package_manager: str) -> str:
+def package_manager_candidates(package_manager: str) -> list[str]:
     if package_manager == "pip":
-        return "python"
+        candidates = ["python", "python3"]
+        if sys.executable:
+            candidates.append(sys.executable)
+        return list(dict.fromkeys(candidates))
     if package_manager == "npm":
-        return "npm"
-    return ""
+        return ["npm"]
+    return []
+
+
+def package_manager_binary(package_manager: str) -> str:
+    candidates = package_manager_candidates(package_manager)
+    for binary in candidates:
+        if shutil.which(binary):
+            return binary
+    return candidates[0] if candidates else ""
 
 
 def dependency_manager_status(package_manager: str) -> dict[str, Any]:
-    binary = package_manager_binary(package_manager)
     if package_manager == "none":
-        return {"package_manager": package_manager, "required": False, "binary": "", "available": True, "path": ""}
-    path = shutil.which(binary) if binary else None
-    return {"package_manager": package_manager, "required": True, "binary": binary, "available": bool(path), "path": path or ""}
+        return {"package_manager": package_manager, "required": False, "binary": "", "available": True, "path": "", "candidates": []}
+    candidates = package_manager_candidates(package_manager)
+    for binary in candidates:
+        path = shutil.which(binary)
+        if path:
+            return {"package_manager": package_manager, "required": True, "binary": binary, "available": True, "path": path, "candidates": candidates}
+    binary = candidates[0] if candidates else ""
+    return {"package_manager": package_manager, "required": True, "binary": binary, "available": False, "path": "", "candidates": candidates}
 
 
 def manifest_ecosystem(rel_path: str) -> str:
@@ -59,15 +75,16 @@ def manifest_ecosystem(rel_path: str) -> str:
     return "unknown"
 
 
-def command_stays_inside_workspace(repo: Path, command: str) -> bool:
+def command_stays_inside_workspace(repo: Path, command: str, allowed_absolute_commands: set[str] | None = None) -> bool:
+    allowed_absolute_commands = allowed_absolute_commands or set()
     try:
         tokens = shlex.split(command)
     except ValueError:
         return False
-    for token in tokens:
+    for index, token in enumerate(tokens):
         if token.startswith("../") or token == ".." or "/../" in token:
             return False
-        if token.startswith("/"):
+        if token.startswith("/") and not (index == 0 and token in allowed_absolute_commands):
             return False
     try:
         repo.resolve()
@@ -109,11 +126,12 @@ def run_dependency_worker(repo: Path, project_brief: dict[str, Any]) -> dict[str
     allowed_prefixes = [
         ["python", "-m", "pip", "install"],
         ["python3", "-m", "pip", "install"],
+        [sys.executable, "-m", "pip", "install"],
         ["npm", "install"],
     ]
     for command in install_commands:
         tokens = shlex.split(command)
-        if not command_stays_inside_workspace(repo, command):
+        if not command_stays_inside_workspace(repo, command, {sys.executable}):
             blockers.append(f"dependency install command uses path outside workspace: {command}")
             command_results.append({"command": command, "status": "blocked", "returncode": None, "stdout": "", "stderr": "path outside workspace"})
             continue

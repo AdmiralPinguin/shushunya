@@ -119,8 +119,8 @@
       "objective_item": 5,
       "status": "implemented",
       "evidence": [
-        "greenfield_dependency_worker.py reads stack dependency_plan, checks package manager availability, records manifests with ecosystem/sha/status, blocks unsafe install paths, records lockfile snapshots, and reports blockers",
-        "focused_self_test.py covers Node manifest recording and workspace escape install blocking"
+        "greenfield_dependency_worker.py reads stack dependency_plan, checks package manager availability with Python interpreter fallback for pip, records manifests with ecosystem/sha/status, blocks unsafe install paths, records lockfile snapshots, and reports blockers",
+        "focused_self_test.py covers pip manager fallback to python3, Python manifest recording without false unavailable-manager warnings, Node manifest recording, and workspace escape install blocking"
       ],
       "remaining_risk": "Install execution remains explicit/allowlisted by design; default behavior records manifests without installing."
     },
