@@ -256,6 +256,42 @@ def _replace_return_expression_in_file(source_path: Path, function_name: str, ol
     source_path.write_text("".join(lines), encoding="utf-8")
 
 
+def _replace_python_constant_in_file(source_path: Path, symbol_name: str, old_literal: str, new_literal: str) -> None:
+    source = source_path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    old_expr = _parse_python_expression(old_literal)
+    _parse_python_expression(new_literal)
+    matches: list[ast.Assign | ast.AnnAssign] = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = [target for target in node.targets if isinstance(target, ast.Name) and target.id == symbol_name]
+            if targets:
+                matches.append(node)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == symbol_name:
+            matches.append(node)
+    if len(matches) != 1:
+        raise ValueError(f"replace_python_constant requires exactly one top-level assignment for {symbol_name}, found {len(matches)}")
+    node = matches[0]
+    value = node.value
+    if value is None or not _ast_expr_equal(value, old_expr):
+        raise ValueError(f"current value for {symbol_name} does not match old_literal")
+    if node.lineno != node.end_lineno:
+        raise ValueError("replace_python_constant only supports single-line assignments")
+    lines = source.splitlines(keepends=True)
+    line_index = node.lineno - 1
+    old_line = lines[line_index]
+    prefix = old_line[: len(old_line) - len(old_line.lstrip())]
+    trailing = "\n" if old_line.endswith("\n") else ""
+    if isinstance(node, ast.AnnAssign) and node.annotation is not None:
+        annotation = ast.get_source_segment(source, node.annotation)
+        if not annotation:
+            raise ValueError(f"annotation source for {symbol_name} is not recoverable")
+        lines[line_index] = f"{prefix}{symbol_name}: {annotation} = {new_literal}{trailing}"
+    else:
+        lines[line_index] = f"{prefix}{symbol_name} = {new_literal}{trailing}"
+    source_path.write_text("".join(lines), encoding="utf-8")
+
+
 def _guided_ast_repair(repo: Path, repair_guidance: dict[str, Any] | None) -> dict[str, Any] | None:
     operations = _repair_operations_from_guidance(repair_guidance)
     if not operations:
@@ -265,35 +301,57 @@ def _guided_ast_repair(repo: Path, repair_guidance: dict[str, Any] | None) -> di
     handled_count = 0
     for index, operation in enumerate(operations, start=1):
         op_type = str(operation.get("type") or operation.get("operation") or operation.get("action") or "")
-        if op_type != "replace_return_expression":
+        if op_type not in {"replace_return_expression", "replace_python_constant"}:
             continue
         handled_count += 1
         target_file = str(operation.get("target_file") or operation.get("path") or "")
-        function_name = str(operation.get("function_name") or "")
-        old_expression = operation.get("old_expression")
-        new_expression = operation.get("new_expression")
-        if not target_file or not function_name or not isinstance(old_expression, str) or not isinstance(new_expression, str):
-            blockers.append(f"replace_return_expression operation {index} is incomplete")
-            continue
         path = _repo_relative_path(repo, target_file)
         if path is None or not path.exists() or not path.is_file():
-            blockers.append(f"replace_return_expression target is missing or outside workspace: {target_file}")
+            blockers.append(f"{op_type} target is missing or outside workspace: {target_file}")
             continue
         if path.suffix != ".py":
-            blockers.append(f"replace_return_expression only supports Python files: {target_file}")
+            blockers.append(f"{op_type} only supports Python files: {target_file}")
+            continue
+        if op_type == "replace_return_expression":
+            function_name = str(operation.get("function_name") or "")
+            old_expression = operation.get("old_expression")
+            new_expression = operation.get("new_expression")
+            if not target_file or not function_name or not isinstance(old_expression, str) or not isinstance(new_expression, str):
+                blockers.append(f"replace_return_expression operation {index} is incomplete")
+                continue
+            try:
+                _replace_return_expression_in_file(path, function_name, old_expression, new_expression)
+            except (SyntaxError, ValueError) as exc:
+                blockers.append(f"replace_return_expression failed for {target_file}:{function_name}: {exc}")
+                continue
+            repaired_files.append(
+                {
+                    "path": target_file,
+                    "repair": "guided_replace_return_expression",
+                    "status": "applied",
+                    "operation_index": index,
+                    "function_name": function_name,
+                }
+            )
+            continue
+        symbol_name = str(operation.get("symbol_name") or operation.get("name") or "")
+        old_literal = operation.get("old_literal", operation.get("old_expression"))
+        new_literal = operation.get("new_literal", operation.get("new_expression"))
+        if not target_file or not symbol_name or not isinstance(old_literal, str) or not isinstance(new_literal, str):
+            blockers.append(f"replace_python_constant operation {index} is incomplete")
             continue
         try:
-            _replace_return_expression_in_file(path, function_name, old_expression, new_expression)
+            _replace_python_constant_in_file(path, symbol_name, old_literal, new_literal)
         except (SyntaxError, ValueError) as exc:
-            blockers.append(f"replace_return_expression failed for {target_file}:{function_name}: {exc}")
+            blockers.append(f"replace_python_constant failed for {target_file}:{symbol_name}: {exc}")
             continue
         repaired_files.append(
             {
                 "path": target_file,
-                "repair": "guided_replace_return_expression",
+                "repair": "guided_replace_python_constant",
                 "status": "applied",
                 "operation_index": index,
-                "function_name": function_name,
+                "symbol_name": symbol_name,
             }
         )
     if not handled_count:
