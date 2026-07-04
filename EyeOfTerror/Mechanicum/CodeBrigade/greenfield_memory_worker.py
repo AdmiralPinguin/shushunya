@@ -26,6 +26,24 @@ def _verification_results(verification_loop: dict[str, Any]) -> list[dict[str, s
 
 
 def _definition_of_done_status(project_brief: dict[str, Any], verification_loop: dict[str, Any], greenfield_review: dict[str, Any]) -> dict[str, Any]:
+    dod_review = greenfield_review.get("definition_of_done_review") if isinstance(greenfield_review.get("definition_of_done_review"), dict) else {}
+    if dod_review:
+        rows = dod_review.get("rows") if isinstance(dod_review.get("rows"), list) else []
+        return {
+            "status": str(dod_review.get("status") or "blocked"),
+            "items": [
+                {
+                    "item": str(row.get("item") or ""),
+                    "status": str(row.get("status") or ""),
+                    "evidence": row.get("evidence", []) if isinstance(row.get("evidence"), list) else [],
+                    "missing_evidence": row.get("missing_evidence", []) if isinstance(row.get("missing_evidence"), list) else [],
+                }
+                for row in rows
+                if isinstance(row, dict)
+            ],
+            "passed_count": dod_review.get("passed_count", 0),
+            "blocked_count": dod_review.get("blocked_count", 0),
+        }
     items = [str(item) for item in project_brief.get("definition_of_done", []) if isinstance(item, str)]
     passed = verification_loop.get("status") == "passed" and greenfield_review.get("status") == "passed"
     return {

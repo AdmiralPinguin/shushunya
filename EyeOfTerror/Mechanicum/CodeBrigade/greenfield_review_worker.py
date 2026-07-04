@@ -296,6 +296,132 @@ def artifact_requirement_tokens(contract: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(tokens))
 
 
+def review_definition_of_done(
+    repo: Path,
+    project_brief: dict[str, Any],
+    dependency_report: dict[str, Any],
+    verification: dict[str, Any],
+    semantic_review: dict[str, Any],
+    scenario_review: dict[str, Any],
+    artifact_review: dict[str, Any],
+) -> dict[str, Any]:
+    items = [str(item) for item in project_brief.get("definition_of_done", []) if isinstance(item, str) and item.strip()]
+    expected_files = [str(path) for path in project_brief.get("expected_files", []) if isinstance(path, str)]
+    run_commands = [str(command) for command in project_brief.get("run_commands", []) if isinstance(command, str) and command.strip()]
+    verification_commands = [str(command) for command in project_brief.get("verification_commands", []) if isinstance(command, str) and command.strip()]
+    entrypoints = project_brief.get("entrypoints") if isinstance(project_brief.get("entrypoints"), list) else []
+    readme_path = repo / "README.md"
+    readme_text = readme_path.read_text(encoding="utf-8") if readme_path.is_file() else ""
+    missing_files = [path for path in expected_files if not (repo / path).is_file()]
+    missing_entrypoints = [
+        str(entrypoint.get("path") or "")
+        for entrypoint in entrypoints
+        if isinstance(entrypoint, dict) and not entrypoint_exists(repo, entrypoint)
+    ]
+    missing_readme_commands = [
+        command
+        for command in [*run_commands, *verification_commands]
+        if command and command not in readme_text
+    ]
+    verification_passed = verification.get("status") in {"passed", "planned"}
+    dependency_passed = dependency_report.get("status") != "blocked"
+    semantic_passed = semantic_review.get("status") == "passed"
+    scenario_passed = scenario_review.get("status") == "passed"
+    artifact_passed = artifact_review.get("status") == "passed"
+    rows: list[dict[str, Any]] = []
+    blockers: list[str] = []
+
+    def add_row(item: str, status: str, evidence: list[str], missing: list[str]) -> None:
+        rows.append(
+            {
+                "item": item,
+                "status": status,
+                "evidence": evidence,
+                "missing_evidence": missing,
+            }
+        )
+        if status != "passed":
+            blockers.append(f"definition_of_done item is not proven: {item}")
+
+    for item in items:
+        lowered = item.lower()
+        evidence: list[str] = []
+        missing: list[str] = []
+        checks: list[bool] = []
+        if any(token in lowered for token in ("expected file", "files are created", "created inside", "artifact")):
+            checks.append(not missing_files)
+            evidence.append(f"expected_file_count={len(expected_files)}")
+            missing.extend(f"missing expected file: {path}" for path in missing_files)
+        if any(token in lowered for token in ("entrypoint", "launch", "run command", "запуск")):
+            checks.append(not missing_entrypoints)
+            evidence.append(f"entrypoint_count={len(entrypoints)}")
+            missing.extend(f"missing entrypoint: {path}" for path in missing_entrypoints if path)
+        if any(token in lowered for token in ("verification", "test", "tests", "build", "smoke", "провер")):
+            checks.append(verification_passed)
+            evidence.append(f"verification_status={verification.get('status') or ''}")
+            if not verification_passed:
+                missing.append(f"verification did not pass: {verification.get('status') or ''}")
+        if any(token in lowered for token in ("readme", "document", "documents", "документ")):
+            checks.append(bool(readme_text) and not missing_readme_commands)
+            evidence.append("README.md")
+            missing.extend(f"README missing command: {command}" for command in missing_readme_commands)
+            if not readme_text:
+                missing.append("README.md is missing or empty")
+        if any(token in lowered for token in ("dependency", "dependencies", "package", "install", "завис")):
+            checks.append(dependency_passed)
+            evidence.append(f"dependency_status={dependency_report.get('status') or ''}")
+            if not dependency_passed:
+                missing.extend(str(blocker) for blocker in dependency_report.get("blockers", []) if isinstance(blocker, str))
+        if any(token in lowered for token in ("behavior", "feature", "workflow", "scenario", "logic", "mvp", "stub", "заглуш")):
+            checks.append(semantic_passed and scenario_passed and artifact_passed)
+            evidence.extend(
+                [
+                    f"semantic_review={semantic_review.get('status') or ''}",
+                    f"scenario_review={scenario_review.get('status') or ''}",
+                    f"artifact_review={artifact_review.get('status') or ''}",
+                ]
+            )
+            if not semantic_passed:
+                missing.append(f"semantic review did not pass: {semantic_review.get('status') or ''}")
+            if not scenario_passed:
+                missing.append(f"scenario review did not pass: {scenario_review.get('status') or ''}")
+            if not artifact_passed:
+                missing.append(f"artifact review did not pass: {artifact_review.get('status') or ''}")
+        if not checks:
+            checks.append(verification_passed and semantic_passed and scenario_passed and artifact_passed)
+            evidence.extend(
+                [
+                    "generic DoD proof requires passed verification and all greenfield reviews",
+                    f"verification_status={verification.get('status') or ''}",
+                    f"semantic_review={semantic_review.get('status') or ''}",
+                    f"scenario_review={scenario_review.get('status') or ''}",
+                    f"artifact_review={artifact_review.get('status') or ''}",
+                ]
+            )
+            if not verification_passed:
+                missing.append(f"verification did not pass: {verification.get('status') or ''}")
+            if not semantic_passed:
+                missing.append(f"semantic review did not pass: {semantic_review.get('status') or ''}")
+            if not scenario_passed:
+                missing.append(f"scenario review did not pass: {scenario_review.get('status') or ''}")
+            if not artifact_passed:
+                missing.append(f"artifact review did not pass: {artifact_review.get('status') or ''}")
+        add_row(item, "passed" if all(checks) and not missing else "blocked", evidence, missing)
+
+    if not rows:
+        blockers.append("definition_of_done has no items")
+    return {
+        "kind": "code_brigade_greenfield_definition_of_done_review",
+        "contract_version": "eye-mechanicum.v1",
+        "status": "blocked" if blockers else "passed",
+        "item_count": len(rows),
+        "passed_count": sum(1 for row in rows if row["status"] == "passed"),
+        "blocked_count": sum(1 for row in rows if row["status"] == "blocked"),
+        "rows": rows,
+        "blockers": blockers,
+    }
+
+
 def review_greenfield_project(
     repo: Path,
     project_brief: dict[str, Any],
@@ -345,6 +471,17 @@ def review_greenfield_project(
     if artifact_review.get("status") == "blocked":
         blockers.extend(str(item) for item in artifact_review.get("blockers", []))
     warnings.extend(str(item) for item in artifact_review.get("warnings", []))
+    definition_of_done_review = review_definition_of_done(
+        repo,
+        project_brief,
+        dependency_report,
+        verification,
+        semantic_review,
+        scenario_review,
+        artifact_review,
+    )
+    if definition_of_done_review.get("status") == "blocked":
+        blockers.extend(str(item) for item in definition_of_done_review.get("blockers", []))
     reviewer_guidance = request_guidance(
         "GreenfieldReviewer",
         {
@@ -357,6 +494,7 @@ def review_greenfield_project(
             "semantic_review": semantic_review,
             "scenario_review": scenario_review,
             "artifact_review": artifact_review,
+            "definition_of_done_review": definition_of_done_review,
             "blockers": blockers,
             "warnings": warnings,
         },
@@ -375,6 +513,7 @@ def review_greenfield_project(
         "semantic_review": semantic_review,
         "scenario_review": scenario_review,
         "artifact_review": artifact_review,
+        "definition_of_done_review": definition_of_done_review,
         "blockers": blockers,
         "warnings": warnings,
         "model_guidance": reviewer_guidance,

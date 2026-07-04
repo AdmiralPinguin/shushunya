@@ -87,6 +87,41 @@ def infer_project_type(task: str) -> str:
     return "cli_tool"
 
 
+def ensure_readme_documents_commands(
+    files: list[Any],
+    project_name: str,
+    run_commands: list[Any],
+    verification_commands: list[Any],
+) -> list[Any]:
+    run_command_rows = [str(command) for command in run_commands if isinstance(command, str) and command.strip()]
+    verification_command_rows = [str(command) for command in verification_commands if isinstance(command, str) and command.strip()]
+    readme_index = next(
+        (
+            index
+            for index, item in enumerate(files)
+            if isinstance(item, dict) and item.get("path") == "README.md"
+        ),
+        -1,
+    )
+    if readme_index < 0:
+        files.append({"path": "README.md", "content": f"# {project_name}\n"})
+        readme_index = len(files) - 1
+    readme = files[readme_index]
+    text = str(readme.get("content") or "")
+    if not text.strip():
+        text = f"# {project_name}\n"
+    additions: list[str] = []
+    for heading, commands in (("Run", run_command_rows), ("Test", verification_command_rows)):
+        missing = [command for command in commands if command not in text]
+        if missing:
+            additions.append("\n".join([f"## {heading}", *[f"```bash\n{command}\n```" for command in missing]]))
+    if additions:
+        text = text.rstrip() + "\n\n" + "\n\n".join(additions) + "\n"
+    readme["content"] = text
+    files[readme_index] = readme
+    return files
+
+
 def build_greenfield_project_brief(
     task: str,
     payload: dict[str, Any] | None = None,
@@ -141,6 +176,7 @@ def build_greenfield_project_brief(
         package = project_name.replace("-", "_")
         run_commands = [f"python -m {package}.cli add 2 3"]
         entrypoints = [{"name": "cli", "command": run_commands[0], "path": f"{package}/cli.py"}]
+    files = ensure_readme_documents_commands(files, project_name, run_commands, verification_commands)
     expected_files = [str(item.get("path") or "") for item in files if isinstance(item, dict) and item.get("path")]
     definition_of_done = payload.get("definition_of_done") if isinstance(payload.get("definition_of_done"), list) else [
         "expected files are created inside the assigned workspace",
