@@ -231,6 +231,17 @@ def _parse_python_expression(expression: str) -> ast.AST:
     return ast.parse(expression, mode="eval").body
 
 
+def _parse_python_body(body: str) -> list[ast.stmt]:
+    parsed = ast.parse(body if body.endswith("\n") else body + "\n", mode="exec")
+    if not parsed.body:
+        raise ValueError("function body cannot be empty")
+    return parsed.body
+
+
+def _ast_body_equal(left: list[ast.stmt], right: list[ast.stmt]) -> bool:
+    return ast.dump(ast.Module(body=left, type_ignores=[]), include_attributes=False) == ast.dump(ast.Module(body=right, type_ignores=[]), include_attributes=False)
+
+
 def _replace_return_expression_in_file(source_path: Path, function_name: str, old_expression: str, new_expression: str) -> None:
     source = source_path.read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -253,6 +264,38 @@ def _replace_return_expression_in_file(source_path: Path, function_name: str, ol
     prefix = old_line[: len(old_line) - len(old_line.lstrip())]
     trailing = "\n" if old_line.endswith("\n") else ""
     lines[line_index] = f"{prefix}return {new_expression}{trailing}"
+    source_path.write_text("".join(lines), encoding="utf-8")
+
+
+def _replace_function_body_in_file(source_path: Path, function_name: str, old_body: str, new_body: str) -> None:
+    source = source_path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    old_nodes = _parse_python_body(old_body)
+    new_nodes = _parse_python_body(new_body)
+    candidates = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name]
+    if len(candidates) != 1:
+        raise ValueError(f"replace_function_body requires exactly one function named {function_name}, found {len(candidates)}")
+    function = candidates[0]
+    if not function.body:
+        raise ValueError(f"function body for {function_name} is empty")
+    if not _ast_body_equal(function.body, old_nodes):
+        raise ValueError(f"current body for {function_name} does not match old_body")
+    first_body_line = min(node.lineno for node in function.body)
+    last_body_line = max((node.end_lineno or node.lineno) for node in function.body)
+    if first_body_line <= function.lineno or last_body_line < first_body_line:
+        raise ValueError(f"function body range for {function_name} is not recoverable")
+    lines = source.splitlines(keepends=True)
+    first_line_text = lines[first_body_line - 1]
+    body_indent = first_line_text[: len(first_line_text) - len(first_line_text.lstrip())]
+    rendered_body: list[str] = []
+    for raw_line in new_body.splitlines():
+        if raw_line.strip():
+            rendered_body.append(body_indent + raw_line.rstrip() + "\n")
+        else:
+            rendered_body.append("\n")
+    if not rendered_body:
+        raise ValueError("new function body cannot be empty")
+    lines[first_body_line - 1 : last_body_line] = rendered_body
     source_path.write_text("".join(lines), encoding="utf-8")
 
 
@@ -301,7 +344,7 @@ def _guided_ast_repair(repo: Path, repair_guidance: dict[str, Any] | None) -> di
     handled_count = 0
     for index, operation in enumerate(operations, start=1):
         op_type = str(operation.get("type") or operation.get("operation") or operation.get("action") or "")
-        if op_type not in {"replace_return_expression", "replace_python_constant"}:
+        if op_type not in {"replace_return_expression", "replace_function_body", "replace_python_constant"}:
             continue
         handled_count += 1
         target_file = str(operation.get("target_file") or operation.get("path") or "")
@@ -328,6 +371,28 @@ def _guided_ast_repair(repo: Path, repair_guidance: dict[str, Any] | None) -> di
                 {
                     "path": target_file,
                     "repair": "guided_replace_return_expression",
+                    "status": "applied",
+                    "operation_index": index,
+                    "function_name": function_name,
+                }
+            )
+            continue
+        if op_type == "replace_function_body":
+            function_name = str(operation.get("function_name") or "")
+            old_body = operation.get("old_body")
+            new_body = operation.get("new_body")
+            if not target_file or not function_name or not isinstance(old_body, str) or not isinstance(new_body, str):
+                blockers.append(f"replace_function_body operation {index} is incomplete")
+                continue
+            try:
+                _replace_function_body_in_file(path, function_name, old_body, new_body)
+            except (SyntaxError, ValueError) as exc:
+                blockers.append(f"replace_function_body failed for {target_file}:{function_name}: {exc}")
+                continue
+            repaired_files.append(
+                {
+                    "path": target_file,
+                    "repair": "guided_replace_function_body",
                     "status": "applied",
                     "operation_index": index,
                     "function_name": function_name,

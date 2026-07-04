@@ -1466,6 +1466,105 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertIn("replace_python_constant failed", "; ".join(repair["blockers"]))
             self.assertEqual((repo / "settings.py").read_text(encoding="utf-8"), "FEATURE_ENABLED = False\n\n\ndef enabled():\n    return FEATURE_ENABLED\n")
 
+    def test_greenfield_verification_loop_applies_guided_ast_function_body_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай CLI проект `body-repair-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "grades.py", "content": "def grade(score):\n    if score >= 90:\n        return 'B'\n    return 'C'\n"},
+                        {
+                            "path": "test_grades.py",
+                            "content": "import unittest\nimport grades\n\nclass GradeTests(unittest.TestCase):\n    def test_grade(self):\n        self.assertEqual(grades.grade(95), 'A')\n        self.assertEqual(grades.grade(70), 'C')\n",
+                        },
+                    ],
+                    "verification_commands": ["python -m unittest test_grades.py"],
+                    "module_contracts": [{"module": "grades", "path": "grades.py", "responsibility": "grade scores", "requirements": ["grade scores"]}],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "operations": [
+                                {
+                                    "type": "replace_function_body",
+                                    "path": "grades.py",
+                                    "function_name": "grade",
+                                    "old_body": "if score >= 90:\n    return 'B'\nreturn 'C'",
+                                    "new_body": "if score >= 90:\n    return 'A'\nreturn 'C'",
+                                }
+                            ]
+                        }
+                    ),
+                }
+
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=2, request_guidance=guidance)
+            self.assertEqual(loop["status"], "passed", loop)
+            repair = loop["attempts"][0]["repair_execution"]
+            self.assertIn(
+                {"path": "grades.py", "repair": "guided_replace_function_body", "status": "applied", "operation_index": 1, "function_name": "grade"},
+                repair["repaired_files"],
+            )
+            self.assertEqual((repo / "grades.py").read_text(encoding="utf-8"), "def grade(score):\n    if score >= 90:\n        return 'A'\n    return 'C'\n")
+
+    def test_greenfield_guided_ast_function_body_repair_blocks_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай CLI проект `body-mismatch-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "grades.py", "content": "def grade(score):\n    if score >= 90:\n        return 'B'\n    return 'C'\n"},
+                        {
+                            "path": "test_grades.py",
+                            "content": "import unittest\nimport grades\n\nclass GradeTests(unittest.TestCase):\n    def test_grade(self):\n        self.assertEqual(grades.grade(95), 'A')\n",
+                        },
+                    ],
+                    "verification_commands": ["python -m unittest test_grades.py"],
+                    "module_contracts": [{"module": "grades", "path": "grades.py", "responsibility": "grade scores", "requirements": ["grade scores"]}],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "operations": [
+                                {
+                                    "type": "replace_function_body",
+                                    "path": "grades.py",
+                                    "function_name": "grade",
+                                    "old_body": "return 'B'",
+                                    "new_body": "return 'A'",
+                                }
+                            ]
+                        }
+                    ),
+                }
+
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=1, request_guidance=guidance)
+            self.assertEqual(loop["status"], "blocked", loop)
+            repair = loop["attempts"][0]["repair_execution"]
+            self.assertIn("replace_function_body failed", "; ".join(repair["blockers"]))
+            self.assertEqual((repo / "grades.py").read_text(encoding="utf-8"), "def grade(score):\n    if score >= 90:\n        return 'B'\n    return 'C'\n")
+
     def test_greenfield_verification_loop_reruns_after_final_allowed_repair(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
