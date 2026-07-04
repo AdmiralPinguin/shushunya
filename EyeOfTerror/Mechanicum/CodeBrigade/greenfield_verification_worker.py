@@ -12,7 +12,58 @@ from greenfield_implementation_worker import execute_module_synthesis_contracts,
 from verification_adapter import run_verification_commands
 
 
-def repair_guidance_for_verification(project_brief: dict[str, Any], verification: dict[str, Any], signature: str, request_guidance=request_greenfield_model_guidance) -> dict[str, Any]:
+def workspace_file_snapshots(repo: Path | None, project_brief: dict[str, Any], *, max_files: int = 12, max_chars_per_file: int = 4000) -> list[dict[str, Any]]:
+    if repo is None:
+        return []
+    snapshots: list[dict[str, Any]] = []
+    expected_files = [str(path) for path in project_brief.get("expected_files", []) if isinstance(path, str)]
+    for rel_path in expected_files:
+        if len(snapshots) >= max_files:
+            break
+        if not rel_path.endswith((".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css")):
+            continue
+        path = _repo_relative_path(repo, rel_path)
+        if path is None or not path.exists() or not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        snapshots.append(
+            {
+                "path": rel_path,
+                "content": text[:max_chars_per_file],
+                "truncated": len(text) > max_chars_per_file,
+            }
+        )
+    return snapshots
+
+
+def repair_guidance_for_verification(project_brief: dict[str, Any], verification: dict[str, Any], signature: str, request_guidance=request_greenfield_model_guidance, repo: Path | None = None) -> dict[str, Any]:
+    supported_operations = [
+        {
+            "type": "remove_undefined_name_line",
+            "shape": {"repair_hypothesis": {"target_file": "relative/path.py", "target_line": 2, "action": "Remove the stray undefined name line."}},
+            "constraints": ["only for NameError where the target line is exactly the undefined symbol"],
+        },
+        {
+            "type": "replace_exact",
+            "shape": {"operations": [{"type": "replace_exact", "path": "relative/path.py", "old_text": "exact current text", "new_text": "replacement text"}]},
+            "constraints": ["old_text must exist exactly once in the target file"],
+        },
+        {
+            "type": "replace_return_expression",
+            "shape": {"operations": [{"type": "replace_return_expression", "path": "relative/path.py", "function_name": "name", "old_expression": "current_expr", "new_expression": "new_expr"}]},
+            "constraints": ["Python only", "function must exist exactly once", "current return AST must match old_expression"],
+        },
+        {
+            "type": "replace_python_constant",
+            "shape": {"operations": [{"type": "replace_python_constant", "path": "relative/path.py", "symbol_name": "NAME", "old_literal": "False", "new_literal": "True"}]},
+            "constraints": ["Python only", "top-level assignment must exist exactly once", "current value AST must match old_literal"],
+        },
+        {
+            "type": "replace_function_body",
+            "shape": {"operations": [{"type": "replace_function_body", "path": "relative/path.py", "function_name": "name", "old_body": "current statements", "new_body": "replacement statements"}]},
+            "constraints": ["Python only", "function must exist exactly once", "current body AST must match old_body"],
+        },
+    ]
     return request_guidance(
         "GreenfieldRepairWorker",
         {
@@ -22,8 +73,10 @@ def repair_guidance_for_verification(project_brief: dict[str, Any], verification
             "verification_results": verification.get("results", []),
             "failure_signature": signature,
             "common_failure_fixes": project_brief.get("template_contract", {}).get("common_failure_fixes", []),
+            "supported_repair_operations": supported_operations,
+            "workspace_file_snapshots": workspace_file_snapshots(repo, project_brief),
         },
-        "Given the failed greenfield verification output, propose a bounded repair hypothesis or a blocker. Do not invent unrelated scope.",
+        "Given the failed greenfield verification output, return JSON only. Choose one supported bounded repair operation when the evidence is clear, or return {\"status\":\"blocked\",\"blockers\":[...]} when no safe bounded repair applies. workspace_file_snapshots contain the current source and tests; derive old_text, old_expression, old_literal, or old_body from those snapshots and set the matching new_* value from the failing test evidence. Do not claim old_* is missing when the current code is present in workspace_file_snapshots. Do not invent unrelated scope.",
     )
 
 
@@ -101,11 +154,18 @@ def _repair_operations_from_guidance(repair_guidance: dict[str, Any] | None) -> 
     operations = parsed.get("operations")
     if isinstance(operations, list):
         return [row for row in operations if isinstance(row, dict)]
+    repair_operation = parsed.get("repair_operation")
+    if isinstance(repair_operation, dict):
+        nested_operations = repair_operation.get("operations")
+        if isinstance(nested_operations, list):
+            return [row for row in nested_operations if isinstance(row, dict)]
+        if any(key in repair_operation for key in ("old_text", "new_text", "old", "new", "old_expression", "new_expression", "old_literal", "new_literal", "old_body", "new_body")):
+            return [repair_operation]
     if isinstance(parsed.get("repair_hypothesis"), dict):
         hypothesis = parsed["repair_hypothesis"]
-        if any(key in hypothesis for key in ("old_text", "new_text", "old", "new")):
+        if any(key in hypothesis for key in ("old_text", "new_text", "old", "new", "old_expression", "new_expression", "old_literal", "new_literal", "old_body", "new_body")):
             return [hypothesis]
-    if any(key in parsed for key in ("old_text", "new_text", "old", "new")):
+    if any(key in parsed for key in ("old_text", "new_text", "old", "new", "old_expression", "new_expression", "old_literal", "new_literal", "old_body", "new_body")):
         return [parsed]
     return []
 
@@ -517,11 +577,19 @@ def apply_greenfield_repair(repo: Path, project_brief: dict[str, Any], verificat
         repaired_files.append({"path": "README.md", "repair": "restored_missing_template_file"})
     if not repaired_files and not blockers:
         blockers.append("no bounded greenfield repair was applicable")
+    if verification.get("status") == "failed" and repaired_files:
+        behavior_repair_files = [
+            row
+            for row in repaired_files
+            if str(row.get("path") or "").endswith((".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css"))
+        ]
+        if not behavior_repair_files:
+            blockers.append("failed verification received only metadata repair; no source or test behavior changed")
     purged_caches = _purge_python_caches(repo) if repaired_files else []
     return {
         "kind": "code_brigade_greenfield_repair_execution",
         "contract_version": "eye-mechanicum.v1",
-        "status": "applied" if repaired_files else "not_applicable",
+        "status": "applied" if repaired_files and not blockers else "not_applicable",
         "repaired_files": repaired_files,
         "blockers": blockers,
         "purged_python_caches": purged_caches,
@@ -600,7 +668,7 @@ def run_greenfield_verification_loop(repo: Path, commands: list[str], project_br
         if signature and signature == previous_signature:
             attempts.append({"cycle": cycle, "status": verification.get("status", ""), "failure_signature": signature, "repair_guidance": {}, "repair_execution": {"status": "skipped_repeat_failure", "repaired_files": [], "blockers": ["same verification failure repeats"]}})
             return verification_loop_result("blocked", attempts, verification, "same verification failure repeats", repeated_signature=True)
-        repair_guidance = repair_guidance_for_verification(project_brief, verification, signature, request_guidance)
+        repair_guidance = repair_guidance_for_verification(project_brief, verification, signature, request_guidance, repo)
         repair_execution = apply_greenfield_repair(repo, project_brief, verification, repair_guidance)
         if repair_execution.get("status") != "applied":
             synthesis_repair = apply_greenfield_synthesis_repair(repo, project_brief, verification, signature, request_guidance)

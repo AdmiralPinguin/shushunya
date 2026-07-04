@@ -18,10 +18,11 @@ from greenfield_implementation_worker import build_implementation_worker_plan as
 from greenfield_live_trial import allocate_live_trial_root, compact_greenfield_result
 from greenfield_memory_worker import build_greenfield_memory_record
 from greenfield_project import build_greenfield_project_brief, execute_greenfield_project_brief, forbidden_placeholder_markers_found, model_synthesis_blockers, reconcile_module_synthesis_with_file_set, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
+from greenfield_repair_live_trial import compact_repair_result
 from greenfield_review_worker import artifact_review_greenfield_project, python_source_semantic_status
 from greenfield_scenario_worker import review_greenfield_scenarios
 from greenfield_scaffold_worker import greenfield_workspace_status, normalize_project_file_rows, scaffold_greenfield_files
-from greenfield_verification_worker import verification_failure_signature
+from greenfield_verification_worker import repair_guidance_for_verification, verification_failure_signature
 from greenfield_templates import available_templates
 from self_test import valid_brief
 
@@ -960,6 +961,57 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertIn('"status": "failed"', signature)
         self.assertLess(len(signature), 800)
 
+    def test_greenfield_repair_guidance_exposes_supported_bounded_operations(self) -> None:
+        captured: dict[str, object] = {}
+
+        def guidance(role: str, payload: dict, instructions: str) -> dict:
+            captured["role"] = role
+            captured["payload"] = payload
+            captured["instructions"] = instructions
+            return {"ok": True, "status": "answered", "content": "{}"}
+
+        repair_guidance_for_verification(
+            {"project_name": "demo", "template_id": "python_cli_basic", "template_contract": {"common_failure_fixes": ["repair tests"]}},
+            {"status": "failed", "results": [{"command": "python -m unittest", "status": "failed"}]},
+            "signature",
+            guidance,
+        )
+        self.assertEqual(captured["role"], "GreenfieldRepairWorker")
+        payload = captured["payload"]
+        self.assertIsInstance(payload, dict)
+        operation_types = {row["type"] for row in payload["supported_repair_operations"]}
+        self.assertEqual(
+            operation_types,
+            {"remove_undefined_name_line", "replace_exact", "replace_return_expression", "replace_python_constant", "replace_function_body"},
+        )
+        self.assertIn("return JSON only", str(captured["instructions"]))
+        self.assertIn("derive old_text", str(captured["instructions"]))
+        self.assertIn("workspace_file_snapshots", str(captured["instructions"]))
+
+    def test_greenfield_repair_guidance_includes_workspace_file_snapshots(self) -> None:
+        captured: dict[str, object] = {}
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "calc.py").write_text("def add(left, right):\n    return left - right\n", encoding="utf-8")
+            (repo / "test_calc.py").write_text("import calc\n", encoding="utf-8")
+            project = {
+                "project_name": "demo",
+                "template_id": "python_cli_basic",
+                "expected_files": ["calc.py", "test_calc.py", "README.md"],
+                "template_contract": {},
+            }
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                captured["payload"] = payload
+                return {"ok": True, "status": "answered", "content": "{}"}
+
+            repair_guidance_for_verification(project, {"status": "failed", "results": []}, "signature", guidance, repo)
+        payload = captured["payload"]
+        self.assertIsInstance(payload, dict)
+        snapshots = payload["workspace_file_snapshots"]
+        self.assertEqual([row["path"] for row in snapshots], ["calc.py", "test_calc.py"])
+        self.assertIn("return left - right", snapshots[0]["content"])
+
     def test_greenfield_memory_worker_records_repair_learning(self) -> None:
         memory = build_greenfield_memory_record(
             {
@@ -1317,6 +1369,56 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
                 {"path": "calc.py", "repair": "guided_replace_return_expression", "status": "applied", "operation_index": 1, "function_name": "add"},
                 repair["repaired_files"],
             )
+            self.assertEqual((repo / "calc.py").read_text(encoding="utf-8"), "def add(left, right):\n    return left + right\n")
+
+    def test_greenfield_verification_loop_accepts_nested_repair_operation_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай CLI проект `nested-repair-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "calc.py", "content": "def add(left, right):\n    return left - right\n"},
+                        {
+                            "path": "test_calc.py",
+                            "content": "import unittest\nimport calc\n\nclass CalcTests(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(calc.add(2, 3), 5)\n",
+                        },
+                    ],
+                    "verification_commands": ["python -m unittest test_calc.py"],
+                    "module_contracts": [{"module": "calc", "path": "calc.py", "responsibility": "add values", "requirements": ["add values"]}],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "status": "success",
+                            "repair_operation": {
+                                "type": "replace_return_expression",
+                                "operations": [
+                                    {
+                                        "type": "replace_return_expression",
+                                        "path": "calc.py",
+                                        "function_name": "add",
+                                        "old_expression": "left - right",
+                                        "new_expression": "left + right",
+                                    }
+                                ],
+                            },
+                        }
+                    ),
+                }
+
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=2, request_guidance=guidance)
+            self.assertEqual(loop["status"], "passed", loop)
             self.assertEqual((repo / "calc.py").read_text(encoding="utf-8"), "def add(left, right):\n    return left + right\n")
 
     def test_greenfield_guided_ast_return_expression_blocks_mismatch(self) -> None:
@@ -2327,6 +2429,35 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertTrue(second.exists())
             self.assertTrue(first.name.startswith("greenfield-live-"))
             self.assertTrue(second.name.startswith("greenfield-live-"))
+
+    def test_greenfield_repair_live_trial_compact_result_requires_repair_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            loop = {
+                "status": "passed",
+                "stop_reason": "verification passed",
+                "attempts": [
+                    {
+                        "repair_execution": {
+                            "status": "applied",
+                            "repaired_files": [
+                                {"path": "calc.py", "repair": "guided_replace_return_expression", "status": "applied"}
+                            ],
+                            "blockers": [],
+                        }
+                    }
+                ],
+                "final_verification": {"status": "passed"},
+                "stop_condition_evidence": {"reason": "verification passed"},
+            }
+            result = compact_repair_result("return_expression", workspace, {"verification_commands": ["python -m unittest test_calc.py"]}, loop)
+            self.assertEqual(result["kind"], "code_brigade_greenfield_live_repair_trial_result")
+            self.assertEqual(result["status"], "accepted")
+            self.assertEqual(result["scenario"], "return_expression")
+            self.assertEqual(result["repair_attempt_count"], 1)
+            self.assertEqual(result["repaired_files"][0]["repair"], "guided_replace_return_expression")
+            blocked = compact_repair_result("return_expression", workspace, {"verification_commands": []}, {"status": "passed", "attempts": []})
+            self.assertEqual(blocked["status"], "blocked")
 
     def test_greenfield_model_json_parser_repairs_code_regex_escapes(self) -> None:
         payload = """```json
