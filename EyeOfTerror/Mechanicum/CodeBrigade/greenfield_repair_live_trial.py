@@ -52,14 +52,14 @@ def scenario_spec(scenario: str) -> dict[str, Any]:
         }
     if scenario == "function_body":
         return {
-            "task": "Repair a generated grading module so grade(95) returns A and grade(70) returns C.",
+            "task": "Repair a generated grading module by replacing the grade() function body so negative scores raise ValueError, grade(95) returns A, grade(85) returns B, and grade(70) returns C.",
             "files": [
                 {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
-                {"path": "grades.py", "content": "def grade(score):\n    if score >= 90:\n        return 'B'\n    return 'C'\n"},
-                {"path": "test_grades.py", "content": "import unittest\nimport grades\n\nclass GradeTests(unittest.TestCase):\n    def test_grade(self):\n        self.assertEqual(grades.grade(95), 'A')\n        self.assertEqual(grades.grade(70), 'C')\n"},
+                {"path": "grades.py", "content": "def grade(score):\n    return 'C'\n"},
+                {"path": "test_grades.py", "content": "import unittest\nimport grades\n\nclass GradeTests(unittest.TestCase):\n    def test_grade_bands(self):\n        self.assertEqual(grades.grade(95), 'A')\n        self.assertEqual(grades.grade(85), 'B')\n        self.assertEqual(grades.grade(70), 'C')\n\n    def test_negative_score_is_rejected(self):\n        with self.assertRaises(ValueError):\n            grades.grade(-1)\n"},
             ],
             "verification_commands": ["python -m unittest test_grades.py"],
-            "module_contracts": [{"module": "grades", "path": "grades.py", "responsibility": "grade scores", "requirements": ["grade scores"]}],
+            "module_contracts": [{"module": "grades", "path": "grades.py", "responsibility": "grade score bands and reject invalid scores", "requirements": ["grade A/B/C bands", "raise ValueError for negative scores"]}],
         }
     if scenario == "exact_replace":
         return {
@@ -113,6 +113,16 @@ def compact_repair_result(scenario: str, workspace: Path, project: dict[str, Any
             repair_strategies.append(repair_strategy)
         repaired_files.extend(row for row in repair.get("repaired_files", []) if isinstance(row, dict))
         blockers.extend(str(item) for item in repair.get("blockers", []) if isinstance(item, str))
+    bounded_repair_applied = any(
+        str(row.get("repair") or "").startswith("guided_")
+        for row in repaired_files
+        if isinstance(row, dict)
+    )
+    module_synthesis_repair_applied = "module_synthesis_repair" in repair_strategies or any(
+        row.get("repair") == "verification_repair_module_synthesis"
+        for row in repaired_files
+        if isinstance(row, dict)
+    )
     return {
         "kind": "code_brigade_greenfield_live_repair_trial_result",
         "contract_version": "eye-mechanicum.v1",
@@ -125,6 +135,8 @@ def compact_repair_result(scenario: str, workspace: Path, project: dict[str, Any
         "stop_reason": str(loop.get("stop_reason") or ""),
         "attempt_count": len(attempts),
         "repair_attempt_count": len(repair_attempts),
+        "bounded_repair_applied": bounded_repair_applied,
+        "module_synthesis_repair_applied": module_synthesis_repair_applied,
         "repaired_files": repaired_files,
         "repair_strategies": repair_strategies,
         "blockers": blockers,

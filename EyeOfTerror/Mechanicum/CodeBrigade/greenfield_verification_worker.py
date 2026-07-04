@@ -61,7 +61,7 @@ def repair_guidance_for_verification(project_brief: dict[str, Any], verification
         {
             "type": "replace_function_body",
             "shape": {"operations": [{"type": "replace_function_body", "path": "relative/path.py", "function_name": "name", "old_body": "current statements", "new_body": "replacement statements"}]},
-            "constraints": ["Python only", "function must exist exactly once", "current body AST must match old_body"],
+            "constraints": ["Python only", "function must exist exactly once", "current body AST must match old_body", "old_body may be a single current statement when the function is currently minimal", "this single operation may replace the entire body of one function, including multiple statements, new branches, and exception handling"],
         },
     ]
     return request_guidance(
@@ -76,7 +76,7 @@ def repair_guidance_for_verification(project_brief: dict[str, Any], verification
             "supported_repair_operations": supported_operations,
             "workspace_file_snapshots": workspace_file_snapshots(repo, project_brief),
         },
-        "Given the failed greenfield verification output, return JSON only. Choose one supported bounded repair operation when the evidence is clear, or return {\"status\":\"blocked\",\"blockers\":[...]} when no safe bounded repair applies. workspace_file_snapshots contain the current source and tests; derive old_text, old_expression, old_literal, or old_body from those snapshots and set the matching new_* value from the failing test evidence. Do not claim old_* is missing when the current code is present in workspace_file_snapshots. Do not invent unrelated scope.",
+        "Given the failed greenfield verification output, return JSON only. Choose one supported bounded repair operation when the evidence is clear, or return {\"status\":\"blocked\",\"blockers\":[...]} when no safe bounded repair applies. Use replace_function_body for multi-statement fixes inside one function, including adding branches and raising exceptions; one replace_function_body operation is allowed to replace the whole body of that single function. A minimal current function body is valid old_body evidence: for example old_body can be one current statement when workspace_file_snapshots show that statement and tests define the intended replacement behavior. Use replace_return_expression only when exactly one return expression changes. workspace_file_snapshots contain the current source and tests; derive old_text, old_expression, old_literal, or old_body from those snapshots and set the matching new_* value from the failing test evidence. Do not claim old_* is missing when the current code is present in workspace_file_snapshots. Do not invent unrelated scope.",
     )
 
 

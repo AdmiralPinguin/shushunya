@@ -19,7 +19,7 @@ from greenfield_implementation_worker import build_implementation_worker_plan as
 from greenfield_live_trial import allocate_live_trial_root, compact_greenfield_result
 from greenfield_memory_worker import build_greenfield_memory_index, build_greenfield_memory_record, update_greenfield_memory_index
 from greenfield_project import build_greenfield_project_brief, execute_greenfield_project_brief, forbidden_placeholder_markers_found, model_synthesis_blockers, reconcile_module_synthesis_with_file_set, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
-from greenfield_repair_live_trial import compact_repair_result
+from greenfield_repair_live_trial import compact_repair_result, scenario_spec
 from greenfield_review_worker import artifact_review_greenfield_project, python_source_semantic_status, review_greenfield_project
 from greenfield_scenario_worker import review_greenfield_scenarios
 from greenfield_scaffold_worker import greenfield_workspace_status, normalize_project_file_rows, scaffold_greenfield_files
@@ -3032,9 +3032,45 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(result["status"], "accepted")
             self.assertEqual(result["scenario"], "return_expression")
             self.assertEqual(result["repair_attempt_count"], 1)
+            self.assertTrue(result["bounded_repair_applied"])
+            self.assertFalse(result["module_synthesis_repair_applied"])
             self.assertEqual(result["repaired_files"][0]["repair"], "guided_replace_return_expression")
             blocked = compact_repair_result("return_expression", workspace, {"verification_commands": []}, {"status": "passed", "attempts": []})
             self.assertEqual(blocked["status"], "blocked")
+
+    def test_greenfield_repair_live_trial_function_body_requires_multi_statement_fix(self) -> None:
+        spec = scenario_spec("function_body")
+        grades = next(item["content"] for item in spec["files"] if item["path"] == "grades.py")
+        tests = next(item["content"] for item in spec["files"] if item["path"] == "test_grades.py")
+        self.assertEqual(grades, "def grade(score):\n    return 'C'\n")
+        self.assertIn("grades.grade(95), 'A'", tests)
+        self.assertIn("grades.grade(85), 'B'", tests)
+        self.assertIn("with self.assertRaises(ValueError)", tests)
+        self.assertIn("replacing the grade() function body", spec["task"])
+
+    def test_greenfield_repair_live_trial_compact_result_marks_module_synthesis_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            loop = {
+                "status": "passed",
+                "stop_reason": "verification passed",
+                "attempts": [
+                    {
+                        "repair_execution": {
+                            "status": "applied",
+                            "repair_strategy": "module_synthesis_repair",
+                            "repaired_files": [{"path": "grades.py", "repair": "verification_repair_module_synthesis"}],
+                            "blockers": ["no bounded greenfield repair was applicable"],
+                        }
+                    }
+                ],
+                "final_verification": {"status": "passed"},
+                "stop_condition_evidence": {"reason": "verification passed"},
+            }
+            result = compact_repair_result("function_body", workspace, {"verification_commands": ["python -m unittest test_grades.py"]}, loop)
+            self.assertEqual(result["status"], "accepted")
+            self.assertFalse(result["bounded_repair_applied"])
+            self.assertTrue(result["module_synthesis_repair_applied"])
 
     def test_greenfield_model_json_parser_repairs_code_regex_escapes(self) -> None:
         payload = """```json
