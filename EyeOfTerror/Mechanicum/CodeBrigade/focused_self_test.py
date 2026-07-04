@@ -1586,6 +1586,71 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(repair["synthesis_repair_report"]["synthesis_stage"], "verification_repair")
             self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), "def main():\n    return 'ready'\n")
 
+    def test_greenfield_verification_repair_synthesis_preserves_test_oracle_modules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай новый CLI проект `oracle-preserve-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "app.py", "content": "def main():\n    return 'broken'\n"},
+                        {
+                            "path": "tests/test_app.py",
+                            "content": "import unittest\nimport app\n\nclass AppTests(unittest.TestCase):\n    def test_main(self):\n        self.assertEqual(app.main(), 'ready')\n",
+                        },
+                    ],
+                    "verification_commands": ["python -m unittest discover tests"],
+                    "module_contracts": [
+                        {"module": "app", "path": "app.py", "responsibility": "return ready", "requirements": ["return ready"]},
+                        {"module": "tests.test_app", "path": "tests/test_app.py", "responsibility": "verify app behavior", "requirements": ["prove return ready"]},
+                    ],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+            original_test = (repo / "tests/test_app.py").read_text(encoding="utf-8")
+            requested_paths: list[str] = []
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                contract = payload["module_synthesis_contract"]
+                requested_paths.append(contract["path"])
+                self.assertNotIn("/tests/", f"/{contract['path']}")
+                snapshots = payload.get("test_oracle_snapshots", [])
+                self.assertEqual(len(snapshots), 1)
+                self.assertEqual(snapshots[0]["path"], "tests/test_app.py")
+                self.assertIn("self.assertEqual(app.main(), 'ready')", snapshots[0]["content"])
+                self.assertIn("test_oracle_snapshots are read-only acceptance evidence", payload.get("repair_invariants", []))
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "path": contract["path"],
+                            "content": "def main():\n    return 'ready'\n",
+                            "requirements_satisfied": contract["requirements"],
+                            "tests_to_update": contract["paired_tests"],
+                            "notes": "fixed source while preserving test oracle",
+                        }
+                    ),
+                }
+
+            report = execute_module_synthesis_contracts(
+                repo,
+                project,
+                guidance,
+                synthesis_stage="verification_repair",
+                verification_context={"status": "failed", "failure_signature": "ready assertion failed"},
+            )
+            self.assertEqual(report["status"], "applied", report)
+            self.assertEqual(report["changed_files"], ["app.py"])
+            self.assertEqual(requested_paths, ["app.py"])
+            rows = {row["path"]: row for row in report["rows"]}
+            self.assertEqual(rows["tests/test_app.py"]["status"], "skipped_test_oracle")
+            self.assertEqual((repo / "tests/test_app.py").read_text(encoding="utf-8"), original_test)
+
     def test_greenfield_verification_loop_applies_model_guided_name_error_line_repair(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -3173,6 +3238,47 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(result["status"], "accepted")
             self.assertFalse(result["bounded_repair_applied"])
             self.assertTrue(result["module_synthesis_repair_applied"])
+            self.assertFalse(result["multi_file_repair_applied"])
+
+    def test_greenfield_repair_live_trial_compact_result_marks_multi_file_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            loop = {
+                "status": "passed",
+                "stop_reason": "verification passed",
+                "attempts": [
+                    {
+                        "repair_execution": {
+                            "status": "applied",
+                            "repair_strategy": "module_synthesis_repair",
+                            "repaired_files": [
+                                {"path": "billing/pricing.py", "repair": "verification_repair_module_synthesis"},
+                                {"path": "billing/invoice.py", "repair": "verification_repair_module_synthesis"},
+                            ],
+                            "blockers": [],
+                        }
+                    }
+                ],
+                "final_verification": {"status": "passed"},
+                "stop_condition_evidence": {"reason": "verification passed"},
+            }
+            result = compact_repair_result("multi_file", workspace, {"verification_commands": ["python -m unittest discover tests"]}, loop)
+            self.assertEqual(result["status"], "accepted")
+            self.assertTrue(result["module_synthesis_repair_applied"])
+            self.assertTrue(result["multi_file_repair_applied"])
+            self.assertEqual(result["repaired_path_count"], 2)
+
+    def test_greenfield_repair_live_trial_multi_file_scenario_requires_two_modules(self) -> None:
+        spec = scenario_spec("multi_file")
+        paths = {item["path"] for item in spec["files"]}
+        contract_paths = {item["path"] for item in spec["module_contracts"]}
+        self.assertIn("billing/pricing.py", paths)
+        self.assertIn("billing/invoice.py", paths)
+        self.assertIn("billing/pricing.py", contract_paths)
+        self.assertIn("billing/invoice.py", contract_paths)
+        tests = next(item["content"] for item in spec["files"] if item["path"] == "tests/test_invoice.py")
+        self.assertIn("discounted_subtotal(ITEMS), 225", tests)
+        self.assertIn("invoice['summary']", tests)
 
     def test_greenfield_model_json_parser_repairs_code_regex_escapes(self) -> None:
         payload = """```json

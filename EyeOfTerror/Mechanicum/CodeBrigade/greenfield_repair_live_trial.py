@@ -61,6 +61,41 @@ def scenario_spec(scenario: str) -> dict[str, Any]:
             "verification_commands": ["python -m unittest test_grades.py"],
             "module_contracts": [{"module": "grades", "path": "grades.py", "responsibility": "grade score bands and reject invalid scores", "requirements": ["grade A/B/C bands", "raise ValueError for negative scores"]}],
         }
+    if scenario == "multi_file":
+        return {
+            "task": "Repair a generated invoicing package so pricing applies tier discounts and invoice totals include tax and formatted summaries.",
+            "files": [
+                {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                {"path": "billing/__init__.py", "content": "from .invoice import build_invoice\nfrom .pricing import discounted_subtotal\n\n__all__ = ['build_invoice', 'discounted_subtotal']\n"},
+                {"path": "billing/pricing.py", "content": "def discounted_subtotal(items):\n    return sum(item['price'] * item['quantity'] for item in items)\n"},
+                {"path": "billing/invoice.py", "content": "from .pricing import discounted_subtotal\n\n\ndef build_invoice(customer, items, tax_rate=0.1):\n    subtotal = discounted_subtotal(items)\n    return {'customer': customer, 'subtotal': subtotal, 'total': subtotal}\n"},
+                {
+                    "path": "tests/test_invoice.py",
+                    "content": (
+                        "import unittest\n\nfrom billing.invoice import build_invoice\nfrom billing.pricing import discounted_subtotal\n\n\n"
+                        "ITEMS = [\n"
+                        "    {'name': 'servo', 'price': 100, 'quantity': 2},\n"
+                        "    {'name': 'cable', 'price': 50, 'quantity': 1},\n"
+                        "]\n\n\n"
+                        "class InvoiceTests(unittest.TestCase):\n"
+                        "    def test_discounted_subtotal(self):\n"
+                        "        self.assertEqual(discounted_subtotal(ITEMS), 225)\n\n"
+                        "    def test_invoice_total_and_summary(self):\n"
+                        "        invoice = build_invoice('Forge', ITEMS, tax_rate=0.2)\n"
+                        "        self.assertEqual(invoice['subtotal'], 225)\n"
+                        "        self.assertEqual(invoice['tax'], 45)\n"
+                        "        self.assertEqual(invoice['total'], 270)\n"
+                        "        self.assertEqual(invoice['summary'], 'Forge: 2 items, total 270.00')\n"
+                    ),
+                },
+            ],
+            "verification_commands": ["python -m unittest discover tests"],
+            "module_contracts": [
+                {"module": "billing.pricing", "path": "billing/pricing.py", "responsibility": "apply tier discount to item subtotal", "requirements": ["apply 10 percent discount when raw subtotal is at least 200"]},
+                {"module": "billing.invoice", "path": "billing/invoice.py", "responsibility": "build invoice totals and summary", "requirements": ["include tax", "include total", "include formatted summary"]},
+                {"module": "tests.test_invoice", "path": "tests/test_invoice.py", "responsibility": "invoice workflow verification", "requirements": ["prove discount", "prove tax and summary"]},
+            ],
+        }
     if scenario == "exact_replace":
         return {
             "task": "Repair a generated demo module so value() returns ready as required by the tests.",
@@ -123,6 +158,7 @@ def compact_repair_result(scenario: str, workspace: Path, project: dict[str, Any
         for row in repaired_files
         if isinstance(row, dict)
     )
+    repaired_paths = sorted({str(row.get("path") or "") for row in repaired_files if isinstance(row, dict) and row.get("path")})
     return {
         "kind": "code_brigade_greenfield_live_repair_trial_result",
         "contract_version": "eye-mechanicum.v1",
@@ -137,6 +173,8 @@ def compact_repair_result(scenario: str, workspace: Path, project: dict[str, Any
         "repair_attempt_count": len(repair_attempts),
         "bounded_repair_applied": bounded_repair_applied,
         "module_synthesis_repair_applied": module_synthesis_repair_applied,
+        "multi_file_repair_applied": len(repaired_paths) > 1,
+        "repaired_path_count": len(repaired_paths),
         "repaired_files": repaired_files,
         "repair_strategies": repair_strategies,
         "blockers": blockers,
@@ -161,7 +199,7 @@ def run_live_repair_trial(scenario: str, run_root: Path) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a live-model GreenfieldRepairWorker verification repair trial.")
-    parser.add_argument("--scenario", choices=["name_error", "exact_replace", "return_expression", "constant", "function_body"], default="return_expression")
+    parser.add_argument("--scenario", choices=["name_error", "exact_replace", "return_expression", "constant", "function_body", "multi_file"], default="return_expression")
     parser.add_argument("--run-root", type=Path, default=DEFAULT_RUN_ROOT)
     parser.add_argument("--require-accepted", action="store_true")
     args = parser.parse_args()

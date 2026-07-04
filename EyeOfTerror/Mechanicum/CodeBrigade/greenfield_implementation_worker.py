@@ -11,6 +11,11 @@ from typing import Any, Callable
 GuidanceFn = Callable[[str, dict[str, Any], str], dict[str, Any]]
 
 
+def is_test_file_path(path: str) -> bool:
+    path_lower = path.lower()
+    return "test" in Path(path).name.lower() or "/tests/" in f"/{path_lower}"
+
+
 def build_implementation_worker_plan(
     task: str,
     template_id: str,
@@ -25,7 +30,7 @@ def build_implementation_worker_plan(
         and "/tests/" not in f"/{path}"
         and not Path(path).name.startswith("test_")
     ]
-    test_files = [path for path in expected_files if "test" in Path(path).name.lower() or "/tests/" in f"/{path}"]
+    test_files = [path for path in expected_files if is_test_file_path(path)]
     rows: list[dict[str, Any]] = []
     for index, contract in enumerate(module_contracts, start=1):
         if not isinstance(contract, dict):
@@ -386,6 +391,27 @@ def safe_repo_relative_path(repo: Path, rel_path: str) -> Path | None:
     return target
 
 
+def test_oracle_snapshots(repo: Path, module_contract: dict[str, Any], *, max_chars_per_file: int = 6000) -> list[dict[str, Any]]:
+    snapshots: list[dict[str, Any]] = []
+    for rel_path in module_contract.get("paired_tests", []):
+        if not isinstance(rel_path, str) or not rel_path:
+            continue
+        target = safe_repo_relative_path(repo, rel_path)
+        if target is None or not target.exists() or not target.is_file():
+            snapshots.append({"path": rel_path, "status": "missing"})
+            continue
+        content = target.read_text(encoding="utf-8")
+        snapshots.append(
+            {
+                "path": rel_path,
+                "status": "captured",
+                "content": content[:max_chars_per_file],
+                "truncated": len(content) > max_chars_per_file,
+            }
+        )
+    return snapshots
+
+
 def generated_file_quality(path: str, content: str, requirements: list[str], project_brief: dict[str, Any] | None = None) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
@@ -394,7 +420,7 @@ def generated_file_quality(path: str, content: str, requirements: list[str], pro
     template_id = str(project_brief.get("template_id") or "")
     stripped = content.strip()
     path_lower = path.lower()
-    is_test = "test" in Path(path).name.lower() or "/tests/" in f"/{path_lower}"
+    is_test = is_test_file_path(path)
     if not stripped:
         blockers.append("generated file is empty")
         score -= 80
@@ -523,7 +549,7 @@ def validate_module_synthesis_output(
         quality = generated_file_quality(expected_path, content, requirements, project_brief)
         if quality["status"] == "blocked":
             problems.append("semantic quality blocked: " + "; ".join(str(item) for item in quality["blockers"]))
-        is_test = "test" in Path(expected_path).name.lower() or "/tests/" in f"/{expected_path}"
+        is_test = is_test_file_path(expected_path)
         required_markers = module_required_behavior_markers(module_contract, project_brief)
         if is_test and required_markers:
             missing_markers = [marker for marker in required_markers if marker not in content]
@@ -614,7 +640,7 @@ def validate_file_set_synthesis_output(
             quality = generated_file_quality(path, content, requirements, project_brief)
             if quality["status"] == "blocked":
                 problems.append(f"semantic quality blocked for {path}: " + "; ".join(str(item) for item in quality["blockers"]))
-            is_test = "test" in Path(path).name.lower() or "/tests/" in f"/{path}"
+            is_test = is_test_file_path(path)
             required_markers = task_behavior_markers(str(project_brief.get("task") or ""))
             if is_test and required_markers:
                 missing_markers = [marker for marker in required_markers if marker not in content]
@@ -672,23 +698,38 @@ def execute_module_synthesis_contracts(
             row["blockers"].append("module path is outside workspace")
             rows.append(row)
             continue
+        if synthesis_stage == "verification_repair" and is_test_file_path(rel_path):
+            row["status"] = "skipped_test_oracle"
+            row["warnings"].append("verification repair preserves test-oracle files")
+            rows.append(row)
+            continue
         if request_guidance is None:
             row["warnings"].append("no model guidance callback supplied")
             rows.append(row)
             continue
+        guidance_payload = {
+            "project_name": project_brief.get("project_name"),
+            "project_type": project_brief.get("project_type"),
+            "template_id": project_brief.get("template_id"),
+            "module_synthesis_contract": synthesis_contract,
+            "existing_content": target.read_text(encoding="utf-8") if target.exists() and target.is_file() else "",
+            "verification_context": verification_context or {},
+        }
+        if synthesis_stage == "verification_repair":
+            guidance_payload["test_oracle_snapshots"] = test_oracle_snapshots(repo, synthesis_contract)
+            guidance_payload["repair_invariants"] = [
+                "test_oracle_snapshots are read-only acceptance evidence",
+                "do not change tests, expected literals, assertions, or verification commands",
+                "source changes must satisfy exact expected keys, values, and strings shown by the test oracle",
+            ]
         guidance = request_guidance(
             "GreenfieldImplementationWorker",
-            {
-                "project_name": project_brief.get("project_name"),
-                "project_type": project_brief.get("project_type"),
-                "template_id": project_brief.get("template_id"),
-                "module_synthesis_contract": synthesis_contract,
-                "existing_content": target.read_text(encoding="utf-8") if target.exists() and target.is_file() else "",
-                "verification_context": verification_context or {},
-            },
+            guidance_payload,
             (
                 "Repair this single module using the verification failure context. Return JSON only with path, content, "
-                "requirements_satisfied, tests_to_update, and notes. Preserve the module contract and do not edit unrelated files."
+                "requirements_satisfied, tests_to_update, and notes. Preserve the module contract and do not edit unrelated files. "
+                "Test files are verification oracles and must not be edited during verification repair. Use paired test oracle "
+                "snapshots to satisfy exact expected keys, values, and string literals."
                 if synthesis_stage == "verification_repair"
                 else "Implement this single module synthesis contract. Return JSON only with path, content, requirements_satisfied, tests_to_update, and notes."
             ),
