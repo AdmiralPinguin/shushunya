@@ -96,6 +96,65 @@ def scenario_spec(scenario: str) -> dict[str, Any]:
                 {"module": "tests.test_invoice", "path": "tests/test_invoice.py", "responsibility": "invoice workflow verification", "requirements": ["prove discount", "prove tax and summary"]},
             ],
         }
+    if scenario == "agent_router_multi_file":
+        return {
+            "task": "Repair a generated command dispatcher `agent-router` so it validates JSON payloads, routes status/echo/summarize actions, rejects unknown actions, records session history, and runs command sequences.",
+            "project_name": "agent-router",
+            "max_cycles": 4,
+            "files": [
+                {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                {"path": "agent_router/__init__.py", "content": ""},
+                {"path": "agent_router/registry.py", "content": "ACTION_REGISTRY = {'status': lambda payload: {'status': 'ready'}}\n\n\ndef available_actions():\n    return ['status']\n"},
+                {"path": "agent_router/schema.py", "content": "def validate_payload(payload):\n    return payload or {}\n"},
+                {"path": "agent_router/session.py", "content": "class AgentSession:\n    def __init__(self):\n        self.history = []\n"},
+                {"path": "agent_router/runner.py", "content": "from .registry import ACTION_REGISTRY\nfrom .schema import validate_payload\n\n\ndef run_action(action='status', payload=None, session=None):\n    data = validate_payload(payload)\n    return ACTION_REGISTRY[action](data)\n"},
+                {"path": "agent_router/contract.py", "content": "from .runner import run_action\n\n\ndef build_tool_result(action='status', payload=None):\n    return run_action(action, payload)\n"},
+                {"path": "agent_router/tool.py", "content": "from .contract import build_tool_result\n\n\ndef main():\n    print(build_tool_result('status'))\n\n\nif __name__ == '__main__':\n    main()\n"},
+                {
+                    "path": "tests/test_agent_router.py",
+                    "content": (
+                        "import unittest\n\n"
+                        "from agent_router.contract import build_tool_result\n"
+                        "from agent_router.runner import run_action, run_sequence\n"
+                        "from agent_router.session import AgentSession\n\n\n"
+                        "class AgentRouterTests(unittest.TestCase):\n"
+                        "    def test_status_echo_and_summary_actions(self):\n"
+                        "        self.assertEqual(build_tool_result('status')['status'], 'ready')\n"
+                        "        self.assertEqual(build_tool_result('echo', {'text': '  hello  '})['text'], 'hello')\n"
+                        "        summary = build_tool_result('summarize', {'items': ['alpha', 'beta', 'gamma']})\n"
+                        "        self.assertEqual(summary['count'], 3)\n"
+                        "        self.assertEqual(summary['summary'], 'alpha, beta, gamma')\n\n"
+                        "    def test_unknown_action_and_payload_validation(self):\n"
+                        "        with self.assertRaises(ValueError):\n"
+                        "            build_tool_result('missing', {})\n"
+                        "        with self.assertRaises(TypeError):\n"
+                        "            build_tool_result('echo', ['not', 'a', 'dict'])\n\n"
+                        "    def test_session_history_and_sequence_order(self):\n"
+                        "        session = AgentSession()\n"
+                        "        first = run_action('echo', {'text': 'first'}, session=session)\n"
+                        "        second = run_action('summarize', {'items': ['x', 'y']}, session=session)\n"
+                        "        self.assertEqual(first['text'], 'first')\n"
+                        "        self.assertEqual(second['count'], 2)\n"
+                        "        self.assertEqual([row['action'] for row in session.history], ['echo', 'summarize'])\n"
+                        "        sequence = run_sequence([\n"
+                        "            {'action': 'echo', 'payload': {'text': 'one'}},\n"
+                        "            {'action': 'status', 'payload': {}},\n"
+                        "        ])\n"
+                        "        self.assertEqual([row['action'] for row in sequence['history']], ['echo', 'status'])\n"
+                        "        self.assertEqual(sequence['results'][1]['status'], 'ready')\n"
+                    ),
+                },
+            ],
+            "verification_commands": ["python -m unittest discover tests"],
+            "module_contracts": [
+                {"module": "agent_router.registry", "path": "agent_router/registry.py", "responsibility": "action registry and supported action listing", "requirements": ["support status action", "support echo action", "support summarize action", "reject unknown actions"]},
+                {"module": "agent_router.schema", "path": "agent_router/schema.py", "responsibility": "payload validation", "requirements": ["accept dict payloads", "reject non-dict payloads"]},
+                {"module": "agent_router.session", "path": "agent_router/session.py", "responsibility": "session history recording", "requirements": ["record action history in order"]},
+                {"module": "agent_router.runner", "path": "agent_router/runner.py", "responsibility": "run actions and sequences", "requirements": ["route actions", "record session history", "run command sequences"]},
+                {"module": "agent_router.contract", "path": "agent_router/contract.py", "responsibility": "public tool contract", "requirements": ["build tool results for named actions"]},
+                {"module": "tests.test_agent_router", "path": "tests/test_agent_router.py", "responsibility": "agent router workflow verification", "requirements": ["prove action routing", "prove payload validation", "prove session sequence history"]},
+            ],
+        }
     if scenario == "exact_replace":
         return {
             "task": "Repair a generated demo module so value() returns ready as required by the tests.",
@@ -190,7 +249,7 @@ def run_live_repair_trial(scenario: str, run_root: Path) -> dict[str, Any]:
     spec = scenario_spec(scenario)
     project = build_greenfield_project_brief(spec["task"], spec)
     write_project(workspace, project)
-    loop = run_greenfield_verification_loop(workspace, project["verification_commands"], project, max_cycles=2)
+    loop = run_greenfield_verification_loop(workspace, project["verification_commands"], project, max_cycles=int(spec.get("max_cycles") or 2))
     result = compact_repair_result(scenario, workspace, project, loop)
     (trial_root / "live_greenfield_repair_trial_result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (trial_root / "greenfield_repair_loop.json").write_text(json.dumps(loop, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -199,7 +258,7 @@ def run_live_repair_trial(scenario: str, run_root: Path) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a live-model GreenfieldRepairWorker verification repair trial.")
-    parser.add_argument("--scenario", choices=["name_error", "exact_replace", "return_expression", "constant", "function_body", "multi_file"], default="return_expression")
+    parser.add_argument("--scenario", choices=["name_error", "exact_replace", "return_expression", "constant", "function_body", "multi_file", "agent_router_multi_file"], default="return_expression")
     parser.add_argument("--run-root", type=Path, default=DEFAULT_RUN_ROOT)
     parser.add_argument("--require-accepted", action="store_true")
     args = parser.parse_args()

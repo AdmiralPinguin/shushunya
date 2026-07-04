@@ -540,7 +540,8 @@ def domain_specific_quality_findings(template_id: str, path: str, content: str, 
             warnings.append("data CLI has weak argument/file handling")
             penalty += 15
     if template_id == "local_agent_tool" and (path.endswith("/contract.py") or path.endswith("/tool.py")):
-        if path.endswith("/contract.py") and "dict" not in content and "{" not in content:
+        contract_delegates_to_structured_runner = "run_action(" in content or "run_sequence(" in content
+        if path.endswith("/contract.py") and "dict" not in content and "{" not in content and not contract_delegates_to_structured_runner:
             blockers.append("local agent contract does not return structured data")
             penalty += 45
         if path.endswith("/contract.py") and not any(marker in lowered for marker in ("status", "action", "task", "result")):
@@ -705,6 +706,7 @@ def execute_module_synthesis_contracts(
     rows: list[dict[str, Any]] = []
     operation_results: list[dict[str, Any]] = []
     changed_files: list[str] = []
+    write_snapshots: dict[str, tuple[Path, bool, bytes]] = {}
     for module in module_sequence:
         if not isinstance(module, dict):
             continue
@@ -803,19 +805,27 @@ def execute_module_synthesis_contracts(
             row["warnings"].append("model output required JSON reformat retry")
         problems = validate_module_synthesis_output(output, module, forbidden_markers, project_brief)
         if problems:
+            validation_retry_payload = {
+                "project_name": project_brief.get("project_name"),
+                "project_type": project_brief.get("project_type"),
+                "template_id": project_brief.get("template_id"),
+                "module_synthesis_contract": synthesis_contract,
+                "previous_module_output": output,
+                "validation_problems": problems,
+                "existing_content": target.read_text(encoding="utf-8") if target.exists() and target.is_file() else "",
+                "verification_context": verification_context or {},
+            }
+            if synthesis_stage == "verification_repair":
+                validation_retry_payload["test_oracle_snapshots"] = test_oracle_snapshots(repo, synthesis_contract)
+                validation_retry_payload["repair_invariants"] = [
+                    "test_oracle_snapshots are read-only acceptance evidence",
+                    "retry must fix validation blockers without weakening tests or changing path",
+                    "source changes must satisfy exact expected imports, keys, values, and strings shown by the test oracle",
+                ]
             validation_retry_guidance = request_guidance(
                 "GreenfieldImplementationWorker",
-                {
-                    "project_name": project_brief.get("project_name"),
-                    "project_type": project_brief.get("project_type"),
-                    "template_id": project_brief.get("template_id"),
-                    "module_synthesis_contract": synthesis_contract,
-                    "previous_module_output": output,
-                    "validation_problems": problems,
-                    "existing_content": target.read_text(encoding="utf-8") if target.exists() and target.is_file() else "",
-                    "verification_context": verification_context or {},
-                },
-                "The previous module implementation JSON was parseable but failed validation. Correct the same module only. Return JSON only with the same path, valid content, complete requirements_satisfied, tests_to_update, and notes. Do not change unrelated files or weaken tests.",
+                validation_retry_payload,
+                "The previous module implementation JSON was parseable but failed validation. Correct the same module only. Return JSON only with the same path, valid content, complete requirements_satisfied, tests_to_update, and notes. Do not change unrelated files or weaken tests. During verification repair, use test_oracle_snapshots as read-only acceptance evidence.",
             )
             row["validation_retry_guidance_status"] = str(validation_retry_guidance.get("status") or "")
             row["validation_retry_guidance_ok"] = bool(validation_retry_guidance.get("ok"))
@@ -843,6 +853,8 @@ def execute_module_synthesis_contracts(
                 continue
         before = target.read_bytes() if target.exists() else b""
         rendered_content = str(output["content"])
+        if rel_path not in write_snapshots:
+            write_snapshots[rel_path] = (target, target.exists(), before)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(rendered_content, encoding="utf-8")
         after = rendered_content.encode("utf-8")
@@ -870,6 +882,26 @@ def execute_module_synthesis_contracts(
     applied_count = sum(1 for row in rows if row.get("status") == "applied")
     unavailable_count = sum(1 for row in rows if row.get("status") == "model_unavailable")
     blocked_count = sum(1 for row in rows if row.get("status") in blocking_statuses)
+    if blocked_count and write_snapshots:
+        for rel_path, (target, existed, before_bytes) in write_snapshots.items():
+            if existed:
+                target.write_bytes(before_bytes)
+            elif target.exists():
+                target.unlink()
+            operation_results.append(
+                {
+                    "operation": "greenfield_module_synthesis_rollback",
+                    "path": rel_path,
+                    "status": "rolled_back_after_blocked_synthesis",
+                }
+            )
+        for row in rows:
+            if row.get("status") == "applied":
+                row["status"] = "rolled_back"
+                row.setdefault("warnings", []).append("module write rolled back because another module failed synthesis validation")
+        changed_files = []
+        applied_count = 0
+        blocked_count = sum(1 for row in rows if row.get("status") in blocking_statuses)
     if blocked_count:
         status = "blocked"
     elif applied_count:

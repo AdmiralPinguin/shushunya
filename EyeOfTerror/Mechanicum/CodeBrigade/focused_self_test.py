@@ -946,6 +946,9 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
                 if "validation_problems" in payload:
                     calls.append("validation_retry")
                     self.assertTrue(any("syntax error" in problem for problem in payload["validation_problems"]))
+                    if payload.get("verification_context"):
+                        self.assertIn("test_oracle_snapshots", payload)
+                        self.assertIn("retry must fix validation blockers without weakening tests or changing path", payload.get("repair_invariants", []))
                     return {
                         "ok": True,
                         "status": "answered",
@@ -988,13 +991,68 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
                     ),
                 }
 
-            report = execute_module_synthesis_contracts(repo, project, guidance)
+            report = execute_module_synthesis_contracts(
+                repo,
+                project,
+                guidance,
+                synthesis_stage="verification_repair",
+                verification_context={"status": "failed", "failure_signature": "syntax error"},
+            )
             self.assertEqual(report["status"], "applied", report)
             self.assertIn("validation_retry", calls)
             self.assertEqual(path.read_text(encoding="utf-8"), "def main():\n    return 'validation-fixed'\n")
             source_row = next(row for row in report["rows"] if row["path"] == module["path"])
             self.assertEqual(source_row["validation_retry_guidance_status"], "answered")
             self.assertIn("model output required validation retry", source_row["warnings"])
+
+    def test_greenfield_module_synthesis_rolls_back_partial_writes_when_any_module_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай multi-module project `rollback-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "pkg/good.py", "content": "def value():\n    return 'old'\n"},
+                        {"path": "pkg/bad.py", "content": "def broken():\n    return 'old'\n"},
+                    ],
+                    "module_contracts": [
+                        {"module": "pkg.good", "path": "pkg/good.py", "responsibility": "good module", "requirements": ["return good"]},
+                        {"module": "pkg.bad", "path": "pkg/bad.py", "responsibility": "bad module", "requirements": ["return bad"]},
+                    ],
+                    "verification_commands": ["python -m py_compile pkg/good.py pkg/bad.py"],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                contract = payload["module_synthesis_contract"]
+                content = "def value():\n    return 'good'\n" if contract["path"].endswith("good.py") else "def broken(:\n    return 'bad'\n"
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "path": contract["path"],
+                            "content": content,
+                            "requirements_satisfied": contract["requirements"],
+                            "tests_to_update": contract["paired_tests"],
+                            "notes": "rollback test",
+                        }
+                    ),
+                }
+
+            report = execute_module_synthesis_contracts(repo, project, guidance)
+            self.assertEqual(report["status"], "blocked", report)
+            self.assertEqual(report["changed_files"], [])
+            self.assertEqual((repo / "pkg/good.py").read_text(encoding="utf-8"), "def value():\n    return 'old'\n")
+            rows = {row["path"]: row for row in report["rows"]}
+            self.assertEqual(rows["pkg/good.py"]["status"], "rolled_back")
+            self.assertEqual(rows["pkg/bad.py"]["status"], "rejected")
+            self.assertTrue(any(item["operation"] == "greenfield_module_synthesis_rollback" for item in report["operation_results"]))
 
     def test_greenfield_file_set_synthesis_applies_source_and_tests_together(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1382,6 +1440,10 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(
             generated_file_quality("agent_demo/contract.py", "def build_tool_result(task):\n    return 'ready'\n", ["structured result"], {"template_id": "local_agent_tool"})["status"],
             "blocked",
+        )
+        self.assertEqual(
+            generated_file_quality("agent_demo/contract.py", "from .runner import run_action\n\n\ndef build_tool_result(action, payload=None):\n    return run_action(action, payload)\n", ["structured result"], {"template_id": "local_agent_tool"})["status"],
+            "passed",
         )
         self.assertEqual(
             generated_file_quality("src/main.jsx", "const value = 1;\n", ["render ready"], {"template_id": "node_vite_app"})["status"],
@@ -3393,6 +3455,31 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         tests = next(item["content"] for item in spec["files"] if item["path"] == "tests/test_invoice.py")
         self.assertIn("discounted_subtotal(ITEMS), 225", tests)
         self.assertIn("invoice['summary']", tests)
+
+    def test_greenfield_repair_live_trial_agent_router_scenario_is_large_multi_file_repair(self) -> None:
+        spec = scenario_spec("agent_router_multi_file")
+        self.assertGreaterEqual(spec["max_cycles"], 4)
+        paths = {item["path"] for item in spec["files"]}
+        contract_paths = {item["path"] for item in spec["module_contracts"]}
+        expected_sources = {
+            "agent_router/registry.py",
+            "agent_router/schema.py",
+            "agent_router/session.py",
+            "agent_router/runner.py",
+            "agent_router/contract.py",
+        }
+        self.assertTrue(expected_sources.issubset(paths))
+        self.assertTrue(expected_sources.issubset(contract_paths))
+        self.assertIn("tests/test_agent_router.py", paths)
+        self.assertIn("tests/test_agent_router.py", contract_paths)
+        tests = next(item["content"] for item in spec["files"] if item["path"] == "tests/test_agent_router.py")
+        self.assertIn("run_sequence", tests)
+        self.assertIn("with self.assertRaises(ValueError)", tests)
+        self.assertIn("session.history", tests)
+        project = build_greenfield_project_brief(spec["task"], spec)
+        module_paths = {row["path"] for row in project["implementation_plan"]["module_sequence"]}
+        self.assertTrue(expected_sources.issubset(module_paths))
+        self.assertFalse(any(path.startswith("ceraxia_project/") for path in module_paths))
 
     def test_greenfield_model_json_parser_repairs_code_regex_escapes(self) -> None:
         payload = """```json
