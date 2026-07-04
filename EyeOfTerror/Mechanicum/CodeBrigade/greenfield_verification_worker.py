@@ -128,6 +128,12 @@ def _repair_spec_from_guidance(repair_guidance: dict[str, Any] | None) -> dict[s
         parsed = extract_json_object(content)
     except (json.JSONDecodeError, ValueError):
         return {}
+    repair_operation = parsed.get("repair_operation") if isinstance(parsed.get("repair_operation"), dict) else {}
+    if isinstance(repair_operation.get("repair_hypothesis"), dict):
+        hypothesis = dict(repair_operation["repair_hypothesis"])
+        hypothesis.setdefault("type", repair_operation.get("type"))
+        hypothesis.setdefault("operation", repair_operation.get("type"))
+        return hypothesis
     hypothesis = parsed.get("repair_hypothesis") if isinstance(parsed.get("repair_hypothesis"), dict) else parsed
     if not isinstance(hypothesis, dict):
         return {}
@@ -156,9 +162,18 @@ def _repair_operations_from_guidance(repair_guidance: dict[str, Any] | None) -> 
         return [row for row in operations if isinstance(row, dict)]
     repair_operation = parsed.get("repair_operation")
     if isinstance(repair_operation, dict):
+        parent_type = str(repair_operation.get("type") or "")
         nested_operations = repair_operation.get("operations")
         if isinstance(nested_operations, list):
-            return [row for row in nested_operations if isinstance(row, dict)]
+            rows: list[dict[str, Any]] = []
+            for row in nested_operations:
+                if not isinstance(row, dict):
+                    continue
+                next_row = dict(row)
+                if parent_type and not next_row.get("type"):
+                    next_row["type"] = parent_type
+                rows.append(next_row)
+            return rows
         if any(key in repair_operation for key in ("old_text", "new_text", "old", "new", "old_expression", "new_expression", "old_literal", "new_literal", "old_body", "new_body")):
             return [repair_operation]
     if isinstance(parsed.get("repair_hypothesis"), dict):
