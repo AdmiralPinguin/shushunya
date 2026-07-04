@@ -1015,6 +1015,92 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(repair["synthesis_repair_report"]["synthesis_stage"], "verification_repair")
             self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), "def main():\n    return 'ready'\n")
 
+    def test_greenfield_verification_loop_applies_model_guided_name_error_line_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай local agent tool router `guided-repair-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "demo.py", "content": "READY = 'ready'\nstray_symbol\n\ndef value():\n    return READY\n"},
+                        {
+                            "path": "test_demo.py",
+                            "content": "import unittest\nimport demo\n\nclass DemoTests(unittest.TestCase):\n    def test_value(self):\n        self.assertEqual(demo.value(), 'ready')\n",
+                        },
+                    ],
+                    "verification_commands": ["python -m unittest test_demo.py"],
+                    "module_contracts": [{"module": "demo", "path": "demo.py", "responsibility": "return ready", "requirements": ["return ready"]}],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                self.assertEqual(role, "GreenfieldRepairWorker")
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": "```json\n{\"repair_hypothesis\":{\"target_file\":\"demo.py\",\"target_line\":2,\"action\":\"Remove the stray undefined name line.\"}}\n```",
+                }
+
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=2, request_guidance=guidance)
+            self.assertEqual(loop["status"], "passed", loop)
+            repair = loop["attempts"][0]["repair_execution"]
+            self.assertEqual(repair["status"], "applied")
+            self.assertIn(
+                {"path": "demo.py", "repair": "guided_remove_undefined_name_line", "status": "applied", "target_line": 2, "undefined_name": "stray_symbol"},
+                repair["repaired_files"],
+            )
+            self.assertNotIn("stray_symbol", (repo / "demo.py").read_text(encoding="utf-8"))
+
+    def test_greenfield_verification_loop_applies_model_guided_evidence_shape_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай CLI проект `evidence-repair-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "demo.py", "content": "READY = 'ready'\nn\n\ndef value():\n    return READY\n"},
+                        {
+                            "path": "test_demo.py",
+                            "content": "import unittest\nimport demo\n\nclass DemoTests(unittest.TestCase):\n    def test_value(self):\n        self.assertEqual(demo.value(), 'ready')\n",
+                        },
+                    ],
+                    "verification_commands": ["python -m unittest test_demo.py"],
+                    "module_contracts": [{"module": "demo", "path": "demo.py", "responsibility": "return ready", "requirements": ["return ready"]}],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "action": "propose_repair",
+                            "hypothesis": "Remove the stray n character on line 2 of demo.py.",
+                            "evidence": {"traceback_source": "demo.py", "line_number": 2, "error_type": "NameError"},
+                            "scope_boundary": "demo.py",
+                        }
+                    ),
+                }
+
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=2, request_guidance=guidance)
+            self.assertEqual(loop["status"], "passed", loop)
+            repair = loop["attempts"][0]["repair_execution"]
+            self.assertIn(
+                {"path": "demo.py", "repair": "guided_remove_undefined_name_line", "status": "applied", "target_line": 2, "undefined_name": "n"},
+                repair["repaired_files"],
+            )
+
     def test_greenfield_verification_loop_reruns_after_final_allowed_repair(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from greenfield_architect import request_greenfield_model_guidance
-from greenfield_implementation_worker import execute_module_synthesis_contracts
+from greenfield_implementation_worker import execute_module_synthesis_contracts, extract_json_object
 from verification_adapter import run_verification_commands
 
 
@@ -52,11 +53,108 @@ def project_file_content_map(project_brief: dict[str, Any]) -> dict[str, str]:
     return contents
 
 
-def apply_greenfield_repair(repo: Path, project_brief: dict[str, Any], verification: dict[str, Any]) -> dict[str, Any]:
+def _repo_relative_path(repo: Path, rel_path: str) -> Path | None:
+    if not rel_path or rel_path.startswith(("/", "~")):
+        return None
+    path = (repo / rel_path).resolve()
+    try:
+        path.relative_to(repo.resolve())
+    except ValueError:
+        return None
+    return path
+
+
+def _repair_spec_from_guidance(repair_guidance: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(repair_guidance, dict) or not repair_guidance.get("ok"):
+        return {}
+    content = repair_guidance.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return {}
+    try:
+        parsed = extract_json_object(content)
+    except (json.JSONDecodeError, ValueError):
+        return {}
+    hypothesis = parsed.get("repair_hypothesis") if isinstance(parsed.get("repair_hypothesis"), dict) else parsed
+    if not isinstance(hypothesis, dict):
+        return {}
+    evidence = parsed.get("evidence") if isinstance(parsed.get("evidence"), dict) else {}
+    if evidence:
+        hypothesis = dict(hypothesis)
+        hypothesis.setdefault("target_file", evidence.get("traceback_source") or evidence.get("target_file") or evidence.get("path"))
+        hypothesis.setdefault("target_line", evidence.get("line_number") or evidence.get("target_line") or evidence.get("line"))
+    hypothesis.setdefault("target_file", parsed.get("scope_boundary"))
+    hypothesis.setdefault("action", parsed.get("hypothesis") or parsed.get("action") or parsed.get("repair"))
+    return hypothesis
+
+
+def _undefined_name_from_verification(verification: dict[str, Any]) -> str:
+    combined = "\n".join(
+        f"{item.get('stdout') or ''}\n{item.get('stderr') or ''}"
+        for item in verification.get("results", [])
+        if isinstance(item, dict)
+    )
+    match = re.search(r"NameError: name '([A-Za-z_][A-Za-z0-9_]*)' is not defined", combined)
+    return match.group(1) if match else ""
+
+
+def _guided_line_repair(repo: Path, verification: dict[str, Any], repair_guidance: dict[str, Any] | None) -> dict[str, Any] | None:
+    spec = _repair_spec_from_guidance(repair_guidance)
+    target_file = str(spec.get("target_file") or spec.get("path") or "")
+    target_line = spec.get("target_line") or spec.get("line")
+    action = " ".join(
+        str(spec.get(key) or "")
+        for key in ("action", "repair", "hypothesis")
+        if spec.get(key)
+    ).lower()
+    if not target_file or not isinstance(target_line, int):
+        return None
+    path = _repo_relative_path(repo, target_file)
+    if path is None or not path.exists() or not path.is_file():
+        return {
+            "path": target_file,
+            "repair": "guided_line_repair",
+            "status": "blocked",
+            "blocker": "guided target file is missing or outside workspace",
+        }
+    undefined_name = _undefined_name_from_verification(verification)
+    if not undefined_name:
+        return None
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    index = target_line - 1
+    if index < 0 or index >= len(lines):
+        return {
+            "path": target_file,
+            "repair": "guided_line_repair",
+            "status": "blocked",
+            "blocker": "guided target line is outside file",
+        }
+    line = lines[index]
+    if line.strip() != undefined_name:
+        return None
+    if action and not any(marker in action for marker in ("remove", "delete", "stray", "удал")):
+        return None
+    del lines[index]
+    path.write_text("".join(lines), encoding="utf-8")
+    return {
+        "path": target_file,
+        "repair": "guided_remove_undefined_name_line",
+        "status": "applied",
+        "target_line": target_line,
+        "undefined_name": undefined_name,
+    }
+
+
+def apply_greenfield_repair(repo: Path, project_brief: dict[str, Any], verification: dict[str, Any], repair_guidance: dict[str, Any] | None = None) -> dict[str, Any]:
     template_contents = project_file_content_map(project_brief)
     expected_files = [str(path) for path in project_brief.get("expected_files", []) if isinstance(path, str)]
     repaired_files: list[dict[str, Any]] = []
     blockers: list[str] = []
+    guided_repair = _guided_line_repair(repo, verification, repair_guidance)
+    if guided_repair is not None:
+        if guided_repair.get("status") == "applied":
+            repaired_files.append(guided_repair)
+        elif guided_repair.get("blocker"):
+            blockers.append(str(guided_repair["blocker"]))
     for rel_path in expected_files:
         if rel_path == "greenfield_project_brief.json":
             continue
@@ -169,7 +267,7 @@ def run_greenfield_verification_loop(repo: Path, commands: list[str], project_br
             attempts.append({"cycle": cycle, "status": verification.get("status", ""), "failure_signature": signature, "repair_guidance": {}, "repair_execution": {"status": "skipped_repeat_failure", "repaired_files": [], "blockers": ["same verification failure repeats"]}})
             return verification_loop_result("blocked", attempts, verification, "same verification failure repeats", repeated_signature=True)
         repair_guidance = repair_guidance_for_verification(project_brief, verification, signature, request_guidance)
-        repair_execution = apply_greenfield_repair(repo, project_brief, verification)
+        repair_execution = apply_greenfield_repair(repo, project_brief, verification, repair_guidance)
         if repair_execution.get("status") != "applied":
             synthesis_repair = apply_greenfield_synthesis_repair(repo, project_brief, verification, signature, request_guidance)
             repair_execution = {
