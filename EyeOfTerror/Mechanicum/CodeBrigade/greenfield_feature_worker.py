@@ -16,7 +16,12 @@ def infer_acceptance_features(task: str) -> list[dict[str, Any]]:
                 "operations": ["add", "subtract", "multiply", "divide"],
             }
         )
-    if any(word in lowered for word in ("todo", "to-do", "task list", "задачник", "список задач", "список дел", "тасклист")):
+    task_dashboard = (
+        any(word in lowered for word in ("task dashboard", "tasks dashboard", "dashboard", "дашборд", "карточк", "cards"))
+        and any(word in lowered for word in ("task", "tasks", "todo", "done", "active", "задач", "дел"))
+        and any(word in lowered for word in ("filter", "filters", "active/done", "toggle", "localstorage", "фильтр", "переключ", "сохран"))
+    )
+    if task_dashboard or any(word in lowered for word in ("todo", "to-do", "task list", "задачник", "список задач", "список дел", "тасклист")):
         features.append(
             {
                 "id": "todo_list",
@@ -137,6 +142,8 @@ def apply_task_feature_overrides(
         return apply_static_site_kanban_board_feature(project_name, files), static_kanban_board_module_contracts(), features
     if template_id == "static_site" and any(feature.get("id") == "todo_list" for feature in features):
         return apply_static_site_todo_feature(project_name, files), static_todo_module_contracts(), features
+    if template_id == "node_vite_app" and any(feature.get("id") == "todo_list" for feature in features):
+        return apply_vite_todo_dashboard_feature(project_name, files), vite_todo_dashboard_module_contracts(), features
     if template_id == "python_fastapi_service" and any(feature.get("id") == "issue_tracker_api" for feature in features):
         return apply_fastapi_issue_tracker_feature(project_name, files), fastapi_issue_tracker_module_contracts(), features
     if template_id == "python_fastapi_service" and any(feature.get("id") == "operations_dashboard_api" for feature in features):
@@ -2021,6 +2028,163 @@ def vite_counter_app_module_contracts() -> list[dict[str, Any]]:
             "path": "tests/test_vite_contract.py",
             "responsibility": "Vite counter behavior-contract verification",
             "requirements": ["prove manifest entrypoint", "prove counter behaviors are present"],
+        },
+    ]
+
+
+def apply_vite_todo_dashboard_feature(project_name: str, files: list[Any]) -> list[Any]:
+    main = (
+        "import React, { useEffect, useMemo, useState } from 'react';\n"
+        "import { createRoot } from 'react-dom/client';\n"
+        "import './styles.css';\n\n"
+        "const STORAGE_KEY = 'ceraxia.vite.todo.dashboard';\n"
+        "const INITIAL_TASKS = [\n"
+        "  { id: 'plan', title: 'Plan release checklist', done: false },\n"
+        "  { id: 'review', title: 'Review generated contract tests', done: true },\n"
+        "  { id: 'ship', title: 'Ship verified dashboard', done: false },\n"
+        "];\n\n"
+        "function loadTodos() {\n"
+        "  try {\n"
+        "    const raw = localStorage.getItem(STORAGE_KEY);\n"
+        "    return raw ? JSON.parse(raw) : INITIAL_TASKS;\n"
+        "  } catch (_error) {\n"
+        "    return INITIAL_TASKS;\n"
+        "  }\n"
+        "}\n\n"
+        "function saveTodos(tasks) {\n"
+        "  localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));\n"
+        "}\n\n"
+        "function addTodo(tasks, title) {\n"
+        "  const cleanTitle = title.trim();\n"
+        "  if (!cleanTitle) return tasks;\n"
+        "  return [...tasks, { id: `task-${Date.now()}`, title: cleanTitle, done: false }];\n"
+        "}\n\n"
+        "function deleteTodo(tasks, taskId) {\n"
+        "  return tasks.filter((task) => task.id !== taskId);\n"
+        "}\n\n"
+        "export function filterTasks(tasks, filter) {\n"
+        "  if (filter === 'active') return tasks.filter((task) => !task.done);\n"
+        "  if (filter === 'done') return tasks.filter((task) => task.done);\n"
+        "  return tasks;\n"
+        "}\n\n"
+        "export function remainingTasks(tasks) {\n"
+        "  return tasks.filter((task) => !task.done).length;\n"
+        "}\n\n"
+        "export function TodoDashboard() {\n"
+        "  const [tasks, setTasks] = useState(loadTodos);\n"
+        "  const [draftTitle, setDraftTitle] = useState('');\n"
+        "  const [activeFilter, setActiveFilter] = useState('all');\n\n"
+        "  useEffect(() => {\n"
+        "    saveTodos(tasks);\n"
+        "  }, [tasks]);\n\n"
+        "  const visibleTasks = useMemo(() => filterTasks(tasks, activeFilter), [tasks, activeFilter]);\n"
+        "  const remaining = remainingTasks(tasks);\n"
+        "  const toggleDone = (taskId) => setTasks((rows) => rows.map((task) => task.id === taskId ? { ...task, done: !task.done } : task));\n\n"
+        "  const completeTodo = (taskId) => toggleDone(taskId);\n"
+        "  const removeTask = (taskId) => setTasks((rows) => deleteTodo(rows, taskId));\n"
+        "  const renderTodos = () => visibleTasks;\n"
+        "  const submitTask = (event) => {\n"
+        "    event.preventDefault();\n"
+        "    setTasks((rows) => addTodo(rows, draftTitle));\n"
+        "    setDraftTitle('');\n"
+        "  };\n\n"
+        "  return (\n"
+        "    <main className=\"dashboard-shell\">\n"
+        f"      <h1>{project_name} Task Dashboard</h1>\n"
+        "      <p className=\"remaining-counter\" aria-live=\"polite\">{remaining} tasks remaining</p>\n"
+        "      <form className=\"task-form\" onSubmit={submitTask}>\n"
+        "        <label htmlFor=\"task-title\">New task</label>\n"
+        "        <input id=\"task-title\" value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} aria-label=\"Add task\" />\n"
+        "        <button type=\"submit\">Add task</button>\n"
+        "      </form>\n"
+        "      <nav className=\"filter-bar\" aria-label=\"Task filters\">\n"
+        "        {['all', 'active', 'done'].map((filter) => (\n"
+        "          <button key={filter} type=\"button\" className={filter === activeFilter ? 'is-active' : ''} onClick={() => setActiveFilter(filter)}>{filter}</button>\n"
+        "        ))}\n"
+        "      </nav>\n"
+        "      <section className=\"task-grid\" aria-label=\"Task cards\">\n"
+        "        {renderTodos().map((task) => (\n"
+        "          <article key={task.id} className={`task-card${task.done ? ' is-done' : ''}`}>\n"
+        "            <h2>{task.title}</h2>\n"
+        "            <div className=\"task-actions\">\n"
+        "              <button type=\"button\" onClick={() => completeTodo(task.id)}>{task.done ? 'Mark active' : 'Toggle done'}</button>\n"
+        "              <button type=\"button\" onClick={() => removeTask(task.id)}>Delete</button>\n"
+        "            </div>\n"
+        "          </article>\n"
+        "        ))}\n"
+        "      </section>\n"
+        "    </main>\n"
+        "  );\n"
+        "}\n\n"
+        "createRoot(document.getElementById('root')).render(<TodoDashboard />);\n"
+    )
+    css = (
+        ":root { font-family: Inter, system-ui, sans-serif; color: #17191f; background: #f6f8fb; }\n"
+        "body { margin: 0; }\n"
+        ".dashboard-shell { width: min(960px, calc(100% - 32px)); margin: 8vh auto; display: grid; gap: 18px; }\n"
+        "h1 { margin: 0; font-size: 2rem; }\n"
+        ".remaining-counter { margin: 0; color: #48556a; font-weight: 600; }\n"
+        ".task-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }\n"
+        ".task-form label { grid-column: 1 / -1; font-weight: 700; }\n"
+        ".task-form input { min-width: 0; border: 1px solid #bdc6d4; border-radius: 6px; padding: 10px 12px; font: inherit; }\n"
+        ".filter-bar { display: flex; flex-wrap: wrap; gap: 8px; }\n"
+        "button { border: 1px solid #bdc6d4; border-radius: 6px; background: #ffffff; padding: 10px 14px; font: inherit; cursor: pointer; }\n"
+        "button.is-active { background: #253858; color: #ffffff; border-color: #253858; }\n"
+        ".task-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }\n"
+        ".task-card { display: grid; gap: 12px; min-height: 132px; border: 1px solid #d6dce8; border-radius: 8px; background: #ffffff; padding: 16px; }\n"
+        ".task-card.is-done { background: #eef7f0; color: #53605a; }\n"
+        ".task-card h2 { margin: 0; font-size: 1rem; line-height: 1.35; }\n"
+        ".task-actions { display: flex; flex-wrap: wrap; gap: 8px; }\n"
+    )
+    tests = (
+        "from pathlib import Path\n"
+        "import json\n"
+        "import unittest\n\n\n"
+        "class ViteTodoDashboardContractTests(unittest.TestCase):\n"
+        "    def test_manifest_and_entrypoint(self):\n"
+        "        manifest = json.loads(Path('package.json').read_text(encoding='utf-8'))\n"
+        "        self.assertEqual(manifest['scripts']['dev'], 'vite')\n"
+        "        self.assertIn('/src/main.jsx', Path('index.html').read_text(encoding='utf-8'))\n\n"
+        "    def test_task_dashboard_behaviors_are_implemented(self):\n"
+        "        source = Path('src/main.jsx').read_text(encoding='utf-8')\n"
+        "        for marker in ('TodoDashboard', 'addTodo', 'deleteTodo', 'renderTodos', 'saveTodos', 'loadTodos', 'filterTasks', 'remainingTasks', 'toggleDone', 'completeTodo', 'localStorage', \"'all'\", \"'active'\", \"'done'\", 'task-card'):\n"
+        "            self.assertIn(marker, source)\n"
+        "        self.assertIn('tasks remaining', source)\n"
+        "        self.assertNotIn('CounterApp', source)\n"
+        "        self.assertNotIn('Increment', source)\n"
+    )
+    readme = (
+        f"# {project_name}\n\nA Vite React task dashboard with cards, all/active/done filters, toggle-done controls, remaining-task counter, and localStorage persistence.\n\n"
+        "## Install\n\n```bash\nnpm install\n```\n\n"
+        "## Run\n\n```bash\nnpm run dev\n```\n\n"
+        "## Test\n\n```bash\npython -m unittest discover tests\n```\n"
+    )
+    rows = replace_project_file(files, "src/main.jsx", main)
+    rows = replace_project_file(rows, "src/styles.css", css)
+    rows = replace_project_file(rows, "tests/test_vite_contract.py", tests)
+    rows = replace_project_file(rows, "README.md", readme)
+    return rows
+
+
+def vite_todo_dashboard_module_contracts() -> list[dict[str, Any]]:
+    return [
+        {
+            "module": "src.main",
+            "path": "src/main.jsx",
+            "responsibility": "React task dashboard application entrypoint",
+            "requirements": ["add tasks", "render task cards", "filter all active done tasks", "toggle done state", "delete tasks", "count remaining tasks", "persist tasks in localStorage"],
+        },
+        {
+            "module": "src.styles",
+            "path": "src/styles.css",
+            "responsibility": "task dashboard layout, filter, and card styling",
+            "requirements": ["style dashboard shell", "style filter controls", "style task cards"],
+        },
+        {
+            "module": "tests.test_vite_contract",
+            "path": "tests/test_vite_contract.py",
+            "responsibility": "Vite task dashboard behavior-contract verification",
+            "requirements": ["prove manifest entrypoint", "prove task dashboard behaviors are present", "reject counter-app substitution"],
         },
     ]
 

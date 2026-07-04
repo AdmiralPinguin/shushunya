@@ -12,7 +12,7 @@ from greenfield_architect import build_greenfield_project_brief as architect_bui
 from greenfield_architect import greenfield_model_runtime_defaults
 from greenfield_dependency_worker import dependency_manager_status
 from greenfield_feature_worker import infer_acceptance_features
-from greenfield_implementation_worker import execute_file_set_synthesis_contract, execute_module_synthesis_contracts, generated_file_quality, task_behavior_markers
+from greenfield_implementation_worker import execute_file_set_synthesis_contract, execute_module_synthesis_contracts, forbidden_markers_found as implementation_forbidden_markers_found, generated_file_quality, task_behavior_markers
 from greenfield_implementation_worker import build_implementation_trace as worker_build_implementation_trace
 from greenfield_implementation_worker import build_implementation_worker_plan as worker_build_implementation_worker_plan
 from greenfield_live_trial import compact_greenfield_result
@@ -274,6 +274,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
     def test_placeholder_marker_does_not_confuse_todo_domain_word(self) -> None:
         self.assertEqual(forbidden_placeholder_markers_found("function addTodo() { return true; }", ["TODO"]), [])
         self.assertEqual(forbidden_placeholder_markers_found("# TODO replace this generated placeholder", ["TODO", "placeholder"]), ["TODO", "placeholder"])
+        self.assertEqual(implementation_forbidden_markers_found("export function TodoDashboard() { return 'ready'; }", ["TODO", "placeholder"]), [])
+        self.assertEqual(implementation_forbidden_markers_found("// TODO replace this generated placeholder", ["TODO", "placeholder"]), ["TODO", "placeholder"])
 
     def test_greenfield_review_worker_scores_python_source_strength(self) -> None:
         self.assertEqual(python_source_semantic_status("VALUE = 1\n"), "weak")
@@ -365,6 +367,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
     def test_greenfield_feature_worker_does_not_treat_todo_remaining_counter_as_vite_app(self) -> None:
         feature_ids = {feature["id"] for feature in infer_acceptance_features("Создай todo list со счетчиком оставшихся задач и фильтром active/completed.")}
         self.assertEqual(feature_ids, {"todo_list"})
+        dashboard_feature_ids = {feature["id"] for feature in infer_acceptance_features("Создай dashboard с карточками задач, фильтрами active/done/all, счетчиком оставшихся задач, toggle done и localStorage.")}
+        self.assertEqual(dashboard_feature_ids, {"todo_list"})
 
     def test_greenfield_architect_routes_csv_pipeline_before_api_keyword(self) -> None:
         project = architect_build_greenfield_project_brief("Создай data sales analytics pipeline `sales-demo` для CSV с CLI JSON API output.")
@@ -1578,6 +1582,38 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(review["semantic_review"]["status"], "passed", review)
             self.assertEqual(review["status"], "passed", review)
 
+    def test_project_creation_vite_todo_dashboard_does_not_collapse_to_counter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(
+                repo,
+                "Создай Vite frontend web app `dashboard-demo`: dashboard с карточками задач, фильтрами active/done/all, счетчиком оставшихся задач, кнопкой toggle done и localStorage.",
+            )
+            report = code_brigade_adapter.build_worker_report(brief, dry_run=False)
+            self.assertEqual(report["status"], "implemented", report)
+            project = report["execution_result"]["greenfield_project"]["greenfield_project_brief"]
+            self.assertEqual(project["template_id"], "node_vite_app")
+            self.assertTrue(any(feature["id"] == "todo_list" for feature in project["acceptance_features"]))
+            self.assertFalse(any(feature["id"] == "vite_counter_app" for feature in project["acceptance_features"]))
+            self.assertIn("todo_list", project["implementation_feature_report"]["recognized_feature_ids"])
+            self.assertIn("filter all active done tasks", json.dumps(project["module_contracts"], ensure_ascii=False))
+            source = (repo / "src/main.jsx").read_text(encoding="utf-8")
+            self.assertIn("export function TodoDashboard", source)
+            self.assertIn("function loadTodos", source)
+            self.assertIn("filterTasks", source)
+            self.assertIn("remainingTasks", source)
+            self.assertIn("toggleDone", source)
+            self.assertIn("localStorage", source)
+            self.assertNotIn("CounterApp", source)
+            tests = (repo / "tests/test_vite_contract.py").read_text(encoding="utf-8")
+            self.assertIn("test_task_dashboard_behaviors_are_implemented", tests)
+            self.assertIn("reject counter-app substitution", json.dumps(project["module_contracts"], ensure_ascii=False))
+            verification = report["execution_result"]["greenfield_project"]["verification"]
+            self.assertEqual(verification["status"], "passed", verification)
+            review = report["execution_result"]["greenfield_project"]["greenfield_review"]
+            self.assertEqual(review["scenario_review"]["status"], "passed", review)
+            self.assertEqual(review["status"], "passed", review)
+
     def test_project_creation_text_utils_library_implements_task_feature(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -1681,6 +1717,11 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         counter_app = build_greenfield_project_brief("Создай Vite React counter app `counter-demo`.")
         self.assertTrue(any(feature["id"] == "vite_counter_app" for feature in counter_app["acceptance_features"]))
         self.assertGreaterEqual(len(counter_app["module_contracts"]), 3)
+        vite_todo = build_greenfield_project_brief("Создай Vite dashboard с карточками задач, фильтрами active/done/all и localStorage `dash-demo`.")
+        self.assertTrue(any(feature["id"] == "todo_list" for feature in vite_todo["acceptance_features"]))
+        self.assertFalse(any(feature["id"] == "vite_counter_app" for feature in vite_todo["acceptance_features"]))
+        self.assertGreaterEqual(len(vite_todo["module_contracts"]), 3)
+        self.assertGreaterEqual(vite_todo["scenario_plan"]["scenario_count"], 2)
         text_utils = build_greenfield_project_brief("Создай python text utils library `text-demo`.")
         self.assertTrue(any(feature["id"] == "python_text_utils_library" for feature in text_utils["acceptance_features"]))
         self.assertGreaterEqual(len(text_utils["module_contracts"]), 3)

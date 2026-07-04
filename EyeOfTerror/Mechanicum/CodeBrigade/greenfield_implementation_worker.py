@@ -249,7 +249,7 @@ def forbidden_markers_found(content: str, markers: list[str]) -> list[str]:
     for marker in markers:
         needle = marker.lower()
         if needle == "todo":
-            if "todo " in lowered or "todo:" in lowered or "# todo" in lowered or "// todo" in lowered:
+            if "todo:" in lowered or "# todo" in lowered or "// todo" in lowered:
                 found.append(marker)
         elif needle and needle in lowered:
             found.append(marker)
