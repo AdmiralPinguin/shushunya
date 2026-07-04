@@ -978,6 +978,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                     execution_mode="project_creation",
                     dry_run=False,
                     execute_verification=True,
+                    greenfield_model_guidance_replay={
+                        "kind": "code_brigade_greenfield_model_guidance_replay",
+                        "mode": "scaffold_files_as_model_output",
+                    },
                     runs_root=Path(tmp) / "runs",
                 )
             )
@@ -1078,6 +1082,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                     execution_mode="project_creation",
                     dry_run=False,
                     execute_verification=True,
+                    greenfield_model_guidance_replay={
+                        "kind": "code_brigade_greenfield_model_guidance_replay",
+                        "mode": "scaffold_files_as_model_output",
+                    },
                     runs_root=Path(tmp) / "runs",
                 )
             )
@@ -1104,6 +1112,10 @@ class CeraxiaLifecycleTests(unittest.TestCase):
                     execution_mode="project_creation",
                     dry_run=False,
                     execute_verification=True,
+                    greenfield_model_guidance_replay={
+                        "kind": "code_brigade_greenfield_model_guidance_replay",
+                        "mode": "scaffold_files_as_model_output",
+                    },
                     runs_root=Path(tmp) / "runs",
                 )
             )

@@ -220,6 +220,7 @@ def build_implementation_brief(packet: dict[str, Any], survey: dict[str, Any]) -
         "target": "CodeBrigade",
         "task": str(packet.get("task") or ""),
         "repo_path": survey["repo_path"],
+        "greenfield_model_guidance_replay": packet.get("greenfield_model_guidance_replay") if isinstance(packet.get("greenfield_model_guidance_replay"), dict) else {},
         "task_kinds": triage.get("task_kinds") if isinstance(triage.get("task_kinds"), list) else [],
         "risk_level": triage.get("risk_level") if triage.get("risk_level") in {"low", "medium", "high"} else "high",
         "selected_strategy": packet.get("design_options", {}).get("selected_strategy", ""),

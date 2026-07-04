@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from typing import Any
 from pathlib import Path
 
 CERAXIA_ROOT = Path(__file__).resolve().parent
@@ -66,4 +67,5 @@ class CeraxiaInput:
     execute_diagnostic_repair: bool = False
     constraints: tuple[str, ...] = ()
     verification_commands: tuple[str, ...] = ()
+    greenfield_model_guidance_replay: dict[str, Any] | None = None
     runs_root: Path = RUNS_ROOT

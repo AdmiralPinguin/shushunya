@@ -660,9 +660,12 @@ def build_worker_report(brief: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         status = "dry_run_handoff_ready"
         notes.append("CodeBrigade adapter accepted the implementation brief without source mutation")
     elif project_creation:
-        from greenfield_project import execute_greenfield_project_brief
+        from greenfield_project import build_greenfield_replay_guidance_provider, execute_greenfield_project_brief
 
-        execution_result = execute_greenfield_project_brief(brief)
+        replay_guidance = build_greenfield_replay_guidance_provider(
+            brief.get("greenfield_model_guidance_replay") if isinstance(brief.get("greenfield_model_guidance_replay"), dict) else {}
+        )
+        execution_result = execute_greenfield_project_brief(brief, replay_guidance) if replay_guidance else execute_greenfield_project_brief(brief)
         status = "implemented" if execution_result.get("status") == "implemented" else "blocked"
         notes.extend(str(item) for item in execution_result.get("blockers", []))
         if status == "implemented":

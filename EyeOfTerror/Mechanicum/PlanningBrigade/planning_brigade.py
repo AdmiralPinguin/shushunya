@@ -2084,6 +2084,7 @@ def build_planning_packet(payload: dict[str, Any]) -> dict[str, Any]:
         "worker": "PlanningBrigade",
         "kind": "ceraxia_planning_packet",
         "task": task,
+        "greenfield_model_guidance_replay": payload.get("greenfield_model_guidance_replay") if isinstance(payload.get("greenfield_model_guidance_replay"), dict) else {},
         "roles_completed": ROLE_ORDER,
         "role_execution_trace": role_trace,
         "problem_statement": context["problem_statement"],

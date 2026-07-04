@@ -85,6 +85,10 @@ def project_creation_brief(repo: Path, task: str) -> dict:
         "blockers": [],
         "required_next_adapter": "",
     }
+    brief["greenfield_model_guidance_replay"] = {
+        "kind": "code_brigade_greenfield_model_guidance_replay",
+        "mode": "scaffold_files_as_model_output",
+    }
     brief["repo_survey_evidence"]["candidate_files"] = []
     brief["repo_survey_evidence"]["test_files"] = []
     brief["repo_survey_evidence"]["recommended_read_order"] = []
@@ -607,6 +611,21 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertIn("model-ready", (repo / "tests/test_core.py").read_text(encoding="utf-8"))
             ledger = json.loads((repo / "greenfield_model_guidance_ledger.json").read_text(encoding="utf-8"))
             self.assertTrue(all(row["status"] != "missing" for row in ledger["entries"]))
+
+    def test_greenfield_project_executor_blocks_when_model_synthesis_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            brief = project_creation_brief(repo, "Создай новый Python CLI проект `blocked-model-demo`.")
+
+            def unavailable_guidance(role: str, payload: dict, instructions: str) -> dict:
+                return {"ok": False, "status": "unavailable", "error": "test model unavailable", "content": ""}
+
+            result = execute_greenfield_project_brief(brief, unavailable_guidance)
+            self.assertEqual(result["status"], "blocked", result)
+            self.assertTrue(any("model synthesis" in blocker for blocker in result["blockers"]))
+            project = result["greenfield_project"]
+            self.assertEqual(project["file_set_synthesis_report"]["status"], "model_unavailable")
+            self.assertEqual(project["implementation_synthesis_report"]["status"], "model_unavailable")
 
     def test_greenfield_file_set_synthesis_rejects_out_of_scope_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

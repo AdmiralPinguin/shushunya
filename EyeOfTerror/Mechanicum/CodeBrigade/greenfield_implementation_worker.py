@@ -267,7 +267,8 @@ def generated_file_quality(path: str, content: str, requirements: list[str], pro
                 for node in ast.walk(tree)
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Assign, ast.Return, ast.If, ast.For, ast.While, ast.Try))
             ]
-            if len(executable_nodes) < 2 and requirements:
+            init_facade = Path(path).name == "__init__.py" and ("import " in content or "__all__" in content)
+            if len(executable_nodes) < 2 and requirements and not init_facade:
                 blockers.append("generated Python source is semantically too weak")
                 score -= 50
     elif path.endswith((".js", ".jsx", ".ts", ".tsx")):
@@ -306,7 +307,8 @@ def domain_specific_quality_findings(template_id: str, path: str, content: str, 
         if path.endswith(".html") and ("<main" not in lowered and "<body" not in lowered):
             blockers.append("frontend HTML lacks a renderable body/main surface")
             penalty += 40
-        if path.endswith((".js", ".jsx", ".ts", ".tsx")) and all(marker not in content for marker in ("document", "createRoot", "addEventListener", "useState", "render", "return <")):
+        ui_script = Path(path).stem.lower() not in {"state", "store", "model", "domain"}
+        if ui_script and path.endswith((".js", ".jsx", ".ts", ".tsx")) and all(marker not in content for marker in ("document", "createRoot", "addEventListener", "useState", "render", "return <")):
             blockers.append("frontend script lacks render or interaction behavior")
             penalty += 40
         if path.endswith(".css") and "{" not in content:

@@ -56,6 +56,8 @@ def run_ceraxia(task_input: CeraxiaInput) -> dict[str, Any]:
         "constraints": list(task_input.constraints),
         "verification_commands": list(task_input.verification_commands),
     }
+    if isinstance(task_input.greenfield_model_guidance_replay, dict):
+        task_payload["greenfield_model_guidance_replay"] = task_input.greenfield_model_guidance_replay
     write_json(run_dir / "task.json", task_payload)
 
     packet = build_planning_packet(task_payload)

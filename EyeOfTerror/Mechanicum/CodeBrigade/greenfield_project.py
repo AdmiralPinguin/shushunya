@@ -145,6 +145,66 @@ def build_greenfield_model_guidance_ledger(
     }
 
 
+def model_synthesis_blockers(file_set_synthesis_report: dict[str, Any], implementation_synthesis_report: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    module_status = str(implementation_synthesis_report.get("status") or "")
+    if module_status in {"model_unavailable", "rejected", "blocked", "skipped"}:
+        blockers.append(f"greenfield module model synthesis did not produce accepted code: {module_status}")
+    if int(implementation_synthesis_report.get("applied_count") or 0) <= 0:
+        blockers.append("greenfield module model synthesis applied no module implementations")
+    return blockers
+
+
+def build_greenfield_replay_guidance_provider(replay: dict[str, Any]):
+    if not isinstance(replay, dict) or replay.get("mode") != "scaffold_files_as_model_output":
+        return None
+
+    def guidance(role: str, payload: dict[str, Any], instructions: str) -> dict[str, Any]:
+        if role == "GreenfieldImplementationWorker" and isinstance(payload.get("synthesis_contract"), dict):
+            existing_files = payload.get("existing_files") if isinstance(payload.get("existing_files"), dict) else {}
+            module_sequence = payload.get("synthesis_contract", {}).get("module_sequence", [])
+            requirements_by_path = {
+                str(row.get("path") or ""): [str(item) for item in row.get("requirements", []) if isinstance(item, str)]
+                for row in module_sequence
+                if isinstance(row, dict)
+            }
+            files = [
+                {
+                    "path": path,
+                    "content": content,
+                    "requirements_satisfied": requirements_by_path.get(path, []),
+                    "notes": "replayed scaffold content as recorded model output",
+                }
+                for path, content in existing_files.items()
+                if isinstance(path, str) and isinstance(content, str) and content.strip()
+            ]
+            return {
+                "ok": True,
+                "status": "replayed",
+                "content": json.dumps({"files": files, "notes": "scaffold file-set replay"}, ensure_ascii=False),
+            }
+        if role == "GreenfieldImplementationWorker" and isinstance(payload.get("module_synthesis_contract"), dict):
+            contract = payload["module_synthesis_contract"]
+            existing_content = str(payload.get("existing_content") or "")
+            return {
+                "ok": True,
+                "status": "replayed",
+                "content": json.dumps(
+                    {
+                        "path": str(contract.get("path") or ""),
+                        "content": existing_content,
+                        "requirements_satisfied": contract.get("requirements", []),
+                        "tests_to_update": contract.get("paired_tests", []),
+                        "notes": "replayed module scaffold content as recorded model output",
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        return {"ok": True, "status": "replayed", "content": "{}"}
+
+    return guidance
+
+
 def extract_project_spec(task: str, request_guidance=request_greenfield_model_guidance) -> dict[str, Any]:
     marker = "CERAXIA_PROJECT:"
     if marker not in task:
@@ -393,7 +453,11 @@ def execute_greenfield_project_brief(brief: dict[str, Any], request_guidance=req
         for item in verification.get("results", [])
         if isinstance(item, dict) and item.get("status") in {"passed", "failed", "blocked", "skipped"}
     ]
-    if dependency_report.get("status") == "blocked":
+    synthesis_blockers = model_synthesis_blockers(file_set_synthesis_report, implementation_synthesis_report)
+    if synthesis_blockers:
+        result["status"] = "blocked"
+        result["blockers"] = synthesis_blockers
+    elif dependency_report.get("status") == "blocked":
         result["status"] = "blocked"
         result["blockers"] = ["greenfield dependency worker blocked"]
     elif greenfield_review.get("status") == "blocked":
