@@ -448,6 +448,88 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertIn("GreenfieldReviewer model blocker: launch smoke is not meaningful", review["blockers"])
             self.assertIn("needs manual UX review", review["warnings"])
 
+    def test_greenfield_review_blocks_missing_architecture_guidance_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / ".ceraxia_greenfield_workspace").write_text("created-by=ceraxia-code-brigade\n", encoding="utf-8")
+            (repo / "README.md").write_text(
+                "# demo\n\n```bash\npython app.py\n```\n\n```bash\npython -m unittest test_app.py\n```\n",
+                encoding="utf-8",
+            )
+            (repo / "app.py").write_text("VALUE = 'ready'\n\n\ndef main():\n    return VALUE\n", encoding="utf-8")
+            (repo / "test_app.py").write_text(
+                "import unittest\n"
+                "import app\n\n"
+                "class AppTests(unittest.TestCase):\n"
+                "    def test_main(self):\n"
+                "        self.assertEqual(app.main(), 'ready')\n",
+                encoding="utf-8",
+            )
+            project = {
+                "project_name": "demo",
+                "project_type": "cli_tool",
+                "template_id": "python_cli_basic",
+                "expected_files": [".ceraxia_greenfield_workspace", "README.md", "app.py", "test_app.py"],
+                "run_commands": ["python app.py"],
+                "verification_commands": ["python -m unittest test_app.py"],
+                "entrypoints": [{"name": "app", "command": "python app.py", "path": "app.py"}],
+                "artifact_contract": {"source_files": ["app.py"], "test_files": ["test_app.py"], "manifest_files": []},
+                "definition_of_done": ["README documents commands", "behavior is tested"],
+                "architecture_plan": {
+                    "model_guidance": {
+                        "ok": True,
+                        "status": "answered",
+                        "content": json.dumps({"evidence_required": ["app/models.py for domain model", "test_app.py for verification"]}),
+                    }
+                },
+                "implementation_plan": {
+                    "module_sequence": [
+                        {"path": "app.py", "code_synthesis_contract": {"kind": "code_brigade_greenfield_module_synthesis_contract"}},
+                        {"path": "test_app.py", "code_synthesis_contract": {"kind": "code_brigade_greenfield_module_synthesis_contract"}},
+                    ],
+                    "anti_stub_policy": {"forbidden_markers": ["TODO", "pass"]},
+                },
+                "implementation_trace": {
+                    "rows": [
+                        {
+                            "requirement": "return ready",
+                            "file": "app.py",
+                            "verification_files": ["test_app.py"],
+                            "synthesis_contract_kind": "code_brigade_greenfield_module_synthesis_contract",
+                        }
+                    ]
+                },
+                "module_contracts": [
+                    {"module": "app", "path": "app.py", "responsibility": "ready behavior", "requirements": ["return ready"]},
+                    {"module": "test_app", "path": "test_app.py", "responsibility": "test ready behavior", "requirements": ["prove ready behavior"]},
+                ],
+                "scenario_plan": {
+                    "kind": "code_brigade_greenfield_scenario_plan",
+                    "contract_version": "eye-mechanicum.v1",
+                    "status": "planned",
+                    "scenario_count": 1,
+                    "rows": [
+                        {
+                            "id": "ready",
+                            "description": "Ready path works",
+                            "steps": ["call main"],
+                            "required_markers": ["ready"],
+                            "evidence_files": ["app.py", "test_app.py"],
+                        }
+                    ],
+                },
+            }
+            review = review_greenfield_project(
+                repo,
+                project,
+                {"status": "not_required", "blockers": [], "warnings": []},
+                {"status": "passed", "results": [{"command": "python -m unittest test_app.py", "status": "passed"}]},
+                lambda role, payload, instructions: {"ok": True, "status": "answered", "content": "{}"},
+            )
+            self.assertEqual(review["status"], "blocked", review)
+            self.assertEqual(review["architecture_guidance_review"]["status"], "blocked")
+            self.assertTrue(any("app/models.py" in blocker for blocker in review["blockers"]))
+
     def test_greenfield_artifact_review_blocks_unwired_frontend_assets_and_weak_tests(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -2604,6 +2686,12 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertTrue(any(feature["id"] == "issue_tracker_api" for feature in issue_tracker["acceptance_features"]))
         self.assertGreaterEqual(len(issue_tracker["module_contracts"]), 5)
         self.assertGreaterEqual(issue_tracker["scenario_plan"]["scenario_count"], 3)
+        maintenance = build_greenfield_project_brief("Создай FastAPI service `maintenance-demo` для заявок обслуживания оборудования: создать заявку, назначить техника, менять статус open/in_progress/resolved, фильтровать по статусу и технику, считать summary по статусам.")
+        self.assertTrue(any(feature["id"] == "maintenance_work_orders_api" for feature in maintenance["acceptance_features"]))
+        self.assertGreaterEqual(len(maintenance["module_contracts"]), 5)
+        self.assertGreaterEqual(maintenance["scenario_plan"]["scenario_count"], 3)
+        self.assertIn("app/store.py", maintenance["expected_files"])
+        self.assertIn("tests/test_maintenance.py", maintenance["expected_files"])
         operations_dashboard = build_greenfield_project_brief("Создай FastAPI operations dashboard API `ops-demo`.")
         self.assertTrue(any(feature["id"] == "operations_dashboard_api" for feature in operations_dashboard["acceptance_features"]))
         self.assertGreaterEqual(len(operations_dashboard["module_contracts"]), 7)

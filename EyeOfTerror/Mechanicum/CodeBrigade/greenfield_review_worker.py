@@ -470,6 +470,57 @@ def reviewer_model_findings(guidance: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def architecture_guidance_review(repo: Path, project_brief: dict[str, Any]) -> dict[str, Any]:
+    guidance = project_brief.get("architecture_plan", {}).get("model_guidance", {}) if isinstance(project_brief.get("architecture_plan"), dict) else {}
+    content = str(guidance.get("content") or "") if isinstance(guidance, dict) else ""
+    blockers: list[str] = []
+    warnings: list[str] = []
+    evidence_rows: list[dict[str, Any]] = []
+    if not content.strip():
+        return {
+            "kind": "code_brigade_greenfield_architecture_guidance_review",
+            "contract_version": "eye-mechanicum.v1",
+            "status": "not_applicable",
+            "evidence_file_count": 0,
+            "rows": [],
+            "blockers": [],
+            "warnings": [],
+        }
+    try:
+        parsed = extract_json_object(content)
+    except ValueError as exc:
+        return {
+            "kind": "code_brigade_greenfield_architecture_guidance_review",
+            "contract_version": "eye-mechanicum.v1",
+            "status": "advisory_unparsed",
+            "evidence_file_count": 0,
+            "rows": [],
+            "blockers": [],
+            "warnings": [f"GreenfieldArchitect model guidance was not structured JSON: {exc}"],
+        }
+    evidence_required = parsed.get("evidence_required") if isinstance(parsed.get("evidence_required"), list) else []
+    for item in evidence_required:
+        if not isinstance(item, str):
+            continue
+        file_match = re.search(r"([A-Za-z0-9_./-]+\.(?:py|js|jsx|ts|tsx|html|css|json|toml|txt|md))", item)
+        if not file_match:
+            continue
+        rel_path = file_match.group(1).strip("./")
+        exists = (repo / rel_path).is_file()
+        evidence_rows.append({"required_evidence": item, "path": rel_path, "exists": exists})
+        if not exists:
+            blockers.append(f"architecture guidance required missing evidence file: {rel_path}")
+    return {
+        "kind": "code_brigade_greenfield_architecture_guidance_review",
+        "contract_version": "eye-mechanicum.v1",
+        "status": "blocked" if blockers else "passed" if evidence_rows else "not_applicable",
+        "evidence_file_count": len(evidence_rows),
+        "rows": evidence_rows,
+        "blockers": blockers,
+        "warnings": warnings,
+    }
+
+
 def review_greenfield_project(
     repo: Path,
     project_brief: dict[str, Any],
@@ -519,6 +570,10 @@ def review_greenfield_project(
     if artifact_review.get("status") == "blocked":
         blockers.extend(str(item) for item in artifact_review.get("blockers", []))
     warnings.extend(str(item) for item in artifact_review.get("warnings", []))
+    architect_guidance_review = architecture_guidance_review(repo, project_brief)
+    if architect_guidance_review.get("status") == "blocked":
+        blockers.extend(str(item) for item in architect_guidance_review.get("blockers", []))
+    warnings.extend(str(item) for item in architect_guidance_review.get("warnings", []) if isinstance(item, str))
     definition_of_done_review = review_definition_of_done(
         repo,
         project_brief,
@@ -542,6 +597,7 @@ def review_greenfield_project(
             "semantic_review": semantic_review,
             "scenario_review": scenario_review,
             "artifact_review": artifact_review,
+            "architecture_guidance_review": architect_guidance_review,
             "definition_of_done_review": definition_of_done_review,
             "blockers": blockers,
             "warnings": warnings,
@@ -565,6 +621,7 @@ def review_greenfield_project(
         "semantic_review": semantic_review,
         "scenario_review": scenario_review,
         "artifact_review": artifact_review,
+        "architecture_guidance_review": architect_guidance_review,
         "definition_of_done_review": definition_of_done_review,
         "model_findings": model_findings,
         "blockers": blockers,
