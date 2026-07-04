@@ -211,11 +211,12 @@
       "evidence": [
         "greenfield_memory_worker.py records stack, dependencies, verification, stop evidence, repaired files, review status, acceptance features, scenario status, and reusable learnings",
         "greenfield_memory_worker.py records definition_of_done evidence rows from GreenfieldReview so future runs can learn which completion proof was missing",
-        "greenfield_project.py writes greenfield_memory_record.json and greenfield_run_report.json after each run",
+        "greenfield_memory_worker.py builds and updates greenfield_memory_index.json with recent runs, template/status counters, common review/dependency blockers, and reusable learnings",
+        "greenfield_project.py writes greenfield_memory_record.json, greenfield_memory_index.json, and greenfield_run_report.json after each run",
         "focused_self_test.py test_greenfield_memory_worker_records_definition_of_done_evidence_matrix verifies DoD evidence/missing_evidence is preserved in memory",
         "focused_self_test.py and Ceraxia self tests verify report artifacts"
       ],
-      "remaining_risk": "Memory is file-based per run; no long-term retrieval/ranking layer is implemented yet."
+      "remaining_risk": "Memory is still file-based in the greenfield workspace; it now has an aggregate index, but no cross-workspace retrieval/ranking service is implemented yet."
     }
   ],
   "next_recommended_work": [

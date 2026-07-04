@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from collections import Counter
+import json
+from pathlib import Path
 from typing import Any
 
 
@@ -143,3 +146,70 @@ def build_greenfield_memory_record(
             "treat scenario_plan as the user-workflow contract and block review when source/test evidence misses required behavior markers",
         ],
     }
+
+
+def build_greenfield_memory_index(records: list[dict[str, Any]], *, max_records: int = 20) -> dict[str, Any]:
+    bounded = [record for record in records if isinstance(record, dict)][-max_records:]
+    template_counter = Counter(str(record.get("template_id") or "") for record in bounded if record.get("template_id"))
+    status_counter = Counter(str(record.get("review_status") or record.get("verification_status") or "") for record in bounded)
+    blockers = Counter(
+        str(blocker)
+        for record in bounded
+        for blocker in (record.get("review_blockers", []) if isinstance(record.get("review_blockers"), list) else [])
+        if str(blocker).strip()
+    )
+    dependency_blockers = Counter(
+        str(blocker)
+        for record in bounded
+        for blocker in (record.get("dependency_blockers", []) if isinstance(record.get("dependency_blockers"), list) else [])
+        if str(blocker).strip()
+    )
+    learnings = list(
+        dict.fromkeys(
+            str(learning)
+            for record in bounded
+            for learning in (record.get("reusable_learnings", []) if isinstance(record.get("reusable_learnings"), list) else [])
+            if str(learning).strip()
+        )
+    )
+    return {
+        "kind": "code_brigade_greenfield_memory_index",
+        "contract_version": "eye-mechanicum.v1",
+        "record_count": len(bounded),
+        "templates_seen": dict(sorted(template_counter.items())),
+        "status_counts": dict(sorted(status_counter.items())),
+        "recent_runs": [
+            {
+                "project_name": str(record.get("project_name") or ""),
+                "project_type": str(record.get("project_type") or ""),
+                "template_id": str(record.get("template_id") or ""),
+                "verification_status": str(record.get("verification_status") or ""),
+                "review_status": str(record.get("review_status") or ""),
+                "scenario_review_status": str(record.get("scenario_review_status") or ""),
+                "implementation_synthesis_status": str(record.get("implementation_synthesis_status") or ""),
+                "repaired_files": record.get("repaired_files", []) if isinstance(record.get("repaired_files"), list) else [],
+            }
+            for record in bounded[-10:]
+        ],
+        "common_review_blockers": [{"blocker": blocker, "count": count} for blocker, count in blockers.most_common(10)],
+        "common_dependency_blockers": [{"blocker": blocker, "count": count} for blocker, count in dependency_blockers.most_common(10)],
+        "reusable_learnings": learnings[:50],
+    }
+
+
+def update_greenfield_memory_index(repo: Path, memory_record: dict[str, Any], *, max_records: int = 20) -> dict[str, Any]:
+    index_path = repo / "greenfield_memory_index.json"
+    records: list[dict[str, Any]] = []
+    if index_path.exists():
+        try:
+            existing = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+        if isinstance(existing, dict) and isinstance(existing.get("records"), list):
+            records = [record for record in existing["records"] if isinstance(record, dict)]
+    records.append(memory_record)
+    records = records[-max_records:]
+    index = build_greenfield_memory_index(records, max_records=max_records)
+    index["records"] = records
+    index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return index

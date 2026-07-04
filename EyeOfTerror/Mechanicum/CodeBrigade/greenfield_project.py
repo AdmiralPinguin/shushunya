@@ -11,7 +11,7 @@ from execution_contract import build_blocked_execution_result, build_implemented
 from greenfield_architect import build_greenfield_project_brief, request_greenfield_model_guidance
 from greenfield_dependency_worker import run_dependency_worker
 from greenfield_implementation_worker import execute_file_set_synthesis_contract, execute_module_synthesis_contracts
-from greenfield_memory_worker import build_greenfield_memory_record
+from greenfield_memory_worker import build_greenfield_memory_record, update_greenfield_memory_index
 from greenfield_review_worker import forbidden_placeholder_markers_found, review_greenfield_project
 from greenfield_scaffold_worker import greenfield_workspace_status, normalize_project_file_rows, scaffold_greenfield_files
 from greenfield_templates import GREENFIELD_MARKER, PROJECT_TYPES
@@ -456,14 +456,19 @@ def execute_greenfield_project_brief(brief: dict[str, Any], request_guidance=req
     implementation_synthesis_report = reconcile_module_synthesis_with_file_set(file_set_synthesis_report, implementation_synthesis_report, verification, greenfield_review)
     operation_results.append(write_greenfield_json_artifact(repo, "greenfield_module_synthesis_report.json", implementation_synthesis_report))
     greenfield_memory_record = build_greenfield_memory_record(project_brief, dependency_report, verification_loop, greenfield_review, implementation_synthesis_report, file_set_synthesis_report)
+    greenfield_memory_index = update_greenfield_memory_index(repo, greenfield_memory_record)
     greenfield_model_guidance_ledger = build_greenfield_model_guidance_ledger(project_brief, file_set_synthesis_report, implementation_synthesis_report, verification_loop, greenfield_review)
     greenfield_run_report = build_greenfield_run_report(project_brief, file_set_synthesis_report, implementation_synthesis_report, dependency_report, verification_loop, greenfield_review, greenfield_memory_record, greenfield_model_guidance_ledger)
     for artifact_path, artifact_payload in (
         ("greenfield_memory_record.json", greenfield_memory_record),
+        ("greenfield_memory_index.json", greenfield_memory_index),
         ("greenfield_model_guidance_ledger.json", greenfield_model_guidance_ledger),
         ("greenfield_run_report.json", greenfield_run_report),
     ):
         operation_results.append(write_greenfield_json_artifact(repo, artifact_path, artifact_payload))
+        if artifact_path not in changed_files:
+            changed_files.append(artifact_path)
+    changed_files = sorted(set(changed_files))
     result = build_implemented_execution_result(
         changed_files,
         f"created {len(changed_files)} greenfield project files from {spec.get('source')}",
@@ -492,6 +497,7 @@ def execute_greenfield_project_brief(brief: dict[str, Any], request_guidance=req
         "verification_loop": verification_loop,
         "greenfield_review": greenfield_review,
         "greenfield_memory_record": greenfield_memory_record,
+        "greenfield_memory_index": greenfield_memory_index,
         "greenfield_model_guidance_ledger": greenfield_model_guidance_ledger,
         "greenfield_run_report": greenfield_run_report,
         "verification": verification,

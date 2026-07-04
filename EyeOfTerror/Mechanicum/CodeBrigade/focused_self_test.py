@@ -17,7 +17,7 @@ from greenfield_implementation_worker import execute_file_set_synthesis_contract
 from greenfield_implementation_worker import build_implementation_trace as worker_build_implementation_trace
 from greenfield_implementation_worker import build_implementation_worker_plan as worker_build_implementation_worker_plan
 from greenfield_live_trial import allocate_live_trial_root, compact_greenfield_result
-from greenfield_memory_worker import build_greenfield_memory_record
+from greenfield_memory_worker import build_greenfield_memory_index, build_greenfield_memory_record, update_greenfield_memory_index
 from greenfield_project import build_greenfield_project_brief, execute_greenfield_project_brief, forbidden_placeholder_markers_found, model_synthesis_blockers, reconcile_module_synthesis_with_file_set, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_repair_live_trial import compact_repair_result
 from greenfield_review_worker import artifact_review_greenfield_project, python_source_semantic_status, review_greenfield_project
@@ -207,8 +207,12 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
                     "architecture_plan.json",
                     "file_tree_plan.json",
                     "greenfield_file_set_synthesis_report.json",
+                    "greenfield_memory_index.json",
+                    "greenfield_memory_record.json",
+                    "greenfield_model_guidance_ledger.json",
                     "greenfield_module_synthesis_report.json",
                     "greenfield_project_brief.json",
+                    "greenfield_run_report.json",
                     "implementation_trace.json",
                     "module_contracts.json",
                     "scenario_plan.json",
@@ -239,6 +243,11 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(memory["definition_of_done_status"]["status"], "passed")
             self.assertTrue(memory["reusable_learnings"])
             self.assertTrue((repo / "greenfield_memory_record.json").exists())
+            memory_index = report["execution_result"]["greenfield_project"]["greenfield_memory_index"]
+            self.assertEqual(memory_index["kind"], "code_brigade_greenfield_memory_index")
+            self.assertEqual(memory_index["record_count"], 1)
+            self.assertEqual(memory_index["recent_runs"][0]["template_id"], project_brief["template_id"])
+            self.assertTrue((repo / "greenfield_memory_index.json").exists())
             self.assertTrue((repo / "greenfield_model_guidance_ledger.json").exists())
             self.assertTrue((repo / "greenfield_file_set_synthesis_report.json").exists())
             self.assertTrue((repo / "greenfield_module_synthesis_report.json").exists())
@@ -1402,6 +1411,56 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(memory["verification_results"], [{"command": "python -m unittest", "status": "passed"}])
         self.assertEqual(memory["verification_stop_condition_evidence"]["reason"], "verification passed")
         self.assertTrue(memory["reusable_learnings"])
+
+    def test_greenfield_memory_worker_builds_reusable_index(self) -> None:
+        records = [
+            {
+                "project_name": "api-demo",
+                "project_type": "api_service",
+                "template_id": "python_fastapi_service",
+                "verification_status": "passed",
+                "review_status": "passed",
+                "scenario_review_status": "passed",
+                "implementation_synthesis_status": "applied",
+                "review_blockers": [],
+                "dependency_blockers": [],
+                "repaired_files": [],
+                "reusable_learnings": ["keep README commands identical to run_commands and verification_commands"],
+            },
+            {
+                "project_name": "game-demo",
+                "project_type": "game",
+                "template_id": "static_browser_game",
+                "verification_status": "passed",
+                "review_status": "blocked",
+                "scenario_review_status": "blocked",
+                "implementation_synthesis_status": "applied",
+                "review_blockers": ["scenario browser_game_loop is missing behavior markers: score"],
+                "dependency_blockers": [],
+                "repaired_files": ["game.js"],
+                "reusable_learnings": ["treat scenario_plan as the user-workflow contract and block review when source/test evidence misses required behavior markers"],
+            },
+        ]
+        index = build_greenfield_memory_index(records)
+        self.assertEqual(index["kind"], "code_brigade_greenfield_memory_index")
+        self.assertEqual(index["record_count"], 2)
+        self.assertEqual(index["templates_seen"]["python_fastapi_service"], 1)
+        self.assertEqual(index["templates_seen"]["static_browser_game"], 1)
+        self.assertEqual(index["status_counts"]["passed"], 1)
+        self.assertEqual(index["status_counts"]["blocked"], 1)
+        self.assertEqual(index["common_review_blockers"][0]["blocker"], "scenario browser_game_loop is missing behavior markers: score")
+        self.assertTrue(index["reusable_learnings"])
+
+    def test_greenfield_memory_worker_updates_workspace_index_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            first = {"project_name": "first", "project_type": "cli_tool", "template_id": "python_cli_basic", "verification_status": "passed", "review_status": "passed", "reusable_learnings": ["first learning"]}
+            second = {"project_name": "second", "project_type": "game", "template_id": "static_browser_game", "verification_status": "passed", "review_status": "passed", "reusable_learnings": ["second learning"]}
+            update_greenfield_memory_index(repo, first)
+            index = update_greenfield_memory_index(repo, second)
+            self.assertTrue((repo / "greenfield_memory_index.json").is_file())
+            self.assertEqual(index["record_count"], 2)
+            self.assertEqual([row["project_name"] for row in index["recent_runs"]], ["first", "second"])
 
     def test_greenfield_memory_worker_records_definition_of_done_evidence_matrix(self) -> None:
         memory = build_greenfield_memory_record(
