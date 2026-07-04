@@ -21,6 +21,7 @@ from greenfield_memory_worker import build_greenfield_memory_index, build_greenf
 from greenfield_project import build_greenfield_project_brief, execute_greenfield_project_brief, forbidden_placeholder_markers_found, model_synthesis_blockers, reconcile_module_synthesis_with_file_set, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_repair_live_trial import build_repair_trial_project, compact_repair_result, scenario_spec
 from greenfield_review_worker import artifact_review_greenfield_project, browser_game_render_contract, python_source_semantic_status, review_greenfield_project, split_model_blockers_against_local_findings
+from greenfield_review_worker import forbidden_placeholder_markers_found as review_forbidden_markers_found
 from greenfield_scenario_worker import review_greenfield_scenarios
 from greenfield_scaffold_worker import greenfield_workspace_status, normalize_project_file_rows, scaffold_greenfield_files
 from greenfield_verification_worker import repair_guidance_for_verification, run_greenfield_verification_loop, verification_failure_signature, workspace_file_snapshots
@@ -666,6 +667,37 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertTrue(any("contract facade not wired to runner" in item for item in review["blockers"]))
             self.assertTrue(any("CLI not wired to runner" in item for item in review["blockers"]))
 
+    def test_greenfield_artifact_review_blocks_api_library_hybrid_without_adapter_layer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            app = repo / "app"
+            app.mkdir()
+            (app / "main.py").write_text(
+                "try:\n    from fastapi import FastAPI\nexcept ModuleNotFoundError:\n    FastAPI = None\napp = FastAPI() if FastAPI else None\n",
+                encoding="utf-8",
+            )
+            tests = repo / "tests"
+            tests.mkdir()
+            (tests / "test_health.py").write_text(
+                "import unittest\n\nclass HealthTests(unittest.TestCase):\n    def test_health(self):\n        self.assertTrue(True)\n",
+                encoding="utf-8",
+            )
+            project = {
+                "task": "Создай FastAPI service/library hybrid: HTTP adapter plus pure Python library.",
+                "template_id": "python_fastapi_service",
+                "artifact_contract": {
+                    "source_files": ["app/main.py"],
+                    "test_files": ["tests/test_health.py"],
+                },
+                "module_contracts": [
+                    {"path": "app/main.py", "responsibility": "HTTP app", "requirements": ["FastAPI app"]},
+                ],
+            }
+            review = artifact_review_greenfield_project(repo, project)
+            self.assertEqual(review["status"], "blocked", review)
+            self.assertTrue(any("without app/service.py" in item for item in review["blockers"]))
+            self.assertTrue(any("without app/routes.py" in item for item in review["blockers"]))
+
     def test_greenfield_artifact_review_blocks_fake_browser_game(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -768,6 +800,73 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(project["project_type"], "library")
         self.assertEqual(project["template_id"], "python_library")
 
+    def test_greenfield_architect_routes_api_library_hybrid_to_fastapi_contract(self) -> None:
+        def guidance(role: str, payload: dict, instructions: str) -> dict:
+            return {"ok": True, "status": "answered", "content": "{}"}
+
+        project = architect_build_greenfield_project_brief(
+            "Создай FastAPI service/library hybrid webhook-demo: HTTP adapter plus pure Python library.",
+            request_guidance=guidance,
+        )
+
+        self.assertEqual(project["project_type"], "api_service")
+        self.assertEqual(project["template_id"], "python_fastapi_service")
+        self.assertIn("app/service.py", project["expected_files"])
+        self.assertIn("app/routes.py", project["expected_files"])
+        self.assertIn("tests/test_api_contract.py", project["expected_files"])
+        contract_paths = {contract["path"] for contract in project["module_contracts"] if isinstance(contract, dict)}
+        self.assertTrue({"app/service.py", "app/routes.py", "tests/test_api_contract.py"}.issubset(contract_paths))
+        scenario_markers = "\n".join(
+            "\n".join(row.get("required_markers", []))
+            for row in project["scenario_plan"]["rows"]
+            if isinstance(row, dict)
+        )
+        self.assertIn("routes", scenario_markers)
+
+    def test_greenfield_architect_routes_browser_json_tool_to_static_site(self) -> None:
+        def guidance(role: str, payload: dict, instructions: str) -> dict:
+            return {"ok": True, "status": "answered", "content": "{}"}
+
+        project = architect_build_greenfield_project_brief(
+            "Создай browser tool project: HTML/CSS/JS редактор JSON карты со SVG preview.",
+            request_guidance=guidance,
+        )
+
+        self.assertEqual(project["project_type"], "web_app")
+        self.assertEqual(project["template_id"], "static_site")
+        self.assertIn("index.html", project["expected_files"])
+        self.assertIn("app.js", project["expected_files"])
+        contracts = {contract["path"]: contract for contract in project["module_contracts"] if isinstance(contract, dict)}
+        index_requirements = "\n".join(contracts["index.html"]["requirements"])
+        script_requirements = "\n".join(contracts["app.js"]["requirements"])
+        self.assertIn("textarea", index_requirements)
+        self.assertIn("SVG preview", index_requirements)
+        self.assertIn("sample JSON", script_requirements)
+        scenario_markers = "\n".join(
+            "\n".join(row.get("required_markers", []))
+            for row in project["scenario_plan"]["rows"]
+            if isinstance(row, dict)
+        )
+        self.assertIn("textarea", scenario_markers)
+        self.assertIn("svg", scenario_markers)
+
+    def test_greenfield_architect_keeps_plain_static_site_scenario_generic(self) -> None:
+        def guidance(role: str, payload: dict, instructions: str) -> dict:
+            return {"ok": True, "status": "answered", "content": "{}"}
+
+        project = architect_build_greenfield_project_brief(
+            "Создай static frontend website site-demo with ready status.",
+            request_guidance=guidance,
+        )
+
+        scenario_markers = "\n".join(
+            "\n".join(row.get("required_markers", []))
+            for row in project["scenario_plan"]["rows"]
+            if isinstance(row, dict)
+        )
+        self.assertIn("ready", scenario_markers)
+        self.assertNotIn("textarea", scenario_markers)
+
     def test_greenfield_architect_owns_project_brief_and_plan(self) -> None:
         def guidance(role: str, payload: dict, instructions: str) -> dict:
             if role == "GreenfieldArchitect":
@@ -855,6 +954,61 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(scenario["id"], "architecture_requested_modules")
         self.assertIn("parser", scenario["required_markers"])
         self.assertNotIn("test_describe", scenario["required_markers"])
+
+    def test_greenfield_architect_promotes_evidence_required_file_paths_to_contracts(self) -> None:
+        def guidance(role: str, payload: dict, instructions: str) -> dict:
+            if role == "GreenfieldArchitect":
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "evidence_required": [
+                                "index.html includes editor controls",
+                                "script.js renders SVG preview",
+                                "tests/test_ui_contract.py proves UI markers",
+                            ],
+                        }
+                    ),
+                }
+            return {"ok": True, "status": "answered", "content": "{}"}
+
+        project = architect_build_greenfield_project_brief(
+            "Создай browser tool project: HTML/CSS/JS редактор JSON карты.",
+            request_guidance=guidance,
+        )
+
+        self.assertIn("script.js", project["expected_files"])
+        self.assertIn("tests/test_ui_contract.py", project["expected_files"])
+        contract_paths = {contract["path"] for contract in project["module_contracts"] if isinstance(contract, dict)}
+        self.assertIn("script.js", contract_paths)
+        self.assertIn("tests/test_ui_contract.py", contract_paths)
+
+    def test_greenfield_architect_resolves_model_suffix_evidence_to_existing_test_path(self) -> None:
+        def guidance(role: str, payload: dict, instructions: str) -> dict:
+            if role == "GreenfieldArchitect":
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps({"evidence_required": ["DOM selector list for test_static_site.py"]}),
+                }
+            return {"ok": True, "status": "answered", "content": "{}"}
+
+        project = architect_build_greenfield_project_brief(
+            "Создай browser tool project: HTML/CSS/JS редактор JSON карты.",
+            request_guidance=guidance,
+        )
+
+        self.assertIn("tests/test_static_site.py", project["expected_files"])
+        self.assertNotIn("test_static_site.py", project["expected_files"])
+        contract_paths = [contract["path"] for contract in project["module_contracts"] if isinstance(contract, dict)]
+        self.assertNotIn("test_static_site.py", contract_paths)
+
+    def test_greenfield_placeholder_marker_allows_html_placeholder_attribute(self) -> None:
+        html = '<textarea placeholder="Paste JSON here"></textarea>'
+        self.assertEqual(implementation_forbidden_markers_found(html, ["placeholder"]), [])
+        self.assertEqual(review_forbidden_markers_found(html, ["placeholder"]), [])
+        self.assertEqual(implementation_forbidden_markers_found("placeholder implementation", ["placeholder"]), ["placeholder"])
 
     def test_greenfield_dependency_worker_reports_manager_status(self) -> None:
         none_status = dependency_manager_status("none")
@@ -3427,12 +3581,13 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         audit_path = Path(__file__).with_name("greenfield_capability_audit.json")
         audit = json.loads(audit_path.read_text(encoding="utf-8"))
         self.assertEqual(audit["kind"], "code_brigade_greenfield_capability_audit")
-        self.assertEqual(audit["status"], "in_progress")
+        self.assertEqual(audit["status"], "implemented")
         rows = audit["requirements"]
         self.assertEqual({row["objective_item"] for row in rows}, set(range(1, 11)))
         by_id = {row["id"]: row for row in rows}
-        self.assertEqual(by_id["implementation_worker"]["status"], "partial")
-        self.assertEqual(by_id["model_integration"]["status"], "partial")
+        self.assertEqual(by_id["implementation_worker"]["status"], "implemented")
+        self.assertEqual(by_id["model_integration"]["status"], "implemented")
+        self.assertTrue(all(row["status"] == "implemented" for row in rows))
         self.assertTrue(all(row["evidence"] for row in rows))
         self.assertTrue(audit["next_recommended_work"])
 

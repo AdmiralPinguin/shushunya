@@ -72,12 +72,16 @@ def project_name_from_task(task: str) -> str:
 
 def infer_project_type(task: str) -> str:
     lowered = task.lower()
+    has_data_intent = any(word in lowered for word in ("data", "csv", "pipeline", "analytics", "данн", "пайплайн", "аналитик"))
+    has_strong_api_intent = any(word in lowered for word in ("fastapi", "http", "server", "сервер", "endpoint"))
+    if any(word in lowered for word in ("browser tool", "browser app", "web tool", "site", "website", "frontend", "html", "css", "javascript", "svg", "браузер", "сайт", "страниц")):
+        return "web_app"
+    if has_data_intent and not has_strong_api_intent:
+        return "automation_tool"
+    if has_strong_api_intent or any(word in lowered for word in ("api", "апи")):
+        return "api_service"
     if any(word in lowered for word in ("library", "package", "sdk", "библиот")):
         return "library"
-    if any(word in lowered for word in ("data", "csv", "pipeline", "analytics", "данн", "пайплайн", "аналитик")):
-        return "automation_tool"
-    if any(word in lowered for word in ("fastapi", "api", "http", "server", "сервер", "апи", "endpoint")):
-        return "api_service"
     if any(word in lowered for word in ("site", "website", "frontend", "html", "css", "vite", "react", "vue", "сайт", "страниц")):
         return "web_app"
     if any(word in lowered for word in ("bot", "telegram", "бот")):
@@ -183,12 +187,25 @@ def apply_architecture_model_module_constraints(
     initial_contracts = [dict(item) if isinstance(item, dict) else item for item in module_contracts]
     added_source_contracts: list[dict[str, Any]] = []
     added_test_requirements: list[str] = []
-    for item in model_constraints.get("missing_modules", []):
+    constraint_items = [
+        *[item for item in model_constraints.get("missing_modules", []) if isinstance(item, str)],
+        *[item for item in model_constraints.get("evidence_required", []) if isinstance(item, str)],
+    ]
+    def resolve_constraint_path(rel_path: str) -> str:
+        if rel_path in existing_files:
+            return rel_path
+        suffix_matches = [path for path in existing_files if path.endswith(f"/{rel_path}")]
+        if len(suffix_matches) == 1:
+            return suffix_matches[0]
+        return rel_path
+
+    for item in constraint_items:
         if not isinstance(item, str):
             continue
         rel_path = extract_guidance_module_path(item)
         if not rel_path:
             continue
+        rel_path = resolve_constraint_path(rel_path)
         if rel_path not in existing_files:
             next_files.append({"path": rel_path, "content": ""})
             existing_files.add(rel_path)
@@ -226,6 +243,151 @@ def apply_architecture_model_module_constraints(
             requirements = [str(row) for row in contract.get("requirements", []) if isinstance(row, str)]
             contract["requirements"] = list(dict.fromkeys([*requirements, *added_test_requirements]))
     return next_files, next_contracts
+
+
+def api_library_adapter_requested(task: str, template_id: str) -> bool:
+    if template_id != "python_fastapi_service":
+        return False
+    lowered = task.lower()
+    api_markers = ("fastapi", "api", "http", "server", "endpoint", "route", "adapter", "апи", "сервер")
+    library_markers = ("library", "package", "sdk", "hybrid", "pure python", "adapter", "библиот")
+    return any(marker in lowered for marker in api_markers) and any(marker in lowered for marker in library_markers)
+
+
+def static_browser_tool_requested(task: str, template_id: str) -> bool:
+    if template_id != "static_site":
+        return False
+    lowered = task.lower()
+    browser_markers = ("browser tool", "web tool", "html", "css", "javascript", "svg", "браузер")
+    tool_markers = ("textarea", "json", "render", "preview", "validation", "editor", "редакт", "узл", "связ")
+    return any(marker in lowered for marker in browser_markers) and any(marker in lowered for marker in tool_markers)
+
+
+def apply_static_browser_tool_contract(
+    task: str,
+    files: list[Any],
+    module_contracts: list[Any],
+    template_id: str,
+) -> tuple[list[Any], list[Any]]:
+    if not static_browser_tool_requested(task, template_id):
+        return files, module_contracts
+    next_contracts = [dict(item) if isinstance(item, dict) else item for item in module_contracts]
+    required_by_path = {
+        "index.html": [
+            "render a textarea JSON editor",
+            "render a button or control that triggers preview rendering",
+            "render an SVG preview area for nodes and links",
+            "render a validation error panel",
+        ],
+        "app.js": [
+            "provide sample JSON map data",
+            "parse JSON from the textarea",
+            "render SVG nodes and links",
+            "show validation errors without a backend",
+        ],
+        "styles.css": [
+            "style the editor, render control, error panel, and SVG preview",
+        ],
+        "tests/test_static_site.py": [
+            "prove HTML asset wiring",
+            "prove textarea, render control, SVG preview, sample data, and validation markers exist",
+        ],
+    }
+    existing_contract_paths = {str(item.get("path") or "") for item in next_contracts if isinstance(item, dict)}
+    for contract in next_contracts:
+        if not isinstance(contract, dict):
+            continue
+        rel_path = str(contract.get("path") or "")
+        additions = required_by_path.get(rel_path)
+        if not additions:
+            continue
+        requirements = [str(item) for item in contract.get("requirements", []) if isinstance(item, str)]
+        contract["requirements"] = list(dict.fromkeys([*requirements, *additions]))
+    for rel_path, additions in required_by_path.items():
+        if rel_path in existing_contract_paths:
+            continue
+        module_name = Path(rel_path).stem.replace("-", "_")
+        next_contracts.append(
+            {
+                "module": module_name,
+                "path": rel_path,
+                "responsibility": "Task-derived browser tool behavior",
+                "requirements": additions,
+                "source": "static_browser_tool_contract",
+            }
+        )
+    return files, next_contracts
+
+
+def apply_api_library_adapter_contract(
+    task: str,
+    files: list[Any],
+    module_contracts: list[Any],
+    verification_commands: list[Any],
+    template_id: str,
+) -> tuple[list[Any], list[Any], list[Any]]:
+    if not api_library_adapter_requested(task, template_id):
+        return files, module_contracts, verification_commands
+    existing_files = {str(item.get("path") or "") for item in files if isinstance(item, dict)}
+    existing_contracts = {str(item.get("path") or "") for item in module_contracts if isinstance(item, dict)}
+    next_files = list(files)
+    next_contracts = [dict(item) if isinstance(item, dict) else item for item in module_contracts]
+    required_files = [
+        ("app/service.py", "pure Python service/domain library for the API task"),
+        ("app/routes.py", "HTTP route adapter helpers and optional FastAPI router wiring"),
+        ("tests/test_api_contract.py", "API/library hybrid contract tests"),
+    ]
+    for rel_path, _description in required_files:
+        if rel_path not in existing_files:
+            next_files.append({"path": rel_path, "content": ""})
+            existing_files.add(rel_path)
+    required_contracts = [
+        {
+            "module": "app.service",
+            "path": "app/service.py",
+            "responsibility": "pure Python service/library behavior behind the HTTP API",
+            "requirements": ["implement requested domain behavior without requiring a live server"],
+            "source": "api_library_adapter_contract",
+        },
+        {
+            "module": "app.routes",
+            "path": "app/routes.py",
+            "responsibility": "HTTP adapter helpers and FastAPI router wiring for the service layer",
+            "requirements": [
+                "expose route adapter functions",
+                "import safely when FastAPI is not installed by wrapping FastAPI imports in try/except ModuleNotFoundError",
+                "wire APIRouter when FastAPI is installed",
+                "delegate to app.service",
+            ],
+            "source": "api_library_adapter_contract",
+        },
+        {
+            "module": "tests.test_api_contract",
+            "path": "tests/test_api_contract.py",
+            "responsibility": "API/library hybrid verification",
+            "requirements": ["prove pure service behavior", "prove route adapter behavior without live server"],
+            "source": "api_library_adapter_contract",
+        },
+    ]
+    for contract in required_contracts:
+        if contract["path"] not in existing_contracts:
+            next_contracts.append(contract)
+            existing_contracts.add(contract["path"])
+    for contract in next_contracts:
+        if not isinstance(contract, dict) or contract.get("path") != "app/main.py":
+            continue
+        requirements = [str(item) for item in contract.get("requirements", []) if isinstance(item, str)]
+        requirements.extend(
+            [
+                "include app.routes.router when FastAPI and router are available",
+                "keep main import-safe when FastAPI is not installed",
+            ]
+        )
+        contract["requirements"] = list(dict.fromkeys(requirements))
+    rows = [str(item) for item in verification_commands if isinstance(item, str)]
+    if "python -m unittest discover tests" not in rows:
+        rows.insert(0, "python -m unittest discover tests")
+    return next_files, next_contracts, rows
 
 
 def sync_python_source_compile_commands(verification_commands: list[Any], expected_files: list[str]) -> list[Any]:
@@ -328,6 +490,8 @@ def build_greenfield_project_brief(
     base_file_paths = [str(item.get("path") or "") for item in files if isinstance(item, dict) and item.get("path")]
     base_contract_paths = [str(item.get("path") or "") for item in module_contracts if isinstance(item, dict) and item.get("path")]
     files, module_contracts, acceptance_features = apply_task_feature_overrides(task, template_id, project_name, files, module_contracts)
+    files, module_contracts = apply_static_browser_tool_contract(task, files, module_contracts, template_id)
+    files, module_contracts, verification_commands = apply_api_library_adapter_contract(task, files, module_contracts, verification_commands, template_id)
     if any(feature.get("id") == "calculator_operations" for feature in acceptance_features):
         package = project_name.replace("-", "_")
         run_commands = [f"python -m {package}.cli add 2 3"]
@@ -370,7 +534,7 @@ def build_greenfield_project_brief(
         module_contracts,
         request_guidance,
     )
-    scenario_plan = build_greenfield_scenario_plan(project_type, template_id, acceptance_features, expected_files, model_constraints)
+    scenario_plan = build_greenfield_scenario_plan(project_type, template_id, acceptance_features, expected_files, model_constraints, task)
     brief = {
         "kind": "code_brigade_greenfield_project_brief",
         "contract_version": "eye-mechanicum.v1",

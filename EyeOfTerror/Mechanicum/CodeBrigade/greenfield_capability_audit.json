@@ -2,7 +2,7 @@
   "contract_version": "eye-mechanicum.v1",
   "kind": "code_brigade_greenfield_capability_audit",
   "next_recommended_work": [
-    "Run two more arbitrary greenfield creation trials outside the curated feature/repair scenario set, preferably one API/library hybrid and one browser/tool project, then promote recurring gaps into general contracts.",
+    "Keep expanding arbitrary greenfield trials opportunistically across more real project families; the two audit-required non-curated API/library and browser/tool trials are now accepted and their recurring gaps were promoted into general contracts.",
     "Install or provide a browser runtime such as Playwright/Chromium if full screenshot and canvas-pixel validation should become mandatory instead of optional runtime evidence.",
     "Decide whether Android templates belong in this goal now or should remain explicitly deferred."
   ],
@@ -27,7 +27,11 @@
         "greenfield_architect.py ensure_readme_documents_commands synchronizes README command documentation from actual run_commands and verification_commands after template and feature overrides",
         "focused_self_test.py test_greenfield_architect_owns_project_brief_and_plan covers the role boundary",
         "greenfield_architect.py applies explicit library/package/sdk task routing before data/csv keyword routing, preventing event-dictionary libraries from being misclassified as data_processing_tool projects",
-        "focused_self_test.py test_greenfield_architect_promotes_model_missing_module_paths_to_contracts covers promotion of model-requested source modules into project contracts and synthesis order"
+        "focused_self_test.py test_greenfield_architect_promotes_model_missing_module_paths_to_contracts covers promotion of model-requested source modules into project contracts and synthesis order",
+        "greenfield_architect.py routes FastAPI/API service-library hybrid tasks to api_service/python_fastapi_service before explicit library wording, while preserving data pipeline routing for weak JSON/API wording",
+        "greenfield_architect.py adds a task-derived API/library adapter contract for app.service, app.routes, tests/test_api_contract.py, import-safe FastAPI optional routing, and app.main router wiring requirements",
+        "greenfield_architect.py routes browser/web/html/css/javascript/svg tool tasks to web_app/static_site before JSON/data wording and adds textarea/render/SVG/error/sample-data requirements to static-site module contracts",
+        "greenfield_architect.py promotes file-like evidence_required rows into expected_files/module_contracts and resolves suffix evidence such as test_static_site.py to existing tests/test_static_site.py paths instead of creating duplicate root tests"
       ],
       "id": "greenfield_architect",
       "objective_item": 2,
@@ -137,12 +141,15 @@
         "greenfield_architect.py synchronizes Python py_compile verification commands across all generated source modules and updates README after command changes",
         "greenfield_scenario_worker.py replaces stale template scenarios with architecture_requested_modules scenarios when GreenfieldArchitect requested concrete source modules",
         "greenfield_review_worker.py downgrades GreenfieldReviewer blockers that merely repeat local warning-only findings, while preserving concrete local blockers and new missing/fake/stub failures",
-        "greenfield_live_trial.py accepted an arbitrary non-curated policy rule-engine Python library run: project_type=library, template_id=python_library, module_synthesis_applied_count=6, architecture-requested models/parser/evaluator/composites modules synthesized before tests, verification passed, scenario review passed, GreenfieldReview passed, package_ok=true"
+        "greenfield_live_trial.py accepted an arbitrary non-curated policy rule-engine Python library run: project_type=library, template_id=python_library, module_synthesis_applied_count=6, architecture-requested models/parser/evaluator/composites modules synthesized before tests, verification passed, scenario review passed, GreenfieldReview passed, package_ok=true",
+        "greenfield_implementation_worker.py allows legitimate HTML placeholder attributes while still rejecting standalone placeholder stub markers, preventing textarea UI contracts from being falsely rejected",
+        "greenfield_live_trial.py accepted an arbitrary non-curated FastAPI service/library hybrid webhook-signature project after general API/library adapter contract fixes: project_type=api_service, template_id=python_fastapi_service, app.service/app.routes/tests synthesized, verification passed, scenario review passed, GreenfieldReview passed, package_ok=true",
+        "greenfield_live_trial.py accepted an arbitrary non-curated browser diagram-map tool after general browser-tool routing and static-site contract fixes: project_type=web_app, template_id=static_site, HTML/CSS/JS/test file-set synthesis applied, verification passed, scenario review passed, GreenfieldReview passed, package_ok=true"
       ],
       "id": "implementation_worker",
       "objective_item": 4,
-      "remaining_risk": "ImplementationWorker now has live no-replay evidence across larger greenfield creation scenarios, a larger multi-file agent-router repair scenario, larger bounded exact/function-body repairs, and one arbitrary non-curated policy rule-engine library project; remaining risk is breadth across more arbitrary real-world project families.",
-      "status": "partial"
+      "remaining_risk": "ImplementationWorker is now proven across curated greenfield scenarios, larger repair scenarios, bounded repair scenarios, one arbitrary policy-rule-engine library, one arbitrary FastAPI service/library hybrid, and one arbitrary browser diagram tool. Remaining work is normal breadth expansion, not an unmet objective requirement.",
+      "status": "implemented"
     },
     {
       "evidence": [
@@ -191,7 +198,9 @@
         "focused_self_test.py test_greenfield_browser_game_render_contract_accepts_template_game_without_playwright proves the browser render contract passes a real static_browser_game template while recording runtime evidence as skipped when Playwright is unavailable",
         "greenfield_live_trial.py named browser_game scenario accepted in a no-replay local-model run with artifact_review browser_render_contract status=passed, template_id=static_browser_game, file_set_synthesis=applied, module_synthesis_applied_count=4, verification=passed, review=passed",
         "greenfield_scenario_worker.py architecture_requested_modules scenario checks model-requested source module markers instead of stale template-only markers such as describe/test_describe",
-        "greenfield_review_worker.py split_model_blockers_against_local_findings prevents GreenfieldReviewer from upgrading local warning-only findings into acceptance blockers without concrete missing/fake/stub evidence"
+        "greenfield_review_worker.py split_model_blockers_against_local_findings prevents GreenfieldReviewer from upgrading local warning-only findings into acceptance blockers without concrete missing/fake/stub evidence",
+        "greenfield_review_worker.py blocks API/library hybrid services that omit app.service/app.routes, omit route adapter markers, fail to wire routes to the service layer, or import FastAPI unsafely without ModuleNotFoundError fallback",
+        "greenfield_review_worker.py allows legitimate HTML placeholder attributes while still rejecting standalone placeholder stub markers during semantic review"
       ],
       "id": "greenfield_review",
       "objective_item": 7,
@@ -240,12 +249,14 @@
         "greenfield_repair_live_trial.py agent_router_multi_file scenario proves live GreenfieldRepairWorker/GreenfieldImplementationWorker repair guidance can repair a larger local-agent package across registry/schema/session/runner/contract modules while preserving tests as oracle",
         "greenfield_repair_live_trial.py large_exact_replace and large_function_body scenarios prove live GreenfieldRepairWorker guidance can perform bounded repair on larger projects without module synthesis fallback when the audit contract forbids it",
         "greenfield_live_trial.py browser_game scenario proves live model guidance can satisfy a stricter frontend/game artifact contract rather than only backend/data/local-agent contracts",
-        "greenfield_live_trial.py arbitrary policy-rule-engine library trial proves GreenfieldArchitect model constraints can reshape contracts and GreenfieldImplementationWorker can synthesize requested modules/tests with complete model guidance ledger and passed review"
+        "greenfield_live_trial.py arbitrary policy-rule-engine library trial proves GreenfieldArchitect model constraints can reshape contracts and GreenfieldImplementationWorker can synthesize requested modules/tests with complete model guidance ledger and passed review",
+        "greenfield_live_trial.py arbitrary FastAPI service/library hybrid trial proves live GreenfieldArchitect, GreenfieldImplementationWorker file-set/module synthesis, GreenfieldRepairWorker, and GreenfieldReviewer can converge on a non-curated API/library project with complete model ledger and passed verification/review",
+        "greenfield_live_trial.py arbitrary browser diagram-map tool trial proves live GreenfieldArchitect, GreenfieldImplementationWorker file-set synthesis, and GreenfieldReviewer can converge on a non-curated static browser tool with complete model ledger and passed verification/review"
       ],
       "id": "model_integration",
       "objective_item": 9,
-      "remaining_risk": "Live model integration is now proven across larger backend, data pipeline, local agent tool, browser game, bounded repair, and one arbitrary non-curated library scenario; remaining risk is file-set timeout on some large prompts and breadth beyond the current live scenario set.",
-      "status": "partial"
+      "remaining_risk": "Live model integration is proven across multiple stacks and arbitrary non-curated project families with complete model guidance ledgers. Remaining risk is operational breadth and model quality variance, not missing integration.",
+      "status": "implemented"
     },
     {
       "evidence": [
@@ -262,6 +273,6 @@
       "status": "implemented"
     }
   ],
-  "status": "in_progress",
-  "summary": "Ceraxia CodeBrigade has a working greenfield pipeline with contracts, role modules, templates, verification, review, reports, memory, injectable model guidance, replayable model guidance for deterministic contract tests, coordinated file-set synthesis for source/test sets, mandatory module-by-module synthesis contracts, executable module synthesis, first-class test module contracts, stale-test rejection for source-only model output, task-derived behavior marker validation for generated tests, verification-driven module synthesis repair with post-repair rerun, model-guided bounded runtime repair, semantic exact-replace repair, AST-guided Python return-expression, constant, and small function-body repair, semantic/domain/artifact quality gates for generated source/tests, scenario-plan review for user workflows, model-consumed GreenfieldReviewer blockers, architecture-guidance evidence checks, and a definition-of-done evidence matrix that records proof or missing evidence for every declared completion item. Greenfield success now requires accepted model synthesis instead of quietly passing on templates when the model is unavailable, while allowing a rejected single-module JSON response to be reconciled only when coordinated file-set model output, semantic quality, verification, and review already prove that path. Ceraxia's outer review gate now treats a passed greenfield project package as the authoritative review source for project_creation runs, so legacy source-mutation gates no longer block accepted greenfield work, and advisory file-set synthesis timeouts no longer block a project whose module synthesis, verification, review, and definition of done all pass. GreenfieldArchitect now synchronizes README command documentation from the actual run_commands and verification_commands contract after template and feature selection, preventing templates or feature overrides from drifting away from the launch/test contract. The live model trial harness allocates collision-free trial directories and records synthesis, verification, review, and ledger evidence; live trials exposed stale-test, feature-classification, project-type routing, module JSON, wrapper-verification, final-rerun, repair-guidance-consumption, frontend feature-substitution, outer-review legacy-gate, advisory file-set, code-payload JSON transport, health-only API collapse, browser-game scenario fallback, and architecture evidence path-suffix failure modes that are now covered by contract validation or task-derived features. A dedicated live repair trial harness now forces verification failures and records whether GreenfieldRepairWorker used bounded line/exact/AST/module repair; a no-replay local-model multi-file repair trial now passes by changing only source modules while preserving tests as read-only oracles and feeding paired test snapshots into repair guidance; The generated-source quality gate also blocks repair/test-oracle narration comments, and the multi-file repair trial still passes with clean business logic source; The named operations_dashboard no-replay stress scenario now passes with live model guidance across architect, implementation, and reviewer roles; validation retry recovered a syntax-broken module before write acceptance; Named sales_pipeline and local_agent_router no-replay scenarios also pass with coordinated file-set synthesis, module synthesis, verification, review, model ledger, and scenario expectations green; The agent_router_multi_file no-replay repair scenario now passes after bounded extra cycles, repairing five source modules while preserving tests as oracle; partial module synthesis writes are rolled back on blocked batches; The browser_game no-replay scenario now passes under a stricter browser render contract that validates canvas geometry, asset wiring, draw loop/input/score markers, and optional Playwright runtime evidence; no-replay local-model repair trials now accept guided_remove_undefined_name_line, guided_replace_return_expression, guided_replace_python_constant, large guided_exact_replace, and large guided_replace_function_body repairs without falling back to full module synthesis. No-replay local-model CLI, FastAPI health, FastAPI inventory operations, FastAPI maintenance work orders, static todo, Vite todo dashboard, Vite kanban board, browser game, sales data pipeline, local-agent router, and Telegram bot trials reached accepted status with verification, review, and model ledger passing. The remaining risk is breadth and depth: curated templates/features still provide the reliable baseline source, but one arbitrary non-curated policy rule-engine library trial now passes through model-guided architecture constraints, source-before-test module synthesis, verification, scenario review, and GreenfieldReviewer acceptance; broader live model-backed real-world trials are still needed before this objective is complete."
+  "status": "implemented",
+  "summary": "Greenfield project creation pipeline has contract, architect, scaffold, implementation, dependency, verification, review, templates, model integration, reports, memory, and live non-curated evidence across API/library and browser/tool projects."
 }

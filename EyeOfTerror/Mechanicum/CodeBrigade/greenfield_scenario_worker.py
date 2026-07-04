@@ -11,6 +11,7 @@ def build_greenfield_scenario_plan(
     acceptance_features: list[dict[str, Any]],
     expected_files: list[str],
     model_constraints: dict[str, Any] | None = None,
+    task: str = "",
 ) -> dict[str, Any]:
     feature_rows = [
         row
@@ -19,7 +20,9 @@ def build_greenfield_scenario_plan(
         for row in _feature_scenarios(feature)
     ]
     constraint_rows = _model_constraint_scenarios(model_constraints or {})
-    rows = feature_rows or constraint_rows or _template_scenarios(project_type, template_id)
+    adapter_rows = _api_library_adapter_scenarios(template_id, expected_files)
+    browser_tool_rows = _static_browser_tool_scenarios(template_id, expected_files, task)
+    rows = feature_rows or constraint_rows or adapter_rows or browser_tool_rows or _template_scenarios(project_type, template_id)
     existing_files = set(expected_files)
     default_evidence = _default_evidence_files(expected_files)
     for row in rows:
@@ -58,6 +61,45 @@ def _model_constraint_scenarios(model_constraints: dict[str, Any]) -> list[dict[
             ["implement model-requested source modules", "verify public behavior through tests"],
             list(dict.fromkeys(marker_stems)),
             evidence_files,
+        )
+    ]
+
+
+def _api_library_adapter_scenarios(template_id: str, expected_files: list[str]) -> list[dict[str, Any]]:
+    if template_id != "python_fastapi_service":
+        return []
+    expected = set(expected_files)
+    if not {"app/service.py", "app/routes.py"}.issubset(expected):
+        return []
+    return [
+        _scenario(
+            "api_library_adapter_contract",
+            "API/library hybrid exposes a pure service layer and route adapters covered by tests",
+            ["call pure service behavior", "call route adapter helpers without a live server", "wire FastAPI router when dependency is installed"],
+            ["service", "routes", "APIRouter", "route adapter"],
+            ["app/service.py", "app/routes.py", "app/main.py", "tests/test_api_contract.py"],
+        )
+    ]
+
+
+def _static_browser_tool_scenarios(template_id: str, expected_files: list[str], task: str = "") -> list[dict[str, Any]]:
+    if template_id != "static_site":
+        return []
+    lowered = task.lower()
+    browser_markers = ("browser tool", "web tool", "html", "css", "javascript", "svg", "браузер")
+    tool_markers = ("textarea", "json", "render", "preview", "validation", "editor", "редакт", "узл", "связ")
+    if not (any(marker in lowered for marker in browser_markers) and any(marker in lowered for marker in tool_markers)):
+        return []
+    expected = set(expected_files)
+    if not {"index.html", "app.js", "styles.css"}.issubset(expected):
+        return []
+    return [
+        _scenario(
+            "static_browser_tool_contract",
+            "Static browser tool exposes controls, SVG preview, sample data, and validation without a backend",
+            ["edit JSON text", "render SVG nodes and links", "show validation errors"],
+            ["textarea", "render", "svg", "json", "sample", "error"],
+            ["index.html", "app.js", "styles.css", "tests/test_static_site.py"],
         )
     ]
 

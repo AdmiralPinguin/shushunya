@@ -155,6 +155,10 @@ def forbidden_placeholder_markers_found(text: str, markers: list[str]) -> list[s
             if re.search(r"(?<![A-Za-z0-9_])TODO(?![A-Za-z0-9_])", text):
                 found.append(marker)
             continue
+        if marker.lower() == "placeholder":
+            if re.search(r"(?<![-_a-z0-9])placeholder(?!\s*=)(?![-_a-z0-9])", lowered):
+                found.append(marker)
+            continue
         if marker.lower() in lowered:
             found.append(marker)
     return found
@@ -339,12 +343,29 @@ def artifact_review_greenfield_project(repo: Path, project_brief: dict[str, Any]
         if package_json and "\"dev\"" not in package_json:
             blockers.append("artifact review found package.json without dev script")
     if template_id == "python_fastapi_service":
+        task = str(project_brief.get("task") or "").lower()
         main = texts.get("app/main.py", "")
         routes = texts.get("app/routes.py", "")
         if main and "FastAPI" not in main and "app =" not in main:
             blockers.append("artifact review found FastAPI main without app construction")
         if routes and "APIRouter" in routes and "include_router" not in main:
             blockers.append("artifact review found routes module not included by app/main.py")
+        hybrid_requested = any(marker in task for marker in ("library", "package", "sdk", "hybrid", "pure python", "adapter", "библиот"))
+        if hybrid_requested:
+            service = texts.get("app/service.py", "")
+            tests = "\n".join(texts.get(path, "") for path in test_files)
+            if not service:
+                blockers.append("artifact review found API/library hybrid without app/service.py")
+            if not routes:
+                blockers.append("artifact review found API/library hybrid without app/routes.py")
+            if routes and "from fastapi import" in routes and "ModuleNotFoundError" not in routes:
+                blockers.append("artifact review found API/library hybrid routes that are not import-safe without FastAPI")
+            if routes and "APIRouter" not in routes and "route" not in routes.lower():
+                blockers.append("artifact review found API/library hybrid routes without route adapter markers")
+            if routes and "app.service" not in routes and ".service" not in routes and "from app import service" not in routes:
+                blockers.append("artifact review found API/library hybrid routes not wired to service layer")
+            if tests and ("service" not in tests.lower() or ("route" not in tests.lower() and "adapter" not in tests.lower())):
+                blockers.append("artifact review found API/library hybrid tests missing service and route adapter evidence")
     if template_id == "local_agent_tool":
         runner = next((texts[path] for path in source_files if path.endswith("/runner.py")), "")
         contract = next((texts[path] for path in source_files if path.endswith("/contract.py")), "")

@@ -375,6 +375,9 @@ def forbidden_markers_found(content: str, markers: list[str]) -> list[str]:
         if needle == "todo":
             if "todo:" in lowered or "# todo" in lowered or "// todo" in lowered:
                 found.append(marker)
+        elif needle == "placeholder":
+            if re.search(r"(?<![-_a-z0-9])placeholder(?!\s*=)(?![-_a-z0-9])", lowered):
+                found.append(marker)
         elif needle and needle in lowered:
             found.append(marker)
     return found
