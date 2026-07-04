@@ -160,6 +160,105 @@ def forbidden_placeholder_markers_found(text: str, markers: list[str]) -> list[s
     return found
 
 
+def browser_game_render_contract(repo: Path) -> dict[str, Any]:
+    blockers: list[str] = []
+    warnings: list[str] = []
+
+    def read(rel_path: str) -> str:
+        path = repo / rel_path
+        return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+    html = read("index.html")
+    css = read("styles.css")
+    game = read("game.js")
+    rows: list[dict[str, Any]] = []
+    for rel_path, text in (("index.html", html), ("styles.css", css), ("game.js", game)):
+        exists = bool(text)
+        rows.append({"path": rel_path, "exists": exists, "size_bytes": len(text.encode("utf-8"))})
+        if not exists:
+            blockers.append(f"browser render contract missing required asset: {rel_path}")
+
+    canvas_match = re.search(r"<canvas\b[^>]*\bid=[\"']game[\"'][^>]*>", html, re.IGNORECASE)
+    canvas_tag = canvas_match.group(0) if canvas_match else ""
+    if not canvas_match:
+        blockers.append("browser render contract found no canvas#game element")
+    width_match = re.search(r"\bwidth=[\"']?(\d+)", canvas_tag)
+    height_match = re.search(r"\bheight=[\"']?(\d+)", canvas_tag)
+    canvas_width = int(width_match.group(1)) if width_match else 0
+    canvas_height = int(height_match.group(1)) if height_match else 0
+    if canvas_match and (canvas_width <= 0 or canvas_height <= 0):
+        blockers.append("browser render contract found canvas#game without positive width/height")
+    if "game.js" not in html or "styles.css" not in html:
+        blockers.append("browser render contract found missing game.js/styles.css references")
+    if canvas_match and "game.js" in html and html.find("game.js") < html.find(canvas_tag):
+        warnings.append("browser render contract found game.js referenced before canvas#game")
+
+    script_markers = {
+        "canvas_context": "getContext(" in game,
+        "animation_loop": "requestAnimationFrame" in game,
+        "render_function": "renderGame" in game or "draw" in game,
+        "pixel_draw": any(marker in game for marker in ("fillRect", "strokeRect", ".arc(", "drawImage")),
+        "keyboard_down": "keydown" in game and "addEventListener" in game,
+        "keyboard_up": "keyup" in game and "addEventListener" in game,
+        "score_update": "score.textContent" in game or ("textContent" in game and "score" in game),
+    }
+    missing_script = [name for name, present in script_markers.items() if not present]
+    if missing_script:
+        blockers.append("browser render contract missing runtime markers: " + ", ".join(missing_script))
+    style_markers = {
+        "canvas_selector": "canvas" in css or "#game" in css,
+        "stable_canvas_size": any(marker in css for marker in ("aspect-ratio", "width:", "height:")),
+        "visible_background": "background" in css,
+    }
+    missing_style = [name for name, present in style_markers.items() if not present]
+    if missing_style:
+        blockers.append("browser render contract missing style markers: " + ", ".join(missing_style))
+
+    runtime_evidence: dict[str, Any] = {"status": "skipped", "reason": "playwright unavailable"}
+    try:
+        from playwright.sync_api import sync_playwright  # type: ignore
+    except Exception:
+        sync_playwright = None  # type: ignore[assignment]
+    if sync_playwright is not None and html and game:
+        try:
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(headless=True)
+                page = browser.new_page(viewport={"width": 800, "height": 600})
+                page.goto((repo / "index.html").resolve().as_uri())
+                page.wait_for_timeout(250)
+                runtime_evidence = page.evaluate(
+                    """() => {
+                      const canvas = document.querySelector('canvas#game');
+                      const score = document.querySelector('#score');
+                      if (!canvas) return {status: 'blocked', reason: 'missing canvas'};
+                      const rect = canvas.getBoundingClientRect();
+                      return {
+                        status: rect.width > 0 && rect.height > 0 ? 'passed' : 'blocked',
+                        canvas_width: rect.width,
+                        canvas_height: rect.height,
+                        score_text: score ? score.textContent : ''
+                      };
+                    }"""
+                )
+                browser.close()
+        except Exception as exc:
+            runtime_evidence = {"status": "blocked", "reason": str(exc)}
+    if runtime_evidence.get("status") == "blocked":
+        blockers.append("browser render contract runtime check blocked: " + str(runtime_evidence.get("reason") or "unknown"))
+
+    return {
+        "kind": "code_brigade_browser_render_contract",
+        "status": "blocked" if blockers else "passed",
+        "canvas": {"present": bool(canvas_match), "width": canvas_width, "height": canvas_height},
+        "script_markers": script_markers,
+        "style_markers": style_markers,
+        "runtime_evidence": runtime_evidence,
+        "rows": rows,
+        "blockers": blockers,
+        "warnings": warnings,
+    }
+
+
 def artifact_review_greenfield_project(repo: Path, project_brief: dict[str, Any]) -> dict[str, Any]:
     artifact_contract = project_brief.get("artifact_contract") if isinstance(project_brief.get("artifact_contract"), dict) else {}
     template_id = str(project_brief.get("template_id") or "")
@@ -221,6 +320,17 @@ def artifact_review_greenfield_project(repo: Path, project_brief: dict[str, Any]
             blockers.append("artifact review found browser game without animation loop")
         if "addEventListener" not in game or "Arrow" not in game:
             blockers.append("artifact review found browser game without keyboard input handling")
+        render_contract = browser_game_render_contract(repo)
+        rows.append(
+            {
+                "path": "index.html",
+                "kind": "browser_render_contract",
+                "status": render_contract["status"],
+                "runtime_status": render_contract["runtime_evidence"]["status"],
+            }
+        )
+        blockers.extend(str(item) for item in render_contract.get("blockers", []) if isinstance(item, str))
+        warnings.extend(str(item) for item in render_contract.get("warnings", []) if isinstance(item, str))
     if template_id == "node_vite_app":
         html = texts.get("index.html", "")
         package_json = read("package.json")

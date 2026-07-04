@@ -59,6 +59,14 @@ SCENARIO_TASKS: dict[str, dict[str, Any]] = {
         "expected_template_id": "local_agent_tool",
         "expected_features": ["local_agent_command_router"],
     },
+    "browser_game": {
+        "task": (
+            "Создай browser game `render-game-demo`: canvas#game, keyboard arrow controls, visible score, "
+            "requestAnimationFrame game loop, moving target, predictable styles, asset wiring and contract tests."
+        ),
+        "expected_template_id": "static_browser_game",
+        "expected_features": [],
+    },
 }
 
 

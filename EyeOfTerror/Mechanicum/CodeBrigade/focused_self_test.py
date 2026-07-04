@@ -20,7 +20,7 @@ from greenfield_live_trial import allocate_live_trial_root, apply_scenario_expec
 from greenfield_memory_worker import build_greenfield_memory_index, build_greenfield_memory_record, update_greenfield_memory_index
 from greenfield_project import build_greenfield_project_brief, execute_greenfield_project_brief, forbidden_placeholder_markers_found, model_synthesis_blockers, reconcile_module_synthesis_with_file_set, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_repair_live_trial import compact_repair_result, scenario_spec
-from greenfield_review_worker import artifact_review_greenfield_project, python_source_semantic_status, review_greenfield_project
+from greenfield_review_worker import artifact_review_greenfield_project, browser_game_render_contract, python_source_semantic_status, review_greenfield_project
 from greenfield_scenario_worker import review_greenfield_scenarios
 from greenfield_scaffold_worker import greenfield_workspace_status, normalize_project_file_rows, scaffold_greenfield_files
 from greenfield_verification_worker import repair_guidance_for_verification, verification_failure_signature
@@ -679,6 +679,29 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertTrue(any("canvas#game" in item for item in review["blockers"]))
             self.assertTrue(any("animation loop" in item for item in review["blockers"]))
             self.assertTrue(any("keyboard input" in item for item in review["blockers"]))
+            self.assertTrue(any("browser render contract" in item for item in review["blockers"]))
+
+    def test_greenfield_browser_game_render_contract_accepts_template_game_without_playwright(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = architect_build_greenfield_project_brief("Создай browser game `render-game-demo` with keyboard controls and score.")
+            for item in project["files"]:
+                if not isinstance(item, dict) or not item.get("path"):
+                    continue
+                path = repo / str(item["path"])
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(str(item.get("content") or ""), encoding="utf-8")
+            contract = browser_game_render_contract(repo)
+            self.assertEqual(contract["status"], "passed", contract)
+            self.assertTrue(contract["canvas"]["present"])
+            self.assertGreater(contract["canvas"]["width"], 0)
+            self.assertGreater(contract["canvas"]["height"], 0)
+            self.assertTrue(contract["script_markers"]["pixel_draw"])
+            self.assertIn(contract["runtime_evidence"]["status"], {"skipped", "passed"})
+            review = artifact_review_greenfield_project(repo, project)
+            self.assertEqual(review["status"], "passed", review)
+            render_rows = [row for row in review["rows"] if row.get("kind") == "browser_render_contract"]
+            self.assertEqual(render_rows[0]["status"], "passed")
 
     def test_greenfield_scenario_review_blocks_missing_behavior_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3325,6 +3348,9 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(ops["expected_template_id"], "python_fastapi_service")
         self.assertEqual(ops["expected_features"], ["operations_dashboard_api"])
         self.assertIn("event timeline", ops["task"])
+        game = live_scenario_spec("browser_game")
+        self.assertEqual(game["expected_template_id"], "static_browser_game")
+        self.assertIn("canvas#game", game["task"])
         result = apply_scenario_expectations(
             {
                 "status": "accepted",
