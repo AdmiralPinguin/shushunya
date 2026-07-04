@@ -2166,6 +2166,108 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             )
             self.assertEqual((repo / "grades.py").read_text(encoding="utf-8"), "def grade(score):\n    if score >= 90:\n        return 'A'\n    return 'C'\n")
 
+    def test_greenfield_verification_loop_retries_function_body_with_old_body_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай CLI проект `body-retry-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "grades.py", "content": "def grade(score):\n    return 'C'\n"},
+                        {
+                            "path": "test_grades.py",
+                            "content": "import unittest\nimport grades\n\nclass GradeTests(unittest.TestCase):\n    def test_grade_bands(self):\n        self.assertEqual(grades.grade(95), 'A')\n        self.assertEqual(grades.grade(85), 'B')\n        self.assertEqual(grades.grade(70), 'C')\n\n    def test_negative_score_is_rejected(self):\n        with self.assertRaises(ValueError):\n            grades.grade(-1)\n",
+                        },
+                    ],
+                    "verification_commands": ["python -m unittest test_grades.py"],
+                    "module_contracts": [{"module": "grades", "path": "grades.py", "responsibility": "grade bands", "requirements": ["grade bands", "reject negative scores"]}],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+            calls: list[dict] = []
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                calls.append(payload)
+                if "function_body_candidates" not in payload:
+                    return {"ok": True, "status": "answered", "content": json.dumps({"status": "blocked", "blockers": ["replace_function_body needs old_body"]})}
+                candidate = payload["function_body_candidates"][0]
+                self.assertEqual(candidate["old_body"], "return 'C'")
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "operations": [
+                                {
+                                    "type": "replace_function_body",
+                                    "path": candidate["path"],
+                                    "function_name": candidate["function_name"],
+                                    "old_body": candidate["old_body"],
+                                    "new_body": "if score < 0:\n    raise ValueError('score must be non-negative')\nif score >= 90:\n    return 'A'\nif score >= 80:\n    return 'B'\nreturn 'C'",
+                                }
+                            ]
+                        }
+                    ),
+                }
+
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=2, request_guidance=guidance)
+            self.assertEqual(loop["status"], "passed", loop)
+            self.assertTrue(loop["attempts"][0]["repair_guidance_retry"])
+            self.assertTrue(any("function_body_candidates" in payload for payload in calls))
+            self.assertIn(
+                {"path": "grades.py", "repair": "guided_replace_function_body", "status": "applied", "operation_index": 1, "function_name": "grade"},
+                loop["attempts"][0]["repair_execution"]["repaired_files"],
+            )
+
+    def test_greenfield_verification_loop_accepts_singular_operation_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай CLI проект `single-operation-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "grades.py", "content": "def grade(score):\n    return 'C'\n"},
+                        {"path": "test_grades.py", "content": "import unittest\nimport grades\n\nclass GradeTests(unittest.TestCase):\n    def test_grade(self):\n        self.assertEqual(grades.grade(95), 'A')\n"},
+                    ],
+                    "verification_commands": ["python -m unittest test_grades.py"],
+                    "module_contracts": [{"module": "grades", "path": "grades.py", "responsibility": "grade score", "requirements": ["grade score"]}],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "status": "replace_function_body",
+                            "operation": {
+                                "type": "replace_function_body",
+                                "path": "grades.py",
+                                "function_name": "grade",
+                                "old_body": "return 'C'",
+                                "new_body": "return 'A'",
+                            },
+                        }
+                    ),
+                }
+
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=2, request_guidance=guidance)
+            self.assertEqual(loop["status"], "passed", loop)
+            self.assertIn(
+                {"path": "grades.py", "repair": "guided_replace_function_body", "status": "applied", "operation_index": 1, "function_name": "grade"},
+                loop["attempts"][0]["repair_execution"]["repaired_files"],
+            )
+
     def test_greenfield_guided_ast_function_body_repair_blocks_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

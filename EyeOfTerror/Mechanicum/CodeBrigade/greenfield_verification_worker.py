@@ -80,6 +80,79 @@ def repair_guidance_for_verification(project_brief: dict[str, Any], verification
     )
 
 
+def _function_body_candidates(repo: Path, project_brief: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    contract_paths = [
+        str(contract.get("path") or "")
+        for contract in project_brief.get("module_contracts", [])
+        if isinstance(contract, dict) and str(contract.get("path") or "").endswith(".py")
+    ]
+    expected_paths = [str(path) for path in project_brief.get("expected_files", []) if isinstance(path, str) and path.endswith(".py")]
+    for rel_path in list(dict.fromkeys([*contract_paths, *expected_paths])):
+        if rel_path.startswith("test") or "/test" in rel_path or rel_path.startswith("tests/"):
+            continue
+        path = _repo_relative_path(repo, rel_path)
+        if path is None or not path.is_file():
+            continue
+        source = path.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue
+        lines = source.splitlines()
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.body:
+                continue
+            first_body_line = min(child.lineno for child in node.body)
+            last_body_line = max((child.end_lineno or child.lineno) for child in node.body)
+            body_lines = lines[first_body_line - 1 : last_body_line]
+            if not body_lines:
+                continue
+            indent = len(body_lines[0]) - len(body_lines[0].lstrip())
+            old_body = "\n".join(line[indent:] if len(line) >= indent else line for line in body_lines).rstrip()
+            candidates.append({"path": rel_path, "function_name": node.name, "old_body": old_body})
+            if len(candidates) >= 8:
+                return candidates
+    return candidates
+
+
+def _guidance_requests_function_body_retry(repair_guidance: dict[str, Any] | None) -> bool:
+    if not isinstance(repair_guidance, dict):
+        return False
+    content = str(repair_guidance.get("content") or "").lower()
+    return "replace_function_body" in content or "function body" in content or "тело функ" in content
+
+
+def repair_function_body_retry_guidance(
+    repo: Path,
+    project_brief: dict[str, Any],
+    verification: dict[str, Any],
+    signature: str,
+    previous_guidance: dict[str, Any],
+    request_guidance=request_greenfield_model_guidance,
+) -> dict[str, Any]:
+    candidates = _function_body_candidates(repo, project_brief)
+    if not candidates:
+        return {}
+    return request_guidance(
+        "GreenfieldRepairWorker",
+        {
+            "project_name": project_brief.get("project_name"),
+            "template_id": project_brief.get("template_id"),
+            "verification_status": verification.get("status"),
+            "verification_results": verification.get("results", []),
+            "failure_signature": signature,
+            "previous_guidance_content": previous_guidance.get("content", "") if isinstance(previous_guidance, dict) else "",
+            "function_body_candidates": candidates,
+            "supported_repair_operation": {
+                "type": "replace_function_body",
+                "shape": {"operations": [{"type": "replace_function_body", "path": "candidate path", "function_name": "candidate function_name", "old_body": "candidate old_body", "new_body": "replacement statements"}]},
+            },
+        },
+        "Return JSON only. The previous bounded repair guidance did not apply. If the failing tests define a safe replacement for one listed function_body_candidate, return a replace_function_body operation using that candidate's exact path, function_name, and old_body. new_body may contain multiple statements, branches, and raises. Return blocked only when no listed function can satisfy the failing tests.",
+    )
+
+
 def apply_greenfield_synthesis_repair(repo: Path, project_brief: dict[str, Any], verification: dict[str, Any], signature: str, request_guidance=request_greenfield_model_guidance) -> dict[str, Any]:
     return execute_module_synthesis_contracts(
         repo,
@@ -160,6 +233,9 @@ def _repair_operations_from_guidance(repair_guidance: dict[str, Any] | None) -> 
     operations = parsed.get("operations")
     if isinstance(operations, list):
         return [row for row in operations if isinstance(row, dict)]
+    operation = parsed.get("operation")
+    if isinstance(operation, dict):
+        return [operation]
     repair_operation = parsed.get("repair_operation")
     if isinstance(repair_operation, dict):
         parent_type = str(repair_operation.get("type") or "")
@@ -685,6 +761,12 @@ def run_greenfield_verification_loop(repo: Path, commands: list[str], project_br
             return verification_loop_result("blocked", attempts, verification, "same verification failure repeats", repeated_signature=True)
         repair_guidance = repair_guidance_for_verification(project_brief, verification, signature, request_guidance, repo)
         repair_execution = apply_greenfield_repair(repo, project_brief, verification, repair_guidance)
+        repair_guidance_retry: dict[str, Any] = {}
+        if repair_execution.get("status") != "applied" and _guidance_requests_function_body_retry(repair_guidance):
+            repair_guidance_retry = repair_function_body_retry_guidance(repo, project_brief, verification, signature, repair_guidance, request_guidance)
+            retry_execution = apply_greenfield_repair(repo, project_brief, verification, repair_guidance_retry)
+            if retry_execution.get("status") == "applied":
+                repair_execution = retry_execution
         if repair_execution.get("status") != "applied":
             synthesis_repair = apply_greenfield_synthesis_repair(repo, project_brief, verification, signature, request_guidance)
             repair_execution = {
@@ -710,6 +792,7 @@ def run_greenfield_verification_loop(repo: Path, commands: list[str], project_br
                 "status": verification.get("status", ""),
                 "failure_signature": signature,
                 "repair_guidance": repair_guidance,
+                "repair_guidance_retry": repair_guidance_retry,
                 "repair_execution": repair_execution,
             }
         )
