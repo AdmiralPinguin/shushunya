@@ -87,6 +87,28 @@ def _repair_spec_from_guidance(repair_guidance: dict[str, Any] | None) -> dict[s
     return hypothesis
 
 
+def _repair_operations_from_guidance(repair_guidance: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(repair_guidance, dict) or not repair_guidance.get("ok"):
+        return []
+    content = repair_guidance.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return []
+    try:
+        parsed = extract_json_object(content)
+    except (json.JSONDecodeError, ValueError):
+        return []
+    operations = parsed.get("operations")
+    if isinstance(operations, list):
+        return [row for row in operations if isinstance(row, dict)]
+    if isinstance(parsed.get("repair_hypothesis"), dict):
+        hypothesis = parsed["repair_hypothesis"]
+        if any(key in hypothesis for key in ("old_text", "new_text", "old", "new")):
+            return [hypothesis]
+    if any(key in parsed for key in ("old_text", "new_text", "old", "new")):
+        return [parsed]
+    return []
+
+
 def _undefined_name_from_verification(verification: dict[str, Any]) -> str:
     combined = "\n".join(
         f"{item.get('stdout') or ''}\n{item.get('stderr') or ''}"
@@ -144,6 +166,59 @@ def _guided_line_repair(repo: Path, verification: dict[str, Any], repair_guidanc
     }
 
 
+def _guided_exact_replace_repair(repo: Path, repair_guidance: dict[str, Any] | None) -> dict[str, Any] | None:
+    operations = _repair_operations_from_guidance(repair_guidance)
+    if not operations:
+        return None
+    repaired_files: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    for index, operation in enumerate(operations, start=1):
+        op_type = str(operation.get("type") or operation.get("operation") or operation.get("action") or "replace_exact")
+        if op_type not in {"replace", "replace_exact", "exact_replace", "replace_text"}:
+            blockers.append(f"unsupported guided repair operation {index}: {op_type}")
+            continue
+        target_file = str(operation.get("target_file") or operation.get("path") or "")
+        old_text = operation.get("old_text", operation.get("old"))
+        new_text = operation.get("new_text", operation.get("new"))
+        if not target_file or not isinstance(old_text, str) or old_text == "" or not isinstance(new_text, str):
+            blockers.append(f"guided replace operation {index} is incomplete")
+            continue
+        path = _repo_relative_path(repo, target_file)
+        if path is None or not path.exists() or not path.is_file():
+            blockers.append(f"guided replace target is missing or outside workspace: {target_file}")
+            continue
+        content = path.read_text(encoding="utf-8")
+        match_count = content.count(old_text)
+        if match_count != 1:
+            blockers.append(f"guided replace requires exactly one match in {target_file}, found {match_count}")
+            continue
+        path.write_text(content.replace(old_text, new_text, 1), encoding="utf-8")
+        repaired_files.append(
+            {
+                "path": target_file,
+                "repair": "guided_exact_replace",
+                "status": "applied",
+                "operation_index": index,
+            }
+        )
+    if repaired_files:
+        return {
+            "path": "",
+            "repair": "guided_exact_replace",
+            "status": "applied",
+            "repaired_files": repaired_files,
+            "blockers": blockers,
+        }
+    if blockers:
+        return {
+            "path": "",
+            "repair": "guided_exact_replace",
+            "status": "blocked",
+            "blocker": "; ".join(blockers),
+        }
+    return None
+
+
 def apply_greenfield_repair(repo: Path, project_brief: dict[str, Any], verification: dict[str, Any], repair_guidance: dict[str, Any] | None = None) -> dict[str, Any]:
     template_contents = project_file_content_map(project_brief)
     expected_files = [str(path) for path in project_brief.get("expected_files", []) if isinstance(path, str)]
@@ -155,6 +230,13 @@ def apply_greenfield_repair(repo: Path, project_brief: dict[str, Any], verificat
             repaired_files.append(guided_repair)
         elif guided_repair.get("blocker"):
             blockers.append(str(guided_repair["blocker"]))
+    guided_replace = _guided_exact_replace_repair(repo, repair_guidance)
+    if guided_replace is not None:
+        if guided_replace.get("status") == "applied":
+            repaired_files.extend([row for row in guided_replace.get("repaired_files", []) if isinstance(row, dict)])
+            blockers.extend(str(item) for item in guided_replace.get("blockers", []) if isinstance(item, str))
+        elif guided_replace.get("blocker"):
+            blockers.append(str(guided_replace["blocker"]))
     for rel_path in expected_files:
         if rel_path == "greenfield_project_brief.json":
             continue

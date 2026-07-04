@@ -1166,6 +1166,108 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
                 repair["repaired_files"],
             )
 
+    def test_greenfield_verification_loop_applies_guided_semantic_exact_replace_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай CLI проект `semantic-repair-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "demo.py", "content": "def value():\n    return 'broken'\n"},
+                        {
+                            "path": "test_demo.py",
+                            "content": "import unittest\nimport demo\n\nclass DemoTests(unittest.TestCase):\n    def test_value(self):\n        self.assertEqual(demo.value(), 'ready')\n",
+                        },
+                    ],
+                    "verification_commands": ["python -m unittest test_demo.py"],
+                    "module_contracts": [{"module": "demo", "path": "demo.py", "responsibility": "return ready", "requirements": ["return ready"]}],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                self.assertEqual(role, "GreenfieldRepairWorker")
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "repair_hypothesis": "test assertion expects ready while demo.value returns broken",
+                            "operations": [
+                                {
+                                    "type": "replace_exact",
+                                    "path": "demo.py",
+                                    "old_text": "return 'broken'",
+                                    "new_text": "return 'ready'",
+                                    "reason": "align implementation with failing assertion and module contract",
+                                }
+                            ],
+                        }
+                    ),
+                }
+
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=2, request_guidance=guidance)
+            self.assertEqual(loop["status"], "passed", loop)
+            repair = loop["attempts"][0]["repair_execution"]
+            self.assertEqual(repair["status"], "applied", repair)
+            self.assertIn(
+                {"path": "demo.py", "repair": "guided_exact_replace", "status": "applied", "operation_index": 1},
+                repair["repaired_files"],
+            )
+            self.assertEqual((repo / "demo.py").read_text(encoding="utf-8"), "def value():\n    return 'ready'\n")
+            self.assertNotEqual(repair.get("repair_strategy"), "module_synthesis_repair")
+
+    def test_greenfield_guided_exact_replace_blocks_ambiguous_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай CLI проект `ambiguous-repair-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "demo.py", "content": "def first():\n    return 'broken'\n\ndef second():\n    return 'broken'\n"},
+                        {
+                            "path": "test_demo.py",
+                            "content": "import unittest\nimport demo\n\nclass DemoTests(unittest.TestCase):\n    def test_first(self):\n        self.assertEqual(demo.first(), 'ready')\n",
+                        },
+                    ],
+                    "verification_commands": ["python -m unittest test_demo.py"],
+                    "module_contracts": [{"module": "demo", "path": "demo.py", "responsibility": "return ready", "requirements": ["return ready"]}],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "operations": [
+                                {
+                                    "type": "replace_exact",
+                                    "path": "demo.py",
+                                    "old_text": "return 'broken'",
+                                    "new_text": "return 'ready'",
+                                }
+                            ]
+                        }
+                    ),
+                }
+
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=1, request_guidance=guidance)
+            self.assertEqual(loop["status"], "blocked", loop)
+            repair = loop["attempts"][0]["repair_execution"]
+            self.assertIn("guided replace requires exactly one match", "; ".join(repair["blockers"]))
+            self.assertIn("return 'broken'", (repo / "demo.py").read_text(encoding="utf-8"))
+
     def test_greenfield_verification_loop_reruns_after_final_allowed_repair(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
