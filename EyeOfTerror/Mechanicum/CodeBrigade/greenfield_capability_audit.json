@@ -2,7 +2,7 @@
   "kind": "code_brigade_greenfield_capability_audit",
   "contract_version": "eye-mechanicum.v1",
   "status": "in_progress",
-  "summary": "Ceraxia CodeBrigade has a working greenfield pipeline with contracts, role modules, templates, verification, review, reports, memory, coordinated file-set synthesis for source/test sets, mandatory module-by-module synthesis contracts, executable module synthesis, verification-driven module synthesis repair, semantic/domain quality gates for generated source/tests, scenario-plan review for user workflows, plus multi-module API, data pipeline, frontend, and local-agent integration trials. The remaining risk is depth: curated templates/features still provide the baseline source, and arbitrary large project code synthesis needs stronger real-world trials beyond the current generated examples before this objective is complete.",
+  "summary": "Ceraxia CodeBrigade has a working greenfield pipeline with contracts, role modules, templates, verification, review, reports, memory, coordinated file-set synthesis for source/test sets, mandatory module-by-module synthesis contracts, executable module synthesis, verification-driven module synthesis repair, semantic/domain/artifact quality gates for generated source/tests, scenario-plan review for user workflows, plus multi-module API, data pipeline, frontend, and local-agent integration trials. The remaining risk is depth: curated templates/features still provide the baseline source, and arbitrary large project code synthesis needs stronger real-world trials beyond the current generated examples before this objective is complete.",
   "requirements": [
     {
       "id": "greenfield_contract",
@@ -48,6 +48,7 @@
         "greenfield_implementation_worker.py execute_module_synthesis_contracts calls the GreenfieldImplementationWorker model path per module and writes source only after JSON, path, requirement, test, placeholder, and workspace validation",
         "greenfield_implementation_worker.py generated_file_quality rejects weak generated Python source and assertionless generated tests before writing model output",
         "greenfield_implementation_worker.py domain_specific_quality_findings adds template-aware checks for FastAPI, frontend, Telegram bot, data processing, and local agent tool outputs",
+        "greenfield_review_worker.py artifact_review_greenfield_project blocks assertionless tests, unreferenced frontend assets, unwired FastAPI routes, unwired local-agent modules, and disconnected data pipeline CLIs",
         "greenfield_implementation_worker.py paired_tests_for_module keeps module requirement traces tied to direct, keyword, or workflow tests instead of every project test",
         "greenfield_scenario_worker.py builds scenario_plan rows from task-derived acceptance features and GreenfieldReview blocks missing behavior markers",
         "greenfield_verification_worker.py can call verification_repair module synthesis with failure context when bounded template repair is not applicable",
@@ -59,7 +60,7 @@
         "focused_self_test.py test_greenfield_implementation_trace_uses_precise_workflow_tests proves multi-module source contracts pair with the relevant workflow test",
         "implementation_trace.json records requirement to file/function/test mapping with synthesis_contract_kind and GreenfieldReview checks it"
       ],
-      "remaining_risk": "Implementation now has executable validated LLM file-set synthesis, module synthesis, verification-driven synthesis repair, semantic/domain quality gates, scenario scoring, and API/data/frontend/local-agent multi-workflow integration trials, but curated feature overrides/templates still provide the reliable baseline; arbitrary large code synthesis still needs additional long-form real-world integration trials."
+      "remaining_risk": "Implementation now has executable validated LLM file-set synthesis, module synthesis, verification-driven synthesis repair, semantic/domain/artifact quality gates, scenario scoring, and API/data/frontend/local-agent multi-workflow integration trials, but curated feature overrides/templates still provide the reliable baseline; arbitrary large code synthesis still needs additional long-form real-world integration trials."
     },
     {
       "id": "dependency_worker",
@@ -88,9 +89,10 @@
       "evidence": [
         "greenfield_review_worker.py checks expected files, README run/test commands, entrypoints, dependency status, verification status, module contracts, placeholders, source/test presence, and implementation_trace",
         "greenfield_review_worker.py includes scenario_review from greenfield_scenario_worker.py and blocks projects whose declared workflows lack source/test evidence",
+        "greenfield_review_worker.py includes artifact_review_greenfield_project for cross-file launch/test/module wiring checks",
         "focused_self_test.py covers placeholder blocking and semantic review status"
       ],
-      "remaining_risk": "Generated artifact meaning is checked by contract, semantic, domain, and scenario heuristics, not a deep domain-specific reviewer for every possible application."
+      "remaining_risk": "Generated artifact meaning is checked by contract, semantic, domain, scenario, and artifact-wiring heuristics, not a deep domain-specific reviewer for every possible application."
     },
     {
       "id": "project_templates",
@@ -131,7 +133,6 @@
     }
   ],
   "next_recommended_work": [
-    "Add deeper generated artifact review for frontend/API behavior beyond static contract checks.",
     "Add a long-form integration test that creates a larger multi-module app and verifies several independent workflows.",
     "Decide whether Android/game templates belong in this goal now or should remain explicitly deferred."
   ]

@@ -16,7 +16,7 @@ from greenfield_implementation_worker import build_implementation_trace as worke
 from greenfield_implementation_worker import build_implementation_worker_plan as worker_build_implementation_worker_plan
 from greenfield_memory_worker import build_greenfield_memory_record
 from greenfield_project import build_greenfield_project_brief, forbidden_placeholder_markers_found, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
-from greenfield_review_worker import python_source_semantic_status
+from greenfield_review_worker import artifact_review_greenfield_project, python_source_semantic_status
 from greenfield_scenario_worker import review_greenfield_scenarios
 from greenfield_scaffold_worker import greenfield_workspace_status, normalize_project_file_rows, scaffold_greenfield_files
 from greenfield_verification_worker import verification_failure_signature
@@ -272,6 +272,65 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
     def test_greenfield_review_worker_scores_python_source_strength(self) -> None:
         self.assertEqual(python_source_semantic_status("VALUE = 1\n"), "weak")
         self.assertEqual(python_source_semantic_status("def run():\n    return 'ready'\n\nif True:\n    run()\n"), "ok")
+
+    def test_greenfield_artifact_review_blocks_unwired_frontend_assets_and_weak_tests(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "index.html").write_text("<main>ready</main><script src=\"app.js\"></script>\n", encoding="utf-8")
+            (repo / "app.js").write_text("function render() { return true; }\n", encoding="utf-8")
+            (repo / "state.js").write_text("function createState() { return {}; }\n", encoding="utf-8")
+            tests = repo / "tests"
+            tests.mkdir()
+            (tests / "test_static_site.py").write_text("def test_page():\n    value = True\n", encoding="utf-8")
+            project = {
+                "template_id": "static_site",
+                "artifact_contract": {
+                    "source_files": ["index.html", "app.js", "state.js"],
+                    "test_files": ["tests/test_static_site.py"],
+                },
+                "module_contracts": [
+                    {"path": "state.js", "responsibility": "state module", "requirements": ["create state"]},
+                ],
+            }
+            review = artifact_review_greenfield_project(repo, project)
+            self.assertEqual(review["status"], "blocked", review)
+            self.assertTrue(any("unreferenced static asset: state.js" in item for item in review["blockers"]))
+            self.assertTrue(any("assertionless test file" in item for item in review["blockers"]))
+
+    def test_greenfield_artifact_review_checks_local_agent_module_wiring(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            package = repo / "agent_demo"
+            package.mkdir()
+            (package / "registry.py").write_text("ACTION_REGISTRY = {}\n", encoding="utf-8")
+            (package / "schema.py").write_text("def validate_payload(payload=None):\n    return {}\n", encoding="utf-8")
+            (package / "session.py").write_text("class AgentSession:\n    pass\n", encoding="utf-8")
+            (package / "runner.py").write_text("def run_action():\n    return {'status': 'ok'}\n", encoding="utf-8")
+            (package / "contract.py").write_text("def build_tool_result():\n    return {'status': 'ok'}\n", encoding="utf-8")
+            (package / "tool.py").write_text("def main():\n    print('ok')\n", encoding="utf-8")
+            tests = repo / "tests"
+            tests.mkdir()
+            (tests / "test_contract.py").write_text("def test_contract():\n    assert True\n", encoding="utf-8")
+            project = {
+                "template_id": "local_agent_tool",
+                "artifact_contract": {
+                    "source_files": [
+                        "agent_demo/registry.py",
+                        "agent_demo/schema.py",
+                        "agent_demo/session.py",
+                        "agent_demo/runner.py",
+                        "agent_demo/contract.py",
+                        "agent_demo/tool.py",
+                    ],
+                    "test_files": ["tests/test_contract.py"],
+                },
+                "module_contracts": [],
+            }
+            review = artifact_review_greenfield_project(repo, project)
+            self.assertEqual(review["status"], "blocked", review)
+            self.assertTrue(any("runner missing import: .registry" in item for item in review["blockers"]))
+            self.assertTrue(any("contract facade not wired to runner" in item for item in review["blockers"]))
+            self.assertTrue(any("CLI not wired to runner" in item for item in review["blockers"]))
 
     def test_greenfield_scenario_review_blocks_missing_behavior_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

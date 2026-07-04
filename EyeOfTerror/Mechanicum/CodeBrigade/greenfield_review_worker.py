@@ -19,7 +19,11 @@ def entrypoint_exists(repo: Path, entrypoint: dict[str, Any]) -> bool:
 def semantic_review_greenfield_files(repo: Path, project_brief: dict[str, Any]) -> dict[str, Any]:
     artifact_contract = project_brief.get("artifact_contract") if isinstance(project_brief.get("artifact_contract"), dict) else {}
     implementation_plan = project_brief.get("implementation_plan") if isinstance(project_brief.get("implementation_plan"), dict) else {}
-    source_files = [str(path) for path in artifact_contract.get("source_files", []) if isinstance(path, str)]
+    source_files = [
+        str(path)
+        for path in artifact_contract.get("source_files", [])
+        if isinstance(path, str) and not str(path).startswith("tests/") and "/tests/" not in str(path)
+    ]
     test_files = [str(path) for path in artifact_contract.get("test_files", []) if isinstance(path, str)]
     manifest_files = [str(path) for path in artifact_contract.get("manifest_files", []) if isinstance(path, str)]
     forbidden_markers = [str(item) for item in implementation_plan.get("anti_stub_policy", {}).get("forbidden_markers", []) if isinstance(item, str)]
@@ -155,6 +159,143 @@ def forbidden_placeholder_markers_found(text: str, markers: list[str]) -> list[s
     return found
 
 
+def artifact_review_greenfield_project(repo: Path, project_brief: dict[str, Any]) -> dict[str, Any]:
+    artifact_contract = project_brief.get("artifact_contract") if isinstance(project_brief.get("artifact_contract"), dict) else {}
+    template_id = str(project_brief.get("template_id") or "")
+    source_files = [str(path) for path in artifact_contract.get("source_files", []) if isinstance(path, str)]
+    test_files = [str(path) for path in artifact_contract.get("test_files", []) if isinstance(path, str)]
+    blockers: list[str] = []
+    warnings: list[str] = []
+    rows: list[dict[str, Any]] = []
+
+    def read(rel_path: str) -> str:
+        path = repo / rel_path
+        if not path.is_file():
+            return ""
+        return path.read_text(encoding="utf-8")
+
+    texts = {path: read(path) for path in source_files + test_files + ["README.md"]}
+    contract_source_files = [
+        str(contract.get("path") or "")
+        for contract in project_brief.get("module_contracts", [])
+        if isinstance(contract, dict)
+        and isinstance(contract.get("path"), str)
+        and not str(contract.get("path")).startswith("tests/")
+        and "/tests/" not in str(contract.get("path"))
+    ]
+    for test_path in test_files:
+        text = texts.get(test_path, "")
+        has_assertion = any(marker in text for marker in ("self.assert", "assert ", "pytest.raises", "with self.assertRaises"))
+        if text and not has_assertion:
+            blockers.append(f"artifact review found assertionless test file: {test_path}")
+        rows.append({"path": test_path, "kind": "test", "has_assertion": has_assertion})
+
+    for contract in project_brief.get("module_contracts", []):
+        if not isinstance(contract, dict):
+            continue
+        rel_path = str(contract.get("path") or "")
+        if not rel_path or rel_path not in texts:
+            continue
+        text = texts.get(rel_path, "")
+        tokens = artifact_requirement_tokens(contract)
+        matched = [token for token in tokens if token in text.lower()]
+        if tokens and not matched and rel_path.endswith((".py", ".js", ".jsx", ".ts", ".tsx", ".html")):
+            warnings.append(f"artifact review found weak requirement vocabulary in {rel_path}")
+        rows.append({"path": rel_path, "kind": "module", "requirement_token_count": len(tokens), "matched_requirement_token_count": len(matched)})
+
+    if template_id == "static_site":
+        html = texts.get("index.html", "")
+        for asset in [path for path in source_files if path.endswith((".js", ".css")) and "/" not in path]:
+            if Path(asset).name not in html:
+                blockers.append(f"artifact review found unreferenced static asset: {asset}")
+    if template_id == "node_vite_app":
+        html = texts.get("index.html", "")
+        package_json = read("package.json")
+        if "/src/main" not in html:
+            blockers.append("artifact review found Vite HTML without src/main entrypoint")
+        if package_json and "\"dev\"" not in package_json:
+            blockers.append("artifact review found package.json without dev script")
+    if template_id == "python_fastapi_service":
+        main = texts.get("app/main.py", "")
+        routes = texts.get("app/routes.py", "")
+        if main and "FastAPI" not in main and "app =" not in main:
+            blockers.append("artifact review found FastAPI main without app construction")
+        if routes and "APIRouter" in routes and "include_router" not in main:
+            blockers.append("artifact review found routes module not included by app/main.py")
+    if template_id == "local_agent_tool":
+        runner = next((texts[path] for path in source_files if path.endswith("/runner.py")), "")
+        contract = next((texts[path] for path in source_files if path.endswith("/contract.py")), "")
+        tool = next((texts[path] for path in source_files if path.endswith("/tool.py")), "")
+        if runner:
+            for marker in (".registry", ".schema", ".session"):
+                if marker not in runner:
+                    blockers.append(f"artifact review found local agent runner missing import: {marker}")
+        if contract and ".runner" not in contract:
+            blockers.append("artifact review found local agent contract facade not wired to runner")
+        if tool and ".runner" not in tool:
+            blockers.append("artifact review found local agent CLI not wired to runner")
+    if template_id == "data_processing_tool":
+        cli_path = next((path for path in source_files if path.endswith("/cli.py")), "")
+        cli = texts.get(cli_path, "")
+        package_sources = [path for path in contract_source_files if "/" in path and not path.endswith(("/__init__.py", "/cli.py"))]
+        if cli and package_sources:
+            missing = [Path(path).stem for path in package_sources if Path(path).stem not in cli]
+            if missing:
+                blockers.append(f"artifact review found data CLI not wired to modules: {', '.join(missing)}")
+
+    return {
+        "kind": "code_brigade_greenfield_artifact_review",
+        "contract_version": "eye-mechanicum.v1",
+        "status": "blocked" if blockers else "passed",
+        "template_id": template_id,
+        "source_file_count": len(source_files),
+        "test_file_count": len(test_files),
+        "rows": rows,
+        "blockers": blockers,
+        "warnings": warnings,
+    }
+
+
+def artifact_requirement_tokens(contract: dict[str, Any]) -> list[str]:
+    raw_parts: list[str] = []
+    for key in ("responsibility",):
+        value = contract.get(key)
+        if isinstance(value, str):
+            raw_parts.append(value)
+    requirements = contract.get("requirements")
+    if isinstance(requirements, list):
+        raw_parts.extend(str(item) for item in requirements if isinstance(item, str))
+    stop_words = {
+        "action",
+        "actions",
+        "behavior",
+        "build",
+        "command",
+        "commands",
+        "entrypoint",
+        "export",
+        "files",
+        "handle",
+        "module",
+        "parse",
+        "print",
+        "prove",
+        "provide",
+        "return",
+        "source",
+        "structured",
+        "support",
+        "workflow",
+    }
+    tokens = [
+        token
+        for part in raw_parts
+        for token in re.sub(r"[^a-zA-Z0-9_]+", " ", part.lower().replace("-", "_")).split()
+        if len(token) >= 5 and token not in stop_words
+    ]
+    return list(dict.fromkeys(tokens))
+
+
 def review_greenfield_project(repo: Path, project_brief: dict[str, Any], dependency_report: dict[str, Any], verification: dict[str, Any]) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
@@ -194,6 +335,10 @@ def review_greenfield_project(repo: Path, project_brief: dict[str, Any], depende
     if scenario_review.get("status") == "blocked":
         blockers.extend(str(item) for item in scenario_review.get("blockers", []))
     warnings.extend(str(item) for item in scenario_review.get("warnings", []))
+    artifact_review = artifact_review_greenfield_project(repo, project_brief)
+    if artifact_review.get("status") == "blocked":
+        blockers.extend(str(item) for item in artifact_review.get("blockers", []))
+    warnings.extend(str(item) for item in artifact_review.get("warnings", []))
     reviewer_guidance = request_greenfield_model_guidance(
         "GreenfieldReviewer",
         {
@@ -205,6 +350,7 @@ def review_greenfield_project(repo: Path, project_brief: dict[str, Any], depende
             "verification_status": verification.get("status"),
             "semantic_review": semantic_review,
             "scenario_review": scenario_review,
+            "artifact_review": artifact_review,
             "blockers": blockers,
             "warnings": warnings,
         },
@@ -222,6 +368,7 @@ def review_greenfield_project(repo: Path, project_brief: dict[str, Any], depende
         "verification_status": verification.get("status", ""),
         "semantic_review": semantic_review,
         "scenario_review": scenario_review,
+        "artifact_review": artifact_review,
         "blockers": blockers,
         "warnings": warnings,
         "model_guidance": reviewer_guidance,
