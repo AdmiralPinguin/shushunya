@@ -57,7 +57,7 @@
         "greenfield_implementation_worker.py task_behavior_markers and module_required_behavior_markers make explicit user-visible literals such as printed CLI output part of generated test validation",
         "greenfield_implementation_worker.py generated_file_quality rejects weak generated Python source and assertionless generated tests before writing model output",
         "greenfield_implementation_worker.py domain_specific_quality_findings adds template-aware checks for FastAPI, frontend, Telegram bot, data processing, and local agent tool outputs",
-        "greenfield_review_worker.py artifact_review_greenfield_project blocks assertionless tests, unreferenced frontend assets, unwired FastAPI routes, unwired local-agent modules, and disconnected data pipeline CLIs",
+        "greenfield_review_worker.py artifact_review_greenfield_project blocks assertionless tests, unreferenced frontend assets, fake browser games without canvas/game loop/input wiring, unwired FastAPI routes, unwired local-agent modules, and disconnected data pipeline CLIs",
         "greenfield_implementation_worker.py paired_tests_for_module keeps module requirement traces tied to direct, keyword, or workflow tests instead of every project test",
         "greenfield_scenario_worker.py builds scenario_plan rows from task-derived acceptance features and GreenfieldReview blocks missing behavior markers",
         "greenfield_verification_worker.py can apply bounded model-guided NameError line repair, exact text replacement repair, AST-guided Python return-expression repair, AST-guided Python constant repair, and AST-guided small function-body repair from GreenfieldRepairWorker JSON guidance before falling back to template or module synthesis repair",
@@ -164,7 +164,7 @@
       "objective_item": 8,
       "status": "implemented",
       "evidence": [
-        "greenfield_templates.py registers python_cli_basic, python_fastapi_service, python_library, node_vite_app, static_site, telegram_bot_python, data_processing_tool, and local_agent_tool",
+        "greenfield_templates.py registers python_cli_basic, python_fastapi_service, python_library, node_vite_app, static_site, static_browser_game, telegram_bot_python, data_processing_tool, and local_agent_tool",
         "focused_self_test.py test_greenfield_project_brief_contract_and_templates validates the full template set"
       ],
       "remaining_risk": "Templates are intentionally compact; larger domain templates should be added as Ceraxia learns."

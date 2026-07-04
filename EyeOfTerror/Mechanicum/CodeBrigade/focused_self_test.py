@@ -590,6 +590,32 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertTrue(any("contract facade not wired to runner" in item for item in review["blockers"]))
             self.assertTrue(any("CLI not wired to runner" in item for item in review["blockers"]))
 
+    def test_greenfield_artifact_review_blocks_fake_browser_game(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "index.html").write_text("<main>Score: 0</main><script src=\"game.js\"></script>\n", encoding="utf-8")
+            (repo / "game.js").write_text("function renderGame() { return true; }\n", encoding="utf-8")
+            (repo / "styles.css").write_text("body { margin: 0; }\n", encoding="utf-8")
+            tests = repo / "tests"
+            tests.mkdir()
+            (tests / "test_browser_game.py").write_text("def test_game_contract():\n    assert True\n", encoding="utf-8")
+            project = {
+                "template_id": "static_browser_game",
+                "artifact_contract": {
+                    "source_files": ["index.html", "styles.css", "game.js"],
+                    "test_files": ["tests/test_browser_game.py"],
+                },
+                "module_contracts": [
+                    {"path": "index.html", "responsibility": "browser game entrypoint", "requirements": ["canvas", "score"]},
+                    {"path": "game.js", "responsibility": "interactive game loop", "requirements": ["keyboard controls", "animation loop"]},
+                ],
+            }
+            review = artifact_review_greenfield_project(repo, project)
+            self.assertEqual(review["status"], "blocked", review)
+            self.assertTrue(any("canvas#game" in item for item in review["blockers"]))
+            self.assertTrue(any("animation loop" in item for item in review["blockers"]))
+            self.assertTrue(any("keyboard input" in item for item in review["blockers"]))
+
     def test_greenfield_scenario_review_blocks_missing_behavior_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -2665,13 +2691,14 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         static = build_greenfield_project_brief("Создай static frontend website `site-demo`.")
         library = build_greenfield_project_brief("Создай python library package `lib-demo`.")
         vite = build_greenfield_project_brief("Создай Vite frontend web app `vite-demo`.")
+        game = build_greenfield_project_brief("Создай browser game `game-demo` with keyboard controls and score.")
         bot = build_greenfield_project_brief("Создай telegram bot `bot-demo`.")
         data_tool = build_greenfield_project_brief("Создай data csv processing tool `data-demo`.")
         agent_tool = build_greenfield_project_brief("Создай local agent tool `agent-demo`.")
         self.assertEqual(validate_greenfield_project_brief(cli), [])
         self.assertEqual(validate_greenfield_project_brief(api), [])
         self.assertEqual(validate_greenfield_project_brief(static), [])
-        for project in (library, vite, bot, data_tool, agent_tool):
+        for project in (library, vite, game, bot, data_tool, agent_tool):
             self.assertEqual(validate_greenfield_project_brief(project), [])
             self.assertTrue(project["template_contract"]["common_failure_fixes"])
             self.assertEqual(project["template_contract"]["expected_tree"], project["expected_files"])
@@ -2680,10 +2707,12 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(static["template_id"], "static_site")
         self.assertEqual(library["template_id"], "python_library")
         self.assertEqual(vite["template_id"], "node_vite_app")
+        self.assertEqual(game["project_type"], "game")
+        self.assertEqual(game["template_id"], "static_browser_game")
         self.assertEqual(bot["template_id"], "telegram_bot_python")
         self.assertEqual(data_tool["template_id"], "data_processing_tool")
         self.assertEqual(agent_tool["template_id"], "local_agent_tool")
-        self.assertTrue({"python_cli_basic", "python_fastapi_service", "python_library", "node_vite_app", "static_site", "telegram_bot_python", "data_processing_tool", "local_agent_tool"}.issubset(set(available_templates())))
+        self.assertTrue({"python_cli_basic", "python_fastapi_service", "python_library", "node_vite_app", "static_site", "static_browser_game", "telegram_bot_python", "data_processing_tool", "local_agent_tool"}.issubset(set(available_templates())))
         self.assertTrue(any(path.endswith("cli.py") for path in cli["expected_files"]))
         self.assertIn("requirements.txt", api["expected_files"])
         self.assertIn("architecture_plan.json", cli["expected_files"])
@@ -2692,11 +2721,13 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertIn("module_contracts.json", cli["expected_files"])
         self.assertIn("verification_plan.json", cli["expected_files"])
         self.assertIn("package.json", vite["expected_files"])
+        self.assertIn("game.js", game["expected_files"])
+        self.assertIn("tests/test_browser_game.py", game["expected_files"])
         self.assertIn("requirements.txt", bot["expected_files"])
         self.assertIn("pyproject.toml", data_tool["expected_files"])
         self.assertIn("pyproject.toml", agent_tool["expected_files"])
         self.assertIn("tests/test_static_site.py", static["expected_files"])
-        for project in (cli, api, static, library, vite, bot, data_tool, agent_tool):
+        for project in (cli, api, static, library, vite, game, bot, data_tool, agent_tool):
             contract_paths = {str(row.get("path") or "") for row in project["module_contracts"]}
             plan_paths = {str(row.get("path") or "") for row in project["implementation_plan"]["module_sequence"]}
             for test_file in project["implementation_plan"]["test_files"]:

@@ -13,6 +13,7 @@ STACK_DEFAULTS = {
     "python_library": {"language": "python", "framework": "stdlib", "package_manager": "none", "runtime": "python"},
     "node_vite_app": {"language": "javascript", "framework": "vite", "package_manager": "npm", "runtime": "browser"},
     "static_site": {"language": "html_css_js", "framework": "none", "package_manager": "none", "runtime": "browser"},
+    "static_browser_game": {"language": "html_css_js", "framework": "canvas", "package_manager": "none", "runtime": "browser"},
     "telegram_bot_python": {"language": "python", "framework": "python-telegram-bot", "package_manager": "pip", "runtime": "python"},
     "data_processing_tool": {"language": "python", "framework": "stdlib", "package_manager": "none", "runtime": "python"},
     "local_agent_tool": {"language": "python", "framework": "stdlib", "package_manager": "none", "runtime": "python"},
@@ -31,6 +32,8 @@ def template_id_for_project_type(project_type: str, task: str) -> str:
         if "vite" in lowered or "react" in lowered or "vue" in lowered:
             return "node_vite_app"
         return "static_site"
+    if project_type == "game":
+        return "static_browser_game"
     if project_type == "library":
         return "python_library"
     if project_type == "bot":
@@ -164,6 +167,33 @@ def static_site_template(project_name: str) -> dict[str, Any]:
     }
 
 
+def static_browser_game_template(project_name: str) -> dict[str, Any]:
+    return {
+        "template_id": "static_browser_game",
+        "files": [
+            {"path": GREENFIELD_MARKER, "content": "created-by=ceraxia-code-brigade\n"},
+            {"path": "README.md", "content": f"# {project_name}\n\n## Run\n\n```bash\nopen index.html\n```\n\n## Test\n\n```bash\npython -m unittest discover tests\n```\n"},
+            {"path": "index.html", "content": "<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>Ceraxia Browser Game</title>\n  <link rel=\"stylesheet\" href=\"styles.css\">\n</head>\n<body>\n  <main>\n    <h1>Ceraxia Browser Game</h1>\n    <canvas id=\"game\" width=\"640\" height=\"360\" aria-label=\"game board\"></canvas>\n    <p id=\"score\">Score: 0</p>\n  </main>\n  <script src=\"game.js\"></script>\n</body>\n</html>\n"},
+            {"path": "styles.css", "content": "body { margin: 0; font-family: system-ui, sans-serif; background: #10131a; color: #f5f7fb; }\nmain { max-width: 760px; margin: 5vh auto; padding: 24px; }\ncanvas { display: block; width: 100%; max-width: 640px; aspect-ratio: 16 / 9; background: #181d27; border: 1px solid #3b4354; }\n"},
+            {"path": "game.js", "content": "const canvas = document.getElementById('game');\nconst context = canvas.getContext('2d');\nconst score = document.getElementById('score');\n\nconst state = {\n  player: { x: 48, y: 160, size: 24, speed: 4 },\n  target: { x: 520, y: 160, size: 18 },\n  score: 0,\n  keys: new Set(),\n};\n\nfunction clamp(value, minimum, maximum) {\n  return Math.max(minimum, Math.min(maximum, value));\n}\n\nfunction updatePlayer() {\n  if (state.keys.has('ArrowLeft')) state.player.x -= state.player.speed;\n  if (state.keys.has('ArrowRight')) state.player.x += state.player.speed;\n  if (state.keys.has('ArrowUp')) state.player.y -= state.player.speed;\n  if (state.keys.has('ArrowDown')) state.player.y += state.player.speed;\n  state.player.x = clamp(state.player.x, 0, canvas.width - state.player.size);\n  state.player.y = clamp(state.player.y, 0, canvas.height - state.player.size);\n}\n\nfunction overlaps(a, b) {\n  return a.x < b.x + b.size && a.x + a.size > b.x && a.y < b.y + b.size && a.y + a.size > b.y;\n}\n\nfunction moveTarget() {\n  state.target.x = 40 + ((state.score * 97) % (canvas.width - 80));\n  state.target.y = 40 + ((state.score * 53) % (canvas.height - 80));\n}\n\nfunction updateGame() {\n  updatePlayer();\n  if (overlaps(state.player, state.target)) {\n    state.score += 1;\n    moveTarget();\n  }\n  score.textContent = `Score: ${state.score}`;\n}\n\nfunction renderGame() {\n  context.clearRect(0, 0, canvas.width, canvas.height);\n  context.fillStyle = '#7dd3fc';\n  context.fillRect(state.player.x, state.player.y, state.player.size, state.player.size);\n  context.fillStyle = '#fbbf24';\n  context.beginPath();\n  context.arc(state.target.x, state.target.y, state.target.size, 0, Math.PI * 2);\n  context.fill();\n}\n\nfunction gameLoop() {\n  updateGame();\n  renderGame();\n  requestAnimationFrame(gameLoop);\n}\n\nwindow.addEventListener('keydown', event => state.keys.add(event.key));\nwindow.addEventListener('keyup', event => state.keys.delete(event.key));\n\nrequestAnimationFrame(gameLoop);\n"},
+            {"path": "tests/test_browser_game.py", "content": "from pathlib import Path\nimport unittest\n\n\nclass BrowserGameContractTests(unittest.TestCase):\n    def test_canvas_and_assets_are_wired(self):\n        html = Path('index.html').read_text(encoding='utf-8')\n        self.assertIn('<canvas', html)\n        self.assertIn('id=\"game\"', html)\n        self.assertIn('styles.css', html)\n        self.assertIn('game.js', html)\n\n    def test_game_loop_and_controls_exist(self):\n        script = Path('game.js').read_text(encoding='utf-8')\n        self.assertIn('requestAnimationFrame(gameLoop)', script)\n        self.assertIn('updatePlayer', script)\n        self.assertIn('renderGame', script)\n        self.assertIn('ArrowLeft', script)\n        self.assertIn('score.textContent', script)\n"},
+        ],
+        "entrypoints": [{"name": "browser-game", "command": "open index.html", "path": "index.html"}],
+        "run_commands": ["open index.html"],
+        "verification_commands": ["python -m unittest discover tests"],
+        "module_contracts": [
+            {"module": "game_page", "path": "index.html", "responsibility": "browser game entrypoint", "requirements": ["load canvas", "load game script", "show score"]},
+            {"module": "game_runtime", "path": "game.js", "responsibility": "interactive game loop", "requirements": ["handle keyboard controls", "update player", "render game", "track score", "schedule animation frames"]},
+            {"module": "game_styles", "path": "styles.css", "responsibility": "stable game layout", "requirements": ["size canvas predictably", "style playable screen"]},
+            {"module": "tests.test_browser_game", "path": "tests/test_browser_game.py", "responsibility": "browser game contract verification", "requirements": ["prove canvas wiring", "prove game loop and controls exist"]},
+        ],
+        "common_failure_fixes": [
+            {"failure": "blank game screen", "fix": "ensure index.html includes canvas#game and game.js after the canvas element"},
+            {"failure": "no game loop", "fix": "call requestAnimationFrame with the main game loop after registering input handlers"},
+        ],
+    }
+
+
 def telegram_bot_template(project_name: str) -> dict[str, Any]:
     package = module_name(project_name)
     return {
@@ -250,6 +280,7 @@ TEMPLATES = {
     "python_library": python_library_template,
     "node_vite_app": node_vite_app_template,
     "static_site": static_site_template,
+    "static_browser_game": static_browser_game_template,
     "telegram_bot_python": telegram_bot_template,
     "data_processing_tool": data_processing_template,
     "local_agent_tool": local_agent_tool_template,

@@ -209,6 +209,18 @@ def artifact_review_greenfield_project(repo: Path, project_brief: dict[str, Any]
         for asset in [path for path in source_files if path.endswith((".js", ".css")) and "/" not in path]:
             if Path(asset).name not in html:
                 blockers.append(f"artifact review found unreferenced static asset: {asset}")
+    if template_id == "static_browser_game":
+        html = texts.get("index.html", "")
+        game = texts.get("game.js", "")
+        for asset in ("styles.css", "game.js"):
+            if asset not in html:
+                blockers.append(f"artifact review found browser game missing asset reference: {asset}")
+        if "<canvas" not in html or "id=\"game\"" not in html:
+            blockers.append("artifact review found browser game without canvas#game entrypoint")
+        if "requestAnimationFrame" not in game:
+            blockers.append("artifact review found browser game without animation loop")
+        if "addEventListener" not in game or "Arrow" not in game:
+            blockers.append("artifact review found browser game without keyboard input handling")
     if template_id == "node_vite_app":
         html = texts.get("index.html", "")
         package_json = read("package.json")

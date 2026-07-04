@@ -161,8 +161,8 @@ file-row normalization, directory creation, generated file writes, rollback,
 operation reports, and patch manifests, so the greenfield orchestrator does not
 become a single role pile. The current
 templates cover `python_cli_basic`, `python_fastapi_service`, `python_library`,
-`node_vite_app`, `static_site`, `telegram_bot_python`, `data_processing_tool`,
-and `local_agent_tool`; each records stack, entrypoints, expected files, install
+`node_vite_app`, `static_site`, `static_browser_game`, `telegram_bot_python`,
+`data_processing_tool`, and `local_agent_tool`; each records stack, entrypoints, expected files, install
 commands, run commands, verification commands, artifact contract, workspace
 policy, definition of done, architecture plan, file tree plan, module contracts,
 implementation plan, dependency plan, common failure fixes, and model-brain
