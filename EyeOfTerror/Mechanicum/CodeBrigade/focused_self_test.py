@@ -990,21 +990,49 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(project["template_id"], "local_agent_tool")
             self.assertTrue(any(feature["id"] == "local_agent_command_router" for feature in project["acceptance_features"]))
             self.assertIn("local_agent_command_router", project["implementation_feature_report"]["recognized_feature_ids"])
+            self.assertGreaterEqual(len(project["module_contracts"]), 7)
+            self.assertGreaterEqual(project["scenario_plan"]["scenario_count"], 3)
             self.assertIn("reject unknown actions", json.dumps(project["module_contracts"], ensure_ascii=False))
-            source = (repo / "agent_demo/contract.py").read_text(encoding="utf-8")
-            self.assertIn("ACTION_REGISTRY", source)
-            self.assertIn("def available_actions", source)
-            self.assertIn("unsupported action", source)
+            expected = {
+                "agent_demo/registry.py",
+                "agent_demo/schema.py",
+                "agent_demo/session.py",
+                "agent_demo/runner.py",
+                "agent_demo/contract.py",
+                "agent_demo/tool.py",
+                "tests/test_contract.py",
+            }
+            self.assertTrue(expected.issubset(set(project["expected_files"])))
+            registry = (repo / "agent_demo/registry.py").read_text(encoding="utf-8")
+            self.assertIn("ACTION_REGISTRY", registry)
+            self.assertIn("def available_actions", registry)
+            self.assertIn("unsupported action", registry)
+            schema = (repo / "agent_demo/schema.py").read_text(encoding="utf-8")
+            self.assertIn("def validate_payload", schema)
+            self.assertIn("payload must be a JSON object", schema)
+            session = (repo / "agent_demo/session.py").read_text(encoding="utf-8")
+            self.assertIn("class AgentSession", session)
+            self.assertIn("def record_action", session)
+            runner = (repo / "agent_demo/runner.py").read_text(encoding="utf-8")
+            self.assertIn("def run_action", runner)
+            self.assertIn("def run_sequence", runner)
             cli = (repo / "agent_demo/tool.py").read_text(encoding="utf-8")
             self.assertIn("json.loads", cli)
             self.assertIn("build_parser", cli)
+            self.assertIn("--sequence", cli)
             tests = (repo / "tests/test_contract.py").read_text(encoding="utf-8")
             self.assertIn("test_unknown_action_is_rejected", tests)
             self.assertIn("test_cli_prints_json", tests)
+            self.assertIn("test_session_records_cross_command_workflow", tests)
+            self.assertIn("test_sequence_runner_preserves_session_order", tests)
+            module_rows = {row["path"]: row for row in project["implementation_plan"]["module_sequence"]}
+            for module_path in ("agent_demo/registry.py", "agent_demo/schema.py", "agent_demo/session.py", "agent_demo/runner.py", "agent_demo/contract.py", "agent_demo/tool.py"):
+                self.assertEqual(module_rows[module_path]["paired_tests"], ["tests/test_contract.py"])
             verification = report["execution_result"]["greenfield_project"]["verification"]
             self.assertEqual(verification["status"], "passed", verification)
             review = report["execution_result"]["greenfield_project"]["greenfield_review"]
             self.assertEqual(review["semantic_review"]["status"], "passed", review)
+            self.assertEqual(review["scenario_review"]["status"], "passed", review)
             self.assertEqual(review["status"], "passed", review)
 
     def test_project_creation_telegram_bot_implements_command_feature(self) -> None:
@@ -1140,7 +1168,8 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertGreaterEqual(sales_pipeline["scenario_plan"]["scenario_count"], 3)
         agent_router = build_greenfield_project_brief("Создай local agent tool router `agent-demo`.")
         self.assertTrue(any(feature["id"] == "local_agent_command_router" for feature in agent_router["acceptance_features"]))
-        self.assertGreaterEqual(len(agent_router["module_contracts"]), 3)
+        self.assertGreaterEqual(len(agent_router["module_contracts"]), 7)
+        self.assertGreaterEqual(agent_router["scenario_plan"]["scenario_count"], 3)
         command_bot = build_greenfield_project_brief("Создай telegram bot `bot-demo` с командами /start /help.")
         self.assertTrue(any(feature["id"] == "telegram_command_bot" for feature in command_bot["acceptance_features"]))
         self.assertGreaterEqual(len(command_bot["module_contracts"]), 2)

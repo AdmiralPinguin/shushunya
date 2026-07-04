@@ -216,6 +216,10 @@ def local_agent_tool_template(project_name: str) -> dict[str, Any]:
             {"path": GREENFIELD_MARKER, "content": "created-by=ceraxia-code-brigade\n"},
             {"path": "README.md", "content": f"# {project_name}\n\n## Run\n\n```bash\npython -m {package}.tool\n```\n\n## Test\n\n```bash\npython -m unittest discover tests\n```\n"},
             {"path": f"{package}/__init__.py", "content": ""},
+            {"path": f"{package}/registry.py", "content": "def available_actions() -> list[str]:\n    return ['status']\n"},
+            {"path": f"{package}/schema.py", "content": "def validate_payload(payload: dict | None = None) -> dict:\n    return {} if payload is None else payload\n"},
+            {"path": f"{package}/session.py", "content": "class AgentSession:\n    def __init__(self) -> None:\n        self.history = []\n"},
+            {"path": f"{package}/runner.py", "content": "def run_action(action: str = 'status') -> dict[str, str]:\n    return {'status': 'ready', 'action': action.strip()}\n"},
             {"path": f"{package}/contract.py", "content": "def build_tool_result(task: str) -> dict[str, str]:\n    return {'status': 'ready', 'task': task.strip()}\n"},
             {"path": f"{package}/tool.py", "content": "from .contract import build_tool_result\n\n\ndef main() -> None:\n    print(build_tool_result('default'))\n\n\nif __name__ == '__main__':\n    main()\n"},
             {"path": "tests/test_contract.py", "content": f"import unittest\n\nfrom {package}.contract import build_tool_result\n\n\nclass ContractTests(unittest.TestCase):\n    def test_result(self):\n        self.assertEqual(build_tool_result(' task ')['task'], 'task')\n"},
@@ -223,7 +227,10 @@ def local_agent_tool_template(project_name: str) -> dict[str, Any]:
         ],
         "entrypoints": [{"name": "local-agent-tool", "command": f"python -m {package}.tool", "path": f"{package}/tool.py"}],
         "run_commands": [f"python -m {package}.tool"],
-        "verification_commands": ["python -m unittest discover tests", f"python -m py_compile {package}/contract.py {package}/tool.py"],
+        "verification_commands": [
+            "python -m unittest discover tests",
+            f"python -m py_compile {package}/__init__.py {package}/registry.py {package}/schema.py {package}/session.py {package}/runner.py {package}/contract.py {package}/tool.py",
+        ],
         "module_contracts": [
             {"module": f"{package}.contract", "path": f"{package}/contract.py", "responsibility": "tool input/output contract", "requirements": ["return structured result"]},
             {"module": f"{package}.tool", "path": f"{package}/tool.py", "responsibility": "local command entrypoint", "requirements": ["print structured result"]},

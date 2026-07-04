@@ -21,7 +21,7 @@ def build_greenfield_scenario_plan(
     existing_files = set(expected_files)
     default_evidence = _default_evidence_files(expected_files)
     for row in rows:
-        evidence_files = [path for path in row.get("evidence_files", []) if path in existing_files]
+        evidence_files = _resolve_evidence_files([str(path) for path in row.get("evidence_files", [])], expected_files, existing_files)
         row["evidence_files"] = list(dict.fromkeys([*evidence_files, *default_evidence]))
     return {
         "kind": "code_brigade_greenfield_scenario_plan",
@@ -128,8 +128,9 @@ def _feature_scenarios(feature: dict[str, Any]) -> list[dict[str, Any]]:
             _scenario("sales_pipeline_cli", "Sales analytics pipeline exposes CLI JSON and markdown output", ["read CSV path", "apply filters", "print JSON", "print markdown"], ["build_parser", "run_pipeline", "json.dumps", "--format"], ["tests/test_sales_pipeline.py"]),
         ],
         "local_agent_command_router": [
-            _scenario("agent_router_actions", "Local agent tool routes status, echo, and summarize actions", ["validate action", "call registry handler", "return structured result"], ["ACTION_REGISTRY", "status", "echo", "summarize"], ["tests/test_contract.py"]),
-            _scenario("agent_router_rejection", "Local agent tool rejects unknown actions and bad payloads", ["reject unknown action", "reject non-object payload"], ["unsupported action", "payload must be", "json.loads"], ["tests/test_contract.py"]),
+            _scenario("agent_router_actions", "Local agent tool routes status, echo, summarize, and history actions", ["validate action", "call registry handler", "return structured result"], ["ACTION_REGISTRY", "status", "echo", "summarize", "history"], ["registry.py", "runner.py", "tests/test_contract.py"]),
+            _scenario("agent_router_rejection", "Local agent tool rejects unknown actions and bad payloads", ["reject unknown action", "reject non-object payload"], ["unsupported action", "payload must be", "json.loads"], ["registry.py", "schema.py", "tool.py", "tests/test_contract.py"]),
+            _scenario("agent_session_sequence", "Local agent tool preserves session order across a command sequence", ["run several commands", "record session events", "return ordered history"], ["AgentSession", "run_sequence", "record_action", "summarize_history"], ["session.py", "runner.py", "tests/test_contract.py"]),
         ],
         "telegram_command_bot": [
             _scenario("telegram_commands", "Telegram bot handles start/help/status/echo commands", ["build command list", "return command replies"], ["COMMANDS", "/start", "/help", "/status", "/echo"], ["tests/test_bot.py"]),
@@ -185,6 +186,17 @@ def _scenario(scenario_id: str, description: str, steps: list[str], required_mar
         "required_markers": required_markers,
         "evidence_files": evidence_files,
     }
+
+
+def _resolve_evidence_files(requested_files: list[str], expected_files: list[str], existing_files: set[str]) -> list[str]:
+    resolved: list[str] = []
+    for requested in requested_files:
+        if requested in existing_files:
+            resolved.append(requested)
+            continue
+        suffix_matches = [path for path in expected_files if path.endswith(f"/{requested}") or path == requested]
+        resolved.extend(suffix_matches)
+    return list(dict.fromkeys(resolved))
 
 
 def _default_evidence_files(expected_files: list[str]) -> list[str]:
