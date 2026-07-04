@@ -20,7 +20,7 @@ from greenfield_live_trial import allocate_live_trial_root, apply_scenario_expec
 from greenfield_memory_worker import build_greenfield_memory_index, build_greenfield_memory_record, update_greenfield_memory_index
 from greenfield_project import build_greenfield_project_brief, execute_greenfield_project_brief, forbidden_placeholder_markers_found, model_synthesis_blockers, reconcile_module_synthesis_with_file_set, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_repair_live_trial import build_repair_trial_project, compact_repair_result, scenario_spec
-from greenfield_review_worker import artifact_review_greenfield_project, browser_game_render_contract, python_source_semantic_status, review_greenfield_project
+from greenfield_review_worker import artifact_review_greenfield_project, browser_game_render_contract, python_source_semantic_status, review_greenfield_project, split_model_blockers_against_local_findings
 from greenfield_scenario_worker import review_greenfield_scenarios
 from greenfield_scaffold_worker import greenfield_workspace_status, normalize_project_file_rows, scaffold_greenfield_files
 from greenfield_verification_worker import repair_guidance_for_verification, run_greenfield_verification_loop, verification_failure_signature, workspace_file_snapshots
@@ -595,6 +595,18 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(arch_review["status"], "passed", arch_review)
             self.assertIn("tests/test_domain.py", {row["path"] for row in arch_review["rows"]})
 
+    def test_greenfield_reviewer_model_findings_do_not_promote_local_warnings_to_blockers(self) -> None:
+        accepted, downgraded = split_model_blockers_against_local_findings(
+            [
+                "artifact review found weak requirement vocabulary in ceraxia_project/evaluator.py",
+                "missing required launch command",
+            ],
+            [],
+            ["artifact review found weak requirement vocabulary in ceraxia_project/evaluator.py"],
+        )
+        self.assertEqual(accepted, ["missing required launch command"])
+        self.assertEqual(downgraded, ["artifact review found weak requirement vocabulary in ceraxia_project/evaluator.py"])
+
     def test_greenfield_artifact_review_blocks_unwired_frontend_assets_and_weak_tests(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -751,6 +763,11 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertEqual(project["template_id"], "data_processing_tool")
         self.assertTrue(any(feature["id"] == "sales_analytics_pipeline" for feature in project["acceptance_features"]))
 
+    def test_greenfield_architect_routes_explicit_library_before_data_words(self) -> None:
+        project = architect_build_greenfield_project_brief("Создай Python library project `policy-demo`: rule engine для event dictionaries.")
+        self.assertEqual(project["project_type"], "library")
+        self.assertEqual(project["template_id"], "python_library")
+
     def test_greenfield_architect_owns_project_brief_and_plan(self) -> None:
         def guidance(role: str, payload: dict, instructions: str) -> dict:
             if role == "GreenfieldArchitect":
@@ -794,6 +811,50 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         self.assertIn("scenario_plan.json", project["expected_files"])
         self.assertTrue(project["implementation_plan"]["module_sequence"])
         self.assertTrue(all("code_synthesis_contract" in row for row in project["implementation_plan"]["module_sequence"]))
+
+    def test_greenfield_architect_promotes_model_missing_module_paths_to_contracts(self) -> None:
+        def guidance(role: str, payload: dict, instructions: str) -> dict:
+            if role == "GreenfieldArchitect":
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "missing_modules": [
+                                "ceraxia_project/models.py (Rule dataclass definition)",
+                                "ceraxia_project/parser.py (condition parser)",
+                                "ceraxia_project/evaluator.py (match details evaluator)",
+                            ],
+                            "evidence_required": ["ceraxia_project/parser.py parser implementation"],
+                        }
+                    ),
+                }
+            return {"ok": True, "status": "answered", "content": "{}"}
+
+        project = architect_build_greenfield_project_brief(
+            "Создай Python library project `policy-rule-engine-demo`: rule engine для словарей событий.",
+            request_guidance=guidance,
+        )
+
+        expected = {"ceraxia_project/models.py", "ceraxia_project/parser.py", "ceraxia_project/evaluator.py"}
+        self.assertTrue(expected.issubset(set(project["expected_files"])))
+        contract_paths = {row["path"] for row in project["module_contracts"]}
+        self.assertTrue(expected.issubset(contract_paths))
+        plan_sequence = project["implementation_plan"]["module_sequence"]
+        plan_paths = {row["path"] for row in plan_sequence}
+        self.assertTrue(expected.issubset(plan_paths))
+        sequence_by_path = {row["path"]: index for index, row in enumerate(plan_sequence)}
+        self.assertLess(sequence_by_path["ceraxia_project/evaluator.py"], sequence_by_path["tests/test_library.py"])
+        compile_commands = [command for command in project["verification_commands"] if command.startswith("python -m py_compile ")]
+        self.assertTrue(any("ceraxia_project/parser.py" in command and "ceraxia_project/evaluator.py" in command for command in compile_commands))
+        test_contract = next(row for row in project["module_contracts"] if row["path"] == "tests/test_library.py")
+        self.assertTrue(any("ceraxia_project/parser.py" in requirement for requirement in test_contract["requirements"]))
+        constraints = project["architecture_plan"]["model_constraints"]
+        self.assertIn("ceraxia_project/parser.py (condition parser)", constraints["missing_modules"])
+        scenario = project["scenario_plan"]["rows"][0]
+        self.assertEqual(scenario["id"], "architecture_requested_modules")
+        self.assertIn("parser", scenario["required_markers"])
+        self.assertNotIn("test_describe", scenario["required_markers"])
 
     def test_greenfield_dependency_worker_reports_manager_status(self) -> None:
         none_status = dependency_manager_status("none")

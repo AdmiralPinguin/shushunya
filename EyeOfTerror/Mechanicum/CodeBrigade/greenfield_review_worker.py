@@ -592,6 +592,25 @@ def reviewer_model_findings(guidance: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def split_model_blockers_against_local_findings(model_blockers: list[Any], local_blockers: list[str], local_warnings: list[str]) -> tuple[list[str], list[str]]:
+    accepted: list[str] = []
+    downgraded: list[str] = []
+    blocker_text = "\n".join(local_blockers).lower()
+    warning_rows = [warning.lower() for warning in local_warnings]
+    concrete_markers = ("missing", "fake", "stub", "failed", "not proven", "outside workspace", "placeholder", "empty")
+    for item in model_blockers:
+        if not isinstance(item, str) or not item.strip():
+            continue
+        lowered = item.lower()
+        repeats_warning = any(lowered == warning or lowered in warning or warning in lowered for warning in warning_rows)
+        supported_by_local_blocker = bool(blocker_text and (lowered in blocker_text or any(marker in lowered for marker in concrete_markers)))
+        if repeats_warning and not supported_by_local_blocker:
+            downgraded.append(item)
+        else:
+            accepted.append(item)
+    return accepted, downgraded
+
+
 def architecture_guidance_review(repo: Path, project_brief: dict[str, Any]) -> dict[str, Any]:
     architecture_plan = project_brief.get("architecture_plan", {}) if isinstance(project_brief.get("architecture_plan"), dict) else {}
     guidance = architecture_plan.get("model_guidance", {}) if isinstance(architecture_plan.get("model_guidance"), dict) else {}
@@ -751,7 +770,13 @@ def review_greenfield_project(
     )
     model_findings = reviewer_model_findings(reviewer_guidance)
     if model_findings.get("status") == "blocked":
-        blockers.extend(f"GreenfieldReviewer model blocker: {item}" for item in model_findings.get("blockers", []) if isinstance(item, str))
+        accepted_model_blockers, downgraded_model_blockers = split_model_blockers_against_local_findings(
+            model_findings.get("blockers", []),
+            blockers,
+            warnings,
+        )
+        blockers.extend(f"GreenfieldReviewer model blocker: {item}" for item in accepted_model_blockers)
+        warnings.extend(f"GreenfieldReviewer warning-only finding: {item}" for item in downgraded_model_blockers)
     warnings.extend(str(item) for item in model_findings.get("warnings", []) if isinstance(item, str))
     return {
         "kind": "code_brigade_greenfield_review",

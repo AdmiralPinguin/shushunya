@@ -10,6 +10,7 @@ def build_greenfield_scenario_plan(
     template_id: str,
     acceptance_features: list[dict[str, Any]],
     expected_files: list[str],
+    model_constraints: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     feature_rows = [
         row
@@ -17,7 +18,8 @@ def build_greenfield_scenario_plan(
         if isinstance(feature, dict)
         for row in _feature_scenarios(feature)
     ]
-    rows = feature_rows or _template_scenarios(project_type, template_id)
+    constraint_rows = _model_constraint_scenarios(model_constraints or {})
+    rows = feature_rows or constraint_rows or _template_scenarios(project_type, template_id)
     existing_files = set(expected_files)
     default_evidence = _default_evidence_files(expected_files)
     for row in rows:
@@ -30,6 +32,41 @@ def build_greenfield_scenario_plan(
         "scenario_count": len(rows),
         "rows": rows,
     }
+
+
+def _model_constraint_scenarios(model_constraints: dict[str, Any]) -> list[dict[str, Any]]:
+    module_paths: list[str] = []
+    for item in model_constraints.get("missing_modules", []):
+        if not isinstance(item, str):
+            continue
+        marker = _extract_file_path(item)
+        if marker:
+            module_paths.append(marker)
+    source_paths = [
+        path
+        for path in module_paths
+        if path.endswith((".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css")) and not path.startswith("tests/") and "/tests/" not in f"/{path}"
+    ]
+    if not source_paths:
+        return []
+    marker_stems = [Path(path).stem for path in source_paths if Path(path).stem not in {"__init__"}]
+    evidence_files = [*source_paths, "tests/test_library.py", "tests/test_processor.py", "README.md"]
+    return [
+        _scenario(
+            "architecture_requested_modules",
+            "Architecture-requested modules are implemented and covered by tests",
+            ["implement model-requested source modules", "verify public behavior through tests"],
+            list(dict.fromkeys(marker_stems)),
+            evidence_files,
+        )
+    ]
+
+
+def _extract_file_path(text: str) -> str:
+    import re
+
+    match = re.search(r"([A-Za-z0-9_./-]+\.(?:py|js|jsx|ts|tsx|html|css))", text)
+    return match.group(1).strip("./") if match else ""
 
 
 def review_greenfield_scenarios(repo: Path, project_brief: dict[str, Any]) -> dict[str, Any]:

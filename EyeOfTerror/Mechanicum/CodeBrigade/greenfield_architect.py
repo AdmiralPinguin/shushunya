@@ -72,14 +72,14 @@ def project_name_from_task(task: str) -> str:
 
 def infer_project_type(task: str) -> str:
     lowered = task.lower()
+    if any(word in lowered for word in ("library", "package", "sdk", "библиот")):
+        return "library"
     if any(word in lowered for word in ("data", "csv", "pipeline", "analytics", "данн", "пайплайн", "аналитик")):
         return "automation_tool"
     if any(word in lowered for word in ("fastapi", "api", "http", "server", "сервер", "апи", "endpoint")):
         return "api_service"
     if any(word in lowered for word in ("site", "website", "frontend", "html", "css", "vite", "react", "vue", "сайт", "страниц")):
         return "web_app"
-    if any(word in lowered for word in ("library", "package", "sdk", "библиот")):
-        return "library"
     if any(word in lowered for word in ("bot", "telegram", "бот")):
         return "bot"
     if any(word in lowered for word in ("game", "игр")):
@@ -153,25 +153,125 @@ def normalize_guidance_strings(value: Any) -> list[str]:
     return [str(item).strip() for item in value if isinstance(item, str) and item.strip()]
 
 
+def merged_guidance_strings(parsed: dict[str, Any], guidance: dict[str, Any], key: str) -> list[str]:
+    return list(dict.fromkeys([*normalize_guidance_strings(guidance.get(key)), *normalize_guidance_strings(parsed.get(key))]))
+
+
+def extract_guidance_module_path(item: str) -> str:
+    match = re.search(r"([A-Za-z0-9_./-]+\.(?:py|js|jsx|ts|tsx|html|css))", item)
+    if not match:
+        return ""
+    return match.group(1).strip("./")
+
+
+def module_name_from_path(path: str) -> str:
+    clean = path.strip().strip("/")
+    suffix = Path(clean).suffix
+    stem = clean[: -len(suffix)] if suffix else clean
+    return stem.replace("/", ".").replace("-", "_")
+
+
+def apply_architecture_model_module_constraints(
+    project_name: str,
+    files: list[Any],
+    module_contracts: list[Any],
+    model_constraints: dict[str, Any],
+) -> tuple[list[Any], list[Any]]:
+    existing_files = {str(item.get("path") or "") for item in files if isinstance(item, dict)}
+    existing_contracts = {str(item.get("path") or "") for item in module_contracts if isinstance(item, dict)}
+    next_files = list(files)
+    initial_contracts = [dict(item) if isinstance(item, dict) else item for item in module_contracts]
+    added_source_contracts: list[dict[str, Any]] = []
+    added_test_requirements: list[str] = []
+    for item in model_constraints.get("missing_modules", []):
+        if not isinstance(item, str):
+            continue
+        rel_path = extract_guidance_module_path(item)
+        if not rel_path:
+            continue
+        if rel_path not in existing_files:
+            next_files.append({"path": rel_path, "content": ""})
+            existing_files.add(rel_path)
+        if rel_path not in existing_contracts:
+            added_source_contracts.append(
+                {
+                    "module": module_name_from_path(rel_path),
+                    "path": rel_path,
+                    "responsibility": f"GreenfieldArchitect requested module for {project_name}",
+                    "requirements": [item],
+                    "source": "greenfield_architect_model_constraints",
+                }
+            )
+            existing_contracts.add(rel_path)
+            if not rel_path.startswith("tests/") and "/tests/" not in f"/{rel_path}":
+                added_test_requirements.append(f"prove GreenfieldArchitect requested module: {item}")
+    next_contracts: list[Any] = []
+    inserted_added_sources = False
+    for contract in initial_contracts:
+        if not inserted_added_sources and isinstance(contract, dict):
+            rel_path = str(contract.get("path") or "")
+            if rel_path.startswith("test") or rel_path.startswith("tests/") or "/tests/" in f"/{rel_path}":
+                next_contracts.extend(added_source_contracts)
+                inserted_added_sources = True
+        next_contracts.append(contract)
+    if not inserted_added_sources:
+        next_contracts.extend(added_source_contracts)
+    if added_test_requirements:
+        for contract in next_contracts:
+            if not isinstance(contract, dict):
+                continue
+            rel_path = str(contract.get("path") or "")
+            if not (rel_path.startswith("test") or rel_path.startswith("tests/") or "/tests/" in f"/{rel_path}"):
+                continue
+            requirements = [str(row) for row in contract.get("requirements", []) if isinstance(row, str)]
+            contract["requirements"] = list(dict.fromkeys([*requirements, *added_test_requirements]))
+    return next_files, next_contracts
+
+
+def sync_python_source_compile_commands(verification_commands: list[Any], expected_files: list[str]) -> list[Any]:
+    if not any(isinstance(item, str) and item.startswith("python -m py_compile ") for item in verification_commands):
+        return verification_commands
+    py_sources = [
+        path
+        for path in expected_files
+        if path.endswith(".py")
+        and not path.startswith("tests/")
+        and "/tests/" not in f"/{path}"
+        and not Path(path).name.startswith("test_")
+        and not path.endswith("/__init__.py")
+    ]
+    if not py_sources:
+        return verification_commands
+    command = "python -m py_compile " + " ".join(py_sources)
+    rows = [str(item) for item in verification_commands if isinstance(item, str)]
+    rows = [row for row in rows if not row.startswith("python -m py_compile ")]
+    rows.append(command)
+    return rows
+
+
 def architecture_model_constraints(model_guidance: dict[str, Any]) -> dict[str, Any]:
     content = str(model_guidance.get("content") or "") if isinstance(model_guidance, dict) else ""
     parsed = extract_guidance_json(content)
     guidance = parsed.get("guidance") if isinstance(parsed.get("guidance"), dict) else {}
-    evidence_required = normalize_guidance_strings(parsed.get("evidence_required"))
+    missing_modules = merged_guidance_strings(parsed, guidance, "missing_modules")
+    verification_gaps = merged_guidance_strings(parsed, guidance, "verification_gaps")
+    scaffold_risks = merged_guidance_strings(parsed, guidance, "scaffold_risks")
+    next_steps = merged_guidance_strings(parsed, guidance, "next_steps")
+    evidence_required = merged_guidance_strings(parsed, guidance, "evidence_required")
     return {
         "kind": "code_brigade_greenfield_architecture_model_constraints",
         "status": "parsed" if parsed else "unparsed" if content.strip() else "not_requested",
-        "missing_modules": normalize_guidance_strings(guidance.get("missing_modules")),
-        "verification_gaps": normalize_guidance_strings(guidance.get("verification_gaps")),
-        "scaffold_risks": normalize_guidance_strings(guidance.get("scaffold_risks")),
-        "next_steps": normalize_guidance_strings(guidance.get("next_steps")),
+        "missing_modules": missing_modules,
+        "verification_gaps": verification_gaps,
+        "scaffold_risks": scaffold_risks,
+        "next_steps": next_steps,
         "evidence_required": evidence_required,
         "constraint_count": sum(
             len(row)
             for row in (
-                normalize_guidance_strings(guidance.get("missing_modules")),
-                normalize_guidance_strings(guidance.get("verification_gaps")),
-                normalize_guidance_strings(guidance.get("scaffold_risks")),
+                missing_modules,
+                verification_gaps,
+                scaffold_risks,
                 evidence_required,
             )
         ),
@@ -254,6 +354,10 @@ def build_greenfield_project_brief(
         "Review the greenfield architecture plan, identify missing modules, verification gaps, and scaffold risks. Return concise guidance.",
     )
     model_constraints = architecture_model_constraints(model_guidance)
+    files, module_contracts = apply_architecture_model_module_constraints(project_name, files, module_contracts, model_constraints)
+    expected_files = [str(item.get("path") or "") for item in files if isinstance(item, dict) and item.get("path")]
+    verification_commands = sync_python_source_compile_commands(verification_commands, expected_files)
+    files = ensure_readme_documents_commands(files, project_name, run_commands, verification_commands)
     implementation_plan = build_implementation_worker_plan(task, template_id, module_contracts, expected_files, request_guidance)
     implementation_trace = build_implementation_trace(implementation_plan)
     implementation_feature_report = build_implementation_feature_report(
@@ -266,7 +370,7 @@ def build_greenfield_project_brief(
         module_contracts,
         request_guidance,
     )
-    scenario_plan = build_greenfield_scenario_plan(project_type, template_id, acceptance_features, expected_files)
+    scenario_plan = build_greenfield_scenario_plan(project_type, template_id, acceptance_features, expected_files, model_constraints)
     brief = {
         "kind": "code_brigade_greenfield_project_brief",
         "contract_version": "eye-mechanicum.v1",
