@@ -380,6 +380,28 @@ def forbidden_markers_found(content: str, markers: list[str]) -> list[str]:
     return found
 
 
+def source_narration_comments(content: str) -> list[str]:
+    narration_markers = (
+        "test oracle",
+        "verification failure",
+        "previous implementation",
+        "current implementation",
+        "match the oracle",
+        "match the test",
+        "to satisfy the test",
+        "test expects",
+    )
+    findings: list[str] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(("#", "//")):
+            continue
+        lowered = stripped.lower()
+        if any(marker in lowered for marker in narration_markers):
+            findings.append(stripped[:160])
+    return findings
+
+
 def safe_repo_relative_path(repo: Path, rel_path: str) -> Path | None:
     if not rel_path or Path(rel_path).is_absolute():
         return None
@@ -424,6 +446,11 @@ def generated_file_quality(path: str, content: str, requirements: list[str], pro
     if not stripped:
         blockers.append("generated file is empty")
         score -= 80
+    if not is_test:
+        narration = source_narration_comments(content)
+        if narration:
+            blockers.append("generated source contains test/repair narration comments: " + "; ".join(narration[:3]))
+            score -= 50
     if len(stripped.splitlines()) < 2 and requirements:
         warnings.append("generated file is very short for a requirement-bearing contract")
         score -= 20

@@ -1259,6 +1259,13 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
     def test_greenfield_synthesis_quality_blocks_weak_source_and_assertionless_tests(self) -> None:
         self.assertEqual(generated_file_quality("app.py", "VALUE = 1\n", ["return ready"])["status"], "blocked")
         self.assertEqual(generated_file_quality("tests/test_app.py", "def test_ready():\n    pass\n", ["prove ready"])["status"], "blocked")
+        narration_quality = generated_file_quality(
+            "billing/invoice.py",
+            "def build_invoice():\n    # The test oracle expects this exact summary.\n    return 'ready'\n",
+            ["build invoice"],
+        )
+        self.assertEqual(narration_quality["status"], "blocked")
+        self.assertTrue(any("test/repair narration" in item for item in narration_quality["blockers"]))
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             project = architect_build_greenfield_project_brief("Создай CLI калькулятор `quality-calc`.")
