@@ -101,6 +101,41 @@ def verification_after_mutation_evidence(
 
 
 def build_verification_report(brief: dict[str, Any], worker_report: dict[str, Any], execute_verification: bool = False) -> dict[str, Any]:
+    execution_result = worker_report.get("execution_result") if isinstance(worker_report.get("execution_result"), dict) else {}
+    greenfield_project = execution_result.get("greenfield_project") if isinstance(execution_result.get("greenfield_project"), dict) else {}
+    greenfield_verification = greenfield_project.get("verification") if isinstance(greenfield_project.get("verification"), dict) else {}
+    if greenfield_verification:
+        commands_executed = [
+            item
+            for item in greenfield_verification.get("results", [])
+            if isinstance(item, dict) and item.get("status") != "planned"
+        ]
+        after_mutation_evidence = verification_after_mutation_evidence(brief, worker_report, commands_executed)
+        return {
+            "kind": "ceraxia_verification_report",
+            "status": str(greenfield_verification.get("status") or "blocked"),
+            "commands_planned": [
+                str(item.get("command") or "")
+                for item in greenfield_verification.get("results", [])
+                if isinstance(item, dict) and item.get("command")
+            ],
+            "commands_executable": [
+                str(item.get("command") or "")
+                for item in greenfield_verification.get("results", [])
+                if isinstance(item, dict) and item.get("command")
+            ],
+            "commands_executed": commands_executed,
+            "output_summary": summarize_verification_output(commands_executed),
+            "verification_after_mutation_evidence": after_mutation_evidence,
+            "verification_execution": greenfield_verification,
+            "contract_trace": greenfield_verification.get("contract_trace", {}),
+            "negative_tests_required": [],
+            "broad_verification_required": False,
+            "blockers": greenfield_verification.get("blockers", []) if isinstance(greenfield_verification.get("blockers"), list) else [],
+            "dry_run": bool(worker_report.get("dry_run")),
+            "execute_verification": execute_verification,
+            "source": "greenfield_project_verification",
+        }
     strategy = brief["required_verification"]
     commands = list(strategy.get("targeted_commands", []))
     for command in brief.get("suggested_verification_commands", []):

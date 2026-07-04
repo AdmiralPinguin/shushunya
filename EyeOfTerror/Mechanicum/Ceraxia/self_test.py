@@ -1130,6 +1130,35 @@ class CeraxiaLifecycleTests(unittest.TestCase):
             self.assertEqual(verification["status"], "passed")
             self.assertEqual([row["command"] for row in verification["commands_executed"]], ["python -m unittest discover tests"])
 
+    def test_project_creation_mode_uses_greenfield_verification_for_data_pipeline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "data_project"
+            repo.mkdir()
+            result = run_ceraxia(
+                CeraxiaInput(
+                    task="Создай data sales analytics pipeline `sales-demo` для CSV с CLI JSON API output.",
+                    repo_path=str(repo),
+                    execution_mode="project_creation",
+                    dry_run=False,
+                    execute_verification=True,
+                    greenfield_model_guidance_replay={
+                        "kind": "code_brigade_greenfield_model_guidance_replay",
+                        "mode": "scaffold_files_as_model_output",
+                    },
+                    runs_root=Path(tmp) / "runs",
+                )
+            )
+            self.assertTrue(result["ok"], result)
+            run_dir = Path(result["run_dir"])
+            project_brief = json.loads((repo / "greenfield_project_brief.json").read_text(encoding="utf-8"))
+            self.assertEqual(project_brief["template_id"], "data_processing_tool")
+            verification = json.loads((run_dir / "verification_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(verification["source"], "greenfield_project_verification")
+            self.assertEqual(verification["status"], "passed")
+            commands = [row["command"] for row in verification["commands_executed"]]
+            self.assertIn("python -m unittest discover tests", commands)
+            self.assertFalse(any("app/main.py" in command for command in commands))
+
     def test_review_only_mode_builds_review_package_without_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"

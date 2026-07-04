@@ -72,6 +72,8 @@ def project_name_from_task(task: str) -> str:
 
 def infer_project_type(task: str) -> str:
     lowered = task.lower()
+    if any(word in lowered for word in ("data", "csv", "pipeline", "analytics", "данн", "пайплайн", "аналитик")):
+        return "automation_tool"
     if any(word in lowered for word in ("fastapi", "api", "http", "server", "сервер", "апи", "endpoint")):
         return "api_service"
     if any(word in lowered for word in ("site", "website", "frontend", "html", "css", "vite", "react", "vue", "сайт", "страниц")):

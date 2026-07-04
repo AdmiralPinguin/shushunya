@@ -155,6 +155,52 @@ def model_synthesis_blockers(file_set_synthesis_report: dict[str, Any], implemen
     return blockers
 
 
+def reconcile_module_synthesis_with_file_set(
+    file_set_synthesis_report: dict[str, Any],
+    implementation_synthesis_report: dict[str, Any],
+    verification: dict[str, Any],
+    greenfield_review: dict[str, Any],
+) -> dict[str, Any]:
+    if implementation_synthesis_report.get("status") != "blocked":
+        return implementation_synthesis_report
+    if file_set_synthesis_report.get("status") != "applied":
+        return implementation_synthesis_report
+    if verification.get("status") != "passed" or greenfield_review.get("status") == "blocked":
+        return implementation_synthesis_report
+    covered_paths = {str(path) for path in file_set_synthesis_report.get("changed_files", []) if isinstance(path, str)}
+    quality_by_path = {
+        str(row.get("path") or ""): str(row.get("status") or "")
+        for row in file_set_synthesis_report.get("semantic_quality_rows", [])
+        if isinstance(row, dict)
+    }
+    rows = implementation_synthesis_report.get("rows") if isinstance(implementation_synthesis_report.get("rows"), list) else []
+    reconciled_rows: list[dict[str, Any]] = []
+    covered_count = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        next_row = dict(row)
+        path = str(next_row.get("path") or "")
+        if next_row.get("status") in {"rejected", "blocked"} and path in covered_paths and quality_by_path.get(path) == "passed":
+            next_row["status"] = "covered_by_file_set"
+            next_row["reconciliation"] = "accepted coordinated file-set model output because verification and review passed"
+            next_row["blockers"] = []
+            covered_count += 1
+        reconciled_rows.append(next_row)
+    if not covered_count:
+        return implementation_synthesis_report
+    blocking_statuses = {"blocked", "rejected"}
+    remaining_blocked_count = sum(1 for row in reconciled_rows if row.get("status") in blocking_statuses)
+    applied_count = sum(1 for row in reconciled_rows if row.get("status") in {"applied", "covered_by_file_set"})
+    reconciled = dict(implementation_synthesis_report)
+    reconciled["rows"] = reconciled_rows
+    reconciled["status"] = "applied" if remaining_blocked_count == 0 and applied_count else implementation_synthesis_report.get("status")
+    reconciled["applied_count"] = applied_count
+    reconciled["blocked_count"] = remaining_blocked_count
+    reconciled["file_set_reconciled_count"] = covered_count
+    return reconciled
+
+
 def build_greenfield_replay_guidance_provider(replay: dict[str, Any]):
     if not isinstance(replay, dict) or replay.get("mode") != "scaffold_files_as_model_output":
         return None
@@ -407,6 +453,8 @@ def execute_greenfield_project_brief(brief: dict[str, Any], request_guidance=req
     verification_loop = run_greenfield_verification_loop(repo, [str(command) for command in commands if isinstance(command, str)], project_brief, request_guidance=request_guidance)
     verification = verification_loop.get("final_verification", {}) if isinstance(verification_loop.get("final_verification"), dict) else {}
     greenfield_review = review_greenfield_project(repo, project_brief, dependency_report, verification, request_guidance)
+    implementation_synthesis_report = reconcile_module_synthesis_with_file_set(file_set_synthesis_report, implementation_synthesis_report, verification, greenfield_review)
+    operation_results.append(write_greenfield_json_artifact(repo, "greenfield_module_synthesis_report.json", implementation_synthesis_report))
     greenfield_memory_record = build_greenfield_memory_record(project_brief, dependency_report, verification_loop, greenfield_review, implementation_synthesis_report, file_set_synthesis_report)
     greenfield_model_guidance_ledger = build_greenfield_model_guidance_ledger(project_brief, file_set_synthesis_report, implementation_synthesis_report, verification_loop, greenfield_review)
     greenfield_run_report = build_greenfield_run_report(project_brief, file_set_synthesis_report, implementation_synthesis_report, dependency_report, verification_loop, greenfield_review, greenfield_memory_record, greenfield_model_guidance_ledger)

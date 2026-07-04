@@ -17,7 +17,7 @@ from greenfield_implementation_worker import build_implementation_trace as worke
 from greenfield_implementation_worker import build_implementation_worker_plan as worker_build_implementation_worker_plan
 from greenfield_live_trial import compact_greenfield_result
 from greenfield_memory_worker import build_greenfield_memory_record
-from greenfield_project import build_greenfield_project_brief, execute_greenfield_project_brief, forbidden_placeholder_markers_found, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
+from greenfield_project import build_greenfield_project_brief, execute_greenfield_project_brief, forbidden_placeholder_markers_found, model_synthesis_blockers, reconcile_module_synthesis_with_file_set, run_dependency_worker, run_greenfield_verification_loop, validate_greenfield_project_brief
 from greenfield_review_worker import artifact_review_greenfield_project, python_source_semantic_status
 from greenfield_scenario_worker import review_greenfield_scenarios
 from greenfield_scaffold_worker import greenfield_workspace_status, normalize_project_file_rows, scaffold_greenfield_files
@@ -366,6 +366,11 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
         feature_ids = {feature["id"] for feature in infer_acceptance_features("Создай todo list со счетчиком оставшихся задач и фильтром active/completed.")}
         self.assertEqual(feature_ids, {"todo_list"})
 
+    def test_greenfield_architect_routes_csv_pipeline_before_api_keyword(self) -> None:
+        project = architect_build_greenfield_project_brief("Создай data sales analytics pipeline `sales-demo` для CSV с CLI JSON API output.")
+        self.assertEqual(project["template_id"], "data_processing_tool")
+        self.assertTrue(any(feature["id"] == "sales_analytics_pipeline" for feature in project["acceptance_features"]))
+
     def test_greenfield_architect_owns_project_brief_and_plan(self) -> None:
         project = architect_build_greenfield_project_brief("Создай CLI калькулятор `architect-calc`.")
         self.assertEqual(project["kind"], "code_brigade_greenfield_project_brief")
@@ -605,6 +610,37 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertEqual(stale_row["status"], "rejected", report)
             self.assertTrue(any("task behavior markers" in blocker for blocker in stale_row["blockers"]), report)
             self.assertEqual(test_path.read_text(encoding="utf-8"), "old\n")
+
+    def test_greenfield_module_synthesis_reconciles_file_set_covered_rejected_module(self) -> None:
+        file_set_report = {
+            "status": "applied",
+            "changed_files": ["demo/report.py", "tests/test_report.py"],
+            "semantic_quality_rows": [
+                {"path": "demo/report.py", "status": "passed"},
+                {"path": "tests/test_report.py", "status": "passed"},
+            ],
+        }
+        module_report = {
+            "status": "blocked",
+            "applied_count": 1,
+            "blocked_count": 1,
+            "rows": [
+                {"module": "demo.core", "path": "demo/core.py", "status": "applied", "blockers": []},
+                {"module": "demo.report", "path": "demo/report.py", "status": "rejected", "blockers": ["model output is not valid JSON object"]},
+            ],
+        }
+        reconciled = reconcile_module_synthesis_with_file_set(
+            file_set_report,
+            module_report,
+            {"status": "passed"},
+            {"status": "passed"},
+        )
+        self.assertEqual(reconciled["status"], "applied", reconciled)
+        self.assertEqual(reconciled["file_set_reconciled_count"], 1)
+        self.assertEqual(reconciled["blocked_count"], 0)
+        self.assertEqual(model_synthesis_blockers(file_set_report, reconciled), [])
+        report_row = next(row for row in reconciled["rows"] if row["path"] == "demo/report.py")
+        self.assertEqual(report_row["status"], "covered_by_file_set")
 
     def test_greenfield_project_executor_uses_injected_model_for_full_synthesis_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
