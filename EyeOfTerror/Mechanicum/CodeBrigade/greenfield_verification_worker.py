@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import ast
 import json
 import re
 from pathlib import Path
@@ -172,11 +173,12 @@ def _guided_exact_replace_repair(repo: Path, repair_guidance: dict[str, Any] | N
         return None
     repaired_files: list[dict[str, Any]] = []
     blockers: list[str] = []
+    handled_count = 0
     for index, operation in enumerate(operations, start=1):
         op_type = str(operation.get("type") or operation.get("operation") or operation.get("action") or "replace_exact")
         if op_type not in {"replace", "replace_exact", "exact_replace", "replace_text"}:
-            blockers.append(f"unsupported guided repair operation {index}: {op_type}")
             continue
+        handled_count += 1
         target_file = str(operation.get("target_file") or operation.get("path") or "")
         old_text = operation.get("old_text", operation.get("old"))
         new_text = operation.get("new_text", operation.get("new"))
@@ -201,6 +203,8 @@ def _guided_exact_replace_repair(repo: Path, repair_guidance: dict[str, Any] | N
                 "operation_index": index,
             }
         )
+    if not handled_count:
+        return None
     if repaired_files:
         return {
             "path": "",
@@ -217,6 +221,122 @@ def _guided_exact_replace_repair(repo: Path, repair_guidance: dict[str, Any] | N
             "blocker": "; ".join(blockers),
         }
     return None
+
+
+def _ast_expr_equal(left: ast.AST, right: ast.AST) -> bool:
+    return ast.dump(left, include_attributes=False) == ast.dump(right, include_attributes=False)
+
+
+def _parse_python_expression(expression: str) -> ast.AST:
+    return ast.parse(expression, mode="eval").body
+
+
+def _replace_return_expression_in_file(source_path: Path, function_name: str, old_expression: str, new_expression: str) -> None:
+    source = source_path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    old_expr = _parse_python_expression(old_expression)
+    _parse_python_expression(new_expression)
+    candidates = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name]
+    if len(candidates) != 1:
+        raise ValueError(f"replace_return_expression requires exactly one function named {function_name}, found {len(candidates)}")
+    function = candidates[0]
+    returns = [node for node in ast.walk(function) if isinstance(node, ast.Return)]
+    matching_returns = [node for node in returns if node.value is not None and _ast_expr_equal(node.value, old_expr)]
+    if len(matching_returns) != 1:
+        raise ValueError(f"replace_return_expression requires exactly one matching return expression in {function_name}, found {len(matching_returns)}")
+    return_node = matching_returns[0]
+    if return_node.lineno != return_node.end_lineno:
+        raise ValueError("replace_return_expression only supports single-line return statements")
+    lines = source.splitlines(keepends=True)
+    line_index = return_node.lineno - 1
+    old_line = lines[line_index]
+    prefix = old_line[: len(old_line) - len(old_line.lstrip())]
+    trailing = "\n" if old_line.endswith("\n") else ""
+    lines[line_index] = f"{prefix}return {new_expression}{trailing}"
+    source_path.write_text("".join(lines), encoding="utf-8")
+
+
+def _guided_ast_repair(repo: Path, repair_guidance: dict[str, Any] | None) -> dict[str, Any] | None:
+    operations = _repair_operations_from_guidance(repair_guidance)
+    if not operations:
+        return None
+    repaired_files: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    handled_count = 0
+    for index, operation in enumerate(operations, start=1):
+        op_type = str(operation.get("type") or operation.get("operation") or operation.get("action") or "")
+        if op_type != "replace_return_expression":
+            continue
+        handled_count += 1
+        target_file = str(operation.get("target_file") or operation.get("path") or "")
+        function_name = str(operation.get("function_name") or "")
+        old_expression = operation.get("old_expression")
+        new_expression = operation.get("new_expression")
+        if not target_file or not function_name or not isinstance(old_expression, str) or not isinstance(new_expression, str):
+            blockers.append(f"replace_return_expression operation {index} is incomplete")
+            continue
+        path = _repo_relative_path(repo, target_file)
+        if path is None or not path.exists() or not path.is_file():
+            blockers.append(f"replace_return_expression target is missing or outside workspace: {target_file}")
+            continue
+        if path.suffix != ".py":
+            blockers.append(f"replace_return_expression only supports Python files: {target_file}")
+            continue
+        try:
+            _replace_return_expression_in_file(path, function_name, old_expression, new_expression)
+        except (SyntaxError, ValueError) as exc:
+            blockers.append(f"replace_return_expression failed for {target_file}:{function_name}: {exc}")
+            continue
+        repaired_files.append(
+            {
+                "path": target_file,
+                "repair": "guided_replace_return_expression",
+                "status": "applied",
+                "operation_index": index,
+                "function_name": function_name,
+            }
+        )
+    if not handled_count:
+        return None
+    if repaired_files:
+        return {
+            "path": "",
+            "repair": "guided_ast_repair",
+            "status": "applied",
+            "repaired_files": repaired_files,
+            "blockers": blockers,
+        }
+    if blockers:
+        return {
+            "path": "",
+            "repair": "guided_ast_repair",
+            "status": "blocked",
+            "blocker": "; ".join(blockers),
+        }
+    return None
+
+
+def _purge_python_caches(repo: Path) -> list[str]:
+    removed: list[str] = []
+    root = repo.resolve()
+    for cache_dir in repo.rglob("__pycache__"):
+        try:
+            cache_dir.resolve().relative_to(root)
+        except ValueError:
+            continue
+        if not cache_dir.is_dir():
+            continue
+        for item in cache_dir.glob("*.pyc"):
+            try:
+                item.unlink()
+                removed.append(str(item.relative_to(root)))
+            except OSError:
+                continue
+        try:
+            cache_dir.rmdir()
+        except OSError:
+            pass
+    return sorted(removed)
 
 
 def apply_greenfield_repair(repo: Path, project_brief: dict[str, Any], verification: dict[str, Any], repair_guidance: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -237,6 +357,13 @@ def apply_greenfield_repair(repo: Path, project_brief: dict[str, Any], verificat
             blockers.extend(str(item) for item in guided_replace.get("blockers", []) if isinstance(item, str))
         elif guided_replace.get("blocker"):
             blockers.append(str(guided_replace["blocker"]))
+    guided_ast = _guided_ast_repair(repo, repair_guidance)
+    if guided_ast is not None:
+        if guided_ast.get("status") == "applied":
+            repaired_files.extend([row for row in guided_ast.get("repaired_files", []) if isinstance(row, dict)])
+            blockers.extend(str(item) for item in guided_ast.get("blockers", []) if isinstance(item, str))
+        elif guided_ast.get("blocker"):
+            blockers.append(str(guided_ast["blocker"]))
     for rel_path in expected_files:
         if rel_path == "greenfield_project_brief.json":
             continue
@@ -267,12 +394,14 @@ def apply_greenfield_repair(repo: Path, project_brief: dict[str, Any], verificat
         repaired_files.append({"path": "README.md", "repair": "restored_missing_template_file"})
     if not repaired_files and not blockers:
         blockers.append("no bounded greenfield repair was applicable")
+    purged_caches = _purge_python_caches(repo) if repaired_files else []
     return {
         "kind": "code_brigade_greenfield_repair_execution",
         "contract_version": "eye-mechanicum.v1",
         "status": "applied" if repaired_files else "not_applicable",
         "repaired_files": repaired_files,
         "blockers": blockers,
+        "purged_python_caches": purged_caches,
         "verification_status_before": verification.get("status", ""),
     }
 

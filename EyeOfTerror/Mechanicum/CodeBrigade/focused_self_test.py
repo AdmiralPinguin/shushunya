@@ -1268,6 +1268,105 @@ class CodeBrigadeFocusedTests(unittest.TestCase):
             self.assertIn("guided replace requires exactly one match", "; ".join(repair["blockers"]))
             self.assertIn("return 'broken'", (repo / "demo.py").read_text(encoding="utf-8"))
 
+    def test_greenfield_verification_loop_applies_guided_ast_return_expression_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай CLI проект `ast-repair-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "calc.py", "content": "def add(left, right):\n    return left - right\n"},
+                        {
+                            "path": "test_calc.py",
+                            "content": "import unittest\nimport calc\n\nclass CalcTests(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(calc.add(2, 3), 5)\n",
+                        },
+                    ],
+                    "verification_commands": ["python -m unittest test_calc.py"],
+                    "module_contracts": [{"module": "calc", "path": "calc.py", "responsibility": "add values", "requirements": ["add values"]}],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "operations": [
+                                {
+                                    "type": "replace_return_expression",
+                                    "path": "calc.py",
+                                    "function_name": "add",
+                                    "old_expression": "left - right",
+                                    "new_expression": "left + right",
+                                }
+                            ]
+                        }
+                    ),
+                }
+
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=2, request_guidance=guidance)
+            self.assertEqual(loop["status"], "passed", loop)
+            repair = loop["attempts"][0]["repair_execution"]
+            self.assertIn(
+                {"path": "calc.py", "repair": "guided_replace_return_expression", "status": "applied", "operation_index": 1, "function_name": "add"},
+                repair["repaired_files"],
+            )
+            self.assertEqual((repo / "calc.py").read_text(encoding="utf-8"), "def add(left, right):\n    return left + right\n")
+
+    def test_greenfield_guided_ast_return_expression_blocks_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            project = build_greenfield_project_brief(
+                "Создай CLI проект `ast-mismatch-demo`.",
+                {
+                    "files": [
+                        {"path": ".ceraxia_greenfield_workspace", "content": "created-by=ceraxia-code-brigade\n"},
+                        {"path": "calc.py", "content": "def add(left, right):\n    return left - right\n"},
+                        {
+                            "path": "test_calc.py",
+                            "content": "import unittest\nimport calc\n\nclass CalcTests(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(calc.add(2, 3), 5)\n",
+                        },
+                    ],
+                    "verification_commands": ["python -m unittest test_calc.py"],
+                    "module_contracts": [{"module": "calc", "path": "calc.py", "responsibility": "add values", "requirements": ["add values"]}],
+                },
+            )
+            for item in project["files"]:
+                path = repo / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+
+            def guidance(role: str, payload: dict, instructions: str) -> dict:
+                return {
+                    "ok": True,
+                    "status": "answered",
+                    "content": json.dumps(
+                        {
+                            "operations": [
+                                {
+                                    "type": "replace_return_expression",
+                                    "path": "calc.py",
+                                    "function_name": "add",
+                                    "old_expression": "left * right",
+                                    "new_expression": "left + right",
+                                }
+                            ]
+                        }
+                    ),
+                }
+
+            loop = run_greenfield_verification_loop(repo, project["verification_commands"], project, max_cycles=1, request_guidance=guidance)
+            self.assertEqual(loop["status"], "blocked", loop)
+            repair = loop["attempts"][0]["repair_execution"]
+            self.assertIn("replace_return_expression failed", "; ".join(repair["blockers"]))
+            self.assertEqual((repo / "calc.py").read_text(encoding="utf-8"), "def add(left, right):\n    return left - right\n")
+
     def test_greenfield_verification_loop_reruns_after_final_allowed_repair(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
