@@ -194,7 +194,7 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
 def list_runs(run_root: Path) -> list[dict[str, Any]]:
     if not run_root.exists():
         return []
-    runs = [run_summary(path) for path in run_root.iterdir() if path.is_dir()]
+    runs = [run_summary(path) for path in run_root.iterdir() if path.is_dir() and not path.name.startswith("_")]
     return sorted(runs, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
 
 
@@ -307,7 +307,7 @@ def all_run_events(run_root: Path, limit: int | None = None, after: int | None =
     if not run_root.exists():
         return {"ok": True, "events": [], "cursor": {"after": 0, "next": 0, "total": 0}, "errors": []}
     for run_dir in run_root.iterdir():
-        if not run_dir.is_dir():
+        if not run_dir.is_dir() or run_dir.name.startswith("_"):
             continue
         ledger, ledger_error = load_ledger_dict(run_dir / "task_ledger.json")
         if ledger_error:

@@ -106,11 +106,11 @@ def task_preflight_actions(
         }
     elif error_code == "multi_governor_decomposition_required":
         next_action = {
-            "kind": "decompose_task",
+            "kind": "prepare_campaign",
             "method": "POST",
-            "endpoint": "POST /task_preflight",
+            "endpoint": "POST /campaign_preflight",
             "body": retry_body,
-            "reason": "task matches multiple active governors and must be split before execution",
+            "reason": "task matches multiple active governors and must be split into a campaign before execution",
         }
     elif include_brigade_health:
         next_action = {
@@ -292,7 +292,8 @@ def gateway_actions() -> dict[str, Any]:
         "can_execute_step_subsets": True,
         "can_cancel_runs": True,
         "can_check_brigade_readiness": True,
-        "preferred_task_flow": ["POST /task_preflight", "POST /task", "POST /runs/{task_id}/preflight_http", "POST /runs/{task_id}/start_http"],
+        "preferred_task_flow": ["POST /task_preflight", "POST /campaign_preflight when decomposition is required", "POST /task", "POST /runs/{task_id}/preflight_http", "POST /runs/{task_id}/start_http"],
+        "campaign_flow": ["POST /campaign_preflight", "POST /campaign", "POST /campaigns/{campaign_id}/start", "GET /campaigns/{campaign_id}"],
         "prepare_task_flow": ["POST /orchestrate", "POST /orchestrate_start", "GET /runs/{task_id}/orchestration?events_after=0"],
         "chat_task_flow": ["POST /orchestrate_run", "GET /runs/{task_id}/orchestration?events_after=0"],
         "research_loop_flow": ["POST /orchestrate", "POST /runs/{task_id}/start_research_loop_http", "GET /runs/{task_id}/orchestration?events_after=0"],

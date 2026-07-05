@@ -64,6 +64,14 @@ from .task_prepare import (
 from .capabilities import (
     gateway_capabilities,
 )
+from .campaigns import (
+    campaign_preflight,
+    campaign_state,
+    cancel_campaign,
+    list_campaigns,
+    prepare_campaign,
+    resume_campaign,
+)
 from .run_state import (
     all_run_events,
     last_run_preflight,
@@ -210,6 +218,7 @@ def gateway_state(run_root: Path, run_limit: int = 20, include_health: bool = Fa
         "run_summary": run_status_summary(all_runs),
         "recovery": recovery_summary(all_runs),
         "process_active_runs": process_active_runs,
+        "campaigns": list_campaigns(run_root),
         "runs": runs,
         "orchestration_cards": run_orchestration_cards(runs, process_active_runs),
     }
@@ -337,6 +346,18 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                 response(self, 200, all_run_events(run_root, limit=limit, after=after))
                 return
             parts = [part for part in parsed.path.split("/") if part]
+            if parts == ["campaigns"]:
+                response(self, 200, {"ok": True, "campaigns": list_campaigns(run_root)})
+                return
+            if len(parts) == 2 and parts[0] == "campaigns":
+                campaign_id = parts[1]
+                try:
+                    payload = campaign_state(run_root, campaign_id)
+                except FileNotFoundError:
+                    response(self, 404, {"ok": False, "error": "campaign not found", "campaign_id": campaign_id})
+                    return
+                response(self, 200, payload)
+                return
             if parts == ["runs"]:
                 query = parse_qs(parsed.query)
                 raw_limit = query.get("limit", [""])[0]
@@ -687,6 +708,28 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     preflight = attach_model_brain(preflight, model_decision)
                     response(self, 409 if preflight.get("error_code") == "task_exists" else (200 if preflight.get("ok") else 400), preflight)
                     return
+                if self.path == "/campaign_preflight":
+                    model_decision = gateway_model_decision("campaign_preflight", payload)
+                    message = str(payload.get("message") or payload.get("task") or "").strip()
+                    if not message:
+                        response(self, 400, {"ok": False, "error": "message is required"})
+                        return
+                    campaign_id = str(payload.get("campaign_id") or payload.get("task_id") or "").strip() or None
+                    preflight = campaign_preflight(message, campaign_id=campaign_id)
+                    preflight = attach_model_brain(preflight, model_decision)
+                    response(self, 200 if preflight.get("ok") else 400, preflight)
+                    return
+                if self.path == "/campaign":
+                    model_decision = gateway_model_decision("campaign", payload)
+                    message = str(payload.get("message") or payload.get("task") or "").strip()
+                    if not message:
+                        response(self, 400, {"ok": False, "error": "message is required"})
+                        return
+                    campaign_id = str(payload.get("campaign_id") or payload.get("task_id") or "").strip() or None
+                    prepared = prepare_campaign(run_root, message, campaign_id=campaign_id, force=bool(payload.get("force")))
+                    prepared = attach_model_brain(prepared, model_decision)
+                    response(self, 200 if prepared.get("ok") else 409, prepared)
+                    return
                 if self.path == "/recover_stale":
                     recovered = recover_stale_runs(run_root)
                     response(self, 200, {"ok": True, "recovered": recovered})
@@ -703,6 +746,83 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     response(self, 202, recovered)
                     return
                 parts = [part for part in self.path.split("?")[0].split("/") if part]
+                if len(parts) == 3 and parts[0] == "campaigns" and parts[2] in {"start", "resume", "cancel"}:
+                    campaign_id = parts[1]
+                    if not valid_task_id(campaign_id):
+                        response(self, 400, {"ok": False, "error": "invalid campaign_id", "campaign_id": campaign_id})
+                        return
+                    if parts[2] == "cancel":
+                        reason = str(payload.get("reason") or "").strip()
+                        host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
+                        try:
+                            cancelled = cancel_campaign(run_root, campaign_id, reason=reason, host=host)
+                        except FileNotFoundError:
+                            response(self, 404, {"ok": False, "error": "campaign not found", "campaign_id": campaign_id})
+                            return
+                        response(self, 200 if cancelled.get("ok") else 409, cancelled)
+                        return
+                    run_mode = str(payload.get("run_mode") or "http").strip() or "http"
+                    host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
+                    timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
+                    max_revision_cycles = max(0, min(int(payload.get("max_revision_cycles") or 3), 8))
+                    allow_resume = bool(payload.get("allow_resume", True))
+                    governor_transport = str(payload.get("governor_transport") or default_governor_transport).strip() or default_governor_transport
+                    governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
+                    max_subruns = max(1, min(int(payload.get("max_subruns") or 8), 32))
+                    try:
+                        campaign_state(run_root, campaign_id)
+                    except FileNotFoundError:
+                        response(self, 404, {"ok": False, "error": "campaign not found", "campaign_id": campaign_id})
+                        return
+                    executor = lambda: resume_campaign(
+                        run_root,
+                        campaign_id,
+                        run_mode=run_mode,
+                        host=host,
+                        timeout_sec=timeout_sec,
+                        max_revision_cycles=max_revision_cycles,
+                        allow_resume=allow_resume,
+                        governor_transport=governor_transport,
+                        governor_host=governor_host,
+                        max_subruns=max_subruns,
+                    )
+                    if parts[2] == "start":
+                        active_key = f"campaign:{campaign_id}"
+                        started = start_background(active_key, executor)
+                        if not started:
+                            response(self, 409, {"ok": False, "error": "campaign already active", "campaign_id": campaign_id})
+                            return
+                        poll_action = {
+                            "kind": "poll_campaign",
+                            "method": "GET",
+                            "endpoint": "GET /campaigns/{campaign_id}",
+                            "body": {},
+                            "reason": "campaign started in background",
+                        }
+                        response(
+                            self,
+                            202,
+                            {
+                                "ok": True,
+                                "campaign_id": campaign_id,
+                                "status": "started",
+                                "next_action": poll_action,
+                                "client_action": {
+                                    "method": "GET",
+                                    "path": f"/campaigns/{campaign_id}",
+                                    "body": {},
+                                    "reason": "campaign started in background",
+                                },
+                            },
+                        )
+                        return
+                    try:
+                        resumed = executor()
+                    except FileNotFoundError:
+                        response(self, 404, {"ok": False, "error": "campaign not found", "campaign_id": campaign_id})
+                        return
+                    response(self, 200 if resumed.get("ok") else 409, resumed)
+                    return
                 if len(parts) == 3 and parts[0] == "runs" and parts[2] == "cancel":
                     task_id = parts[1]
                     ledger_path = run_root / task_id / "task_ledger.json"

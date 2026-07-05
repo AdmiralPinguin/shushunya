@@ -256,7 +256,14 @@ def cleanup_unregistered_run_dir(run_root: Path, run_dir: Path) -> dict[str, Any
     return {"attempted": True, "removed": True}
 
 
-def prepare_task(message: str, task_id: str | None, run_root: Path, governor_transport: str = "local", governor_host: str = "127.0.0.1") -> dict[str, Any]:
+def prepare_task(
+    message: str,
+    task_id: str | None,
+    run_root: Path,
+    governor_transport: str = "local",
+    governor_host: str = "127.0.0.1",
+    forced_governor: str | None = None,
+) -> dict[str, Any]:
     if task_id is not None and not valid_task_id(task_id):
         return {
             "ok": False,
@@ -267,20 +274,33 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
             "actions": task_preflight_actions(False, "invalid_task_id", task_id or "", governor_transport=governor_transport, governor_host=governor_host, message=message),
         }
     route = route_message(message)
-    if not route.ok:
-        return route_failure_payload(route)
-    if route.requires_decomposition:
-        return {
-            "ok": False,
-            "gateway": "WarmasterGateway",
-            "error": "task requires multi-governor decomposition before a single run can be prepared",
-            "error_code": "multi_governor_decomposition_required",
-            "kind": route.kind,
-            "governor": route.governor,
-            "route": route.to_dict(),
-            "actions": task_preflight_actions(False, "multi_governor_decomposition_required", task_id or "", governor_transport=governor_transport, governor_host=governor_host, message=message),
-        }
-    governor = route.governor
+    if forced_governor:
+        governor = forced_governor.strip()
+        governor_ref = governor_by_name(governor)
+        if governor_ref is None:
+            return {
+                "ok": False,
+                "gateway": "WarmasterGateway",
+                "error": f"unknown forced governor: {governor}",
+                "error_code": "unknown_forced_governor",
+                "governor": governor,
+                "actions": task_preflight_actions(False, "governor_inactive", task_id or "", governor_transport=governor_transport, governor_host=governor_host, message=message),
+            }
+    else:
+        if not route.ok:
+            return route_failure_payload(route)
+        if route.requires_decomposition:
+            return {
+                "ok": False,
+                "gateway": "WarmasterGateway",
+                "error": "task requires multi-governor decomposition before a single run can be prepared",
+                "error_code": "multi_governor_decomposition_required",
+                "kind": route.kind,
+                "governor": route.governor,
+                "route": route.to_dict(),
+                "actions": task_preflight_actions(False, "multi_governor_decomposition_required", task_id or "", governor_transport=governor_transport, governor_host=governor_host, message=message),
+            }
+        governor = route.governor
     governor_ref = governor_by_name(governor)
     if governor_ref is None or not governor_ref.active():
         return {

@@ -25,6 +25,13 @@ GET  /events
 GET  /events?limit=20
 GET  /events?after=0
 POST /task_preflight
+POST /campaign_preflight
+POST /campaign
+GET  /campaigns
+GET  /campaigns/{campaign_id}
+POST /campaigns/{campaign_id}/start
+POST /campaigns/{campaign_id}/resume
+POST /campaigns/{campaign_id}/cancel
 POST /orchestrate
 POST /orchestrate_start
 POST /orchestrate_run
@@ -172,6 +179,21 @@ planning boundaries. Task preflight action bodies include the original
 `message`, making successful `create_task` hints directly executable by simple
 chat clients. Rejected task creation responses that recommend retrying task
 preflight preserve the same executable body shape.
+
+When `POST /task_preflight` returns
+`error_code=multi_governor_decomposition_required`, clients should follow
+`actions.next_action` to `POST /campaign_preflight` instead of retrying a
+single run. `POST /campaign_preflight` builds a strict `campaign_plan.json`
+without writing state. `POST /campaign` persists `campaign_plan.json` and
+`campaign_state.json` under the service campaign directory, then recommends
+`POST /campaigns/{campaign_id}/start`. `GET /campaigns` lists campaign cards,
+and `GET /campaigns/{campaign_id}` returns the plan, current state, handoff
+records, and final report when available. `POST /campaigns/{campaign_id}/start`
+runs the campaign in the background, while
+`POST /campaigns/{campaign_id}/resume` advances ready subruns synchronously for
+debugging. `POST /campaigns/{campaign_id}/cancel` marks the campaign cancelled
+and cooperatively forwards cancellation to any non-terminal subrun ledgers and
+HTTP worker task endpoints.
 
 `POST /orchestrate` is a prepare-only orchestration helper for chat clients. It
 performs task preflight, task creation, and run preflight in order, records the

@@ -723,7 +723,7 @@ def recover_stale_runs(run_root: Path) -> list[dict[str, Any]]:
     with ACTIVE_RUNS_LOCK:
         active = set(ACTIVE_RUNS)
     for run_dir in run_root.iterdir():
-        if not run_dir.is_dir() or run_dir.name in active:
+        if not run_dir.is_dir() or run_dir.name.startswith("_") or run_dir.name in active:
             continue
         ledger_path = run_dir / "task_ledger.json"
         if not ledger_path.exists():
