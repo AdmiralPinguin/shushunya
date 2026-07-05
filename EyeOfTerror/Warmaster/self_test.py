@@ -13,9 +13,10 @@ from eye_of_terror.contracts import (
     WORKER_STEP_FIELDS,
     WORKER_STEP_REQUIRED_FIELDS,
     build_lore_reconstruction_contract,
+    build_research_writing_contract,
     validate_task_contract_payload,
 )
-from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction
+from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction, plan_research_writing
 from eye_of_terror.pipeline import build_dispatch_packets, write_pipeline_run
 from eye_of_terror.registry import worker_refs
 
@@ -138,6 +139,27 @@ def main() -> int:
     if documented_iskandar_pipeline() != expected_order:
         raise AssertionError(f"Iskandar README worker pipeline is out of sync: {documented_iskandar_pipeline()}")
     print("[ok] lore reconstruction contract")
+
+    generic_task = "Исследуй историю развития домашних 3D-принтеров и собери связный русский обзор с источниками."
+    generic_contract = build_research_writing_contract(generic_task, task_id="test-generic-research")
+    generic_payload = generic_contract.to_dict()
+    if generic_payload["assigned_governor"] != "IskandarKhayon" or generic_payload["kind"] != "research":
+        raise AssertionError(f"bad research/writing contract routing: {generic_payload}")
+    if validate_task_contract_payload(generic_payload):
+        raise AssertionError(f"valid research/writing contract failed validation: {validate_task_contract_payload(generic_payload)}")
+    if generic_payload["task_id"] != "test-generic-research":
+        raise AssertionError(f"generic research task id not preserved: {generic_payload}")
+    if "Do not answer from a single convenient source" not in " ".join(generic_payload["non_goals"]):
+        raise AssertionError(f"generic research contract lacks broad-source guardrail: {generic_payload}")
+    generic_plan = plan_research_writing(generic_task, task_id="test-generic-research").to_dict()
+    if (
+        not generic_plan["ok"]
+        or generic_plan["oversight"]["kind"] != "research_writing_oversight"
+        or generic_plan["contract"]["required_artifacts"][0] != "/work/3d/corpus_index.json"
+        or generic_plan["contract"]["worker_plan"][4]["purpose"].find("claims, events, arguments") < 0
+    ):
+        raise AssertionError(f"bad generic research/writing plan: {generic_plan}")
+    print("[ok] research/writing contract")
 
     plan = plan_lore_reconstruction(task, task_id="test-skalathrax").to_dict()
     if not plan["ok"] or plan["missing_workers"] or plan.get("unavailable_workers"):

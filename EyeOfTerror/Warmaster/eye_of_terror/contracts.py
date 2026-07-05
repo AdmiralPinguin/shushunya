@@ -173,6 +173,112 @@ def lore_worker_plan(slug: str) -> list[WorkerPlanStep]:
     ]
 
 
+def research_writing_required_artifacts(slug: str) -> list[str]:
+    return lore_required_artifacts(slug)
+
+
+def research_writing_worker_plan(slug: str) -> list[WorkerPlanStep]:
+    base = f"/work/{slug}"
+    return [
+        WorkerPlanStep(
+            step_id="corpus_ingestion",
+            worker="CorpusIngestor",
+            purpose="Index user-provided local documents and expose relevant primary or reference-text candidates before web discovery.",
+            expected_artifacts=[f"{base}/corpus_index.json"],
+        ),
+        WorkerPlanStep(
+            step_id="source_discovery",
+            worker="Lexmechanic",
+            purpose="Discover and classify sources for the requested research/writing task by reliability, language, and usefulness.",
+            depends_on=["corpus_ingestion"],
+            expected_artifacts=[f"{base}/source_map.json"],
+        ),
+        WorkerPlanStep(
+            step_id="source_acquisition",
+            worker="AuspexBrowser",
+            purpose="Fetch accessible public source URLs and record blocked, binary, or unavailable sources as coverage data.",
+            depends_on=["source_discovery"],
+            expected_artifacts=[f"{base}/source_snapshots.json"],
+        ),
+        WorkerPlanStep(
+            step_id="source_rendering",
+            worker="OcularisRenderium",
+            purpose="Render JavaScript-required source snapshots and record DOM text or render blockers.",
+            depends_on=["source_acquisition"],
+            expected_artifacts=[f"{base}/rendered_snapshots.json"],
+        ),
+        WorkerPlanStep(
+            step_id="fact_extraction",
+            worker="NoosphericExtractor",
+            purpose="Extract direct claims, events, arguments, or evidence notes with confidence labels and source references.",
+            depends_on=["source_rendering"],
+            expected_artifacts=[f"{base}/direct_event_notes.json"],
+        ),
+        WorkerPlanStep(
+            step_id="timeline",
+            worker="Chronologis",
+            purpose="Order extracted material into a useful sequence: chronology for events, argument flow for analysis, or source order for synthesis.",
+            depends_on=["fact_extraction"],
+            expected_artifacts=[f"{base}/timeline.json"],
+        ),
+        WorkerPlanStep(
+            step_id="draft_reconstruction",
+            worker="ScriptoriumDaemon",
+            purpose="Write the requested Russian research/synthesis draft from extracted evidence without inventing unsupported details.",
+            depends_on=["source_discovery", "fact_extraction", "timeline"],
+            expected_artifacts=[f"{base}/reconstruction_ru.md", f"{base}/coverage_report.md"],
+        ),
+        WorkerPlanStep(
+            step_id="critic_review",
+            worker="ReductorVerifier",
+            purpose="Review the draft against the user task, source coverage, extracted evidence, and hallucination risks.",
+            depends_on=["draft_reconstruction"],
+            expected_artifacts=[f"{base}/critic_report.json"],
+        ),
+        WorkerPlanStep(
+            step_id="finalize",
+            worker="FabricatorFinalis",
+            purpose="Package final artifacts only after critic approval or explicit blockers.",
+            depends_on=["critic_review"],
+            expected_artifacts=[f"{base}/final_manifest.json"],
+        ),
+    ]
+
+
+def build_research_writing_contract(user_task: str, task_id: str | None = None) -> TaskContract:
+    slug = slugify(user_task, fallback="research")
+    resolved_task_id = task_id or f"iskandar-{slug}-research-writing"
+    return TaskContract(
+        task_id=resolved_task_id,
+        kind="research",
+        goal=user_task.strip(),
+        assigned_governor="IskandarKhayon",
+        non_goals=[
+            "Do not answer from a single convenient source when the task asks for broad research.",
+            "Do not hide weak source coverage, inaccessible primary texts, or uncertain claims.",
+            "Do not let the writer invent facts absent from extraction outputs.",
+            "Do not treat a short summary as complete when the task asks for full coverage.",
+        ],
+        required_artifacts=research_writing_required_artifacts(slug),
+        completion_criteria=[
+            "All required artifacts exist and are structurally valid.",
+            "Source coverage separates primary, official, secondary, community, unavailable, and uncertain sources where applicable.",
+            "Extracted notes separate direct evidence from interpretation and synthesis.",
+            "The draft addresses the user's requested form and language while preserving source limitations.",
+            "Critic report passes or lists explicit blockers and required revisions.",
+        ],
+        quality_gates=[
+            "source_map_created",
+            "evidence_notes_non_empty",
+            "source_order_or_timeline_present",
+            "writer_uses_only_extracted_evidence",
+            "coverage_report_names_gaps",
+            "critic_review_passed_or_blocked",
+        ],
+        worker_plan=research_writing_worker_plan(slug),
+    )
+
+
 def build_lore_reconstruction_contract(user_task: str, task_id: str | None = None) -> TaskContract:
     slug = slugify(user_task)
     resolved_task_id = task_id or f"iskandar-{slug}-lore-reconstruction"

@@ -2,14 +2,15 @@
 
 Port: `7101`
 
-Iskandar Khayon is the first Inner Circle governor. He owns lore, research,
-source reconstruction, translation, and long-form synthesis tasks.
+Iskandar Khayon is the first Inner Circle governor. He owns research, source
+reconstruction, translation, and long-form synthesis tasks. Lore reconstruction
+is a specialized training case inside that broader mandate.
 
 He is a brigade leader, not a low-level worker. He should coordinate Mechanicum
 workers and decide whether their outputs are good enough.
 
-His service capabilities expose the required Mechanicum worker set for the lore
-reconstruction pipeline, so Warmaster/admin clients can compare requirements
+His service capabilities expose the required Mechanicum worker set for the
+research/writing pipeline, so Warmaster/admin clients can compare requirements
 against the worker registry before execution.
 They also expose a compact pipeline summary with step dependencies and expected
 artifacts, built from the same worker-plan source used for concrete contracts.
@@ -42,8 +43,8 @@ CorpusIngestor
 
 - Source map exists and separates primary, secondary, wiki, and community
   sources.
-- Direct facts are separated from reconstruction.
-- Timeline records uncertainty and contradictions.
+- Direct claims/facts are separated from reconstruction and interpretation.
+- Timeline or source order records uncertainty and contradictions.
 - Writer does not invent facts absent from extractor output.
 - Critic checks the result against the original task contract.
 - Final answer reports gaps honestly.

@@ -79,7 +79,7 @@ def service_governor(port: int) -> Any:
                 "name": self.name,
                 "status": self.status,
                 "port": self.port,
-                "task_kinds": ["research", "lore_reconstruction"],
+                "task_kinds": ["research", "research_writing", "lore_reconstruction"],
                 "route_terms": ["скалатракс"],
                 "service": "eye_of_terror.inner_circle.iskandar_service",
             }

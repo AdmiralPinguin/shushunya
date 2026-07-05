@@ -23,7 +23,7 @@ from .contracts import validate_task_contract_payload
 from .gateway_util import post_json, valid_task_id, validate_service_host
 from .governors import governor_by_name
 from .inner_circle.ceraxia import plan_code_task
-from .inner_circle.iskandar import plan_lore_reconstruction
+from .inner_circle.iskandar import plan_research_writing as plan_lore_reconstruction
 from .ledger import TaskLedger
 from .oversight_guard import compact_oversight_summary
 from .pipeline import write_pipeline_run

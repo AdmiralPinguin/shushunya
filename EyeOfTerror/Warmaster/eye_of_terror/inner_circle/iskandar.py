@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from ..contracts import TaskContract, build_lore_reconstruction_contract, validate_task_contract_payload
+from ..contracts import TaskContract, build_lore_reconstruction_contract, build_research_writing_contract, validate_task_contract_payload
 from ..pipeline import build_dispatch_packets, pipeline_status, write_pipeline_run
 from ..registry import worker_by_name
 
@@ -160,7 +160,9 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
     ]
     return {
         "governor": contract.assigned_governor,
-        "kind": "lore_reconstruction_oversight",
+        "kind": "lore_reconstruction_oversight"
+        if any("shallow wiki summary" in item for item in contract.non_goals)
+        else "research_writing_oversight",
         "quality_gates": contract.quality_gates,
         "completion_criteria": contract.completion_criteria,
         "non_goals": contract.non_goals,
@@ -337,15 +339,19 @@ def plan_lore_reconstruction(user_task: str, task_id: str | None = None) -> Iska
     return IskandarPlan(contract=build_lore_reconstruction_contract(user_task, task_id=task_id))
 
 
+def plan_research_writing(user_task: str, task_id: str | None = None) -> IskandarPlan:
+    return IskandarPlan(contract=build_research_writing_contract(user_task, task_id=task_id))
+
+
 def main() -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Build an Iskandar Khayon lore reconstruction plan.")
+    parser = argparse.ArgumentParser(description="Build an Iskandar Khayon research/writing plan.")
     parser.add_argument("task", help="User task text")
     parser.add_argument("--task-id", default="", help="Stable task id")
     parser.add_argument("--run-dir", default="", help="Write contract and dispatch packets to this directory")
     args = parser.parse_args()
-    plan = plan_lore_reconstruction(args.task, task_id=args.task_id or None)
+    plan = plan_research_writing(args.task, task_id=args.task_id or None)
     if args.run_dir:
         status = write_pipeline_run(plan.contract, Path(args.run_dir), oversight=oversight_plan(plan.contract))
         print(json.dumps(status, ensure_ascii=False, indent=2))

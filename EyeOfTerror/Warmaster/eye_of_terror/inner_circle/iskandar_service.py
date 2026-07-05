@@ -13,23 +13,23 @@ if str(REPO_ROOT) not in sys.path:
 
 from EyeOfTerror.model_brain import model_contract, request_model_decision
 
-from ..contracts import build_lore_reconstruction_contract, lore_worker_plan
-from .iskandar import executable_client_action, oversight_plan, payload_with_plan_view, plan_lore_reconstruction
+from ..contracts import build_research_writing_contract, research_writing_worker_plan
+from .iskandar import executable_client_action, oversight_plan, payload_with_plan_view, plan_research_writing
 from ..pipeline import write_pipeline_run
 
 
 def required_workers() -> list[str]:
     workers: list[str] = []
-    for step in lore_worker_plan("capabilities"):
+    for step in research_writing_worker_plan("capabilities"):
         if step.worker not in workers:
             workers.append(step.worker)
     return workers
 
 
 def pipeline_summary() -> dict[str, Any]:
-    steps = [step.to_dict() for step in lore_worker_plan("capabilities")]
+    steps = [step.to_dict() for step in research_writing_worker_plan("capabilities")]
     return {
-        "kind": "lore_reconstruction",
+        "kind": "research_writing",
         "step_count": len(steps),
         "required_workers": required_workers(),
         "steps": [
@@ -46,7 +46,7 @@ def pipeline_summary() -> dict[str, Any]:
 
 
 def oversight_template() -> dict[str, Any]:
-    contract = build_lore_reconstruction_contract("capabilities", task_id="capabilities")
+    contract = build_research_writing_contract("capabilities", task_id="capabilities")
     return oversight_plan(contract)
 
 
@@ -71,7 +71,7 @@ def payload_from(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 
 
 def service_capabilities() -> dict[str, Any]:
-    capability_plan = plan_lore_reconstruction("capabilities", task_id="capabilities").to_dict()
+    capability_plan = plan_research_writing("capabilities", task_id="capabilities").to_dict()
     pipeline = pipeline_summary()
     oversight = oversight_template()
     next_action = {
@@ -85,7 +85,7 @@ def service_capabilities() -> dict[str, Any]:
         "ok": True,
         "governor": "IskandarKhayon",
         "api_version": 1,
-        "task_kinds": ["research", "lore_reconstruction"],
+        "task_kinds": ["research", "research_writing", "lore_reconstruction"],
         "required_workers": required_workers(),
         "worker_availability": {
             "ok": not capability_plan.get("missing_workers") and not capability_plan.get("unavailable_workers"),
@@ -93,7 +93,7 @@ def service_capabilities() -> dict[str, Any]:
             "unavailable_workers": capability_plan.get("unavailable_workers", []),
             "resolved_workers": capability_plan.get("resolved_workers", {}),
         },
-        "model_brain": model_contract("IskandarKhayon", "Inner Circle lore reconstruction governor", layer="governor_service"),
+        "model_brain": model_contract("IskandarKhayon", "Inner Circle research and writing governor", layer="governor_service"),
         "pipeline": pipeline,
         "oversight": oversight,
         "summary": {
@@ -114,6 +114,7 @@ def service_capabilities() -> dict[str, Any]:
         "client_action": executable_client_action("", next_action),
         "capabilities": [
             "model_backed_governor_planning",
+            "research_writing_planning",
             "lore_reconstruction_planning",
             "worker_plan_resolution",
             "dispatch_packet_preparation",
@@ -170,10 +171,10 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                     response(self, 400, {"ok": False, "error": "task is required"})
                     return
                 task_id = str(payload.get("task_id") or "").strip() or None
-                plan = plan_lore_reconstruction(task, task_id=task_id)
+                plan = plan_research_writing(task, task_id=task_id)
                 model_decision = request_model_decision(
                     "IskandarKhayon",
-                    "Inner Circle lore reconstruction governor",
+                    "Inner Circle research and writing governor",
                     payload,
                     layer="governor_service",
                     instructions="Plan a research/reconstruction brigade task, identify source coverage risks, and keep the answer scoped to governor oversight.",
