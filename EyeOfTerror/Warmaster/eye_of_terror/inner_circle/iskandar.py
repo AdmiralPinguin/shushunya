@@ -200,6 +200,7 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
             "source_policy": research_intent["source_policy"],
             "needs_timeline": research_intent["needs_timeline"],
             "needs_chapters": research_intent["needs_chapters"],
+            "chapter_count": research_intent.get("chapter_count", 0),
             "required_workers": required_workers,
             "steps": planned_step_ids,
         },

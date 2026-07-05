@@ -32,6 +32,18 @@ RESEARCH_INTENTS = {
 }
 
 
+def requested_chapter_count(text: str) -> int:
+    patterns = [
+        r"(\d{1,2})\s*(?:глав|главы|глава|chapters?|chapter)",
+        r"(?:глав|chapters?|chapter)\s*(\d{1,2})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return max(1, min(24, int(match.group(1))))
+    return 3
+
+
 def slugify(value: str, fallback: str = "task") -> str:
     lowered = value.lower()
     replacements = {
@@ -145,6 +157,7 @@ def classify_research_intent(user_task: str) -> dict[str, Any]:
         "source_policy": source_policy,
         "needs_timeline": needs_timeline,
         "needs_chapters": needs_chapters,
+        "chapter_count": requested_chapter_count(text) if needs_chapters else 0,
     }
 
 
@@ -357,11 +370,10 @@ def research_writing_worker_plan(slug: str, intent_profile: dict[str, Any] | Non
     draft_dependencies.append("synthesis_planning")
     draft_artifacts = [f"{base}/reconstruction_ru.md", f"{base}/coverage_report.md"]
     if profile.get("needs_chapters"):
+        chapter_count = max(1, min(24, int(profile.get("chapter_count") or 3)))
+        draft_artifacts.extend(f"{base}/chapters/chapter_{index:02d}.md" for index in range(1, chapter_count + 1))
         draft_artifacts.extend(
             [
-                f"{base}/chapters/chapter_01.md",
-                f"{base}/chapters/chapter_02.md",
-                f"{base}/chapters/chapter_03.md",
                 f"{base}/continuity_report.json",
                 f"{base}/editor_report.json",
                 f"{base}/manuscript_ru.md",

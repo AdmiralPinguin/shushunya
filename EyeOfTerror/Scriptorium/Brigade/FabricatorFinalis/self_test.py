@@ -504,15 +504,30 @@ def main() -> int:
             raise AssertionError(f"FabricatorFinalis failed on book final package: {result}")
         book_manifest = json.loads((book_base / "final_manifest.json").read_text(encoding="utf-8"))
         fb2_file = next((item for item in book_manifest.get("files", []) if item.get("path") == "/work/bookfinal/manuscript.fb2"), {})
+        chapter_file = next((item for item in book_manifest.get("files", []) if item.get("path") == "/work/bookfinal/chapters/chapter_01.md"), {})
         if (
             book_manifest.get("status") != "ready"
             or book_manifest.get("deliverable") != "/work/bookfinal/manuscript.fb2"
             or book_manifest.get("draft_deliverable") != "/work/bookfinal/reconstruction_ru.md"
             or fb2_file.get("kind") != "fb2"
+            or chapter_file.get("kind") != "markdown"
             or book_manifest.get("readiness_checks", {}).get("book_continuity_ready") is not True
             or book_manifest.get("readiness_checks", {}).get("book_editor_ready") is not True
         ):
             raise AssertionError(f"book final manifest should expose mode-specific fb2 deliverable: {book_manifest}")
+        (book_base / "chapters/chapter_01.md").unlink()
+        result = run(book_request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"FabricatorFinalis failed on missing book chapter: {result}")
+        book_manifest = json.loads((book_base / "final_manifest.json").read_text(encoding="utf-8"))
+        chapter_revision_workers = {step.get("worker") for step in book_manifest.get("revision_plan", {}).get("steps", [])}
+        if (
+            book_manifest.get("status") != "blocked"
+            or book_manifest.get("readiness_checks", {}).get("book_manifest_complete") is not False
+            or "ScriptoriumDaemon" not in chapter_revision_workers
+        ):
+            raise AssertionError(f"missing book chapter should block final readiness and reroute to writer: {book_manifest}")
+        write(book_base / "chapters/chapter_01.md", "# Глава 1\n\nEvidence trace: claim_1.\n")
         write(book_base / "continuity_report.json", json.dumps({"status": "needs_revision"}))
         result = run(book_request, root)
         if not result.get("ok"):

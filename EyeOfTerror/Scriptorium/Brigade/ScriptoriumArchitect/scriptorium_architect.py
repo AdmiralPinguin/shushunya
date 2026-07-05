@@ -248,14 +248,16 @@ def build_book_outline(
     output_mode: str,
     needs_timeline: bool,
     guidance: dict[str, Any],
+    chapter_count: int = 3,
 ) -> dict[str, Any]:
     model_chapters = model_chapter_candidates(guidance, set(refs))
-    chapters = fill_book_chapters(model_chapters, sections, refs, output_mode, needs_timeline)
+    chapters = fill_book_chapters(model_chapters, sections, refs, output_mode, needs_timeline, chapter_count=chapter_count)
     return {
         "version": 1,
         "title": topic or "Research manuscript",
         "target_language": "ru",
         "planning_method": "model_guided_evidence_outline" if model_chapters else "evidence_balanced_outline",
+        "chapter_count": len(chapters),
         "chapters": chapters,
     }
 
@@ -263,6 +265,7 @@ def build_book_outline(
 def build_synthesis_plan(request: dict[str, Any], research_corpus: dict[str, Any], structure_map: dict[str, Any]) -> dict[str, Any]:
     intent = research_intent_from_request(request)
     output_mode = str(intent.get("output_mode") or "research_report")
+    chapter_count = max(1, min(24, int(intent.get("chapter_count") or 3))) if intent.get("needs_chapters") else 0
     refs = claim_refs(research_corpus)
     sections = attach_claim_refs(output_mode_sections(output_mode, bool(intent.get("needs_timeline"))), refs, output_mode)
     unsupported_sections = [
@@ -283,6 +286,7 @@ def build_synthesis_plan(request: dict[str, Any], research_corpus: dict[str, Any
         "source_policy": intent.get("source_policy", "broad_sources_with_gaps_disclosed"),
         "needs_timeline": bool(intent.get("needs_timeline")),
         "needs_chapters": bool(intent.get("needs_chapters")),
+        "chapter_count": chapter_count,
         "topic": topic,
         "style": {
             "language": "ru",
@@ -361,10 +365,12 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
             str(plan.get("output_mode") or ""),
             bool(plan.get("needs_timeline")),
             guidance,
+            chapter_count=max(1, min(24, int(plan.get("chapter_count") or 3))),
         )
         chapter_plan = {
             "version": 1,
             "planning_method": outline.get("planning_method", ""),
+            "chapter_count": outline.get("chapter_count", len(outline["chapters"])),
             "chapters": outline["chapters"],
             "continuity_requirements": ["preserve source limits", "do not add unsupported scenes", "each chapter must retain its required evidence trace"],
         }

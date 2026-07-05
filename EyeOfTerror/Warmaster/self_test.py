@@ -96,6 +96,8 @@ def main() -> int:
         actual = (profile["intent"], profile["output_mode"], profile["needs_timeline"], profile["needs_chapters"])
         if actual != expected:
             raise AssertionError(f"bad research intent classification for {classifier_task!r}: {profile}")
+    if classify_research_intent("Напиши книгу на 5 глав о локальных агентах.").get("chapter_count") != 5:
+        raise AssertionError("research intent classifier should preserve requested book chapter count")
     print("[ok] research intent classifier")
 
     task = "Собери все известное о событиях Скалатракса и сделай реконструкцию."
@@ -202,11 +204,18 @@ def main() -> int:
     for artifact in [
         "/work/book-3-chapters/book_outline.json",
         "/work/book-3-chapters/chapter_plan.json",
+        "/work/book-3-chapters/chapters/chapter_01.md",
+        "/work/book-3-chapters/chapters/chapter_02.md",
+        "/work/book-3-chapters/chapters/chapter_03.md",
         "/work/book-3-chapters/manuscript_ru.md",
         "/work/book-3-chapters/manuscript.fb2",
     ]:
         if artifact not in book_payload["required_artifacts"]:
             raise AssertionError(f"book contract missing required artifact {artifact}: {book_payload}")
+    five_chapter_contract = build_research_writing_contract("Напиши book на 5 chapters о локальных агентах.", task_id="test-book-five")
+    five_chapter_artifacts = five_chapter_contract.to_dict()["required_artifacts"]
+    if "/work/book-5-chapters/chapters/chapter_05.md" not in five_chapter_artifacts or "/work/book-5-chapters/chapters/chapter_06.md" in five_chapter_artifacts:
+        raise AssertionError(f"book contract should create exactly the requested chapter artifacts: {five_chapter_artifacts}")
     book_plan = plan_research_writing("Напиши book на 3 chapters о локальных агентах.", task_id="test-book").to_dict()
     if (
         book_plan.get("oversight", {}).get("final_review", {}).get("deliverable_role") != "fb2"

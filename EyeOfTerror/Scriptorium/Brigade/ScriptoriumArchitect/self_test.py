@@ -58,6 +58,7 @@ def main() -> int:
                 "source_policy": "primary_and_secondary_sources_required",
                 "needs_timeline": False,
                 "needs_chapters": True,
+                "chapter_count": 5,
             }
         },
         "step": {
@@ -97,8 +98,10 @@ def main() -> int:
             raise AssertionError(f"synthesis plan should contain sections and evidence trace: {plan}")
         if plan.get("unsupported_sections"):
             raise AssertionError(f"supported corpus should not create unsupported sections: {plan}")
-        if len(outline.get("chapters", [])) != 3 or len(chapter_plan.get("chapters", [])) != 3:
-            raise AssertionError(f"book outline and chapter plan should have three baseline chapters: {outline} {chapter_plan}")
+        if plan.get("chapter_count") != 5 or outline.get("chapter_count") != 5 or chapter_plan.get("chapter_count") != 5:
+            raise AssertionError(f"book planning should preserve requested chapter count: {plan} {outline} {chapter_plan}")
+        if len(outline.get("chapters", [])) != 5 or len(chapter_plan.get("chapters", [])) != 5:
+            raise AssertionError(f"book outline and chapter plan should follow requested chapter count: {outline} {chapter_plan}")
         if outline.get("planning_method") != "model_guided_evidence_outline" or chapter_plan.get("chapters", [{}])[0].get("title") != "Модельная глава с доказательством":
             raise AssertionError(f"grounded model outline chapter should be accepted: {outline} {chapter_plan}")
         if "Недоказанная модельная глава" in json.dumps(chapter_plan, ensure_ascii=False):

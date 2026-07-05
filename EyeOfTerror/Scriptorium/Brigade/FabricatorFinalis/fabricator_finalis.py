@@ -101,12 +101,33 @@ def load_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def planned_book_chapter_filenames(workspace_root: Path, manifest_path: str) -> list[str]:
+    chapter_plan_path = sandbox_path(workspace_root, sibling_artifact(manifest_path, "chapter_plan.json"))
+    if not chapter_plan_path.exists():
+        return []
+    try:
+        chapter_plan = load_json(chapter_plan_path)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return []
+    filenames: list[str] = []
+    for index, chapter in enumerate(chapter_plan.get("chapters", []) if isinstance(chapter_plan.get("chapters"), list) else [], start=1):
+        if not isinstance(chapter, dict):
+            continue
+        chapter_id = str(chapter.get("chapter_id") or f"chapter_{index:02d}").strip()
+        if not chapter_id:
+            continue
+        filename = f"chapters/{chapter_id}.md"
+        if filename not in filenames:
+            filenames.append(filename)
+    return filenames
+
+
 def missing_artifact_revision_steps(missing: list[str]) -> list[dict[str, str]]:
     steps: list[dict[str, str]] = []
     seen: set[tuple[str, str, str]] = set()
     for artifact in missing:
         filename = artifact.rsplit("/", 1)[-1]
-        target = ARTIFACT_REWORK_TARGETS.get(filename)
+        target = ("draft_reconstruction", "ScriptoriumDaemon") if "/chapters/" in artifact and filename.endswith(".md") else ARTIFACT_REWORK_TARGETS.get(filename)
         if not target:
             continue
         step_id, worker = target
@@ -378,6 +399,9 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         for filename in ["book_outline.json", "chapter_plan.json", "continuity_report.json", "editor_report.json", "manuscript_ru.md", "manuscript.fb2"]:
             if filename not in package_files:
                 package_files.append(filename)
+        for filename in planned_book_chapter_filenames(workspace_root, manifest_path):
+            if filename not in package_files:
+                package_files.append(filename)
     for filename in package_files:
         artifact_path = sibling_artifact(manifest_path, filename)
         host_path = sandbox_path(workspace_root, artifact_path)
@@ -448,10 +472,16 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "corpus_requirements_satisfied": not bool(corpus_requirements.get("required")),
     }
     if output_mode in {"book_manuscript", "book_manuscript_with_timeline"}:
-        book_manifest_complete = all(
-            sandbox_path(workspace_root, sibling_artifact(manifest_path, filename)).exists()
-            for filename in ["book_outline.json", "chapter_plan.json", "continuity_report.json", "editor_report.json", "manuscript_ru.md", "manuscript.fb2"]
-        )
+        book_required_filenames = [
+            "book_outline.json",
+            "chapter_plan.json",
+            "continuity_report.json",
+            "editor_report.json",
+            "manuscript_ru.md",
+            "manuscript.fb2",
+            *planned_book_chapter_filenames(workspace_root, manifest_path),
+        ]
+        book_manifest_complete = all(sandbox_path(workspace_root, sibling_artifact(manifest_path, filename)).exists() for filename in book_required_filenames)
         readiness_checks["book_manifest_complete"] = book_manifest_complete
         continuity = {}
         editor = {}
@@ -470,7 +500,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         readiness_checks["book_continuity_ready"] = continuity.get("status") == "completed" if continuity else False
         readiness_checks["book_editor_ready"] = editor.get("status") == "completed" if editor else False
         if not book_manifest_complete:
-            readiness_blockers.append({"severity": "blocker", "message": "Book output is missing outline, chapter plan, manuscript, fb2, continuity, or editor artifact."})
+            readiness_blockers.append({"severity": "blocker", "message": "Book output is missing outline, chapter plan, chapters, manuscript, fb2, continuity, or editor artifact."})
         if book_manifest_complete and not readiness_checks["book_continuity_ready"]:
             readiness_blockers.append({"severity": "blocker", "message": f"Book continuity report is not completed: {continuity.get('status', 'missing')}."})
         if book_manifest_complete and not readiness_checks["book_editor_ready"]:
