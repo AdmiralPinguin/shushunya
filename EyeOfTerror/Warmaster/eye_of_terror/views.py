@@ -72,6 +72,11 @@ def payload_with_task_view(payload: dict[str, Any], fallback_task_id: str = "") 
         headline = "No active governor for this task"
         detail = str(payload.get("error") or next_action.get("reason") or error_code)
         severity = "warning"
+    elif error_code == "multi_governor_decomposition_required":
+        phase = "decomposition_required"
+        headline = "Task needs multiple governors"
+        detail = str(payload.get("error") or next_action.get("reason") or error_code)
+        severity = "warning"
     elif error_code in {"contract_workers_missing", "contract_workers_unavailable", "governor_workers_missing", "governor_workers_unavailable"}:
         phase = "brigade_blocked"
         headline = "Required workers are unavailable"

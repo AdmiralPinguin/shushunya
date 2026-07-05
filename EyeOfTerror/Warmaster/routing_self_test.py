@@ -32,8 +32,22 @@ def main() -> int:
     # A stronger match on an inactive governor must fall back to an active one
     # rather than dead-ending: this hits image (planned) and code (active) terms.
     mixed = route_message("нарисуй картинку и почини python код в репозитории")
-    if not mixed.ok or mixed.governor != "Ceraxia":
+    if not mixed.ok or mixed.governor != "Ceraxia" or mixed.requires_decomposition:
         raise AssertionError(f"inactive-governor tie should fall back to active: {mixed}")
+    code_investigation = route_message("исследуй источник ошибки и почини python код в приложении")
+    if not code_investigation.ok or code_investigation.governor != "Ceraxia" or code_investigation.requires_decomposition:
+        raise AssertionError(f"code investigation should stay with Ceraxia: {code_investigation}")
+    active_mixed = route_message("собери обзор источников по RISC-V и реализуй python демо код")
+    if (
+        not active_mixed.ok
+        or not active_mixed.requires_decomposition
+        or {item.get("name") for item in active_mixed.matched_governors if item.get("active")} != {"IskandarKhayon", "Ceraxia"}
+        or not active_mixed.supporting_governors
+    ):
+        raise AssertionError(f"active mixed-governor task should require decomposition: {active_mixed}")
+    route_payload = active_mixed.to_dict()
+    if not route_payload.get("matched_governors") or route_payload.get("requires_decomposition") is not True:
+        raise AssertionError(f"route payload should expose strategic routing diagnostics: {route_payload}")
     print("[ok] Warmaster routing")
     return 0
 

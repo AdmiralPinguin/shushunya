@@ -41,6 +41,8 @@ def gateway_capabilities() -> dict[str, Any]:
         "capabilities": [
             "model_backed_gateway_orchestration",
             "task_routing",
+            "multi_governor_route_detection",
+            "decomposition_required_preflight",
             "task_preflight",
             "task_prepare_orchestration",
             "task_submit_orchestration",

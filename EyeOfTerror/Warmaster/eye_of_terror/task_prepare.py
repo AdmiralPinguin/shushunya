@@ -224,7 +224,7 @@ def route_failure_payload(route: Any) -> dict[str, Any]:
         "error_code": error_code,
         "kind": route.kind,
         "governor": route.governor,
-        "route": {"kind": route.kind, "governor": route.governor, "ok": route.ok, "reason": route.reason},
+        "route": route.to_dict() if hasattr(route, "to_dict") else {"kind": route.kind, "governor": route.governor, "ok": route.ok, "reason": route.reason},
         "required_governor": required_governor,
         "actions": {
             "can_create_task": False,
@@ -269,6 +269,17 @@ def prepare_task(message: str, task_id: str | None, run_root: Path, governor_tra
     route = route_message(message)
     if not route.ok:
         return route_failure_payload(route)
+    if route.requires_decomposition:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "task requires multi-governor decomposition before a single run can be prepared",
+            "error_code": "multi_governor_decomposition_required",
+            "kind": route.kind,
+            "governor": route.governor,
+            "route": route.to_dict(),
+            "actions": task_preflight_actions(False, "multi_governor_decomposition_required", task_id or "", governor_transport=governor_transport, governor_host=governor_host, message=message),
+        }
     governor = route.governor
     governor_ref = governor_by_name(governor)
     if governor_ref is None or not governor_ref.active():
@@ -384,6 +395,17 @@ def preflight_task(
     route = route_message(message)
     if not route.ok:
         return route_failure_payload(route)
+    if route.requires_decomposition:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "task requires multi-governor decomposition before a single run can be prepared",
+            "error_code": "multi_governor_decomposition_required",
+            "kind": route.kind,
+            "governor": route.governor,
+            "route": route.to_dict(),
+            "actions": task_preflight_actions(False, "multi_governor_decomposition_required", task_id or "", include_brigade_health, governor_transport, governor_host, message),
+        }
     governor_ref = governor_by_name(route.governor)
     if governor_ref is None or not governor_ref.active():
         return {
@@ -446,7 +468,10 @@ def preflight_task(
         contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else {}
         oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else {}
     else:
-        plan = plan_lore_reconstruction(message, task_id=task_id)
+        if governor_ref.name == "Ceraxia":
+            plan = plan_code_task(message, task_id=task_id)
+        else:
+            plan = plan_lore_reconstruction(message, task_id=task_id)
         plan_payload = plan.to_dict()
         contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else plan.contract.to_dict()
         oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else {}
@@ -483,7 +508,7 @@ def preflight_task(
         "governor": governor_ref.name,
         "governor_transport": governor_transport,
         "task_id": resolved_task_id,
-        "route": {"kind": route.kind, "governor": route.governor},
+        "route": route.to_dict(),
         "contract_summary": contract_summary(contract),
         "governor_plan_actions": plan_payload.get("actions") if isinstance(plan_payload.get("actions"), dict) else {},
         "oversight_summary": compact_oversight_summary(oversight) if oversight else {},

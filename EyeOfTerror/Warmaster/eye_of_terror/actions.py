@@ -104,6 +104,14 @@ def task_preflight_actions(
             "body": {},
             "reason": "no active governor can accept this task",
         }
+    elif error_code == "multi_governor_decomposition_required":
+        next_action = {
+            "kind": "decompose_task",
+            "method": "POST",
+            "endpoint": "POST /task_preflight",
+            "body": retry_body,
+            "reason": "task matches multiple active governors and must be split before execution",
+        }
     elif include_brigade_health:
         next_action = {
             "kind": "inspect_preflight",
