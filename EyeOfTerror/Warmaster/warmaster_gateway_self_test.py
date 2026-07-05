@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import threading
 import time
@@ -18,6 +19,38 @@ from eye_of_terror.warmaster_gateway import brigade_readiness_summary, cancel_ht
 from eye_of_terror.ledger import TaskLedger
 from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction
 from eye_of_terror.pipeline import write_pipeline_run
+
+
+LOCAL_EXEC_TIMEOUT_SEC = 600
+
+
+def write_gateway_test_corpus(corpus_root: Path) -> None:
+    entries = [
+        ("kharn_eater_of_worlds.txt", "Kharn: Eater of Worlds", ["Skalathrax", "Kharn", "World Eaters"]),
+        ("lucius_faultless_blade.txt", "Lucius: The Faultless Blade", ["Skalathrax", "Lucius", "Emperor's Children"]),
+        ("weakness_of_others.txt", "The Weakness of Others", ["Skalathrax", "World Eaters", "aftermath"]),
+    ]
+    for filename, title, tags in entries:
+        path = corpus_root / filename
+        text = (
+            f"{title}\n"
+            "Skalathrax Kharn World Eaters Emperor's Children battle cold night shelters "
+            "direct event evidence primary narrative chronology. "
+        ) * 80
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        metadata = {
+            "title": title,
+            "language": "en",
+            "source_class": "official_primary_narrative",
+            "source_type": "book",
+            "type": "book",
+            "reliability": "user-provided-test-primary",
+            "tags": tags,
+            "aliases": tags,
+            "expected_use": "gateway self-test local primary text for comprehensive event reconstruction",
+        }
+        write_json(path.with_suffix(path.suffix + ".json"), metadata)
 
 
 def write_json(path: Path, payload: dict) -> None:
@@ -164,6 +197,10 @@ def main() -> int:
         raise AssertionError(f"compact readiness should fail soft on invalid host: {invalid_readiness}")
     with tempfile.TemporaryDirectory() as temp_dir:
         run_root = Path(temp_dir) / "runs"
+        corpus_root = Path(temp_dir) / "corpus"
+        write_gateway_test_corpus(corpus_root)
+        old_corpus_dir = os.environ.get("SHUSHUNYA_CORPUS_DIR")
+        os.environ["SHUSHUNYA_CORPUS_DIR"] = str(corpus_root)
         try:
             resolve_run_child_path(run_root / "x", str(Path(temp_dir) / "escape"), "work")
         except ValueError:
@@ -171,7 +208,7 @@ def main() -> int:
         else:
             raise AssertionError("run child path resolver accepted path outside run_dir")
         invalid_transport = warmaster_gateway.prepare_task(
-            "Собери все известное о событиях Скалатракса.",
+            "Исследуй Скалатракс и сделай report.",
             "invalid-transport-task",
             run_root,
             governor_transport="warp",
@@ -179,7 +216,7 @@ def main() -> int:
         invalid_transport_body = invalid_transport.get("actions", {}).get("next_action", {}).get("body", {})
         if (
             invalid_transport.get("error_code") != "invalid_governor_transport"
-            or invalid_transport_body.get("message") != "Собери все известное о событиях Скалатракса."
+            or invalid_transport_body.get("message") != "Исследуй Скалатракс и сделай report."
             or invalid_transport_body.get("task_id") != "invalid-transport-task"
             or invalid_transport_body.get("governor_transport") != "warp"
         ):
@@ -201,7 +238,7 @@ def main() -> int:
                     }
 
             task_prepare.plan_lore_reconstruction = lambda _message, task_id=None: type("BadPlan", (), {"contract": BadContract()})()
-            bad_contract = warmaster_gateway.prepare_task("Собери все известное о событиях Скалатракса.", "bad-contract", run_root)
+            bad_contract = warmaster_gateway.prepare_task("Исследуй Скалатракс и сделай report.", "bad-contract", run_root)
             if (
                 bad_contract.get("error_code") != "invalid_task_contract"
                 or bad_contract.get("actions", {}).get("next_action", {}).get("kind") != "inspect_governor"
@@ -234,7 +271,7 @@ def main() -> int:
 
             task_prepare.plan_lore_reconstruction = lambda _message, task_id=None: type("MissingWorkerPlan", (), {"contract": MissingWorkerContract()})()
             missing_worker_contract = warmaster_gateway.prepare_task(
-                "Собери все известное о событиях Скалатракса.",
+                "Исследуй Скалатракс и сделай report.",
                 "missing-worker-contract",
                 run_root,
             )
@@ -285,7 +322,7 @@ def main() -> int:
 
             task_prepare.plan_lore_reconstruction = lambda _message, task_id=None: PlannedWorkerPlan()
             planned_worker_contract = warmaster_gateway.prepare_task(
-                "Собери все известное о событиях Скалатракса.",
+                "Исследуй Скалатракс и сделай report.",
                 "planned-worker-contract",
                 run_root,
             )
@@ -296,7 +333,7 @@ def main() -> int:
             ):
                 raise AssertionError(f"Warmaster accepted a contract with a planned worker: {planned_worker_contract}")
             planned_worker_preflight = warmaster_gateway.preflight_task(
-                "Собери все известное о событиях Скалатракса.",
+                "Исследуй Скалатракс и сделай report.",
                 "planned-worker-contract",
                 run_root,
             )
@@ -305,7 +342,7 @@ def main() -> int:
         finally:
             task_prepare.plan_lore_reconstruction = original_planner
         try:
-            good_plan = original_planner("Собери все известное о событиях Скалатракса.", task_id="missing-oversight-contract")
+            good_plan = original_planner("Исследуй Скалатракс и сделай report.", task_id="missing-oversight-contract")
 
             class MissingOversightPlan:
                 contract = good_plan.contract
@@ -315,7 +352,7 @@ def main() -> int:
 
             task_prepare.plan_lore_reconstruction = lambda _message, task_id=None: MissingOversightPlan()
             missing_oversight_contract = warmaster_gateway.prepare_task(
-                "Собери все известное о событиях Скалатракса.",
+                "Исследуй Скалатракс и сделай report.",
                 "missing-oversight-contract",
                 run_root,
             )
@@ -352,7 +389,7 @@ def main() -> int:
                     }
 
             service_prepared = warmaster_gateway.prepare_task_via_governor_service(
-                "Собери все известное о событиях Скалатракса.",
+                "Исследуй Скалатракс и сделай report.",
                 "warmaster-governor-http-test",
                 run_root,
                 ServiceGovernor(),
@@ -373,7 +410,7 @@ def main() -> int:
                     port = bad_prepare_server.server_port
 
                 bad_prepared = warmaster_gateway.prepare_task_via_governor_service(
-                    "Собери все известное о событиях Скалатракса.",
+                    "Исследуй Скалатракс и сделай report.",
                     "warmaster-governor-bad-prepare-test",
                     run_root,
                     BadPrepareGovernor(),
@@ -385,7 +422,7 @@ def main() -> int:
                 ):
                     raise AssertionError(f"Warmaster accepted invalid governor-prepared run package: {bad_prepared}")
                 bad_dispatch_prepared = warmaster_gateway.prepare_task_via_governor_service(
-                    "Собери все известное о событиях Скалатракса.",
+                    "Исследуй Скалатракс и сделай report.",
                     "warmaster-governor-bad-dispatch-test",
                     run_root,
                     BadPrepareGovernor(),
@@ -398,7 +435,7 @@ def main() -> int:
                 ):
                     raise AssertionError(f"Warmaster accepted invalid governor-prepared dispatch: {bad_dispatch_prepared}")
                 bad_worker_prepared = warmaster_gateway.prepare_task_via_governor_service(
-                    "Собери все известное о событиях Скалатракса.",
+                    "Исследуй Скалатракс и сделай report.",
                     "warmaster-governor-bad-worker-test",
                     run_root,
                     BadPrepareGovernor(),
@@ -417,7 +454,7 @@ def main() -> int:
             brigade.worker_refs = lambda: []
             try:
                 missing_workers = warmaster_gateway.prepare_task_via_governor_service(
-                    "Собери все известное о событиях Скалатракса.",
+                    "Исследуй Скалатракс и сделай report.",
                     "warmaster-governor-missing-workers-test",
                     run_root,
                     ServiceGovernor(),
@@ -442,20 +479,20 @@ def main() -> int:
                 gateway_base = f"http://127.0.0.1:{gateway_server.server_port}"
                 service_task = request_json(
                     gateway_base + "/task",
-                    {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-default-http-governor-test"},
+                    {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-default-http-governor-test"},
                 )
                 if service_task.get("governor_transport") != "http" or not service_task.get("ok"):
                     raise AssertionError(f"gateway did not use default http governor transport: {service_task}")
                 service_preflight = request_json(
                     gateway_base + "/task_preflight",
-                    {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-default-http-preflight-test"},
+                    {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-default-http-preflight-test"},
                 )
                 service_preflight_body = service_preflight.get("actions", {}).get("next_action", {}).get("body", {})
                 if (
                     not service_preflight.get("ok")
                     or service_preflight.get("governor_transport") != "http"
                     or service_preflight.get("governor_plan_actions", {}).get("next_action", {}).get("kind") != "prepare_run"
-                    or service_preflight_body.get("message") != "Собери все известное о событиях Скалатракса."
+                    or service_preflight_body.get("message") != "Исследуй Скалатракс и сделай report."
                     or service_preflight_body.get("governor_transport") != "http"
                     or service_preflight_body.get("task_id") != "warmaster-default-http-preflight-test"
                 ):
@@ -690,7 +727,7 @@ def main() -> int:
             try:
                 request_json(
                     base + "/task",
-                    {"message": "Собери все известное о событиях Скалатракса.", "task_id": "../escape"},
+                    {"message": "Исследуй Скалатракс и сделай report.", "task_id": "../escape"},
                 )
             except urllib.error.HTTPError as exc:
                 if exc.code != 400:
@@ -706,7 +743,7 @@ def main() -> int:
                 raise AssertionError("unsafe task_id should be rejected")
             preflight = request_json(
                 base + "/task_preflight",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-preflight-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-preflight-test"},
             )
             preflight_steps = preflight.get("contract_summary", {}).get("steps", [])
             preflight_action_body = preflight.get("actions", {}).get("next_action", {}).get("body", {})
@@ -724,7 +761,7 @@ def main() -> int:
                 or preflight.get("oversight_summary", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
                 or not preflight.get("oversight_validation", {}).get("ok")
                 or preflight.get("actions", {}).get("can_create_task") is not True
-                or preflight_action_body.get("message") != "Собери все известное о событиях Скалатракса."
+                or preflight_action_body.get("message") != "Исследуй Скалатракс и сделай report."
                 or preflight_action_body.get("task_id") != "warmaster-preflight-test"
                 or preflight.get("actions", {}).get("next_action", {}).get("kind") != "create_task"
                 or preflight.get("actions", {}).get("next_action", {}).get("method") != "POST"
@@ -740,7 +777,7 @@ def main() -> int:
             preflight_with_readiness = request_json(
                 base + "/task_preflight",
                 {
-                    "message": "Собери все известное о событиях Скалатракса.",
+                    "message": "Исследуй Скалатракс и сделай report.",
                     "task_id": "warmaster-preflight-readiness-test",
                     "include_brigade_health": True,
                 },
@@ -755,7 +792,7 @@ def main() -> int:
             orchestrated = request_json(
                 base + "/orchestrate",
                 {
-                    "message": "Собери все известное о событиях Скалатракса.",
+                    "message": "Исследуй Скалатракс и сделай report.",
                     "task_id": "warmaster-orchestrate-test",
                     "run_mode": "local",
                     "timeout_sec": 180,
@@ -780,7 +817,7 @@ def main() -> int:
                 orchestrated_state.get("phase") != "ready_to_start"
                 or not orchestrated_state.get("decision", {}).get("can_start")
                 or orchestrated_state.get("display", {}).get("headline") != "Run is ready to start"
-                or orchestrated_state.get("display", {}).get("progress", {}).get("planned_steps") != 9
+                or orchestrated_state.get("display", {}).get("progress", {}).get("planned_steps") != 10
                 or orchestrated_state.get("next_action", {}).get("kind") != "start"
                 or orchestrated_state.get("client_action", {}).get("path") != "/runs/warmaster-orchestrate-test/start_http"
                 or orchestrated_state.get("snapshot", {}).get("summary", {}).get("task_id") != "warmaster-orchestrate-test"
@@ -806,7 +843,7 @@ def main() -> int:
             orchestrated_run = request_json(
                 base + "/orchestrate_run",
                 {
-                    "message": "Собери все известное о событиях Скалатракса.",
+                    "message": "Исследуй Скалатракс и сделай report.",
                     "task_id": "warmaster-orchestrate-run-test",
                     "run_mode": "local",
                     "timeout_sec": 180,
@@ -835,7 +872,7 @@ def main() -> int:
             orchestrated_retry = request_json(
                 base + "/orchestrate_run",
                 {
-                    "message": "Собери все известное о событиях Скалатракса.",
+                    "message": "Исследуй Скалатракс и сделай report.",
                     "task_id": "warmaster-orchestrate-run-test",
                     "run_mode": "local",
                     "auto_start": False,
@@ -856,7 +893,7 @@ def main() -> int:
                 raise AssertionError(f"one-shot orchestration retry did not reuse existing run: {orchestrated_retry}")
             task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-test"},
             )
             if (
                 not task.get("ok")
@@ -892,7 +929,7 @@ def main() -> int:
             try:
                 request_json(
                     base + "/task",
-                    {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-test"},
+                    {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-test"},
                 )
             except urllib.error.HTTPError as exc:
                 if exc.code != 409:
@@ -908,7 +945,7 @@ def main() -> int:
             try:
                 request_json(
                     base + "/task_preflight",
-                    {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-test"},
+                    {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-test"},
                 )
             except urllib.error.HTTPError as exc:
                 if exc.code != 409:
@@ -957,7 +994,7 @@ def main() -> int:
                 raise AssertionError(f"bad local run preflight: {run_preflight}")
             completed_preflight_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-completed-preflight-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-completed-preflight-test"},
             )
             completed_ledger_path = Path(completed_preflight_task["run_dir"], "task_ledger.json")
             completed_ledger = json.loads(completed_ledger_path.read_text(encoding="utf-8"))
@@ -978,7 +1015,7 @@ def main() -> int:
                 raise AssertionError(f"completed run preflight should preserve run-status action gates: {completed_preflight}")
             missing_oversight_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-missing-oversight-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-missing-oversight-test"},
             )
             Path(missing_oversight_task["run_dir"], "oversight.json").unlink()
             try:
@@ -997,7 +1034,7 @@ def main() -> int:
                 raise AssertionError("run preflight should fail when oversight.json is missing")
             bad_oversight_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-bad-oversight-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-bad-oversight-test"},
             )
             bad_oversight_path = Path(bad_oversight_task["run_dir"], "oversight.json")
             bad_oversight_payload = json.loads(bad_oversight_path.read_text(encoding="utf-8"))
@@ -1019,7 +1056,7 @@ def main() -> int:
                 raise AssertionError(f"summary should block actions for inconsistent oversight: {bad_oversight_summary}")
             bad_revision_policy_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-bad-revision-policy-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-bad-revision-policy-test"},
             )
             bad_revision_policy_path = Path(bad_revision_policy_task["run_dir"], "oversight.json")
             bad_revision_policy_payload = json.loads(bad_revision_policy_path.read_text(encoding="utf-8"))
@@ -1042,7 +1079,7 @@ def main() -> int:
                 raise AssertionError(f"summary should block bad revision policy: {bad_revision_policy_summary}")
             bad_quality_matrix_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-bad-quality-matrix-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-bad-quality-matrix-test"},
             )
             bad_quality_matrix_path = Path(bad_quality_matrix_task["run_dir"], "oversight.json")
             bad_quality_matrix_payload = json.loads(bad_quality_matrix_path.read_text(encoding="utf-8"))
@@ -1086,7 +1123,7 @@ def main() -> int:
                 raise AssertionError(f"bad oversight diagnostics should expose client state: {bad_oversight_direct}")
             bad_package_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-bad-package-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-bad-package-test"},
             )
             Path(bad_package_task["run_dir"], "dispatch", "source_discovery.json").write_text("{", encoding="utf-8")
             bad_package_summary = request_json(base + "/runs/warmaster-bad-package-test/summary")
@@ -1194,8 +1231,8 @@ def main() -> int:
                 or run_summary.get("display", {}).get("headline") != "Run is ready to start"
                 or run_summary.get("client_action", {}).get("path") != "/runs/warmaster-test/start_http"
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
-                or run_summary.get("summary", {}).get("oversight_summary", {}).get("quality_gate_count") != 6
-                or run_summary.get("summary", {}).get("oversight_summary", {}).get("step_quality_matrix_count") != 9
+                or run_summary.get("summary", {}).get("oversight_summary", {}).get("quality_gate_count") != 9
+                or run_summary.get("summary", {}).get("oversight_summary", {}).get("step_quality_matrix_count") != 10
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("step_quality_check_count", 0) < 8
                 or run_summary.get("summary", {}).get("oversight_summary", {}).get("iteration_policy", {}).get("recommended_endpoint") != "POST /runs/{task_id}/start_research_loop_http"
                 or run_summary.get("summary", {}).get("progress", {}).get("next_step_id") != "corpus_ingestion"
@@ -1203,7 +1240,7 @@ def main() -> int:
                 or run_summary.get("summary", {}).get("progress", {}).get("ready_step_ids") != ["corpus_ingestion"]
                 or "fact_extraction" not in run_summary.get("summary", {}).get("progress", {}).get("waiting_step_ids", [])
                 or run_summary.get("summary", {}).get("progress", {}).get("ready_steps") != 1
-                or run_summary.get("summary", {}).get("progress", {}).get("waiting_steps") != 8
+                or run_summary.get("summary", {}).get("progress", {}).get("waiting_steps") != 9
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("worker") != "CorpusIngestor"
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("status") != "pending"
                 or run_summary.get("summary", {}).get("progress", {}).get("step_states", [{}])[0].get("quality_hints", {}).get("check_count", 0) < 1
@@ -1256,8 +1293,8 @@ def main() -> int:
             if (
                 not package.get("ok")
                 or not package.get("validation", {}).get("ok")
-                or package.get("contract_summary", {}).get("step_count") != 9
-                or package.get("dispatch_count") != 9
+                or package.get("contract_summary", {}).get("step_count") != 10
+                or package.get("dispatch_count") != 10
                 or not package.get("files", {}).get("oversight")
                 or package.get("phase") != "ready_to_start"
                 or package.get("next_action", {}).get("kind") != "start"
@@ -1334,7 +1371,7 @@ def main() -> int:
             if (
                 not run_list.get("ok")
                 or run_list.get("run_summary", {}).get("total", 0) < 1
-                or not any(item.get("task_id") == "warmaster-test" and item.get("progress", {}).get("planned_steps") == 9 for item in run_list.get("runs", []))
+                or not any(item.get("task_id") == "warmaster-test" and item.get("progress", {}).get("planned_steps") == 10 for item in run_list.get("runs", []))
                 or not any(item.get("task_id") == "warmaster-test" and "headline" in item.get("display", {}) for item in run_list.get("orchestration_cards", []))
             ):
                 raise AssertionError(f"bad run list: {run_list}")
@@ -1348,13 +1385,13 @@ def main() -> int:
                 raise AssertionError(f"bad limited run list: {limited_run_list}")
             restricted_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-restricted-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-restricted-test"},
             )
             restricted_run_dir = Path(restricted_task["run_dir"])
             restricted = request_json(
                 base + "/runs/warmaster-restricted-test/execute_local",
-                {"step_ids": ["corpus_ingestion"], "timeout_sec": 180},
-                timeout=180,
+                {"step_ids": ["corpus_ingestion"], "timeout_sec": LOCAL_EXEC_TIMEOUT_SEC},
+                timeout=LOCAL_EXEC_TIMEOUT_SEC,
             )
             if (
                 not restricted.get("ok")
@@ -1375,14 +1412,22 @@ def main() -> int:
             restricted_pending = resume_step_ids_from_run(restricted_run_dir)
             if not restricted_pending or restricted_pending[0] != "source_discovery" or "corpus_ingestion" in restricted_pending:
                 raise AssertionError(f"restricted execution did not expose resumable pending steps: {restricted_pending}")
-            restricted_resumed = request_json(base + "/runs/warmaster-restricted-test/resume_local", {"timeout_sec": 180}, timeout=180)
+            restricted_resumed = request_json(
+                base + "/runs/warmaster-restricted-test/resume_local",
+                {"timeout_sec": LOCAL_EXEC_TIMEOUT_SEC},
+                timeout=LOCAL_EXEC_TIMEOUT_SEC,
+            )
             if (
                 not restricted_resumed.get("ok")
                 or restricted_resumed.get("next_action", {}).get("kind") != "resume"
                 or restricted_resumed.get("client_action", {}).get("path") != "/runs/warmaster-restricted-test/start_resume_http"
             ):
                 raise AssertionError(f"restricted run did not resume cleanly: {restricted_resumed}")
-            executed = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 180}, timeout=180)
+            executed = request_json(
+                base + "/runs/warmaster-test/execute_local",
+                {"timeout_sec": LOCAL_EXEC_TIMEOUT_SEC},
+                timeout=LOCAL_EXEC_TIMEOUT_SEC,
+            )
             if (
                 not executed.get("ok")
                 or executed.get("phase") != "completed"
@@ -1507,7 +1552,12 @@ def main() -> int:
             ):
                 raise AssertionError(f"bad artifact text response: {text_artifact}")
             reconstruction_text = request_json(base + "/runs/warmaster-test/artifact_text?path=/work/skalathrax/reconstruction_ru.md")
-            if not reconstruction_text.get("ok") or "Реконструкция" not in reconstruction_text.get("text", ""):
+            reconstruction_body = reconstruction_text.get("text", "")
+            if (
+                not reconstruction_text.get("ok")
+                or "Output mode: research_report" not in reconstruction_body
+                or "Evidence trace:" not in reconstruction_body
+            ):
                 raise AssertionError(f"bad expanded artifact text response: {reconstruction_text}")
             final_package = request_json(base + "/runs/warmaster-test/final?max_bytes=1000")
             reconstruction_preview = next(
@@ -1519,7 +1569,7 @@ def main() -> int:
                 or final_package.get("summary", {}).get("status") != "ready"
                 or final_package.get("deliverable") != "/work/skalathrax/reconstruction_ru.md"
                 or final_package.get("manifest", {}).get("status") != "ready"
-                or "Реконструкция" not in reconstruction_preview.get("preview", {}).get("text", "")
+                or "Output mode: research_report" not in reconstruction_preview.get("preview", {}).get("text", "")
                 or final_package.get("phase") != "completed"
                 or final_package.get("client_action", {}).get("path") != "/runs/warmaster-test/final"
                 or not final_package.get("display", {}).get("headline")
@@ -1580,7 +1630,11 @@ def main() -> int:
             if event_types.count("task_created") != 1:
                 raise AssertionError(f"ledger should preserve original task_created event: {ledger}")
             try:
-                request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 180}, timeout=180)
+                request_json(
+                    base + "/runs/warmaster-test/execute_local",
+                    {"timeout_sec": LOCAL_EXEC_TIMEOUT_SEC},
+                    timeout=LOCAL_EXEC_TIMEOUT_SEC,
+                )
             except urllib.error.HTTPError as exc:
                 if exc.code != 409:
                     raise
@@ -1589,12 +1643,16 @@ def main() -> int:
                     raise AssertionError(f"bad rerun block response: {blocked}")
             else:
                 raise AssertionError("completed run should not execute again without force=true")
-            forced = request_json(base + "/runs/warmaster-test/execute_local", {"timeout_sec": 180, "force": True}, timeout=180)
+            forced = request_json(
+                base + "/runs/warmaster-test/execute_local",
+                {"timeout_sec": LOCAL_EXEC_TIMEOUT_SEC, "force": True},
+                timeout=LOCAL_EXEC_TIMEOUT_SEC,
+            )
             if not forced.get("ok"):
                 raise AssertionError(f"forced rerun failed: {forced}")
             resume_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-resume-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-resume-test"},
             )
             if not resume_task.get("ok"):
                 raise AssertionError(f"bad resume task response: {resume_task}")
@@ -1618,7 +1676,11 @@ def main() -> int:
                 or resume_orchestration.get("decision", {}).get("recommended_kind") != "resume"
             ):
                 raise AssertionError(f"interrupted run did not expose orchestration resume decision: {resume_orchestration}")
-            resumed = request_json(base + "/runs/warmaster-resume-test/resume_local", {"timeout_sec": 180}, timeout=180)
+            resumed = request_json(
+                base + "/runs/warmaster-resume-test/resume_local",
+                {"timeout_sec": LOCAL_EXEC_TIMEOUT_SEC},
+                timeout=LOCAL_EXEC_TIMEOUT_SEC,
+            )
             if (
                 not resumed.get("ok")
                 or resumed.get("phase") != "completed"
@@ -1633,7 +1695,7 @@ def main() -> int:
                 raise AssertionError(f"resume execution was not recorded: {resumed_ledger}")
             partial_resume = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-partial-resume-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-partial-resume-test"},
             )
             if not partial_resume.get("ok"):
                 raise AssertionError(f"bad partial resume task response: {partial_resume}")
@@ -1711,7 +1773,7 @@ def main() -> int:
                 raise AssertionError(f"revision-required run did not expose orchestration revision decision: {revision_orchestration}")
             failed_revision_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-failed-revision-actions-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-failed-revision-actions-test"},
             )
             failed_revision_dir = Path(failed_revision_task["run_dir"])
             failed_revision_ledger_path = failed_revision_dir / "task_ledger.json"
@@ -1730,7 +1792,7 @@ def main() -> int:
                 raise AssertionError(f"revision-required failed run exposed unsafe actions: {failed_revision_summary}")
             interrupted_revision_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-interrupted-revision-actions-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-interrupted-revision-actions-test"},
             )
             interrupted_revision_dir = Path(interrupted_revision_task["run_dir"])
             interrupted_revision_ledger_path = interrupted_revision_dir / "task_ledger.json"
@@ -1748,7 +1810,7 @@ def main() -> int:
                 raise AssertionError(f"revision-required interrupted run should prefer revision action: {interrupted_revision_summary}")
             invalid_revision_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-invalid-revision-plan-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-invalid-revision-plan-test"},
             )
             invalid_revision_dir = Path(invalid_revision_task["run_dir"])
             invalid_revision_ledger_path = invalid_revision_dir / "task_ledger.json"
@@ -1788,7 +1850,7 @@ def main() -> int:
                 raise AssertionError("invalid revision plan should not produce revision step ids")
             incomplete_downstream_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-incomplete-downstream-revision-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-incomplete-downstream-revision-test"},
             )
             incomplete_downstream_dir = Path(incomplete_downstream_task["run_dir"])
             incomplete_downstream_ledger_path = incomplete_downstream_dir / "task_ledger.json"
@@ -1816,7 +1878,7 @@ def main() -> int:
                 raise AssertionError(f"incomplete downstream revision plan was accepted: {incomplete_downstream_summary}")
             corpus_revision_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-corpus-revision-plan-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-corpus-revision-plan-test"},
             )
             corpus_revision_dir = Path(corpus_revision_task["run_dir"])
             corpus_revision_ledger_path = corpus_revision_dir / "task_ledger.json"
@@ -1861,16 +1923,23 @@ def main() -> int:
                         "priority": "blocker",
                     },
                     {
-                        "step_id": "timeline",
+                        "step_id": "structure_mapping",
                         "worker": "Chronologis",
-                        "reason": "timeline must be rebuilt from revised evidence",
+                        "reason": "structure map must be rebuilt from revised evidence",
+                        "source": "self_test",
+                        "priority": "blocker",
+                    },
+                    {
+                        "step_id": "synthesis_planning",
+                        "worker": "ScriptoriumArchitect",
+                        "reason": "synthesis plan must be rebuilt from revised evidence and structure",
                         "source": "self_test",
                         "priority": "blocker",
                     },
                     {
                         "step_id": "draft_reconstruction",
                         "worker": "ScriptoriumDaemon",
-                        "reason": "draft must be rebuilt from revised timeline",
+                        "reason": "draft must be rebuilt from revised synthesis plan",
                         "source": "self_test",
                         "priority": "blocker",
                     },
@@ -1894,7 +1963,8 @@ def main() -> int:
                 "source_acquisition",
                 "source_rendering",
                 "fact_extraction",
-                "timeline",
+                "structure_mapping",
+                "synthesis_planning",
                 "draft_reconstruction",
                 "critic_review",
                 "finalize",
@@ -1905,7 +1975,7 @@ def main() -> int:
                 raise AssertionError(f"bad revision step expansion: {revision_steps}")
             policy_order_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-revision-policy-order-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-revision-policy-order-test"},
             )
             policy_order_dir = Path(policy_order_task["run_dir"])
             policy_order_ledger_path = policy_order_dir / "task_ledger.json"
@@ -1921,7 +1991,7 @@ def main() -> int:
                 raise AssertionError(f"revision execution did not follow oversight policy order: {policy_order_steps}")
             policy_allowed_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-revision-policy-allowed-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-revision-policy-allowed-test"},
             )
             policy_allowed_dir = Path(policy_allowed_task["run_dir"])
             policy_allowed_ledger_path = policy_allowed_dir / "task_ledger.json"
@@ -1942,8 +2012,8 @@ def main() -> int:
                 raise AssertionError(f"revision policy allowed_steps did not block disallowed revision: {policy_allowed_summary}")
             revision_execution = request_json(
                 base + "/runs/warmaster-test/execute_revision_local",
-                {"timeout_sec": 180},
-                timeout=180,
+                {"timeout_sec": LOCAL_EXEC_TIMEOUT_SEC},
+                timeout=LOCAL_EXEC_TIMEOUT_SEC,
             )
             if (
                 not revision_execution.get("ok")
@@ -1964,14 +2034,14 @@ def main() -> int:
                 raise AssertionError(f"revision execution event missing from ledger: {revision_ledger}")
             loop_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-research-loop-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-research-loop-test"},
             )
             if not loop_task.get("ok"):
                 raise AssertionError(f"bad research loop task response: {loop_task}")
             loop_result = request_json(
                 base + "/runs/warmaster-research-loop-test/research_loop_local",
-                {"timeout_sec": 180, "max_revision_cycles": 2},
-                timeout=90,
+                {"timeout_sec": LOCAL_EXEC_TIMEOUT_SEC, "max_revision_cycles": 2},
+                timeout=LOCAL_EXEC_TIMEOUT_SEC,
             )
             if (
                 not loop_result.get("ok")
@@ -1987,7 +2057,7 @@ def main() -> int:
                 raise AssertionError(f"research loop events missing from ledger: {loop_ledger}")
             repeated_loop_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-research-loop-repeat-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-research-loop-repeat-test"},
             )
             repeated_loop_dir = Path(repeated_loop_task["run_dir"])
             repeated_loop_ledger_path = repeated_loop_dir / "task_ledger.json"
@@ -1998,8 +2068,8 @@ def main() -> int:
             try:
                 repeated_result = request_json(
                     base + "/runs/warmaster-research-loop-repeat-test/research_loop_local",
-                    {"timeout_sec": 180, "max_revision_cycles": 0},
-                    timeout=180,
+                    {"timeout_sec": LOCAL_EXEC_TIMEOUT_SEC, "max_revision_cycles": 0},
+                    timeout=LOCAL_EXEC_TIMEOUT_SEC,
                 )
             except urllib.error.HTTPError as exc:
                 if exc.code != 409:
@@ -2009,7 +2079,7 @@ def main() -> int:
                 raise AssertionError(f"research loop did not honor revision cycle limit: {repeated_result}")
             unsafe_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-unsafe-workspace-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-unsafe-workspace-test"},
             )
             if not unsafe_task.get("ok"):
                 raise AssertionError(f"bad unsafe workspace task response: {unsafe_task}")
@@ -2043,18 +2113,21 @@ def main() -> int:
                 raise AssertionError("execute_local should reject workspace_root outside run_dir")
             background_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-background-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-background-test"},
             )
             if not background_task.get("ok"):
                 raise AssertionError(f"bad background task response: {background_task}")
-            started = request_json(base + "/runs/warmaster-background-test/start_local", {"timeout_sec": 180})
+            started = request_json(
+                base + "/runs/warmaster-background-test/start_local",
+                {"timeout_sec": LOCAL_EXEC_TIMEOUT_SEC},
+            )
             if (
                 started.get("status") != "started"
                 or started.get("next_action", {}).get("kind") != "poll"
                 or started.get("client_action", {}).get("path") != "/runs/warmaster-background-test/snapshot"
             ):
                 raise AssertionError(f"background start failed: {started}")
-            for _ in range(150):
+            for _ in range(max(150, LOCAL_EXEC_TIMEOUT_SEC * 5)):
                 background_ledger = request_json(base + "/runs/warmaster-background-test/ledger")
                 if background_ledger["ledger"].get("status") == "completed":
                     break
@@ -2066,7 +2139,7 @@ def main() -> int:
                 raise AssertionError(f"background start event missing: {background_ledger}")
             cancel_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-cancel-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-cancel-test"},
             )
             if not cancel_task.get("ok"):
                 raise AssertionError(f"bad cancel task response: {cancel_task}")
@@ -2142,7 +2215,7 @@ def main() -> int:
                 raise AssertionError(f"recovery endpoint did not expose blocked display state: {recovery_endpoint}")
             bulk_task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-bulk-recovery-test"},
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-bulk-recovery-test"},
             )
             if not bulk_task.get("ok"):
                 raise AssertionError(f"bad bulk recovery task response: {bulk_task}")
@@ -2161,7 +2234,7 @@ def main() -> int:
                 or bulk_recovery.get("display", {}).get("headline") != "Recovery is ready"
             ):
                 raise AssertionError(f"recovery endpoint should expose startable resume packages: {recovery_with_bulk}")
-            bulk_timeout_sec = 90
+            bulk_timeout_sec = LOCAL_EXEC_TIMEOUT_SEC
             bulk_started = request_json(base + "/recovery/start_resume_local", {"timeout_sec": bulk_timeout_sec}, timeout=120)
             if (
                 bulk_started.get("started", 0) < 1
@@ -2195,7 +2268,7 @@ def main() -> int:
             server.shutdown()
             thread.join(timeout=120)
         startup_run = warmaster_gateway.prepare_task(
-            "Собери все известное о событиях Скалатракса.",
+            "Исследуй Скалатракс и сделай report.",
             "warmaster-startup-recover-test",
             run_root,
         )
@@ -2209,6 +2282,10 @@ def main() -> int:
         startup_ledger_after = TaskLedger.load(startup_ledger_path).to_dict()
         if startup_ledger_after.get("status") != "interrupted":
             raise AssertionError(f"startup recovery did not persist interrupted status: {startup_ledger_after}")
+        if old_corpus_dir is None:
+            os.environ.pop("SHUSHUNYA_CORPUS_DIR", None)
+        else:
+            os.environ["SHUSHUNYA_CORPUS_DIR"] = old_corpus_dir
     print("[ok] Warmaster gateway")
     return 0
 

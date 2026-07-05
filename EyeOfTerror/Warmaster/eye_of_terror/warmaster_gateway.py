@@ -218,6 +218,19 @@ def gateway_state(run_root: Path, run_limit: int = 20, include_health: bool = Fa
     return payload
 
 
+def execution_response_status(summary: dict[str, Any], post_summary: dict[str, Any]) -> int:
+    if summary.get("ok"):
+        return 200
+    revision_plan = summary.get("revision_plan") if isinstance(summary.get("revision_plan"), dict) else {}
+    post_revision_plan = post_summary.get("revision_plan") if isinstance(post_summary.get("revision_plan"), dict) else {}
+    summary_result = summary.get("result") if isinstance(summary.get("result"), dict) else {}
+    post_result = post_summary.get("result") if isinstance(post_summary.get("result"), dict) else {}
+    final_status = str(summary.get("status") or summary_result.get("status") or post_result.get("status") or "").lower()
+    if revision_plan.get("required") or post_revision_plan.get("required") or final_status in {"blocked", "needs_revision"}:
+        return 409
+    return 500
+
+
 def make_handler(run_root: Path, default_governor_transport: str = "local", default_governor_host: str = "127.0.0.1") -> type[BaseHTTPRequestHandler]:
     class WarmasterHandler(BaseHTTPRequestHandler):
         server_version = "WarmasterGateway/0.1"
@@ -984,7 +997,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     post_view = orchestration_view_fields(post_summary, task_id=task_id)
                     response(
                         self,
-                        200 if summary.get("ok") else 500,
+                        execution_response_status(summary, post_summary),
                         {
                             "ok": bool(summary.get("ok")),
                             "summary": summary,
