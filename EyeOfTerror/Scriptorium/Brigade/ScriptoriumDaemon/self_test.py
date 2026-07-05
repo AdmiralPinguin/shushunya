@@ -5,12 +5,36 @@ import json
 import tempfile
 from pathlib import Path
 
-from scriptorium_daemon import run
+from scriptorium_daemon import run as run_with_model
 
 
 def write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def fake_guidance(role: str, payload: dict, instructions: str) -> dict:
+    if role != "ScriptoriumDaemon":
+        raise AssertionError(f"unexpected role: {role}")
+    if not payload.get("timeline"):
+        raise AssertionError(f"writer model payload should include timeline: {payload}")
+    return {
+        "ok": True,
+        "status": "answered",
+        "role": role,
+        "content": json.dumps(
+            {
+                "status": "draft_augmented",
+                "appendix_markdown": "Модельная редактура сохранила источниковые ограничения и усилила связность черновика.",
+                "warnings": [],
+            },
+            ensure_ascii=False,
+        ),
+    }
+
+
+def run(request: dict, root: Path) -> dict:
+    return run_with_model(request, root, request_guidance=fake_guidance)
 
 
 def main() -> int:
@@ -156,6 +180,13 @@ def main() -> int:
             raise AssertionError("coverage report should preserve generic evidence lead metadata")
         if "Revision Context" not in coverage or "Source step: critic_review" not in coverage:
             raise AssertionError("coverage report should expose revision context")
+        if "Модельная редактура" not in reconstruction or "усилила связность" not in reconstruction:
+            raise AssertionError("reconstruction should include model writer guidance")
+        if "Model Guidance" not in coverage or "Status: answered" not in coverage:
+            raise AssertionError("coverage report should record model writer guidance")
+        guidance = json.loads((base / "scriptorium_model_guidance.json").read_text(encoding="utf-8"))
+        if guidance.get("status") != "answered":
+            raise AssertionError(f"model guidance artifact missing status: {guidance}")
     print("[ok] ScriptoriumDaemon draft")
     return 0
 

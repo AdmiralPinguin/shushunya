@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 EVENT_PLAYBOOK_DIR = Path(__file__).resolve().parents[1] / "NoosphericExtractor" / "playbooks"
+BRIGADE_ROOT = Path(__file__).resolve().parents[1]
+if str(BRIGADE_ROOT) not in sys.path:
+    sys.path.insert(0, str(BRIGADE_ROOT))
+
+from scriptorium_model import parsed_model_content, request_scriptorium_model_guidance  # noqa: E402
+
+GuidanceFn = Callable[[str, dict[str, Any], str], dict[str, Any]]
 
 ARTIFACT_REWORK_TARGETS = {
     "corpus_index.json": ("corpus_ingestion", "CorpusIngestor"),
@@ -656,7 +664,80 @@ def quality_expectation_findings(request: dict[str, Any]) -> list[dict[str, str]
     return findings
 
 
-def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
+def model_review_payload(
+    request: dict[str, Any],
+    source_map: dict[str, Any],
+    notes: dict[str, Any],
+    timeline: dict[str, Any],
+    reconstruction: str,
+    coverage: str,
+    findings: list[dict[str, str]],
+    warnings: list[dict[str, str]],
+    comprehensive_metrics: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "task_id": request.get("task_id"),
+        "step": request.get("step"),
+        "contract": request.get("contract") if isinstance(request.get("contract"), dict) else {},
+        "quality_expectations": quality_expectation_summary(request),
+        "hard_findings": findings,
+        "hard_warnings": warnings,
+        "metrics": {
+            "source_count": len(source_map.get("sources", [])) if isinstance(source_map.get("sources"), list) else 0,
+            "event_note_count": len(notes.get("events", [])) if isinstance(notes.get("events"), list) else 0,
+            "timeline_count": len(timeline.get("timeline", [])) if isinstance(timeline.get("timeline"), list) else 0,
+            "draft_chars": len(reconstruction),
+            "comprehensive_depth": comprehensive_metrics,
+        },
+        "source_map": source_map,
+        "direct_event_notes": notes,
+        "timeline": timeline,
+        "reconstruction_preview": reconstruction[:26000],
+        "coverage_report_preview": coverage[:14000],
+    }
+
+
+def model_review_findings(decision: dict[str, Any]) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    if not decision.get("ok"):
+        return [], [
+            {
+                "severity": "warning",
+                "message": f"Model critic unavailable: {decision.get('error') or decision.get('status') or 'unknown error'}",
+            }
+        ]
+    parsed = parsed_model_content(decision)
+    blockers: list[dict[str, str]] = []
+    warnings: list[dict[str, str]] = []
+    for field_name, severity, target in (
+        ("blockers", "blocker", blockers),
+        ("findings", "blocker", blockers),
+        ("warnings", "warning", warnings),
+    ):
+        values = parsed.get(field_name)
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if isinstance(item, dict):
+                message = str(item.get("message") or item.get("note") or item.get("summary") or "").strip()
+                item_severity = str(item.get("severity") or severity)
+            else:
+                message = str(item).strip()
+                item_severity = severity
+            if message:
+                target.append({"severity": item_severity, "message": f"Model critic: {message}"})
+    status = str(parsed.get("status") or "").lower()
+    if status in {"blocked", "needs_revision"} and not blockers:
+        reason = str(parsed.get("reason") or parsed.get("summary") or "model critic requested revision").strip()
+        blockers.append({"severity": "blocker", "message": f"Model critic: {reason}"})
+    return blockers, warnings
+
+
+def review_artifacts(
+    workspace_root: Path,
+    critic_path: str,
+    request: dict[str, Any],
+    request_guidance: GuidanceFn,
+) -> dict[str, Any]:
     reconstruction_path = sibling_artifact(critic_path, "reconstruction_ru.md")
     coverage_path = sibling_artifact(critic_path, "coverage_report.md")
     source_path = sibling_artifact(critic_path, "source_map.json")
@@ -746,6 +827,19 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
         findings.append({"severity": "blocker", "message": "Draft package does not expose coverage gaps clearly."})
     comprehensive_findings, comprehensive_metrics = comprehensive_depth_findings(source_map, notes, reconstruction, required_events)
     findings.extend(comprehensive_findings)
+    model_guidance = request_guidance(
+        "ReductorVerifier",
+        model_review_payload(request, source_map, notes, timeline, reconstruction, coverage, findings, warnings, comprehensive_metrics),
+        (
+            "You are an independent Scriptorium critic. Check whether the draft actually satisfies the user's "
+            "research/writing task, whether chronology is complete, whether unsupported invention exists, and "
+            "whether the revision plan points to the right upstream workers. Return JSON with status, blockers, "
+            "warnings, and evidence_notes. Do not waive hard source/evidence blockers."
+        ),
+    )
+    model_blockers, model_warnings = model_review_findings(model_guidance)
+    findings.extend(model_blockers)
+    warnings.extend(model_warnings)
 
     notes_gaps = [str(item) for item in notes.get("gaps", []) if item]
     timeline_gaps = [str(item) for item in timeline.get("gaps", []) if item]
@@ -777,6 +871,7 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
         "warnings": warnings,
         "revision_plan": revision_plan_from_findings(findings, []),
         "revision_focus": revision_focus,
+        "model_guidance": model_guidance,
         "metrics": {
             "sources": len(source_map.get("sources", [])),
             "direct_event_notes": len(notes.get("events", [])),
@@ -792,7 +887,11 @@ def review_artifacts(workspace_root: Path, critic_path: str) -> dict[str, Any]:
     }
 
 
-def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
+def run(
+    request: dict[str, Any],
+    workspace_root: Path,
+    request_guidance: GuidanceFn = request_scriptorium_model_guidance,
+) -> dict[str, Any]:
     step = request.get("step")
     if not isinstance(step, dict):
         return {"ok": False, "worker": "ReductorVerifier", "error": "request.step must be an object"}
@@ -801,7 +900,7 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
         return {"ok": False, "worker": "ReductorVerifier", "error": "step.expected_artifacts is empty"}
     critic_path = str(expected_artifacts[0])
     try:
-        report = review_artifacts(workspace_root, critic_path)
+        report = review_artifacts(workspace_root, critic_path, request, request_guidance)
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
         return {"ok": False, "worker": "ReductorVerifier", "error": str(exc)}
     expectation_findings = quality_expectation_findings(request)

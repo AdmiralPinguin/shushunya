@@ -5,7 +5,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from reductor_verifier import run
+from reductor_verifier import run as run_with_model
 
 
 def write(path: Path, content: str) -> None:
@@ -15,6 +15,30 @@ def write(path: Path, content: str) -> None:
 
 def write_json(path: Path, payload: dict) -> None:
     write(path, json.dumps(payload, ensure_ascii=False))
+
+
+def fake_guidance(role: str, payload: dict, instructions: str) -> dict:
+    if role != "ReductorVerifier":
+        raise AssertionError(f"unexpected role: {role}")
+    if "reconstruction_preview" not in payload or "hard_findings" not in payload:
+        raise AssertionError(f"critic model payload is incomplete: {payload}")
+    return {
+        "ok": True,
+        "status": "answered",
+        "role": role,
+        "content": json.dumps(
+            {
+                "status": "passed",
+                "warnings": ["semantic critic reviewed chronology and source boundaries"],
+                "evidence_notes": ["stubbed model review for self-test"],
+            },
+            ensure_ascii=False,
+        ),
+    }
+
+
+def run(request: dict, root: Path) -> dict:
+    return run_with_model(request, root, request_guidance=fake_guidance)
 
 
 def main() -> int:
@@ -102,6 +126,10 @@ def main() -> int:
             or report.get("quality_expectations", {}).get("revision_targets") != ["critic_review", "finalize"]
         ):
             raise AssertionError(f"expected verifier to preserve quality expectations: {report}")
+        if report.get("model_guidance", {}).get("status") != "answered":
+            raise AssertionError(f"expected verifier to record model critic guidance: {report}")
+        if "semantic critic reviewed chronology" not in json.dumps(report.get("warnings", [])):
+            raise AssertionError(f"expected verifier to include model critic warnings: {report}")
         write_json(
             base / "source_map.json",
             {

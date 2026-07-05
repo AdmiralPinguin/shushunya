@@ -3,6 +3,11 @@
   "port": 7005,
   "role": "writer",
   "status": "prototype",
-  "capabilities": ["longform_writing", "translation_ru", "style_revision", "evidence_lead_reporting"],
+  "capabilities": ["longform_writing", "translation_ru", "style_revision", "model_guided_revision", "evidence_lead_reporting"],
+  "model_brain": {
+    "required": true,
+    "role": "ScriptoriumDaemon",
+    "guidance_artifact": "scriptorium_model_guidance.json"
+  },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

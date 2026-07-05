@@ -3,6 +3,11 @@
   "port": 7006,
   "role": "critic and verifier",
   "status": "prototype",
-  "capabilities": ["contract_review", "source_coverage_review", "hallucination_risk", "evidence_lead_risk_reporting"],
+  "capabilities": ["contract_review", "source_coverage_review", "semantic_model_critique", "hallucination_risk", "evidence_lead_risk_reporting"],
+  "model_brain": {
+    "required": true,
+    "role": "ReductorVerifier",
+    "failure_policy": "record warning; keep hard deterministic blockers authoritative"
+  },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

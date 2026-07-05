@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 PHASE_TITLES = {
@@ -19,6 +20,13 @@ PHASE_TITLES = {
 }
 
 EVENT_PLAYBOOK_DIR = Path(__file__).resolve().parents[1] / "NoosphericExtractor" / "playbooks"
+BRIGADE_ROOT = Path(__file__).resolve().parents[1]
+if str(BRIGADE_ROOT) not in sys.path:
+    sys.path.insert(0, str(BRIGADE_ROOT))
+
+from scriptorium_model import parsed_model_content, request_scriptorium_model_guidance  # noqa: E402
+
+GuidanceFn = Callable[[str, dict[str, Any], str], dict[str, Any]]
 
 
 def load_event_playbooks() -> list[dict[str, Any]]:
@@ -385,7 +393,96 @@ def build_coverage_report(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
+def model_payload(
+    request: dict[str, Any],
+    source_map: dict[str, Any],
+    notes: dict[str, Any],
+    timeline: dict[str, Any],
+    reconstruction: str,
+    coverage_report: str,
+) -> dict[str, Any]:
+    return {
+        "task_id": request.get("task_id"),
+        "step": request.get("step"),
+        "contract": request.get("contract") if isinstance(request.get("contract"), dict) else {},
+        "quality_expectations": request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {},
+        "revision_context": request.get("revision_context") if isinstance(request.get("revision_context"), dict) else {},
+        "source_summary": {
+            "topic": source_map.get("topic"),
+            "discovery_status": source_map.get("discovery_status"),
+            "coverage": source_map.get("source_coverage", {}),
+            "coverage_gaps": source_map.get("coverage_gaps", []),
+            "source_count": len(source_map.get("sources", [])) if isinstance(source_map.get("sources"), list) else 0,
+        },
+        "events": notes.get("events", []) if isinstance(notes.get("events"), list) else [],
+        "timeline": timeline.get("timeline", []) if isinstance(timeline.get("timeline"), list) else [],
+        "timeline_gaps": timeline.get("gaps", []) if isinstance(timeline.get("gaps"), list) else [],
+        "draft_reconstruction_preview": reconstruction[:24000],
+        "coverage_report_preview": coverage_report[:12000],
+    }
+
+
+def model_guidance_section(decision: dict[str, Any]) -> list[str]:
+    if not decision.get("ok"):
+        return []
+    parsed = parsed_model_content(decision)
+    appendix = str(
+        parsed.get("appendix_markdown")
+        or parsed.get("narrative_addendum")
+        or parsed.get("revision_notes")
+        or ""
+    ).strip()
+    if not appendix:
+        content = str(decision.get("content") or "").strip()
+        if not content or content.startswith("{"):
+            return []
+        appendix = content
+    return [
+        "## Модельная редактура",
+        "",
+        appendix,
+        "",
+    ]
+
+
+def apply_model_guidance(reconstruction: str, coverage_report: str, decision: dict[str, Any]) -> tuple[str, str]:
+    if not decision.get("ok"):
+        return reconstruction, coverage_report
+    parsed = parsed_model_content(decision)
+    replacement = str(parsed.get("reconstruction_ru_markdown") or parsed.get("draft_markdown") or "").strip()
+    if replacement and "## Что еще надо проверить" in replacement:
+        reconstruction = replacement.rstrip() + "\n"
+    else:
+        section = model_guidance_section(decision)
+        if section:
+            reconstruction = reconstruction.rstrip() + "\n\n" + "\n".join(section).rstrip() + "\n"
+    coverage_lines = [
+        coverage_report.rstrip(),
+        "",
+        "## Model Guidance",
+        "",
+        f"- Status: {decision.get('status', 'unknown')}",
+        f"- Role: {decision.get('role', 'ScriptoriumDaemon')}",
+    ]
+    parsed_keys = ", ".join(sorted(parsed)) if parsed else ""
+    if parsed_keys:
+        coverage_lines.append(f"- Parsed keys: {parsed_keys}")
+    return reconstruction, "\n".join(coverage_lines).rstrip() + "\n"
+
+
+def write_model_guidance_artifact(workspace_root: Path, reconstruction_path: str, decision: dict[str, Any]) -> str:
+    output_path = sibling_artifact(reconstruction_path, "scriptorium_model_guidance.json")
+    host_path = sandbox_path(workspace_root, output_path)
+    host_path.parent.mkdir(parents=True, exist_ok=True)
+    host_path.write_text(json.dumps(decision, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return output_path
+
+
+def run(
+    request: dict[str, Any],
+    workspace_root: Path,
+    request_guidance: GuidanceFn = request_scriptorium_model_guidance,
+) -> dict[str, Any]:
     step = request.get("step")
     if not isinstance(step, dict):
         return {"ok": False, "worker": "ScriptoriumDaemon", "error": "request.step must be an object"}
@@ -409,17 +506,29 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
     revision_context = request.get("revision_context") if isinstance(request.get("revision_context"), dict) else None
     reconstruction = build_reconstruction(source_map, source_snapshots, notes, timeline, revision_context)
     coverage_report = build_coverage_report(source_map, source_snapshots, notes, timeline, revision_context)
+    guidance = request_guidance(
+        "ScriptoriumDaemon",
+        model_payload(request, source_map, notes, timeline, reconstruction, coverage_report),
+        (
+            "You are the Scriptorium writer. Improve the Russian reconstruction only from supplied facts, "
+            "timeline, evidence excerpts, and gaps. Do not invent unsupported events. Return JSON with optional "
+            "reconstruction_ru_markdown or appendix_markdown plus warnings."
+        ),
+    )
+    reconstruction, coverage_report = apply_model_guidance(reconstruction, coverage_report, guidance)
     for output_path, content in ((reconstruction_path, reconstruction), (coverage_path, coverage_report)):
         host_path = sandbox_path(workspace_root, output_path)
         host_path.parent.mkdir(parents=True, exist_ok=True)
         host_path.write_text(content, encoding="utf-8")
+    guidance_path = write_model_guidance_artifact(workspace_root, reconstruction_path, guidance)
     return {
         "ok": True,
         "worker": "ScriptoriumDaemon",
         "task_id": request.get("task_id"),
         "status": "completed",
         "summary": "Draft reconstruction and coverage report written.",
-        "artifacts": [reconstruction_path, coverage_path],
+        "artifacts": [reconstruction_path, coverage_path, guidance_path],
+        "model_guidance": guidance,
         "gaps": list(dict.fromkeys(str(item) for item in timeline.get("gaps", []) if item)),
         "confidence": "medium",
     }
