@@ -12,7 +12,7 @@ BRIGADE_ROOT = Path(__file__).resolve().parents[1]
 if str(BRIGADE_ROOT) not in sys.path:
     sys.path.insert(0, str(BRIGADE_ROOT))
 
-from scriptorium_model import model_unavailable_payload, request_required_scriptorium_guidance  # noqa: E402
+from scriptorium_model import model_unavailable_payload, parsed_model_content, request_required_scriptorium_guidance  # noqa: E402
 
 
 def load_playbook(path: Path) -> dict[str, Any]:
@@ -480,10 +480,142 @@ def definitions_from_topic(source_map: dict[str, Any], claims: list[dict[str, An
     ]
 
 
+def known_source_refs(source_map: dict[str, Any], source_snapshots: dict[str, Any]) -> set[str]:
+    refs = {
+        str(item.get("title") or "")
+        for item in source_map.get("sources", [])
+        if isinstance(item, dict) and item.get("title")
+    }
+    for snapshot in source_snapshots.get("snapshots", []):
+        if isinstance(snapshot, dict):
+            refs.add(source_ref(snapshot))
+    return {ref for ref in refs if ref}
+
+
+def refs_are_known(refs: Any, known_refs: set[str]) -> bool:
+    if not isinstance(refs, list) or not refs:
+        return False
+    return any(str(ref) in known_refs for ref in refs)
+
+
+def append_unique_by_text(items: list[dict[str, Any]], additions: list[dict[str, Any]], text_key: str) -> list[dict[str, Any]]:
+    seen = {str(item.get(text_key) or "").strip().lower() for item in items if isinstance(item, dict)}
+    for addition in additions:
+        text = str(addition.get(text_key) or "").strip()
+        if not text or text.lower() in seen:
+            continue
+        seen.add(text.lower())
+        items.append(addition)
+    return items
+
+
+def model_research_layers(guidance: dict[str, Any], source_map: dict[str, Any], source_snapshots: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    parsed = parsed_model_content(guidance)
+    known_refs = known_source_refs(source_map, source_snapshots)
+    layers: dict[str, list[dict[str, Any]]] = {
+        "claims": [],
+        "arguments": [],
+        "definitions": [],
+        "quotes": [],
+        "contradictions": [],
+        "open_questions": [],
+    }
+    for raw in parsed.get("claims", []) if isinstance(parsed.get("claims"), list) else []:
+        if not isinstance(raw, dict) or not str(raw.get("claim") or "").strip():
+            continue
+        source_refs = raw.get("source_refs") if isinstance(raw.get("source_refs"), list) else raw.get("evidence_refs")
+        if not refs_are_known(source_refs, known_refs):
+            continue
+        layers["claims"].append(
+            {
+                "claim_id": str(raw.get("claim_id") or stable_id("model_claim", len(layers["claims"]) + 1)),
+                "claim": str(raw.get("claim") or "").strip(),
+                "claim_type": str(raw.get("claim_type") or "model_guided"),
+                "confidence": str(raw.get("confidence") or "low"),
+                "source_refs": [str(ref) for ref in source_refs if str(ref) in known_refs],
+                "evidence_refs": [str(ref) for ref in (raw.get("evidence_refs") if isinstance(raw.get("evidence_refs"), list) else source_refs) if str(ref)],
+                "extraction_method": "model_guided_grounded",
+            }
+        )
+    for raw in parsed.get("arguments", []) if isinstance(parsed.get("arguments"), list) else []:
+        if not isinstance(raw, dict) or not str(raw.get("summary") or "").strip():
+            continue
+        source_refs = raw.get("source_refs") if isinstance(raw.get("source_refs"), list) else []
+        claim_refs = raw.get("claim_refs") if isinstance(raw.get("claim_refs"), list) else []
+        if not claim_refs and not refs_are_known(source_refs, known_refs):
+            continue
+        layers["arguments"].append(
+            {
+                "argument_id": str(raw.get("argument_id") or stable_id("model_argument", len(layers["arguments"]) + 1)),
+                "summary": str(raw.get("summary") or "").strip(),
+                "claim_refs": [str(ref) for ref in claim_refs if str(ref).strip()],
+                "source_refs": [str(ref) for ref in source_refs if str(ref) in known_refs],
+                "confidence": str(raw.get("confidence") or "low"),
+                "extraction_method": "model_guided_grounded",
+            }
+        )
+    for raw in parsed.get("definitions", []) if isinstance(parsed.get("definitions"), list) else []:
+        if not isinstance(raw, dict) or not str(raw.get("term") or "").strip() or not str(raw.get("definition") or "").strip():
+            continue
+        source_refs = raw.get("source_refs") if isinstance(raw.get("source_refs"), list) else []
+        if source_refs and not refs_are_known(source_refs, known_refs):
+            continue
+        layers["definitions"].append(
+            {
+                "term": str(raw.get("term") or "").strip(),
+                "definition": str(raw.get("definition") or "").strip(),
+                "confidence": str(raw.get("confidence") or "low"),
+                "source_refs": [str(ref) for ref in source_refs if str(ref) in known_refs],
+                "extraction_method": "model_guided_grounded",
+            }
+        )
+    raw_quotes = parsed.get("quotes") or parsed.get("evidence_excerpts") or []
+    for raw in raw_quotes if isinstance(raw_quotes, list) else []:
+        if not isinstance(raw, dict) or not str(raw.get("excerpt") or "").strip():
+            continue
+        source = str(raw.get("source_ref") or raw.get("source_title") or "").strip()
+        if source not in known_refs:
+            continue
+        layers["quotes"].append(
+            {
+                "quote_id": str(raw.get("quote_id") or stable_id("model_evidence", len(layers["quotes"]) + 1)),
+                "source_ref": source,
+                "event_id": str(raw.get("event_id") or ""),
+                "excerpt": str(raw.get("excerpt") or "").strip(),
+                "is_primary_source": bool(raw.get("is_primary_source")),
+                "extraction_method": "model_guided_grounded",
+            }
+        )
+    for raw in parsed.get("contradictions", []) if isinstance(parsed.get("contradictions"), list) else []:
+        if isinstance(raw, dict) and str(raw.get("summary") or "").strip():
+            layers["contradictions"].append(
+                {
+                    "contradiction_id": str(raw.get("contradiction_id") or stable_id("model_contradiction", len(layers["contradictions"]) + 1)),
+                    "summary": str(raw.get("summary") or "").strip(),
+                    "status": str(raw.get("status") or "unresolved"),
+                    "source_refs": [str(ref) for ref in raw.get("source_refs", []) if str(ref) in known_refs] if isinstance(raw.get("source_refs"), list) else [],
+                    "extraction_method": "model_guided",
+                }
+            )
+    for raw in parsed.get("open_questions", []) if isinstance(parsed.get("open_questions"), list) else []:
+        if isinstance(raw, dict):
+            question = str(raw.get("question") or raw.get("summary") or "").strip()
+            reason = str(raw.get("reason") or "model_guided_gap")
+        else:
+            question = str(raw or "").strip()
+            reason = "model_guided_gap"
+        if question:
+            layers["open_questions"].append({"question": question, "reason": reason})
+    return layers
+
+
 def build_research_corpus(source_map: dict[str, Any], source_snapshots: dict[str, Any], notes: dict[str, Any], guidance: dict[str, Any]) -> dict[str, Any]:
     event_claims = claims_from_events([event for event in notes.get("events", []) if isinstance(event, dict)])
     claims = event_claims + claims_from_snapshots(source_snapshots, event_claims)
     evidence_quotes = evidence_quotes_from_notes(notes, source_snapshots)
+    model_layers = model_research_layers(guidance, source_map, source_snapshots)
+    claims = append_unique_by_text(claims, model_layers["claims"], "claim")
+    evidence_quotes = append_unique_by_text(evidence_quotes, model_layers["quotes"], "excerpt")
     gaps = notes.get("gaps", []) if isinstance(notes.get("gaps"), list) else []
     coverage_risks = [
         {
@@ -503,7 +635,14 @@ def build_research_corpus(source_map: dict[str, Any], source_snapshots: dict[str
         for index, gap in enumerate(gaps, start=1)
         if any(marker in str(gap).lower() for marker in ["contradict", "conflict", "inconsistent", "uncertain"])
     ]
+    contradictions = append_unique_by_text(contradictions, model_layers["contradictions"], "summary")
     snapshots = [snapshot for snapshot in source_snapshots.get("snapshots", []) if isinstance(snapshot, dict)]
+    definitions = definitions_from_topic(source_map, claims)
+    definitions = append_unique_by_text(definitions, model_layers["definitions"], "term")
+    arguments = arguments_from_claims(claims, source_map)
+    arguments = append_unique_by_text(arguments, model_layers["arguments"], "summary")
+    open_questions = [{"question": gap, "reason": "coverage_gap"} for gap in gaps]
+    open_questions = append_unique_by_text(open_questions, model_layers["open_questions"], "question")
     return {
         "version": 1,
         "topic": source_map.get("topic", ""),
@@ -520,13 +659,13 @@ def build_research_corpus(source_map: dict[str, Any], source_snapshots: dict[str
         ],
         "events": notes.get("events", []) if isinstance(notes.get("events"), list) else [],
         "claims": claims,
-        "arguments": arguments_from_claims(claims, source_map),
-        "definitions": definitions_from_topic(source_map, claims),
+        "arguments": arguments,
+        "definitions": definitions,
         "quotes": evidence_quotes,
         "evidence_excerpts": evidence_quotes,
         "contradictions": contradictions,
         "coverage_risks": coverage_risks,
-        "open_questions": [{"question": gap, "reason": "coverage_gap"} for gap in gaps],
+        "open_questions": open_questions,
         "confidence": {
             "event_summary": notes.get("summary", {}),
             "claim_count": len(claims),

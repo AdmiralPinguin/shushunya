@@ -8,7 +8,49 @@ from pathlib import Path
 from noospheric_extractor import run as run_without_model
 
 
-MODEL_BRAIN = {"ok": True, "status": "answered", "content": "{\"status\":\"ok\"}"}
+MODEL_BRAIN = {
+    "ok": True,
+    "status": "answered",
+    "content": json.dumps(
+        {
+            "status": "ok",
+            "claims": [
+                {
+                    "claim": "Модельно выделенный факт привязан к первичному источнику.",
+                    "source_refs": ["Kharn: Eater of Worlds"],
+                    "confidence": "medium",
+                },
+                {
+                    "claim": "Этот факт должен быть отброшен из-за неизвестного источника.",
+                    "source_refs": ["Unknown Source"],
+                    "confidence": "medium",
+                },
+            ],
+            "arguments": [
+                {
+                    "summary": "Модельный аргумент допустим, потому что ссылается на известный источник.",
+                    "source_refs": ["Kharn: Eater of Worlds"],
+                    "confidence": "medium",
+                }
+            ],
+            "definitions": [
+                {
+                    "term": "Skalathrax",
+                    "definition": "Событие, проверяемое по корпусу источников.",
+                    "source_refs": ["Kharn: Eater of Worlds"],
+                }
+            ],
+            "quotes": [
+                {
+                    "source_ref": "Kharn: Eater of Worlds",
+                    "excerpt": "Модельно выбранный отрывок из известного источника.",
+                }
+            ],
+            "open_questions": [{"question": "Какие детали требуют полного первичного текста?", "reason": "model_guided_gap"}],
+        },
+        ensure_ascii=False,
+    ),
+}
 
 
 def run(request: dict, *args, **kwargs) -> dict:
@@ -114,6 +156,12 @@ def main() -> int:
             or corpus.get("confidence", {}).get("claim_count", 0) < 1
         ):
             raise AssertionError(f"research corpus should contain general research evidence layers: {corpus}")
+        corpus_text = json.dumps(corpus, ensure_ascii=False)
+        if "Модельно выделенный факт" not in corpus_text or "Модельный аргумент" not in corpus_text:
+            raise AssertionError(f"grounded model extraction layers should be merged into research corpus: {corpus}")
+        claim_text = json.dumps(corpus.get("claims", []), ensure_ascii=False)
+        if "неизвестного источника" in claim_text:
+            raise AssertionError(f"ungrounded model claims must not enter research corpus: {corpus}")
         if corpus.get("contradictions"):
             raise AssertionError(f"coverage gaps must not be reported as semantic contradictions: {corpus.get('contradictions')}")
         coverage_risk_text = json.dumps(corpus.get("coverage_risks"), ensure_ascii=False)
