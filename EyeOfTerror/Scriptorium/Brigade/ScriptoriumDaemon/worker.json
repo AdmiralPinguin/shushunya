@@ -3,7 +3,7 @@
   "port": 7005,
   "role": "writer",
   "status": "prototype",
-  "capabilities": ["longform_writing", "translation_ru", "style_revision", "model_guided_revision", "evidence_lead_reporting"],
+  "capabilities": ["output_mode_writing", "short_answer", "research_report", "comparison", "investigation", "event_reconstruction", "longform_writing", "book_manuscript", "translation_ru", "style_revision", "model_guided_revision", "evidence_trace_reporting"],
   "model_brain": {
     "required": true,
     "role": "ScriptoriumDaemon",

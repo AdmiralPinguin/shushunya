@@ -21,9 +21,16 @@ ARTIFACT_REWORK_TARGETS = {
     "source_snapshots.json": ("source_acquisition", "AuspexBrowser"),
     "rendered_snapshots.json": ("source_rendering", "OcularisRenderium"),
     "direct_event_notes.json": ("fact_extraction", "NoosphericExtractor"),
+    "research_corpus.json": ("fact_extraction", "NoosphericExtractor"),
     "timeline.json": ("timeline", "Chronologis"),
+    "structure_map.json": ("structure_mapping", "Chronologis"),
+    "synthesis_plan.json": ("synthesis_planning", "ScriptoriumArchitect"),
+    "book_outline.json": ("synthesis_planning", "ScriptoriumArchitect"),
+    "chapter_plan.json": ("synthesis_planning", "ScriptoriumArchitect"),
     "reconstruction_ru.md": ("draft_reconstruction", "ScriptoriumDaemon"),
     "coverage_report.md": ("draft_reconstruction", "ScriptoriumDaemon"),
+    "manuscript_ru.md": ("draft_reconstruction", "ScriptoriumDaemon"),
+    "manuscript.fb2": ("draft_reconstruction", "ScriptoriumDaemon"),
 }
 
 REVISION_DEPENDENCIES = {
@@ -52,10 +59,19 @@ REVISION_DEPENDENCIES = {
         ("draft_reconstruction", "ScriptoriumDaemon"),
     ],
     "fact_extraction": [
-        ("timeline", "Chronologis"),
+        ("structure_mapping", "Chronologis"),
+        ("synthesis_planning", "ScriptoriumArchitect"),
         ("draft_reconstruction", "ScriptoriumDaemon"),
     ],
     "timeline": [
+        ("synthesis_planning", "ScriptoriumArchitect"),
+        ("draft_reconstruction", "ScriptoriumDaemon"),
+    ],
+    "structure_mapping": [
+        ("synthesis_planning", "ScriptoriumArchitect"),
+        ("draft_reconstruction", "ScriptoriumDaemon"),
+    ],
+    "synthesis_planning": [
         ("draft_reconstruction", "ScriptoriumDaemon"),
     ],
 }
@@ -66,7 +82,9 @@ REVISION_STEP_ORDER = [
     "source_acquisition",
     "source_rendering",
     "fact_extraction",
+    "structure_mapping",
     "timeline",
+    "synthesis_planning",
     "draft_reconstruction",
     "critic_review",
 ]
@@ -630,6 +648,7 @@ def quality_expectation_summary(request: dict[str, Any]) -> dict[str, Any]:
     step_quality = expectations.get("step_quality") if isinstance(expectations.get("step_quality"), dict) else {}
     final_review = expectations.get("final_review") if isinstance(expectations.get("final_review"), dict) else {}
     revision_policy = expectations.get("revision_policy") if isinstance(expectations.get("revision_policy"), dict) else {}
+    research_intent = expectations.get("research_intent") if isinstance(expectations.get("research_intent"), dict) else {}
     return {
         "provided": bool(expectations),
         "step_id": str(step_quality.get("step_id") or ""),
@@ -639,7 +658,21 @@ def quality_expectation_summary(request: dict[str, Any]) -> dict[str, Any]:
         "revision_targets": step_quality.get("revision_targets", []) if isinstance(step_quality.get("revision_targets"), list) else [],
         "final_review": final_review,
         "revision_policy": revision_policy,
+        "research_intent": research_intent,
     }
+
+
+def research_intent_from_request(request: dict[str, Any]) -> dict[str, Any]:
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    return expectations.get("research_intent") if isinstance(expectations.get("research_intent"), dict) else {}
+
+
+def load_optional_json(workspace_root: Path, path: str) -> dict[str, Any]:
+    host_path = sandbox_path(workspace_root, path)
+    if not host_path.exists():
+        return {}
+    payload = json.loads(host_path.read_text(encoding="utf-8"))
+    return payload if isinstance(payload, dict) else {}
 
 
 def quality_expectation_findings(request: dict[str, Any]) -> list[dict[str, str]]:
@@ -706,11 +739,15 @@ def model_review_findings(decision: dict[str, Any]) -> tuple[list[dict[str, str]
             }
         ]
     parsed = parsed_model_content(decision)
+    status = str(parsed.get("status") or "").lower()
+    model_is_blocking = status in {"blocked", "block", "needs_revision", "failed", "fail"}
     blockers: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
+    blocker_target = blockers if model_is_blocking else warnings
+    blocker_severity = "blocker" if model_is_blocking else "warning"
     for field_name, severity, target in (
-        ("blockers", "blocker", blockers),
-        ("findings", "blocker", blockers),
+        ("blockers", blocker_severity, blocker_target),
+        ("findings", blocker_severity, blocker_target),
         ("warnings", "warning", warnings),
     ):
         values = parsed.get(field_name)
@@ -725,8 +762,7 @@ def model_review_findings(decision: dict[str, Any]) -> tuple[list[dict[str, str]
                 item_severity = severity
             if message:
                 target.append({"severity": item_severity, "message": f"Model critic: {message}"})
-    status = str(parsed.get("status") or "").lower()
-    if status in {"blocked", "needs_revision"} and not blockers:
+    if model_is_blocking and not blockers:
         reason = str(parsed.get("reason") or parsed.get("summary") or "model critic requested revision").strip()
         blockers.append({"severity": "blocker", "message": f"Model critic: {reason}"})
     return blockers, warnings
@@ -745,7 +781,18 @@ def review_artifacts(
     rendered_snapshots_path = sibling_artifact(critic_path, "rendered_snapshots.json")
     notes_path = sibling_artifact(critic_path, "direct_event_notes.json")
     timeline_path = sibling_artifact(critic_path, "timeline.json")
+    structure_path = sibling_artifact(critic_path, "structure_map.json")
+    research_corpus_path = sibling_artifact(critic_path, "research_corpus.json")
+    synthesis_plan_path = sibling_artifact(critic_path, "synthesis_plan.json")
     corpus_path = sibling_artifact(critic_path, "corpus_index.json")
+    intent = research_intent_from_request(request)
+    output_mode = str(intent.get("output_mode") or "")
+    needs_timeline = bool(intent.get("needs_timeline"))
+    has_synthesis_plan = artifact_exists(workspace_root, synthesis_plan_path)
+    contract = request.get("contract") if isinstance(request.get("contract"), dict) else {}
+    required_artifacts = contract.get("required_artifacts") if isinstance(contract.get("required_artifacts"), list) else []
+    contract_requires_synthesis = any(str(item).endswith("/synthesis_plan.json") for item in required_artifacts)
+    contract_requires_structure = any(str(item).endswith("/structure_map.json") for item in required_artifacts)
     required_paths = [
         corpus_path,
         reconstruction_path,
@@ -754,8 +801,13 @@ def review_artifacts(
         source_snapshots_path,
         rendered_snapshots_path,
         notes_path,
-        timeline_path,
     ]
+    if has_synthesis_plan or contract_requires_synthesis:
+        required_paths.extend([research_corpus_path, synthesis_plan_path])
+    if needs_timeline or artifact_exists(workspace_root, timeline_path):
+        required_paths.append(timeline_path)
+    if artifact_exists(workspace_root, structure_path) or contract_requires_structure:
+        required_paths.append(structure_path)
     missing_artifacts = [path for path in required_paths if not artifact_exists(workspace_root, path)]
     if missing_artifacts:
         findings = [{"severity": "blocker", "message": f"Missing artifact: {path}"} for path in missing_artifacts]
@@ -772,7 +824,10 @@ def review_artifacts(
     source_snapshots = load_json(workspace_root, source_snapshots_path)
     rendered_snapshots = load_json(workspace_root, rendered_snapshots_path)
     notes = load_json(workspace_root, notes_path)
-    timeline = load_json(workspace_root, timeline_path)
+    timeline = load_optional_json(workspace_root, timeline_path)
+    structure_map = load_optional_json(workspace_root, structure_path)
+    research_corpus = load_optional_json(workspace_root, research_corpus_path)
+    synthesis_plan = load_optional_json(workspace_root, synthesis_plan_path)
     reconstruction = read_text(workspace_root, reconstruction_path)
     coverage = read_text(workspace_root, coverage_path)
     revision_focus = revision_focus_from_artifacts(reconstruction, coverage)
@@ -789,14 +844,15 @@ def review_artifacts(
     findings: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
     note_event_ids = set(note_by_event_id)
-    for event_id in sorted(note_event_ids - timeline_event_ids):
-        findings.append({"severity": "blocker", "message": f"Missing required direct event in timeline: {event_id}"})
-    for event_id in sorted(timeline_event_ids - note_event_ids):
-        findings.append({"severity": "blocker", "message": f"Timeline event lacks extracted direct-event note: {event_id}"})
+    if needs_timeline or timeline_event_ids:
+        for event_id in sorted(note_event_ids - timeline_event_ids):
+            findings.append({"severity": "blocker", "message": f"Missing required direct event in timeline: {event_id}"})
+        for event_id in sorted(timeline_event_ids - note_event_ids):
+            findings.append({"severity": "blocker", "message": f"Timeline event lacks extracted direct-event note: {event_id}"})
     for event_id, note in sorted(note_by_event_id.items()):
         if not isinstance(note, dict) or not note.get("evidence_snapshots"):
             findings.append({"severity": "blocker", "message": f"Required event lacks fetched source evidence: {event_id}"})
-    required_events = required_review_events(source_map, notes, timeline)
+    required_events = required_review_events(source_map, notes, timeline) if needs_timeline or output_mode == "event_reconstruction" or not intent else []
     for event in required_events:
         event_id = str(event.get("event_id") or "")
         label = required_event_label(event)
@@ -825,6 +881,20 @@ def review_artifacts(
         findings.append({"severity": "blocker", "message": "Source coverage is not extraction-ready: official/primary evidence and secondary cross-checking are both required."})
     if "## Gaps" not in coverage or "Что еще надо проверить" not in reconstruction:
         findings.append({"severity": "blocker", "message": "Draft package does not expose coverage gaps clearly."})
+    if synthesis_plan:
+        unsupported = synthesis_plan.get("unsupported_sections") if isinstance(synthesis_plan.get("unsupported_sections"), list) else []
+        if unsupported and "Unsupported Sections" not in coverage:
+            findings.append({"severity": "blocker", "message": "Draft package hides unsupported synthesis sections."})
+        if "Evidence Trace" not in coverage:
+            findings.append({"severity": "blocker", "message": "Draft package does not expose evidence trace required by synthesis plan."})
+        claim_refs = synthesis_plan.get("evidence_trace", {}).get("claim_refs") if isinstance(synthesis_plan.get("evidence_trace"), dict) else []
+        if not claim_refs:
+            findings.append({"severity": "blocker", "message": "Synthesis plan has no claim_refs for evidence-grounded writing."})
+    if output_mode in {"book_manuscript", "book_manuscript_with_timeline"}:
+        for filename in ("book_outline.json", "chapter_plan.json", "manuscript_ru.md", "manuscript.fb2", "continuity_report.json", "editor_report.json"):
+            path = sibling_artifact(critic_path, filename)
+            if not artifact_exists(workspace_root, path):
+                findings.append({"severity": "blocker", "message": f"Book output missing required artifact: {path}"})
     comprehensive_findings, comprehensive_metrics = comprehensive_depth_findings(source_map, notes, reconstruction, required_events)
     findings.extend(comprehensive_findings)
     model_guidance = request_required_scriptorium_guidance(
@@ -887,6 +957,10 @@ def review_artifacts(
             "comprehensive_depth": comprehensive_metrics,
             "snapshot_count": len(source_snapshots.get("snapshots", [])),
             "rendered_snapshot_count": len(rendered_snapshots.get("rendered_snapshots", [])),
+            "output_mode": output_mode,
+            "claim_count": len(research_corpus.get("claims", []) if isinstance(research_corpus.get("claims"), list) else []),
+            "evidence_trace_count": len(synthesis_plan.get("evidence_trace", {}).get("claim_refs", []) if isinstance(synthesis_plan.get("evidence_trace"), dict) else []),
+            "structure_sections": len(structure_map.get("topic_structure", []) if isinstance(structure_map.get("topic_structure"), list) else []),
         },
     }
 

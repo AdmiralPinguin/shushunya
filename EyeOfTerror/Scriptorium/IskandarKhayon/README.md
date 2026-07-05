@@ -59,6 +59,11 @@ For event tasks, `Chronologis` writes both `timeline.json` and
 flow, and topic structure into `structure_map.json` while preserving
 `timeline.json` compatibility. Short Q&A tasks may skip `Chronologis` entirely.
 
+`ScriptoriumArchitect` then writes `synthesis_plan.json`; book tasks also get
+`book_outline.json` and `chapter_plan.json`. `ScriptoriumDaemon` writes from
+`research_corpus + synthesis_plan + output_mode`; sections without evidence
+trace must stay blocked instead of being filled with invented text.
+
 ## Research Quality Gates
 
 - Source map exists and separates primary, secondary, wiki, and community

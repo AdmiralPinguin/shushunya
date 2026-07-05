@@ -124,6 +124,11 @@
       "name": "SealwrightFinalis",
       "role": "code final handoff packager",
       "path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/SealwrightFinalis"
+    },
+    "7021": {
+      "name": "ScriptoriumArchitect",
+      "role": "research synthesis planner",
+      "path": "EyeOfTerror/Scriptorium/Brigade/ScriptoriumArchitect"
     }
   }
 }

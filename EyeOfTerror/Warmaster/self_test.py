@@ -72,6 +72,7 @@ def main() -> int:
         "AuspexBrowser",
         "NoosphericExtractor",
         "Chronologis",
+        "ScriptoriumArchitect",
         "ScriptoriumDaemon",
         "ReductorVerifier",
         "FabricatorFinalis",
@@ -175,6 +176,7 @@ def main() -> int:
         or generic_plan["contract"]["required_artifacts"][0] != "/work/3d/corpus_index.json"
         or "/work/3d/research_corpus.json" not in generic_plan["contract"]["required_artifacts"]
         or "/work/3d/structure_map.json" not in generic_plan["contract"]["required_artifacts"]
+        or "/work/3d/synthesis_plan.json" not in generic_plan["contract"]["required_artifacts"]
         or generic_plan["contract"]["worker_plan"][4]["purpose"].find("claims, events, arguments") < 0
     ):
         raise AssertionError(f"bad generic research/writing plan: {generic_plan}")
@@ -186,10 +188,21 @@ def main() -> int:
     event_payload = event_contract.to_dict()
     if (
         "Chronologis" not in [step["worker"] for step in event_payload["worker_plan"]]
+        or "ScriptoriumArchitect" not in [step["worker"] for step in event_payload["worker_plan"]]
         or "/work/skalathrax/timeline.json" not in event_payload["required_artifacts"]
         or "/work/skalathrax/structure_map.json" not in event_payload["required_artifacts"]
     ):
         raise AssertionError(f"event research should include timeline and structure map: {event_payload}")
+    book_contract = build_research_writing_contract("Напиши book на 3 chapters о локальных агентах.", task_id="test-book")
+    book_payload = book_contract.to_dict()
+    for artifact in [
+        "/work/book-3-chapters/book_outline.json",
+        "/work/book-3-chapters/chapter_plan.json",
+        "/work/book-3-chapters/manuscript_ru.md",
+        "/work/book-3-chapters/manuscript.fb2",
+    ]:
+        if artifact not in book_payload["required_artifacts"]:
+            raise AssertionError(f"book contract missing required artifact {artifact}: {book_payload}")
     print("[ok] research/writing contract")
 
     plan = plan_lore_reconstruction(task, task_id="test-skalathrax").to_dict()

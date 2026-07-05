@@ -23,14 +23,33 @@ PACKAGE_FILES = [
     "critic_report.json",
 ]
 
+OPTIONAL_PACKAGE_FILES = [
+    "research_corpus.json",
+    "structure_map.json",
+    "synthesis_plan.json",
+    "book_outline.json",
+    "chapter_plan.json",
+    "continuity_report.json",
+    "editor_report.json",
+    "manuscript_ru.md",
+    "manuscript.fb2",
+]
+
 ARTIFACT_REWORK_TARGETS = {
     "corpus_index.json": ("corpus_ingestion", "CorpusIngestor"),
     "source_map.json": ("source_discovery", "Lexmechanic"),
     "source_snapshots.json": ("source_acquisition", "AuspexBrowser"),
     "direct_event_notes.json": ("fact_extraction", "NoosphericExtractor"),
+    "research_corpus.json": ("fact_extraction", "NoosphericExtractor"),
     "timeline.json": ("timeline", "Chronologis"),
+    "structure_map.json": ("structure_mapping", "Chronologis"),
+    "synthesis_plan.json": ("synthesis_planning", "ScriptoriumArchitect"),
+    "book_outline.json": ("synthesis_planning", "ScriptoriumArchitect"),
+    "chapter_plan.json": ("synthesis_planning", "ScriptoriumArchitect"),
     "reconstruction_ru.md": ("draft_reconstruction", "ScriptoriumDaemon"),
     "coverage_report.md": ("draft_reconstruction", "ScriptoriumDaemon"),
+    "manuscript_ru.md": ("draft_reconstruction", "ScriptoriumDaemon"),
+    "manuscript.fb2": ("draft_reconstruction", "ScriptoriumDaemon"),
     "critic_report.json": ("critic_review", "ReductorVerifier"),
 }
 
@@ -39,7 +58,9 @@ REVISION_STEP_ORDER = [
     "source_discovery",
     "source_acquisition",
     "fact_extraction",
+    "structure_mapping",
     "timeline",
+    "synthesis_planning",
     "draft_reconstruction",
     "critic_review",
     "finalize",
@@ -214,6 +235,7 @@ def add_corpus_requirement_revision_steps(revision_plan: dict[str, Any], corpus_
 def quality_expectation_summary(request: dict[str, Any]) -> dict[str, Any]:
     expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
     step_quality = expectations.get("step_quality") if isinstance(expectations.get("step_quality"), dict) else {}
+    research_intent = expectations.get("research_intent") if isinstance(expectations.get("research_intent"), dict) else {}
     return {
         "provided": bool(expectations),
         "step_id": str(step_quality.get("step_id") or ""),
@@ -221,6 +243,7 @@ def quality_expectation_summary(request: dict[str, Any]) -> dict[str, Any]:
         "check_count": len(step_quality.get("checks") if isinstance(step_quality.get("checks"), list) else []),
         "blocker_count": len(step_quality.get("blockers") if isinstance(step_quality.get("blockers"), list) else []),
         "revision_targets": step_quality.get("revision_targets", []) if isinstance(step_quality.get("revision_targets"), list) else [],
+        "research_intent": research_intent,
     }
 
 
@@ -301,7 +324,19 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
     files: list[dict[str, Any]] = []
     missing: list[str] = []
     package_file_errors: list[dict[str, str]] = []
-    for filename in PACKAGE_FILES:
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    research_intent = expectations.get("research_intent") if isinstance(expectations.get("research_intent"), dict) else {}
+    output_mode = str(research_intent.get("output_mode") or "")
+    package_files = list(PACKAGE_FILES)
+    for filename in OPTIONAL_PACKAGE_FILES:
+        artifact_path = sibling_artifact(manifest_path, filename)
+        if sandbox_path(workspace_root, artifact_path).exists():
+            package_files.append(filename)
+    if output_mode in {"book_manuscript", "book_manuscript_with_timeline"}:
+        for filename in ["book_outline.json", "chapter_plan.json", "continuity_report.json", "editor_report.json", "manuscript_ru.md", "manuscript.fb2"]:
+            if filename not in package_files:
+                package_files.append(filename)
+    for filename in package_files:
         artifact_path = sibling_artifact(manifest_path, filename)
         host_path = sandbox_path(workspace_root, artifact_path)
         if not host_path.exists():
@@ -326,6 +361,12 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
     critic_metrics = critic.get("metrics", {}) if isinstance(critic.get("metrics"), dict) else {}
     event_review = event_review_summary(workspace_root, manifest_path, critic)
     corpus_diagnostics = source_map_diagnostics(workspace_root, manifest_path)
+    research_corpus_path = sandbox_path(workspace_root, sibling_artifact(manifest_path, "research_corpus.json"))
+    synthesis_plan_path = sandbox_path(workspace_root, sibling_artifact(manifest_path, "synthesis_plan.json"))
+    research_corpus = load_json(research_corpus_path) if research_corpus_path.exists() else {}
+    synthesis_plan = load_json(synthesis_plan_path) if synthesis_plan_path.exists() else {}
+    if not output_mode:
+        output_mode = str(synthesis_plan.get("output_mode") or critic_metrics.get("output_mode") or "event_reconstruction")
     source_coverage_ready = critic_metrics.get("source_coverage_ready")
     comprehensive_depth = critic_metrics.get("comprehensive_depth") if isinstance(critic_metrics.get("comprehensive_depth"), dict) else {}
     comprehensive_depth_ready = comprehensive_depth.get("passed") if comprehensive_depth.get("mode") == "comprehensive" else True
@@ -359,6 +400,13 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "required_event_evidence_covered": event_review.get("required_event_evidence_covered"),
         "corpus_requirements_satisfied": not bool(corpus_requirements.get("required")),
     }
+    if output_mode in {"book_manuscript", "book_manuscript_with_timeline"}:
+        readiness_checks["book_manifest_complete"] = all(
+            sandbox_path(workspace_root, sibling_artifact(manifest_path, filename)).exists()
+            for filename in ["book_outline.json", "chapter_plan.json", "continuity_report.json", "editor_report.json", "manuscript_ru.md", "manuscript.fb2"]
+        )
+        if not readiness_checks["book_manifest_complete"]:
+            readiness_blockers.append({"severity": "blocker", "message": "Book output is missing outline, chapter plan, manuscript, fb2, continuity, or editor artifact."})
     status = "ready" if approved and not missing and not quality_blockers and not readiness_blockers else "blocked"
     revision_plan = merge_revision_plan(critic, missing, package_file_errors)
     revision_plan = add_required_event_revision_steps(revision_plan, event_review)
@@ -377,10 +425,17 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
             ],
         }
     revision_plan = sort_revision_plan(revision_plan)
+    remaining_gaps: list[str] = []
+    if isinstance(research_corpus.get("gaps"), list):
+        remaining_gaps.extend(str(item) for item in research_corpus.get("gaps", []) if item)
+    remaining_gaps.extend(str(item.get("message") or "") for item in critic.get("findings", []) if isinstance(item, dict) and item.get("message"))
+    remaining_gaps = list(dict.fromkeys(remaining_gaps))
     return {
         "status": status,
         "approved": approved,
+        "output_mode": output_mode,
         "deliverable": sibling_artifact(manifest_path, "reconstruction_ru.md"),
+        "book_deliverable": sibling_artifact(manifest_path, "manuscript.fb2") if output_mode in {"book_manuscript", "book_manuscript_with_timeline"} else "",
         "files": files,
         "missing": missing,
         "package_file_errors": package_file_errors,
@@ -389,6 +444,13 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "event_review": event_review,
         "corpus_diagnostics": corpus_diagnostics,
         "corpus_requirements": corpus_requirements,
+        "source_coverage": {
+            "ready": source_coverage_ready,
+            "source_count": critic_metrics.get("sources"),
+            "claim_count": critic_metrics.get("claim_count", len(research_corpus.get("claims", []) if isinstance(research_corpus.get("claims"), list) else [])),
+        },
+        "evidence_trace": synthesis_plan.get("evidence_trace", {}) if isinstance(synthesis_plan.get("evidence_trace"), dict) else {},
+        "remaining_gaps": remaining_gaps,
         "readiness_checks": readiness_checks,
         "warnings": critic.get("warnings", []),
         "blockers": critic.get("findings", []) + [{"severity": "blocker", "message": f"Missing package file: {path}"} for path in missing] + quality_blockers + readiness_blockers,

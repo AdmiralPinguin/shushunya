@@ -99,8 +99,13 @@ def step_quality_checks(step_id: str) -> list[str]:
             "timeline is populated for event tasks and preserved as compatibility artifact",
             "analytical tasks expose source_order and argument_flow instead of forcing an event chronology",
         ],
+        "synthesis_planning": [
+            "synthesis_plan exists and declares output_mode, sections, source requirements, and evidence trace",
+            "sections requiring evidence list claim refs or are marked unsupported",
+            "book tasks include book_outline and chapter_plan before drafting",
+        ],
         "draft_reconstruction": [
-            "draft uses research_corpus and structure/timeline artifacts as inputs",
+            "draft uses research_corpus, synthesis_plan, output_mode, and structure/timeline artifacts as inputs",
             "coverage report names gaps and source limitations",
             "unsupported narrative invention is treated as a blocker",
         ],
@@ -164,7 +169,12 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
         "evidence_notes": [artifact for artifact in contract.required_artifacts if artifact.endswith("/direct_event_notes.json")],
         "timeline": [artifact for artifact in contract.required_artifacts if artifact.endswith("/timeline.json")],
         "structure_map": [artifact for artifact in contract.required_artifacts if artifact.endswith("/structure_map.json")],
+        "synthesis_plan": [artifact for artifact in contract.required_artifacts if artifact.endswith("/synthesis_plan.json")],
+        "book_outline": [artifact for artifact in contract.required_artifacts if artifact.endswith("/book_outline.json")],
+        "chapter_plan": [artifact for artifact in contract.required_artifacts if artifact.endswith("/chapter_plan.json")],
         "draft": [artifact for artifact in contract.required_artifacts if artifact.endswith("/reconstruction_ru.md")],
+        "manuscript": [artifact for artifact in contract.required_artifacts if artifact.endswith("/manuscript_ru.md")],
+        "fb2": [artifact for artifact in contract.required_artifacts if artifact.endswith("/manuscript.fb2")],
         "coverage": [artifact for artifact in contract.required_artifacts if artifact.endswith("/coverage_report.md")],
         "critic": [artifact for artifact in contract.required_artifacts if artifact.endswith("/critic_report.json")],
         "final": [artifact for artifact in contract.required_artifacts if artifact.endswith("/final_manifest.json")],
@@ -212,7 +222,17 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
             "allowed_steps": planned_step_ids,
             "section_rerun_targets": [
                 step_id
-                for step_id in ["source_discovery", "source_acquisition", "source_rendering", "fact_extraction", "structure_mapping", "timeline", "draft_reconstruction", "critic_review"]
+                for step_id in [
+                    "source_discovery",
+                    "source_acquisition",
+                    "source_rendering",
+                    "fact_extraction",
+                    "structure_mapping",
+                    "timeline",
+                    "synthesis_planning",
+                    "draft_reconstruction",
+                    "critic_review",
+                ]
                 if step_id in planned_step_ids
             ],
             "requires_downstream_rerun": True,

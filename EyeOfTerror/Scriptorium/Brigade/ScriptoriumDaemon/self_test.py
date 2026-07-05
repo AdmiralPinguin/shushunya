@@ -16,8 +16,8 @@ def write_json(path: Path, payload: dict) -> None:
 def fake_guidance(role: str, payload: dict, instructions: str) -> dict:
     if role != "ScriptoriumDaemon":
         raise AssertionError(f"unexpected role: {role}")
-    if not payload.get("timeline"):
-        raise AssertionError(f"writer model payload should include timeline: {payload}")
+    if not payload.get("timeline") and not payload.get("synthesis_plan"):
+        raise AssertionError(f"writer model payload should include timeline or synthesis_plan: {payload}")
     return {
         "ok": True,
         "status": "answered",
@@ -187,6 +187,90 @@ def main() -> int:
         guidance = json.loads((base / "scriptorium_model_guidance.json").read_text(encoding="utf-8"))
         if guidance.get("status") != "answered":
             raise AssertionError(f"model guidance artifact missing status: {guidance}")
+        book_base = root / "book"
+        write_json(
+            book_base / "source_map.json",
+            {"topic": "Book Topic", "sources": [{"title": "Primary"}], "coverage_gaps": ["needs more primary text"]},
+        )
+        write_json(book_base / "source_snapshots.json", {"snapshots": [], "skipped": []})
+        write_json(book_base / "direct_event_notes.json", {"events": [], "gaps": ["needs more primary text"]})
+        write_json(
+            book_base / "research_corpus.json",
+            {
+                "topic": "Book Topic",
+                "sources": [{"title": "Primary"}],
+                "claims": [
+                    {"claim_id": "claim_1", "claim": "Первое подтвержденное утверждение.", "confidence": "medium", "source_refs": ["Primary"]},
+                    {"claim_id": "claim_2", "claim": "Второе подтвержденное утверждение.", "confidence": "medium", "source_refs": ["Primary"]},
+                ],
+                "evidence_excerpts": [{"quote_id": "evidence_1", "source_ref": "Primary", "excerpt": "Первое утверждение."}],
+                "gaps": ["needs more primary text"],
+            },
+        )
+        write_json(book_base / "structure_map.json", {"topic": "Book Topic", "topic_structure": [], "gaps": []})
+        write_json(
+            book_base / "synthesis_plan.json",
+            {
+                "topic": "Book Topic",
+                "intent": "book",
+                "output_mode": "book_manuscript",
+                "needs_chapters": True,
+                "sections": [
+                    {"section_id": "source_base", "title": "Источники", "requires_evidence": True, "required_claim_refs": ["claim_1"]},
+                    {"section_id": "book_body", "title": "Основная часть", "requires_evidence": True, "required_claim_refs": ["claim_2"]},
+                ],
+                "unsupported_sections": [],
+                "evidence_trace": {"claim_refs": ["claim_1", "claim_2"]},
+            },
+        )
+        write_json(
+            book_base / "chapter_plan.json",
+            {
+                "chapters": [
+                    {"chapter_id": "chapter_01", "title": "Глава 1"},
+                    {"chapter_id": "chapter_02", "title": "Глава 2"},
+                    {"chapter_id": "chapter_03", "title": "Глава 3"},
+                ]
+            },
+        )
+        book_result = run(
+            {
+                "task_id": "test-book:draft_reconstruction",
+                "step": {
+                    "expected_artifacts": [
+                        "/work/book/reconstruction_ru.md",
+                        "/work/book/coverage_report.md",
+                        "/work/book/chapters/chapter_01.md",
+                        "/work/book/chapters/chapter_02.md",
+                        "/work/book/chapters/chapter_03.md",
+                        "/work/book/continuity_report.json",
+                        "/work/book/editor_report.json",
+                        "/work/book/manuscript_ru.md",
+                        "/work/book/manuscript.fb2",
+                    ]
+                },
+            },
+            root,
+        )
+        if not book_result.get("ok"):
+            raise AssertionError(f"ScriptoriumDaemon book mode failed: {book_result}")
+        book_draft = (book_base / "reconstruction_ru.md").read_text(encoding="utf-8")
+        book_coverage = (book_base / "coverage_report.md").read_text(encoding="utf-8")
+        if "Output mode: book_manuscript" not in book_draft or "Evidence trace: claim_1" not in book_draft:
+            raise AssertionError(f"book draft should use synthesis plan and evidence trace: {book_draft}")
+        if "Evidence Trace" not in book_coverage or "Unsupported Sections" not in book_coverage:
+            raise AssertionError(f"book coverage should expose evidence trace and unsupported sections: {book_coverage}")
+        for filename in [
+            "chapters/chapter_01.md",
+            "chapters/chapter_02.md",
+            "chapters/chapter_03.md",
+            "continuity_report.json",
+            "editor_report.json",
+            "manuscript_ru.md",
+            "manuscript.fb2",
+        ]:
+            if not (book_base / filename).exists():
+                raise AssertionError(f"book mode did not write artifact: {filename}")
     print("[ok] ScriptoriumDaemon draft")
     return 0
 

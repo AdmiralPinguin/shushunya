@@ -324,14 +324,40 @@ def research_writing_worker_plan(slug: str, intent_profile: dict[str, Any] | Non
             )
         )
         draft_dependencies.append("structure_mapping")
+    synthesis_artifacts = [f"{base}/synthesis_plan.json"]
+    if profile.get("needs_chapters"):
+        synthesis_artifacts.extend([f"{base}/book_outline.json", f"{base}/chapter_plan.json"])
+    plan.append(
+        WorkerPlanStep(
+            step_id="synthesis_planning",
+            worker="ScriptoriumArchitect",
+            purpose="Plan the requested output structure, style, length, source requirements, evidence trace, and unsupported sections before writing.",
+            depends_on=["fact_extraction"] + (["structure_mapping"] if needs_structure else []),
+            expected_artifacts=synthesis_artifacts,
+        )
+    )
+    draft_dependencies.append("synthesis_planning")
+    draft_artifacts = [f"{base}/reconstruction_ru.md", f"{base}/coverage_report.md"]
+    if profile.get("needs_chapters"):
+        draft_artifacts.extend(
+            [
+                f"{base}/chapters/chapter_01.md",
+                f"{base}/chapters/chapter_02.md",
+                f"{base}/chapters/chapter_03.md",
+                f"{base}/continuity_report.json",
+                f"{base}/editor_report.json",
+                f"{base}/manuscript_ru.md",
+                f"{base}/manuscript.fb2",
+            ]
+        )
     plan.extend(
         [
             WorkerPlanStep(
                 step_id="draft_reconstruction",
                 worker="ScriptoriumDaemon",
-                purpose="Write the requested Russian research/synthesis draft from research_corpus and structure_map without unsupported sections.",
+                purpose="Write the requested Russian output from research_corpus, synthesis_plan, output_mode, and evidence trace without unsupported sections.",
                 depends_on=draft_dependencies,
-                expected_artifacts=[f"{base}/reconstruction_ru.md", f"{base}/coverage_report.md"],
+                expected_artifacts=draft_artifacts,
             ),
             WorkerPlanStep(
                 step_id="critic_review",

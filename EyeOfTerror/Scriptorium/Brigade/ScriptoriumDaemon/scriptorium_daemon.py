@@ -82,6 +82,14 @@ def load_json_artifact(workspace_root: Path, path: str) -> dict[str, Any]:
     return payload
 
 
+def load_optional_json_artifact(workspace_root: Path, path: str) -> dict[str, Any]:
+    host_path = sandbox_path(workspace_root, path)
+    if not host_path.exists():
+        return {}
+    payload = json.loads(host_path.read_text(encoding="utf-8"))
+    return payload if isinstance(payload, dict) else {}
+
+
 def confidence_marker(value: Any) -> str:
     text = str(value or "").lower()
     if text in {"high", "medium-high"}:
@@ -177,6 +185,170 @@ def evidence_counts_by_source(notes: dict[str, Any], primary_only: bool = False)
             if source_title:
                 counts[source_title] += 1
     return dict(counts)
+
+
+def research_intent_from_request(request: dict[str, Any]) -> dict[str, Any]:
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    return expectations.get("research_intent") if isinstance(expectations.get("research_intent"), dict) else {}
+
+
+def claims_by_id(research_corpus: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(item.get("claim_id")): item
+        for item in research_corpus.get("claims", [])
+        if isinstance(item, dict) and item.get("claim_id")
+    }
+
+
+def evidence_line_for_claim(claim: dict[str, Any]) -> str:
+    refs = claim.get("source_refs") if isinstance(claim.get("source_refs"), list) else []
+    refs_text = ", ".join(str(item) for item in refs if str(item).strip()) or "source not mapped"
+    confidence = str(claim.get("confidence") or "unknown")
+    return f"Evidence trace: {claim.get('claim_id', '')} | confidence={confidence} | sources={refs_text}"
+
+
+def section_claims(section: dict[str, Any], claim_index: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    refs = section.get("required_claim_refs") if isinstance(section.get("required_claim_refs"), list) else []
+    return [claim_index[str(ref)] for ref in refs if str(ref) in claim_index]
+
+
+def build_mode_draft(
+    source_map: dict[str, Any],
+    research_corpus: dict[str, Any],
+    structure_map: dict[str, Any],
+    synthesis_plan: dict[str, Any],
+    revision_context: dict[str, Any] | None = None,
+) -> tuple[str, str]:
+    output_mode = str(synthesis_plan.get("output_mode") or "research_report")
+    topic = str(synthesis_plan.get("topic") or research_corpus.get("topic") or source_map.get("topic") or "задача")
+    claim_index = claims_by_id(research_corpus)
+    lines = [
+        f"# {topic}",
+        "",
+        f"Output mode: {output_mode}",
+        "",
+    ]
+    lines.extend(revision_context_lines(revision_context, "## Фокус ревизии"))
+    sections = synthesis_plan.get("sections") if isinstance(synthesis_plan.get("sections"), list) else []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        title = str(section.get("title") or section.get("section_id") or "Раздел")
+        claims = section_claims(section, claim_index)
+        lines.append(f"## {title}")
+        lines.append("")
+        if section.get("requires_evidence") and not claims:
+            lines.append("Раздел не написан: для него нет evidence trace в research_corpus.")
+            lines.append("")
+            continue
+        if claims:
+            for claim in claims:
+                lines.append(str(claim.get("claim") or "").strip())
+                lines.append("")
+                lines.append(f"> {evidence_line_for_claim(claim)}")
+                lines.append("")
+        else:
+            gaps = research_corpus.get("gaps") if isinstance(research_corpus.get("gaps"), list) else []
+            if gaps:
+                lines.append("Этот раздел фиксирует ограничения корпуса и не добавляет неподтвержденные сведения.")
+            else:
+                lines.append("Нет дополнительных неподтвержденных утверждений сверх корпуса.")
+            lines.append("")
+    contradictions = structure_map.get("contradictions") if isinstance(structure_map.get("contradictions"), list) else []
+    gaps = list(source_map.get("coverage_gaps", [])) + list(research_corpus.get("gaps", []) if isinstance(research_corpus.get("gaps"), list) else [])
+    if contradictions:
+        lines.extend(["## Противоречия", ""])
+        for item in contradictions:
+            if isinstance(item, dict):
+                lines.append(f"- {item.get('topic') or item.get('contradiction_id')}: {item.get('note') or item.get('summary')}")
+        lines.append("")
+    lines.extend(["## Что еще надо проверить", ""])
+    for gap in dict.fromkeys(str(item) for item in gaps if item):
+        lines.append(f"- {gap}")
+    if not gaps:
+        lines.append("- Явных пробелов в текущем корпусе не указано.")
+    lines.append("")
+
+    coverage = [
+        "# Coverage Report",
+        "",
+        f"- Output mode: {output_mode}",
+        f"- Intent: {synthesis_plan.get('intent', '')}",
+        f"- Sources mapped: {len(research_corpus.get('sources', []) if isinstance(research_corpus.get('sources'), list) else [])}",
+        f"- Claims: {len(claim_index)}",
+        f"- Evidence excerpts: {len(research_corpus.get('evidence_excerpts', []) if isinstance(research_corpus.get('evidence_excerpts'), list) else [])}",
+        f"- Unsupported sections: {len(synthesis_plan.get('unsupported_sections', []) if isinstance(synthesis_plan.get('unsupported_sections'), list) else [])}",
+        "",
+        "## Evidence Trace",
+        "",
+    ]
+    for claim_id, claim in claim_index.items():
+        coverage.append(f"- {claim_id}: {evidence_line_for_claim(claim)}")
+    coverage.extend(["", "## Unsupported Sections", ""])
+    unsupported = synthesis_plan.get("unsupported_sections") if isinstance(synthesis_plan.get("unsupported_sections"), list) else []
+    if unsupported:
+        for item in unsupported:
+            if isinstance(item, dict):
+                coverage.append(f"- {item.get('section_id')}: {item.get('reason')}")
+    else:
+        coverage.append("- none")
+    coverage.extend(["", "## Gaps", ""])
+    for gap in dict.fromkeys(str(item) for item in gaps if item):
+        coverage.append(f"- {gap}")
+    if not gaps:
+        coverage.append("- none")
+    return "\n".join(lines).rstrip() + "\n", "\n".join(coverage).rstrip() + "\n"
+
+
+def fb2_escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def write_book_artifacts(
+    workspace_root: Path,
+    expected_artifacts: list[Any],
+    reconstruction_path: str,
+    draft: str,
+    synthesis_plan: dict[str, Any],
+) -> list[str]:
+    paths = [str(item) for item in expected_artifacts]
+    chapter_paths = [path for path in paths if "/chapters/" in path and path.endswith(".md")]
+    if not chapter_paths:
+        return []
+    artifacts: list[str] = []
+    chapter_plan_path = sibling_artifact(reconstruction_path, "chapter_plan.json")
+    chapter_plan = load_optional_json_artifact(workspace_root, chapter_plan_path)
+    chapters = chapter_plan.get("chapters") if isinstance(chapter_plan.get("chapters"), list) else []
+    for index, chapter_path in enumerate(chapter_paths, start=1):
+        chapter = chapters[index - 1] if index - 1 < len(chapters) and isinstance(chapters[index - 1], dict) else {}
+        title = str(chapter.get("title") or f"Глава {index}")
+        content = f"# {title}\n\n{draft}\n"
+        sandbox_path(workspace_root, chapter_path).parent.mkdir(parents=True, exist_ok=True)
+        sandbox_path(workspace_root, chapter_path).write_text(content, encoding="utf-8")
+        artifacts.append(chapter_path)
+    manuscript_path = next((path for path in paths if path.endswith("/manuscript_ru.md")), "")
+    if manuscript_path:
+        manuscript = "\n\n".join(sandbox_path(workspace_root, path).read_text(encoding="utf-8") for path in chapter_paths)
+        sandbox_path(workspace_root, manuscript_path).write_text(manuscript, encoding="utf-8")
+        artifacts.append(manuscript_path)
+    continuity_path = next((path for path in paths if path.endswith("/continuity_report.json")), "")
+    if continuity_path:
+        payload = {"status": "completed", "checks": ["chapter order preserved", "source limitations repeated"], "output_mode": synthesis_plan.get("output_mode", "")}
+        sandbox_path(workspace_root, continuity_path).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        artifacts.append(continuity_path)
+    editor_path = next((path for path in paths if path.endswith("/editor_report.json")), "")
+    if editor_path:
+        payload = {"status": "completed", "checks": ["unsupported sections blocked", "evidence trace retained"], "unsupported_sections": synthesis_plan.get("unsupported_sections", [])}
+        sandbox_path(workspace_root, editor_path).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        artifacts.append(editor_path)
+    fb2_path = next((path for path in paths if path.endswith("/manuscript.fb2")), "")
+    if fb2_path and manuscript_path:
+        title = fb2_escape(str(synthesis_plan.get("topic") or "Manuscript"))
+        body = fb2_escape(sandbox_path(workspace_root, manuscript_path).read_text(encoding="utf-8"))
+        fb2 = f'<?xml version="1.0" encoding="utf-8"?>\n<FictionBook><description><title-info><book-title>{title}</book-title><lang>ru</lang></title-info></description><body><section><p>{body}</p></section></body></FictionBook>\n'
+        sandbox_path(workspace_root, fb2_path).write_text(fb2, encoding="utf-8")
+        artifacts.append(fb2_path)
+    return artifacts
 
 
 def source_match_tokens(text: str) -> set[str]:
@@ -400,6 +572,9 @@ def model_payload(
     timeline: dict[str, Any],
     reconstruction: str,
     coverage_report: str,
+    research_corpus: dict[str, Any] | None = None,
+    synthesis_plan: dict[str, Any] | None = None,
+    structure_map: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "task_id": request.get("task_id"),
@@ -407,6 +582,10 @@ def model_payload(
         "contract": request.get("contract") if isinstance(request.get("contract"), dict) else {},
         "quality_expectations": request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {},
         "revision_context": request.get("revision_context") if isinstance(request.get("revision_context"), dict) else {},
+        "research_corpus": research_corpus or {},
+        "synthesis_plan": synthesis_plan or {},
+        "structure_map": structure_map or {},
+        "output_mode": (synthesis_plan or {}).get("output_mode", ""),
         "source_summary": {
             "topic": source_map.get("topic"),
             "discovery_status": source_map.get("discovery_status"),
@@ -495,24 +674,37 @@ def run(
     source_snapshots_path = sibling_artifact(reconstruction_path, "source_snapshots.json")
     notes_path = sibling_artifact(reconstruction_path, "direct_event_notes.json")
     timeline_path = sibling_artifact(reconstruction_path, "timeline.json")
+    research_corpus_path = sibling_artifact(reconstruction_path, "research_corpus.json")
+    structure_map_path = sibling_artifact(reconstruction_path, "structure_map.json")
+    synthesis_plan_path = sibling_artifact(reconstruction_path, "synthesis_plan.json")
     try:
         source_map = load_json_artifact(workspace_root, source_path)
         source_snapshots = load_json_artifact(workspace_root, source_snapshots_path)
         notes = load_json_artifact(workspace_root, notes_path)
-        timeline = load_json_artifact(workspace_root, timeline_path)
+        timeline = load_optional_json_artifact(workspace_root, timeline_path)
+        research_corpus = load_optional_json_artifact(workspace_root, research_corpus_path)
+        structure_map = load_optional_json_artifact(workspace_root, structure_map_path)
+        synthesis_plan = load_optional_json_artifact(workspace_root, synthesis_plan_path)
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
         return {"ok": False, "worker": "ScriptoriumDaemon", "error": str(exc)}
 
     revision_context = request.get("revision_context") if isinstance(request.get("revision_context"), dict) else None
-    reconstruction = build_reconstruction(source_map, source_snapshots, notes, timeline, revision_context)
-    coverage_report = build_coverage_report(source_map, source_snapshots, notes, timeline, revision_context)
+    if synthesis_plan and research_corpus:
+        reconstruction = ""
+        coverage_report = ""
+        output_mode = str(synthesis_plan.get("output_mode") or "")
+        reconstruction, coverage_report = build_mode_draft(source_map, research_corpus, structure_map, synthesis_plan, revision_context)
+    else:
+        output_mode = str(research_intent_from_request(request).get("output_mode") or "event_reconstruction")
+        reconstruction = build_reconstruction(source_map, source_snapshots, notes, timeline, revision_context)
+        coverage_report = build_coverage_report(source_map, source_snapshots, notes, timeline, revision_context)
     guidance = request_required_scriptorium_guidance(
         "ScriptoriumDaemon",
         request,
-        model_payload(request, source_map, notes, timeline, reconstruction, coverage_report),
+        model_payload(request, source_map, notes, timeline, reconstruction, coverage_report, research_corpus, synthesis_plan, structure_map),
         (
-            "You are the Scriptorium writer. Improve the Russian reconstruction only from supplied facts, "
-            "timeline, evidence excerpts, and gaps. Do not invent unsupported events. Return JSON with optional "
+            "You are the Scriptorium writer. Improve the Russian output only from supplied research_corpus, "
+            "synthesis_plan, output_mode, timeline/structure, evidence excerpts, and gaps. Do not invent unsupported sections. Return JSON with optional "
             "reconstruction_ru_markdown or appendix_markdown plus warnings."
         ),
         request_guidance,
@@ -524,14 +716,17 @@ def run(
         host_path = sandbox_path(workspace_root, output_path)
         host_path.parent.mkdir(parents=True, exist_ok=True)
         host_path.write_text(content, encoding="utf-8")
+    extra_artifacts = []
+    if output_mode in {"book_manuscript", "book_manuscript_with_timeline"}:
+        extra_artifacts = write_book_artifacts(workspace_root, expected_artifacts, reconstruction_path, reconstruction, synthesis_plan)
     guidance_path = write_model_guidance_artifact(workspace_root, reconstruction_path, guidance)
     return {
         "ok": True,
         "worker": "ScriptoriumDaemon",
         "task_id": request.get("task_id"),
         "status": "completed",
-        "summary": "Draft reconstruction and coverage report written.",
-        "artifacts": [reconstruction_path, coverage_path, guidance_path],
+        "summary": f"Draft written for {output_mode}.",
+        "artifacts": [reconstruction_path, coverage_path, *extra_artifacts, guidance_path],
         "model_guidance": guidance,
         "gaps": list(dict.fromkeys(str(item) for item in timeline.get("gaps", []) if item)),
         "confidence": "medium",

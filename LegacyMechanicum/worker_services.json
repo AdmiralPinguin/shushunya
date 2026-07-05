@@ -69,6 +69,11 @@
     "module_path": "EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon",
     "module": "scriptorium_daemon"
   },
+  "ScriptoriumArchitect": {
+    "port": 7021,
+    "module_path": "EyeOfTerror/Scriptorium/Brigade/ScriptoriumArchitect",
+    "module": "scriptorium_architect"
+  },
   "ReductorVerifier": {
     "port": 7006,
     "module_path": "EyeOfTerror/Scriptorium/Brigade/ReductorVerifier",

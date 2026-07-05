@@ -26,6 +26,7 @@ WORKER_COMMANDS = {
     "OcularisRenderium": ("EyeOfTerror/Scriptorium/Brigade/OcularisRenderium", "EyeOfTerror/Scriptorium/Brigade/OcularisRenderium/ocularis_renderium.py"),
     "NoosphericExtractor": ("EyeOfTerror/Scriptorium/Brigade/NoosphericExtractor", "EyeOfTerror/Scriptorium/Brigade/NoosphericExtractor/noospheric_extractor.py"),
     "Chronologis": ("EyeOfTerror/Scriptorium/Brigade/Chronologis", "EyeOfTerror/Scriptorium/Brigade/Chronologis/chronologis.py"),
+    "ScriptoriumArchitect": ("EyeOfTerror/Scriptorium/Brigade/ScriptoriumArchitect", "EyeOfTerror/Scriptorium/Brigade/ScriptoriumArchitect/scriptorium_architect.py"),
     "ScriptoriumDaemon": ("EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon", "EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon/scriptorium_daemon.py"),
     "ReductorVerifier": ("EyeOfTerror/Scriptorium/Brigade/ReductorVerifier", "EyeOfTerror/Scriptorium/Brigade/ReductorVerifier/reductor_verifier.py"),
     "FabricatorFinalis": ("EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis", "EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis/fabricator_finalis.py"),

@@ -9,7 +9,7 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from eye_of_terror.contracts import build_lore_reconstruction_contract
+from eye_of_terror.contracts import build_research_writing_contract
 from eye_of_terror.inner_circle.iskandar_service import make_handler, oversight_template, pipeline_summary, required_workers, resolve_run_dir
 
 
@@ -30,7 +30,7 @@ def request_options(url: str) -> int:
 def main() -> int:
     contract_workers = [
         step.worker
-        for step in build_lore_reconstruction_contract("Собери события Скалатракса", task_id="iskandar-service-test").worker_plan
+        for step in build_research_writing_contract("Собери события Скалатракса", task_id="iskandar-service-test").worker_plan
     ]
     if required_workers() != contract_workers:
         raise AssertionError(f"Iskandar required workers drifted from contract plan: {required_workers()}")

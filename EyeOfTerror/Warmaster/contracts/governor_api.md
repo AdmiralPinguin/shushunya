@@ -29,7 +29,7 @@ POST /prepare_run
   "ok": true,
   "governor": "IskandarKhayon",
   "api_version": 1,
-  "task_kinds": ["research", "lore_reconstruction"],
+  "task_kinds": ["research", "research_writing", "lore_reconstruction"],
   "required_workers": [
     "CorpusIngestor",
     "Lexmechanic",
@@ -37,13 +37,14 @@ POST /prepare_run
     "OcularisRenderium",
     "NoosphericExtractor",
     "Chronologis",
+    "ScriptoriumArchitect",
     "ScriptoriumDaemon",
     "ReductorVerifier",
     "FabricatorFinalis"
   ],
   "pipeline": {
-    "kind": "lore_reconstruction",
-    "step_count": 9,
+    "kind": "research_writing",
+    "step_count": 10,
     "required_workers": [
       "CorpusIngestor",
       "Lexmechanic",
@@ -51,6 +52,7 @@ POST /prepare_run
       "OcularisRenderium",
       "NoosphericExtractor",
       "Chronologis",
+      "ScriptoriumArchitect",
       "ScriptoriumDaemon",
       "ReductorVerifier",
       "FabricatorFinalis"

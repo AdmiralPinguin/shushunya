@@ -1,0 +1,13 @@
+{
+  "name": "ScriptoriumArchitect",
+  "port": 7021,
+  "role": "research synthesis planner",
+  "status": "prototype",
+  "capabilities": ["model_guided_synthesis_planning", "output_mode_planning", "evidence_trace_requirements", "book_outline", "chapter_plan"],
+  "model_brain": {
+    "required": true,
+    "role": "ScriptoriumArchitect",
+    "failure_policy": "block worker execution when model_brain is unavailable"
+  },
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
+}

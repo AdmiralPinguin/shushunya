@@ -29,6 +29,7 @@ PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/OcularisRenderium python3 EyeOfTerror
 PYTHONPATH=EyeOfTerror/Mechanicum/CodeBrigade/Workers/CogitatorCodewright python3 EyeOfTerror/Mechanicum/CodeBrigade/Workers/CogitatorCodewright/self_test.py
 PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/NoosphericExtractor python3 EyeOfTerror/Scriptorium/Brigade/NoosphericExtractor/self_test.py
 PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/Chronologis python3 EyeOfTerror/Scriptorium/Brigade/Chronologis/self_test.py
+PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/ScriptoriumArchitect python3 EyeOfTerror/Scriptorium/Brigade/ScriptoriumArchitect/self_test.py
 PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon python3 EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon/self_test.py
 PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/ReductorVerifier python3 EyeOfTerror/Scriptorium/Brigade/ReductorVerifier/self_test.py
 PYTHONPATH=EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis python3 EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis/self_test.py
