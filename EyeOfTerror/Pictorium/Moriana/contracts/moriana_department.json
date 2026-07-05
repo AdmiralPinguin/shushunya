@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "department": "Pictorium",
+  "governor": {
+    "name": "Moriana",
+    "status": "planned",
+    "planned_port": 7103,
+    "task_kinds": ["image_generation"],
+    "route_terms": [
+      "картин",
+      "image",
+      "stable diffusion",
+      "рисовал",
+      "forge",
+      "flux",
+      "sdxl",
+      "lora"
+    ]
+  },
+  "backend": {
+    "name": "DemonsForge",
+    "default_url": "http://127.0.0.1:8110",
+    "adapter_worker": "ForgeRelay",
+    "adapter_port": 7010
+  },
+  "workers": [
+    {
+      "name": "Promptwright",
+      "role": "image prompt and job-spec planner",
+      "source_modules": [
+        "DemonsForge/forge_service/planner.py",
+        "DemonsForge/forge_service/thinker.py",
+        "DemonsForge/forge_service/schemas.py"
+      ],
+      "expected_artifacts": ["/work/pictorium/image_plan.json"]
+    },
+    {
+      "name": "ModelQuartermaster",
+      "role": "model, LoRA, embedding, and asset readiness inspector",
+      "source_modules": [
+        "DemonsForge/forge_service/registries.py",
+        "DemonsForge/forge_service/downloader.py",
+        "DemonsForge/quality_assets/asset_profiles.json",
+        "DemonsForge/quality_assets/character_profiles.json"
+      ],
+      "expected_artifacts": ["/work/pictorium/resource_report.json"]
+    },
+    {
+      "name": "ForgeDispatcher",
+      "role": "DemonsForge job submitter and monitor",
+      "source_modules": [
+        "DemonsForge/forge_service/client.py",
+        "DemonsForge/forge_service/queue.py",
+        "DemonsForge/forge_service/server.py",
+        "DemonsForge/forge_service/projects.py"
+      ],
+      "expected_artifacts": ["/work/pictorium/forge_jobs.json"]
+    },
+    {
+      "name": "ImageVerifier",
+      "role": "generated artifact verifier and visual risk reporter",
+      "source_modules": [
+        "DemonsForge/forge_service/evaluator.py",
+        "DemonsForge/tests/quality_bench.py"
+      ],
+      "expected_artifacts": ["/work/pictorium/image_verification.json"]
+    },
+    {
+      "name": "ArtifactFinalis",
+      "role": "final manifest and delivery packager",
+      "source_modules": [
+        "DemonsForge/forge_service/storage.py",
+        "DemonsForge/forge_service/reports.py"
+      ],
+      "expected_artifacts": ["/work/pictorium/final_manifest.json"]
+    }
+  ],
+  "activation_requirements": [
+    "Moriana governor service exposes GET /health, GET /capabilities, POST /plan, and POST /prepare_run",
+    "each brigade worker exposes the common Worker API",
+    "Warmaster can prepare an image_generation run package without calling DemonsForge directly",
+    "DemonsForge job failures are surfaced as structured blockers",
+    "asset downloads require explicit approval and safe source validation",
+    "generated image artifacts appear in Warmaster artifact endpoints"
+  ]
+}
