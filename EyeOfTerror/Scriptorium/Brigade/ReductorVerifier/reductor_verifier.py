@@ -583,6 +583,39 @@ def mode_quality_gates(
     }
 
 
+def synthesis_structure_findings(output_mode: str, reconstruction: str, synthesis_plan: dict[str, Any]) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    if not synthesis_plan or output_mode in {"event_reconstruction", "book_manuscript", "book_manuscript_with_timeline"}:
+        return [], {"applies": False}
+    sections = synthesis_plan.get("sections") if isinstance(synthesis_plan.get("sections"), list) else []
+    missing_sections: list[str] = []
+    missing_claim_traces: list[str] = []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        title = str(section.get("title") or "").strip()
+        section_id = str(section.get("section_id") or "").strip()
+        if title and f"## {title}" not in reconstruction:
+            missing_sections.append(section_id or title)
+        if not section.get("requires_evidence"):
+            continue
+        for claim_ref in section.get("required_claim_refs", []) if isinstance(section.get("required_claim_refs"), list) else []:
+            marker = f"Evidence trace: {claim_ref}"
+            if marker not in reconstruction:
+                missing_claim_traces.append(str(claim_ref))
+    findings: list[dict[str, str]] = []
+    if missing_sections:
+        findings.append({"severity": "blocker", "message": f"Draft misses synthesis section(s): {', '.join(missing_sections[:8])}."})
+    if missing_claim_traces:
+        findings.append({"severity": "blocker", "message": f"Draft misses required evidence trace claim(s): {', '.join(missing_claim_traces[:12])}."})
+    return findings, {
+        "applies": True,
+        "passed": not findings,
+        "checked_section_count": len(sections),
+        "missing_sections": missing_sections,
+        "missing_claim_traces": missing_claim_traces,
+    }
+
+
 def book_artifact_findings(workspace_root: Path, critic_path: str, required_artifacts: list[Any]) -> tuple[list[dict[str, str]], dict[str, Any]]:
     findings: list[dict[str, str]] = []
     chapter_paths = sorted(str(item) for item in required_artifacts if "/chapters/" in str(item) and str(item).endswith(".md"))
@@ -617,6 +650,23 @@ def book_artifact_findings(workspace_root: Path, critic_path: str, required_arti
             findings.append({"severity": "blocker", "message": f"Book FB2 lost chapter section boundaries: {fb2.count('<section>')}/{len(chapter_paths)}."})
     continuity = load_optional_json(workspace_root, continuity_path)
     editor = load_optional_json(workspace_root, editor_path)
+    chapter_plan_path = sibling_artifact(critic_path, "chapter_plan.json")
+    chapter_plan = load_optional_json(workspace_root, chapter_plan_path)
+    missing_planned_claim_refs: dict[str, list[str]] = {}
+    for chapter in chapter_plan.get("chapters", []) if isinstance(chapter_plan.get("chapters"), list) else []:
+        if not isinstance(chapter, dict):
+            continue
+        chapter_id = str(chapter.get("chapter_id") or "")
+        planned_refs = [str(ref) for ref in chapter.get("required_claim_refs", []) if str(ref).strip()] if isinstance(chapter.get("required_claim_refs"), list) else []
+        if not planned_refs:
+            findings.append({"severity": "blocker", "message": f"Book chapter plan has ungrounded chapter with no required claims: {chapter_id or 'unknown chapter'}"})
+            continue
+        chapter_text = next((text for path, text in chapter_texts.items() if chapter_id and chapter_id in path), "")
+        missing_refs = [ref for ref in planned_refs if f"Evidence trace: {ref}" not in chapter_text]
+        if missing_refs:
+            missing_planned_claim_refs[chapter_id or "unknown"] = missing_refs
+    for chapter_id, refs in missing_planned_claim_refs.items():
+        findings.append({"severity": "blocker", "message": f"Book chapter misses planned evidence claim(s): {chapter_id}: {', '.join(refs[:8])}"})
     if continuity and continuity.get("status") != "completed":
         findings.append({"severity": "blocker", "message": f"Book continuity report requires revision: {continuity.get('status')}"})
     if editor and editor.get("status") != "completed":
@@ -627,6 +677,7 @@ def book_artifact_findings(workspace_root: Path, critic_path: str, required_arti
         "duplicated_chapter_count": repeated_count,
         "continuity_status": continuity.get("status", "") if continuity else "",
         "editor_status": editor.get("status", "") if editor else "",
+        "missing_planned_claim_refs": missing_planned_claim_refs,
     }
     return findings, metrics
 
@@ -725,7 +776,13 @@ def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifact
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
             add_revision_step(steps, "timeline", "Chronologis", message, "critic_finding")
             add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
-        elif "draft does not visibly cover" in lowered or "coverage gaps clearly" in lowered or "under-detailed in final draft" in lowered:
+        elif (
+            "draft does not visibly cover" in lowered
+            or "coverage gaps clearly" in lowered
+            or "under-detailed in final draft" in lowered
+            or "draft misses synthesis section" in lowered
+            or "draft misses required evidence trace" in lowered
+        ):
             add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
         elif "book chapter" in lowered or "book manuscript" in lowered or "book fb2" in lowered or "book continuity" in lowered or "book editor" in lowered:
             add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
@@ -1054,6 +1111,9 @@ def review_artifacts(
         claim_refs = synthesis_plan.get("evidence_trace", {}).get("claim_refs") if isinstance(synthesis_plan.get("evidence_trace"), dict) else []
         if not claim_refs:
             findings.append({"severity": "blocker", "message": "Synthesis plan has no claim_refs for evidence-grounded writing."})
+    synthesis_structure_metrics: dict[str, Any] = {}
+    structure_findings, synthesis_structure_metrics = synthesis_structure_findings(output_mode, reconstruction, synthesis_plan)
+    findings.extend(structure_findings)
     book_metrics: dict[str, Any] = {}
     if output_mode in {"book_manuscript", "book_manuscript_with_timeline"}:
         for filename in ("book_outline.json", "chapter_plan.json", "manuscript_ru.md", "manuscript.fb2", "continuity_report.json", "editor_report.json"):
@@ -1131,6 +1191,7 @@ def review_artifacts(
             "evidence_trace_count": len(synthesis_plan.get("evidence_trace", {}).get("claim_refs", []) if isinstance(synthesis_plan.get("evidence_trace"), dict) else []),
             "structure_sections": len(structure_map.get("topic_structure", []) if isinstance(structure_map.get("topic_structure"), list) else []),
             "quality_gates": quality_gates,
+            "synthesis_structure": synthesis_structure_metrics,
             "book_pipeline": book_metrics,
         },
     }

@@ -387,6 +387,58 @@ def main() -> int:
         report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
         if report.get("approved") or report.get("metrics", {}).get("quality_gates", {}).get("passed") is not False:
             raise AssertionError(f"unsupported QA should fail quality gates: {report}")
+        report_request = json.loads(json.dumps(request))
+        report_request["quality_expectations"]["research_intent"] = {
+            "intent": "topic_report",
+            "output_mode": "research_report",
+            "required_depth": "deep",
+            "source_policy": "broad_sources_with_gaps_disclosed",
+            "needs_timeline": False,
+            "needs_chapters": False,
+        }
+        report_claims = [
+            {"claim_id": f"claim_{index}", "claim": f"Supported report claim {index}.", "source_refs": [f"Source {index}"]}
+            for index in range(1, 4)
+        ]
+        write_json(
+            base / "source_map.json",
+            {
+                "discovery_status": "research_ready",
+                "sources": [
+                    {"title": "Source 1", "source_class": "official_primary_narrative"},
+                    {"title": "Source 2", "source_class": "secondary_wiki"},
+                    {"title": "Source 3", "source_class": "secondary_wiki"},
+                    {"title": "Source 4", "source_class": "secondary_wiki"},
+                ],
+                "source_coverage": {"ready_for_extraction": True},
+            },
+        )
+        write_json(base / "research_corpus.json", {"sources": [{"title": f"Source {index}"} for index in range(1, 5)], "claims": report_claims, "contradictions": [], "gaps": []})
+        write_json(base / "structure_map.json", {"topic_structure": [{"title": "Обзор"}], "contradictions": []})
+        write_json(
+            base / "synthesis_plan.json",
+            {
+                "output_mode": "research_report",
+                "evidence_trace": {"claim_refs": ["claim_1", "claim_2", "claim_3"]},
+                "sections": [
+                    {"section_id": "overview", "title": "Обзор", "requires_evidence": True, "required_claim_refs": ["claim_1", "claim_2"]},
+                    {"section_id": "conclusion", "title": "Выводы", "requires_evidence": True, "required_claim_refs": ["claim_3"]},
+                ],
+                "unsupported_sections": [],
+            },
+        )
+        write(base / "reconstruction_ru.md", ("Plain report body without planned headings. Evidence trace: claim_1. " * 90) + "\n## Что еще надо проверить\n- none\n")
+        write(base / "coverage_report.md", "## Evidence Trace\n- claim_1\n- claim_2\n- claim_3\n## Unsupported Sections\n- none\n## Gaps\n- none\n")
+        result = run(report_request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"ReductorVerifier failed on report structure gates: {result}")
+        report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
+        structure_metrics = report.get("metrics", {}).get("synthesis_structure", {})
+        if report.get("approved") or structure_metrics.get("passed") is not False or "Draft misses required evidence trace" not in json.dumps(report):
+            raise AssertionError(f"report critic should block missing synthesis structure/evidence traces: {report}")
+        revision_workers = {step.get("worker") for step in report.get("revision_plan", {}).get("steps", [])}
+        if "ScriptoriumDaemon" not in revision_workers:
+            raise AssertionError(f"report structure blocker should reroute to writer: {report}")
         book_base = root / "bookcritic"
         book_request = {
             "task_id": "bookcritic:critic_review",
