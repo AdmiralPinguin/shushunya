@@ -232,6 +232,67 @@ def main() -> int:
         guidance = json.loads((base / "scriptorium_model_guidance.json").read_text(encoding="utf-8"))
         if guidance.get("status") != "answered":
             raise AssertionError(f"model guidance artifact missing status: {guidance}")
+        mode_cases = {
+            "short_answer": "Краткий ответ",
+            "comparative_review": "Сравнение и вывод",
+            "investigative_report": "Версии и проверка",
+            "longform_article": "Контекст",
+        }
+        for output_mode, expected_heading in mode_cases.items():
+            mode_base = root / output_mode
+            write_json(mode_base / "source_map.json", {"topic": output_mode, "sources": [{"title": "Primary"}], "coverage_gaps": []})
+            write_json(mode_base / "source_snapshots.json", {"snapshots": [], "skipped": []})
+            write_json(mode_base / "direct_event_notes.json", {"events": [], "gaps": []})
+            write_json(
+                mode_base / "research_corpus.json",
+                {
+                    "topic": output_mode,
+                    "sources": [{"title": "Primary"}],
+                    "claims": [
+                        {"claim_id": "claim_1", "claim": "Подтвержденное утверждение для режима.", "confidence": "medium", "source_refs": ["Primary"]}
+                    ],
+                    "evidence_excerpts": [{"quote_id": "evidence_1", "source_ref": "Primary", "excerpt": "Подтвержденное утверждение."}],
+                    "gaps": [],
+                },
+            )
+            write_json(mode_base / "structure_map.json", {"topic": output_mode, "topic_structure": [], "contradictions": []})
+            write_json(
+                mode_base / "synthesis_plan.json",
+                {
+                    "topic": output_mode,
+                    "intent": output_mode,
+                    "output_mode": output_mode,
+                    "sections": [
+                        {"section_id": "source_base", "title": "Источник и границы уверенности", "requires_evidence": True, "required_claim_refs": ["claim_1"]},
+                        {"section_id": "mode_section", "title": expected_heading, "requires_evidence": True, "required_claim_refs": ["claim_1"]},
+                        {"section_id": "unsupported", "title": "Неподтвержденное", "requires_evidence": True, "required_claim_refs": []},
+                    ],
+                    "unsupported_sections": [{"section_id": "unsupported", "reason": "no evidence trace"}],
+                    "evidence_trace": {"claim_refs": ["claim_1"]},
+                },
+            )
+            mode_result = run(
+                {
+                    "task_id": f"test-{output_mode}:draft_reconstruction",
+                    "step": {
+                        "expected_artifacts": [
+                            f"/work/{output_mode}/reconstruction_ru.md",
+                            f"/work/{output_mode}/coverage_report.md",
+                        ]
+                    },
+                },
+                root,
+            )
+            if not mode_result.get("ok"):
+                raise AssertionError(f"ScriptoriumDaemon {output_mode} mode failed: {mode_result}")
+            mode_draft = (mode_base / "reconstruction_ru.md").read_text(encoding="utf-8")
+            if (
+                f"Output mode: {output_mode}" not in mode_draft
+                or f"## {expected_heading}" not in mode_draft
+                or "Evidence trace: claim_1" not in mode_draft
+                or "Раздел не написан: для него нет evidence trace" not in mode_draft
+            ):
+                raise AssertionError(f"writer mode {output_mode} did not follow synthesis plan and evidence trace: {mode_draft}")
         book_base = root / "book"
         write_json(
             book_base / "source_map.json",
