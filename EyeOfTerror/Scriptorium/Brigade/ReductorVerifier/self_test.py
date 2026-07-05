@@ -364,6 +364,98 @@ def main() -> int:
         report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
         if report.get("approved") or report.get("metrics", {}).get("quality_gates", {}).get("passed") is not False:
             raise AssertionError(f"unsupported QA should fail quality gates: {report}")
+        book_base = root / "bookcritic"
+        book_request = {
+            "task_id": "bookcritic:critic_review",
+            "step": {"step_id": "critic_review", "expected_artifacts": ["/work/bookcritic/critic_report.json"]},
+            "quality_expectations": {
+                "research_intent": {
+                    "intent": "book",
+                    "output_mode": "book_manuscript",
+                    "required_depth": "book",
+                    "source_policy": "broad_sources_with_gaps_disclosed",
+                    "needs_timeline": False,
+                    "needs_chapters": True,
+                }
+            },
+            "contract": {
+                "required_artifacts": [
+                    "/work/bookcritic/research_corpus.json",
+                    "/work/bookcritic/synthesis_plan.json",
+                    "/work/bookcritic/reconstruction_ru.md",
+                    "/work/bookcritic/coverage_report.md",
+                    "/work/bookcritic/book_outline.json",
+                    "/work/bookcritic/chapter_plan.json",
+                    "/work/bookcritic/chapters/chapter_01.md",
+                    "/work/bookcritic/chapters/chapter_02.md",
+                    "/work/bookcritic/chapters/chapter_03.md",
+                    "/work/bookcritic/continuity_report.json",
+                    "/work/bookcritic/editor_report.json",
+                    "/work/bookcritic/manuscript_ru.md",
+                    "/work/bookcritic/manuscript.fb2",
+                ]
+            },
+        }
+        write_json(book_base / "corpus_index.json", {"summary": {"sources_matched": 6}, "sources": [], "gaps": []})
+        write_json(
+            book_base / "source_map.json",
+            {
+                "discovery_status": "research_ready",
+                "sources": [
+                    {"title": f"Source {index}", "source_class": "official_primary_narrative" if index == 1 else "secondary_wiki"}
+                    for index in range(1, 7)
+                ],
+                "source_coverage": {"ready_for_extraction": True},
+            },
+        )
+        write_json(book_base / "source_snapshots.json", {"snapshots": [{"source_title": f"Source {index}", "ok": True} for index in range(1, 7)], "skipped": []})
+        write_json(book_base / "rendered_snapshots.json", {"rendered_snapshots": [], "summary": {"render_required": 0}})
+        write_json(book_base / "direct_event_notes.json", {"events": [], "gaps": []})
+        claims = [
+            {"claim_id": f"claim_{index}", "claim": f"Подтвержденное утверждение {index}.", "source_refs": [f"Source {index}"]}
+            for index in range(1, 7)
+        ]
+        write_json(
+            book_base / "research_corpus.json",
+            {"sources": [{"title": f"Source {index}"} for index in range(1, 7)], "claims": claims, "contradictions": [], "gaps": []},
+        )
+        write_json(book_base / "structure_map.json", {"topic_structure": [], "contradictions": []})
+        write_json(
+            book_base / "synthesis_plan.json",
+            {
+                "output_mode": "book_manuscript",
+                "evidence_trace": {"claim_refs": [claim["claim_id"] for claim in claims]},
+                "sections": [{"section_id": "book_body", "requires_evidence": True, "required_claim_refs": ["claim_1", "claim_2"]}],
+                "unsupported_sections": [],
+            },
+        )
+        write_json(book_base / "book_outline.json", {"chapters": [{"chapter_id": f"chapter_{index:02d}"} for index in range(1, 4)]})
+        write_json(book_base / "chapter_plan.json", {"chapters": [{"chapter_id": f"chapter_{index:02d}"} for index in range(1, 4)]})
+        write(book_base / "reconstruction_ru.md", ("Evidence trace: claim_1. " * 700) + "\n## Что еще надо проверить\n- none\n")
+        write(book_base / "coverage_report.md", "## Evidence Trace\n- claim_1\n## Unsupported Sections\n- none\n## Gaps\n- none\n")
+        write(book_base / "chapters/chapter_01.md", "# Глава 1\n\nEvidence trace: claim_1.\n")
+        write(book_base / "chapters/chapter_02.md", "# Глава 2\n\nГлава не развернута: для неё нет подтвержденных claims.\n")
+        write(book_base / "chapters/chapter_03.md", "# Глава 3\n\nEvidence trace: claim_3.\n")
+        write_json(
+            book_base / "continuity_report.json",
+            {"status": "needs_revision", "missing_evidence_trace_chapters": ["chapter_02"], "repeated_chapters": []},
+        )
+        write_json(book_base / "editor_report.json", {"status": "completed", "grounded_chapter_count": 2})
+        write(book_base / "manuscript_ru.md", "# Глава 1\n\nEvidence trace: claim_1.\n\n# Глава 2\n\nГлава не развернута.\n\n# Глава 3\n\nEvidence trace: claim_3.\n")
+        write(book_base / "manuscript.fb2", "<FictionBook><body><section></section><section></section><section></section></body></FictionBook>\n")
+        result = run(book_request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"ReductorVerifier failed on book pipeline review: {result}")
+        report = json.loads((book_base / "critic_report.json").read_text(encoding="utf-8"))
+        if report.get("approved") or "Book chapter was blocked for missing evidence" not in json.dumps(report):
+            raise AssertionError(f"book critic should block ungrounded chapters: {report}")
+        if report.get("metrics", {}).get("quality_gates", {}).get("passed") is not True:
+            raise AssertionError(f"book quality gates should pass so chapter blocker is isolated: {report}")
+        if report.get("metrics", {}).get("book_pipeline", {}).get("continuity_status") != "needs_revision":
+            raise AssertionError(f"book metrics should expose continuity status: {report}")
+        revision_workers = {step.get("worker") for step in report.get("revision_plan", {}).get("steps", [])}
+        if "ScriptoriumDaemon" not in revision_workers:
+            raise AssertionError(f"book chapter blocker should reroute to writer: {report}")
         write_json(
             base / "source_map.json",
             {

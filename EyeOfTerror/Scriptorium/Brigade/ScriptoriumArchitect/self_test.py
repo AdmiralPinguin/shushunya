@@ -74,6 +74,13 @@ def main() -> int:
             raise AssertionError(f"supported corpus should not create unsupported sections: {plan}")
         if len(outline.get("chapters", [])) != 3 or len(chapter_plan.get("chapters", [])) != 3:
             raise AssertionError(f"book outline and chapter plan should have three baseline chapters: {outline} {chapter_plan}")
+        empty_chapters = [
+            chapter.get("chapter_id")
+            for chapter in chapter_plan.get("chapters", [])
+            if not chapter.get("required_claim_refs")
+        ]
+        if empty_chapters:
+            raise AssertionError(f"book chapter plan should not create ungrounded chapters when claims exist: {chapter_plan}")
     print("[ok] ScriptoriumArchitect synthesis plan")
     return 0
 

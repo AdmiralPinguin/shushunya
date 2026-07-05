@@ -304,27 +304,163 @@ def fb2_escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def unique_strings(values: list[Any]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def chapter_required_claim_refs(chapter: dict[str, Any], synthesis_plan: dict[str, Any]) -> list[str]:
+    direct_refs = chapter.get("required_claim_refs") if isinstance(chapter.get("required_claim_refs"), list) else []
+    refs = unique_strings(direct_refs)
+    if refs:
+        return refs
+    section_refs = set(unique_strings(chapter.get("section_refs") if isinstance(chapter.get("section_refs"), list) else []))
+    if not section_refs:
+        return []
+    sections = synthesis_plan.get("sections") if isinstance(synthesis_plan.get("sections"), list) else []
+    collected: list[Any] = []
+    for section in sections:
+        if not isinstance(section, dict) or str(section.get("section_id") or "") not in section_refs:
+            continue
+        section_claims = section.get("required_claim_refs") if isinstance(section.get("required_claim_refs"), list) else []
+        collected.extend(section_claims)
+    return unique_strings(collected)
+
+
+def build_chapter_markdown(
+    chapter: dict[str, Any],
+    index: int,
+    claim_index: dict[str, dict[str, Any]],
+    synthesis_plan: dict[str, Any],
+    research_corpus: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    chapter_id = str(chapter.get("chapter_id") or f"chapter_{index:02d}")
+    title = str(chapter.get("title") or f"Глава {index}")
+    claim_refs = chapter_required_claim_refs(chapter, synthesis_plan)
+    claims = [claim_index[claim_ref] for claim_ref in claim_refs if claim_ref in claim_index]
+    lines = [
+        f"# {title}",
+        "",
+        f"Chapter ID: {chapter_id}",
+        f"Output mode: {synthesis_plan.get('output_mode', '')}",
+        "",
+    ]
+    missing_claim_refs = [claim_ref for claim_ref in claim_refs if claim_ref not in claim_index]
+    if claims:
+        for claim in claims:
+            claim_text = str(claim.get("claim") or "").strip()
+            if claim_text:
+                lines.append(claim_text)
+                lines.append("")
+            lines.append(f"> {evidence_line_for_claim(claim)}")
+            lines.append("")
+    else:
+        lines.append("Глава не развернута: для неё нет подтвержденных claims в research_corpus.")
+        lines.append("")
+    gaps = research_corpus.get("gaps") if isinstance(research_corpus.get("gaps"), list) else []
+    if gaps:
+        lines.extend(["## Ограничения главы", ""])
+        for gap in unique_strings(gaps)[:6]:
+            lines.append(f"- {gap}")
+        lines.append("")
+    record = {
+        "chapter_id": chapter_id,
+        "title": title,
+        "required_claim_refs": claim_refs,
+        "written_claim_refs": [str(claim.get("claim_id") or "") for claim in claims if claim.get("claim_id")],
+        "missing_claim_refs": missing_claim_refs,
+        "char_count": len("\n".join(lines)),
+        "has_evidence_trace": bool(claims),
+    }
+    return "\n".join(lines).rstrip() + "\n", record
+
+
+def build_continuity_report(chapter_records: list[dict[str, Any]], synthesis_plan: dict[str, Any]) -> dict[str, Any]:
+    seen_bodies: set[tuple[str, ...]] = set()
+    repeated_chapters: list[str] = []
+    for record in chapter_records:
+        fingerprint = tuple(record.get("written_claim_refs", []))
+        chapter_id = str(record.get("chapter_id") or "")
+        if fingerprint and fingerprint in seen_bodies:
+            repeated_chapters.append(chapter_id)
+        if fingerprint:
+            seen_bodies.add(fingerprint)
+    missing_evidence = [str(record.get("chapter_id") or "") for record in chapter_records if not record.get("has_evidence_trace")]
+    missing_claims = {
+        str(record.get("chapter_id") or ""): record.get("missing_claim_refs", [])
+        for record in chapter_records
+        if record.get("missing_claim_refs")
+    }
+    checks = [
+        "chapter order preserved",
+        "chapter-specific claim refs used",
+        "source limitations repeated where corpus gaps exist",
+    ]
+    status = "completed" if not repeated_chapters and not missing_evidence and not missing_claims else "needs_revision"
+    return {
+        "status": status,
+        "output_mode": synthesis_plan.get("output_mode", ""),
+        "chapter_count": len(chapter_records),
+        "checks": checks,
+        "repeated_chapters": repeated_chapters,
+        "missing_evidence_trace_chapters": missing_evidence,
+        "missing_claim_refs_by_chapter": missing_claims,
+        "chapters": chapter_records,
+    }
+
+
+def build_editor_report(chapter_records: list[dict[str, Any]], synthesis_plan: dict[str, Any]) -> dict[str, Any]:
+    unsupported = synthesis_plan.get("unsupported_sections") if isinstance(synthesis_plan.get("unsupported_sections"), list) else []
+    short_chapters = [
+        str(record.get("chapter_id") or "")
+        for record in chapter_records
+        if int(record.get("char_count") or 0) < 120
+    ]
+    status = "completed" if not unsupported and not short_chapters else "needs_revision"
+    return {
+        "status": status,
+        "checks": [
+            "unsupported sections blocked",
+            "evidence trace retained",
+            "chapter minimum substance checked",
+        ],
+        "unsupported_sections": unsupported,
+        "short_chapters": short_chapters,
+        "grounded_chapter_count": sum(1 for record in chapter_records if record.get("has_evidence_trace")),
+        "chapter_count": len(chapter_records),
+    }
+
+
 def write_book_artifacts(
     workspace_root: Path,
     expected_artifacts: list[Any],
     reconstruction_path: str,
     draft: str,
     synthesis_plan: dict[str, Any],
+    research_corpus: dict[str, Any] | None = None,
 ) -> list[str]:
     paths = [str(item) for item in expected_artifacts]
     chapter_paths = [path for path in paths if "/chapters/" in path and path.endswith(".md")]
     if not chapter_paths:
         return []
     artifacts: list[str] = []
+    research_corpus = research_corpus or {}
+    claim_index = claims_by_id(research_corpus)
     chapter_plan_path = sibling_artifact(reconstruction_path, "chapter_plan.json")
     chapter_plan = load_optional_json_artifact(workspace_root, chapter_plan_path)
     chapters = chapter_plan.get("chapters") if isinstance(chapter_plan.get("chapters"), list) else []
+    chapter_records: list[dict[str, Any]] = []
     for index, chapter_path in enumerate(chapter_paths, start=1):
         chapter = chapters[index - 1] if index - 1 < len(chapters) and isinstance(chapters[index - 1], dict) else {}
-        title = str(chapter.get("title") or f"Глава {index}")
-        content = f"# {title}\n\n{draft}\n"
+        content, record = build_chapter_markdown(chapter, index, claim_index, synthesis_plan, research_corpus)
         sandbox_path(workspace_root, chapter_path).parent.mkdir(parents=True, exist_ok=True)
         sandbox_path(workspace_root, chapter_path).write_text(content, encoding="utf-8")
+        record["path"] = chapter_path
+        chapter_records.append(record)
         artifacts.append(chapter_path)
     manuscript_path = next((path for path in paths if path.endswith("/manuscript_ru.md")), "")
     if manuscript_path:
@@ -333,19 +469,22 @@ def write_book_artifacts(
         artifacts.append(manuscript_path)
     continuity_path = next((path for path in paths if path.endswith("/continuity_report.json")), "")
     if continuity_path:
-        payload = {"status": "completed", "checks": ["chapter order preserved", "source limitations repeated"], "output_mode": synthesis_plan.get("output_mode", "")}
+        payload = build_continuity_report(chapter_records, synthesis_plan)
         sandbox_path(workspace_root, continuity_path).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         artifacts.append(continuity_path)
     editor_path = next((path for path in paths if path.endswith("/editor_report.json")), "")
     if editor_path:
-        payload = {"status": "completed", "checks": ["unsupported sections blocked", "evidence trace retained"], "unsupported_sections": synthesis_plan.get("unsupported_sections", [])}
+        payload = build_editor_report(chapter_records, synthesis_plan)
         sandbox_path(workspace_root, editor_path).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         artifacts.append(editor_path)
     fb2_path = next((path for path in paths if path.endswith("/manuscript.fb2")), "")
     if fb2_path and manuscript_path:
         title = fb2_escape(str(synthesis_plan.get("topic") or "Manuscript"))
-        body = fb2_escape(sandbox_path(workspace_root, manuscript_path).read_text(encoding="utf-8"))
-        fb2 = f'<?xml version="1.0" encoding="utf-8"?>\n<FictionBook><description><title-info><book-title>{title}</book-title><lang>ru</lang></title-info></description><body><section><p>{body}</p></section></body></FictionBook>\n'
+        sections = []
+        for chapter_path in chapter_paths:
+            body = fb2_escape(sandbox_path(workspace_root, chapter_path).read_text(encoding="utf-8"))
+            sections.append(f"<section><p>{body}</p></section>")
+        fb2 = f'<?xml version="1.0" encoding="utf-8"?>\n<FictionBook><description><title-info><book-title>{title}</book-title><lang>ru</lang></title-info></description><body>{"".join(sections)}</body></FictionBook>\n'
         sandbox_path(workspace_root, fb2_path).write_text(fb2, encoding="utf-8")
         artifacts.append(fb2_path)
     return artifacts
@@ -718,7 +857,7 @@ def run(
         host_path.write_text(content, encoding="utf-8")
     extra_artifacts = []
     if output_mode in {"book_manuscript", "book_manuscript_with_timeline"}:
-        extra_artifacts = write_book_artifacts(workspace_root, expected_artifacts, reconstruction_path, reconstruction, synthesis_plan)
+        extra_artifacts = write_book_artifacts(workspace_root, expected_artifacts, reconstruction_path, reconstruction, synthesis_plan, research_corpus)
     guidance_path = write_model_guidance_artifact(workspace_root, reconstruction_path, guidance)
     return {
         "ok": True,

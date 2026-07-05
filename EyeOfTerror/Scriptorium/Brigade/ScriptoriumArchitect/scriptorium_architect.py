@@ -108,14 +108,19 @@ def attach_claim_refs(sections: list[dict[str, Any]], refs: list[str]) -> list[d
 
 
 def build_book_outline(topic: str, sections: list[dict[str, Any]], refs: list[str]) -> dict[str, Any]:
+    chapter_refs = [refs[index::3] for index in range(3)] if refs else [[], [], []]
+    if refs:
+        for index, values in enumerate(chapter_refs):
+            if not values:
+                chapter_refs[index] = refs[: min(3, len(refs))]
     return {
         "version": 1,
         "title": topic or "Research manuscript",
         "target_language": "ru",
         "chapters": [
-            {"chapter_id": "chapter_01", "title": "Введение и источники", "section_refs": ["source_base"], "required_claim_refs": refs[:4]},
-            {"chapter_id": "chapter_02", "title": "Основной рассказ", "section_refs": [section.get("section_id", "") for section in sections if section.get("requires_evidence")], "required_claim_refs": refs[4:12] or refs[:6]},
-            {"chapter_id": "chapter_03", "title": "Итоги и открытые вопросы", "section_refs": ["book_close"], "required_claim_refs": refs[12:18]},
+            {"chapter_id": "chapter_01", "title": "Введение и источники", "section_refs": ["source_base"], "required_claim_refs": chapter_refs[0][:6]},
+            {"chapter_id": "chapter_02", "title": "Основной рассказ", "section_refs": [section.get("section_id", "") for section in sections if section.get("requires_evidence")], "required_claim_refs": chapter_refs[1][:8]},
+            {"chapter_id": "chapter_03", "title": "Итоги и открытые вопросы", "section_refs": ["book_close"], "required_claim_refs": chapter_refs[2][:6]},
         ],
     }
 

@@ -227,9 +227,9 @@ def main() -> int:
             book_base / "chapter_plan.json",
             {
                 "chapters": [
-                    {"chapter_id": "chapter_01", "title": "Глава 1"},
-                    {"chapter_id": "chapter_02", "title": "Глава 2"},
-                    {"chapter_id": "chapter_03", "title": "Глава 3"},
+                    {"chapter_id": "chapter_01", "title": "Глава 1", "required_claim_refs": ["claim_1"]},
+                    {"chapter_id": "chapter_02", "title": "Глава 2", "required_claim_refs": ["claim_2"]},
+                    {"chapter_id": "chapter_03", "title": "Глава 3", "section_refs": ["book_close"]},
                 ]
             },
         )
@@ -271,6 +271,22 @@ def main() -> int:
         ]:
             if not (book_base / filename).exists():
                 raise AssertionError(f"book mode did not write artifact: {filename}")
+        chapter_1 = (book_base / "chapters/chapter_01.md").read_text(encoding="utf-8")
+        chapter_2 = (book_base / "chapters/chapter_02.md").read_text(encoding="utf-8")
+        chapter_3 = (book_base / "chapters/chapter_03.md").read_text(encoding="utf-8")
+        if chapter_1 == chapter_2 or "Evidence trace: claim_1" not in chapter_1 or "Evidence trace: claim_2" not in chapter_2:
+            raise AssertionError("book chapters should be chapter-specific, not duplicated whole-draft copies")
+        if "не развернута" not in chapter_3:
+            raise AssertionError("chapter without evidence should be explicitly blocked instead of invented")
+        continuity = json.loads((book_base / "continuity_report.json").read_text(encoding="utf-8"))
+        if continuity.get("status") != "needs_revision" or "chapter_03" not in continuity.get("missing_evidence_trace_chapters", []):
+            raise AssertionError(f"continuity report should block ungrounded chapters: {continuity}")
+        editor = json.loads((book_base / "editor_report.json").read_text(encoding="utf-8"))
+        if editor.get("status") != "completed" or editor.get("grounded_chapter_count") != 2:
+            raise AssertionError(f"editor report should summarize grounded chapters: {editor}")
+        fb2 = (book_base / "manuscript.fb2").read_text(encoding="utf-8")
+        if fb2.count("<section>") != 3:
+            raise AssertionError(f"fb2 should preserve chapter section boundaries: {fb2}")
     print("[ok] ScriptoriumDaemon draft")
     return 0
 
