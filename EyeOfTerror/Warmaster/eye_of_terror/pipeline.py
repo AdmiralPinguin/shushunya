@@ -59,6 +59,9 @@ def quality_expectations_for_step(oversight: dict[str, Any] | None, step_id: str
     task_profile = oversight.get("task_profile") if isinstance(oversight.get("task_profile"), dict) else {}
     if task_profile:
         expectations["task_profile"] = task_profile
+    research_intent = oversight.get("research_intent") if isinstance(oversight.get("research_intent"), dict) else {}
+    if research_intent:
+        expectations["research_intent"] = research_intent
     briefs = oversight.get("worker_specialization_briefs") if isinstance(oversight.get("worker_specialization_briefs"), list) else []
     worker_brief = next((item for item in briefs if isinstance(item, dict) and item.get("step_id") == step_id), {})
     if worker_brief:
@@ -73,12 +76,15 @@ def quality_hints_for_request(request: dict[str, Any]) -> dict[str, Any]:
     blockers = step_quality.get("blockers") if isinstance(step_quality.get("blockers"), list) else []
     revision_targets = step_quality.get("revision_targets") if isinstance(step_quality.get("revision_targets"), list) else []
     task_profile = expectations.get("task_profile") if isinstance(expectations.get("task_profile"), dict) else {}
+    research_intent = expectations.get("research_intent") if isinstance(expectations.get("research_intent"), dict) else {}
     worker_brief = expectations.get("worker_brief") if isinstance(expectations.get("worker_brief"), dict) else {}
     return {
         "check_count": len(checks),
         "blocker_count": len(blockers),
         "revision_targets": revision_targets,
         "task_complexity": str(task_profile.get("complexity") or ""),
+        "research_intent": str(research_intent.get("intent") or ""),
+        "output_mode": str(research_intent.get("output_mode") or ""),
         "worker_brief": str(worker_brief.get("brief") or ""),
     }
 

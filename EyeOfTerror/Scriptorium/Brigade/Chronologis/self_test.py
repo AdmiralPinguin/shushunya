@@ -20,7 +20,15 @@ def run(request: dict, *args, **kwargs) -> dict:
 def main() -> int:
     request = {
         "task_id": "test-skalathrax:timeline",
-        "step": {"expected_artifacts": ["/work/skalathrax/timeline.json"]},
+        "quality_expectations": {
+            "research_intent": {
+                "intent": "event_reconstruction",
+                "output_mode": "event_reconstruction",
+                "needs_timeline": True,
+                "needs_chapters": False,
+            }
+        },
+        "step": {"expected_artifacts": ["/work/skalathrax/timeline.json", "/work/skalathrax/structure_map.json"]},
     }
     notes = {
         "topic": "Skalathrax",
@@ -54,6 +62,25 @@ def main() -> int:
         notes_path = Path(temp_dir) / "skalathrax" / "direct_event_notes.json"
         notes_path.parent.mkdir(parents=True, exist_ok=True)
         notes_path.write_text(json.dumps(notes), encoding="utf-8")
+        (Path(temp_dir) / "skalathrax" / "research_corpus.json").write_text(
+            json.dumps(
+                {
+                    "topic": "Skalathrax",
+                    "sources": [
+                        {"title": "Kharn: Eater of Worlds", "class": "official_primary_narrative", "language": "en"},
+                        {"title": "Lexicanum: Battle of Skalathrax", "class": "curated_wiki", "language": "en"},
+                    ],
+                    "claims": [
+                        {"claim_id": "event_claim_1", "claim": "moon parley", "confidence": "medium"},
+                        {"claim_id": "event_claim_2", "claim": "burns shelters", "confidence": "high"},
+                    ],
+                    "arguments": [{"argument_id": "argument_1", "summary": "Direct event evidence anchors the reconstruction.", "claim_refs": ["event_claim_1"], "confidence": "medium"}],
+                    "definitions": [{"term": "Skalathrax", "definition": "World Eaters civil conflict site."}],
+                    "gaps": ["gap"],
+                }
+            ),
+            encoding="utf-8",
+        )
         result = run(request, Path(temp_dir))
         if not result.get("ok"):
             raise AssertionError(f"Chronologis failed: {result}")
@@ -73,6 +100,16 @@ def main() -> int:
             raise AssertionError(f"timeline should summarize evidence lead uncertainty: {data.get('summary')}")
         if data.get("summary", {}).get("events_missing_evidence") != 1 or data.get("summary", {}).get("source_coverage_ready") is not True:
             raise AssertionError(f"timeline should summarize evidence coverage: {data.get('summary')}")
+        structure = json.loads((Path(temp_dir) / "skalathrax" / "structure_map.json").read_text(encoding="utf-8"))
+        if (
+            structure.get("intent", {}).get("intent") != "event_reconstruction"
+            or structure.get("needs_timeline") is not True
+            or not structure.get("source_order")
+            or not structure.get("argument_flow")
+            or not structure.get("topic_structure")
+            or structure.get("summary", {}).get("timeline_events") != 5
+        ):
+            raise AssertionError(f"structure map should preserve intent, source order, argument flow, and timeline: {structure}")
     print("[ok] Chronologis timeline")
     return 0
 

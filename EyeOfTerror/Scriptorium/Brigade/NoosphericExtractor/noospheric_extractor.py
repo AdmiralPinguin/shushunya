@@ -64,6 +64,13 @@ def rendered_snapshots_path_for_output(output_path: str) -> str:
     return f"{parent}/rendered_snapshots.json"
 
 
+def research_corpus_path_for_output(output_path: str) -> str:
+    if not output_path.startswith("/work/"):
+        raise ValueError(f"unsupported output path: {output_path}")
+    parent = output_path.rsplit("/", 1)[0]
+    return f"{parent}/research_corpus.json"
+
+
 EVENT_EVIDENCE_MARKERS = {
     str(event.get("event_id")): [str(marker) for marker in event.get("evidence_markers", [])]
     for playbook in EVENT_PLAYBOOKS
@@ -227,6 +234,14 @@ def first_sentence(text: str, max_chars: int = 360) -> str:
     return sentence[:max_chars].strip()
 
 
+def source_ref(snapshot: dict[str, Any]) -> str:
+    return str(snapshot.get("source_title") or snapshot.get("title") or snapshot.get("requested_url") or "unknown source")
+
+
+def stable_id(prefix: str, index: int) -> str:
+    return f"{prefix}_{index}"
+
+
 def generic_events_from_snapshots(source_snapshots: dict[str, Any]) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for snapshot in source_snapshots.get("snapshots", []):
@@ -341,6 +356,178 @@ def extract_events(source_map: dict[str, Any], source_snapshots: dict[str, Any] 
     }
 
 
+def claims_from_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    claims: list[dict[str, Any]] = []
+    for index, event in enumerate(events, start=1):
+        if not isinstance(event, dict):
+            continue
+        summary = str(event.get("summary") or "").strip()
+        if not summary:
+            continue
+        claims.append(
+            {
+                "claim_id": stable_id("event_claim", index),
+                "claim": summary,
+                "claim_type": "event",
+                "confidence": str(event.get("confidence") or "unknown"),
+                "source_refs": event.get("source_refs", []) if isinstance(event.get("source_refs"), list) else [],
+                "evidence_refs": [item.get("source_title") for item in event.get("evidence_snapshots", []) if isinstance(item, dict) and item.get("source_title")],
+                "event_id": event.get("event_id", ""),
+            }
+        )
+    return claims
+
+
+def claims_from_snapshots(source_snapshots: dict[str, Any], existing_claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    known = {str(item.get("claim") or "").lower() for item in existing_claims if isinstance(item, dict)}
+    claims: list[dict[str, Any]] = []
+    for snapshot in source_snapshots.get("snapshots", []):
+        if not isinstance(snapshot, dict) or not snapshot.get("ok"):
+            continue
+        claim = first_sentence(str(snapshot.get("text_excerpt") or ""), max_chars=420)
+        if not claim or claim.lower() in known:
+            continue
+        claims.append(
+            {
+                "claim_id": stable_id("source_claim", len(claims) + 1),
+                "claim": claim,
+                "claim_type": "source_lead",
+                "confidence": "medium" if snapshot_is_primary(snapshot) else "low",
+                "source_refs": [source_ref(snapshot)],
+                "evidence_refs": [source_ref(snapshot)],
+            }
+        )
+    return claims
+
+
+def evidence_quotes_from_notes(notes: dict[str, Any], source_snapshots: dict[str, Any]) -> list[dict[str, Any]]:
+    quotes: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for event in notes.get("events", []):
+        if not isinstance(event, dict):
+            continue
+        for evidence in event.get("evidence_snapshots", []):
+            if not isinstance(evidence, dict):
+                continue
+            excerpt = str(evidence.get("excerpt") or "").strip()
+            source_title = str(evidence.get("source_title") or "")
+            if not excerpt or (source_title, excerpt) in seen:
+                continue
+            seen.add((source_title, excerpt))
+            quotes.append(
+                {
+                    "quote_id": stable_id("evidence", len(quotes) + 1),
+                    "source_ref": source_title,
+                    "event_id": event.get("event_id", ""),
+                    "excerpt": excerpt,
+                    "is_primary_source": bool(evidence.get("is_primary_source")),
+                }
+            )
+    for snapshot in source_snapshots.get("snapshots", []):
+        if not isinstance(snapshot, dict) or not snapshot.get("ok"):
+            continue
+        excerpt = first_sentence(str(snapshot.get("text_excerpt") or ""), max_chars=520)
+        source_title = source_ref(snapshot)
+        if not excerpt or (source_title, excerpt) in seen:
+            continue
+        seen.add((source_title, excerpt))
+        quotes.append(
+            {
+                "quote_id": stable_id("evidence", len(quotes) + 1),
+                "source_ref": source_title,
+                "event_id": "",
+                "excerpt": excerpt,
+                "is_primary_source": snapshot_is_primary(snapshot),
+            }
+        )
+    return quotes
+
+
+def arguments_from_claims(claims: list[dict[str, Any]], source_map: dict[str, Any]) -> list[dict[str, Any]]:
+    arguments: list[dict[str, Any]] = []
+    source_classes = {
+        str(item.get("title") or ""): str(item.get("class") or item.get("source_class") or item.get("type") or item.get("source_type") or "")
+        for item in source_map.get("sources", [])
+        if isinstance(item, dict)
+    }
+    for index, claim in enumerate(claims[:12], start=1):
+        refs = claim.get("source_refs") if isinstance(claim.get("source_refs"), list) else []
+        arguments.append(
+            {
+                "argument_id": stable_id("argument", index),
+                "summary": f"Use claim {claim.get('claim_id')} as a supported synthesis point.",
+                "claim_refs": [claim.get("claim_id")],
+                "source_refs": refs,
+                "source_classes": [source_classes.get(str(ref), "") for ref in refs],
+                "confidence": claim.get("confidence", "unknown"),
+            }
+        )
+    return arguments
+
+
+def definitions_from_topic(source_map: dict[str, Any], claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    topic = str(source_map.get("topic") or "").strip()
+    if not topic:
+        return []
+    first_claim = next((str(claim.get("claim") or "") for claim in claims if isinstance(claim, dict) and claim.get("claim")), "")
+    return [
+        {
+            "term": topic,
+            "definition": first_claim or f"Research topic: {topic}",
+            "confidence": "low" if not first_claim else "medium",
+            "source_refs": claims[0].get("source_refs", []) if claims else [],
+        }
+    ]
+
+
+def build_research_corpus(source_map: dict[str, Any], source_snapshots: dict[str, Any], notes: dict[str, Any], guidance: dict[str, Any]) -> dict[str, Any]:
+    event_claims = claims_from_events([event for event in notes.get("events", []) if isinstance(event, dict)])
+    claims = event_claims + claims_from_snapshots(source_snapshots, event_claims)
+    evidence_quotes = evidence_quotes_from_notes(notes, source_snapshots)
+    gaps = notes.get("gaps", []) if isinstance(notes.get("gaps"), list) else []
+    contradictions = [
+        {
+            "contradiction_id": stable_id("coverage_risk", index),
+            "summary": gap,
+            "status": "unresolved",
+        }
+        for index, gap in enumerate(gaps, start=1)
+        if any(marker in str(gap).lower() for marker in ["contradict", "uncertain", "blocked", "unavailable", "requires browser", "403"])
+    ]
+    snapshots = [snapshot for snapshot in source_snapshots.get("snapshots", []) if isinstance(snapshot, dict)]
+    return {
+        "version": 1,
+        "topic": source_map.get("topic", ""),
+        "sources": source_map.get("sources", []) if isinstance(source_map.get("sources"), list) else [],
+        "snapshots": snapshots,
+        "rendered_text": [
+            {
+                "source_ref": source_ref(snapshot),
+                "text_excerpt": str(snapshot.get("text_excerpt") or ""),
+                "rendered": bool(snapshot.get("rendered")),
+            }
+            for snapshot in snapshots
+            if snapshot.get("ok") and str(snapshot.get("text_excerpt") or "")
+        ],
+        "events": notes.get("events", []) if isinstance(notes.get("events"), list) else [],
+        "claims": claims,
+        "arguments": arguments_from_claims(claims, source_map),
+        "definitions": definitions_from_topic(source_map, claims),
+        "quotes": evidence_quotes,
+        "evidence_excerpts": evidence_quotes,
+        "contradictions": contradictions,
+        "open_questions": [{"question": gap, "reason": "coverage_gap"} for gap in gaps],
+        "confidence": {
+            "event_summary": notes.get("summary", {}),
+            "claim_count": len(claims),
+            "evidence_excerpt_count": len(evidence_quotes),
+            "source_count": len(source_map.get("sources", []) if isinstance(source_map.get("sources"), list) else []),
+        },
+        "gaps": gaps,
+        "model_guidance": guidance,
+    }
+
+
 def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
     step = request.get("step")
     if not isinstance(step, dict):
@@ -372,16 +559,21 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
         return model_unavailable_payload("NoosphericExtractor", request.get("task_id"), guidance)
     notes = extract_events(source_map, source_snapshots)
     notes["model_guidance"] = guidance
+    research_corpus = build_research_corpus(source_map, source_snapshots, notes, guidance)
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(json.dumps(notes, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    corpus_path = next((str(item) for item in expected_artifacts if str(item).endswith("/research_corpus.json")), research_corpus_path_for_output(output_path))
+    corpus_host_path = sandbox_path(workspace_root, corpus_path)
+    corpus_host_path.parent.mkdir(parents=True, exist_ok=True)
+    corpus_host_path.write_text(json.dumps(research_corpus, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {
         "ok": True,
         "worker": "NoosphericExtractor",
         "task_id": request.get("task_id"),
         "status": "completed",
-        "summary": f"Extracted {len(notes['events'])} direct event notes.",
-        "artifacts": [output_path],
+        "summary": f"Extracted {len(notes['events'])} events and {len(research_corpus['claims'])} claims into research corpus.",
+        "artifacts": [output_path, corpus_path],
         "model_guidance": guidance,
         "gaps": notes["gaps"],
         "confidence": "medium",

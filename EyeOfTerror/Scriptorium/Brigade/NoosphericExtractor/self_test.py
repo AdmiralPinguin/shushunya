@@ -21,7 +21,7 @@ def main() -> int:
     request = {
         "task_id": "test-skalathrax:fact_extraction",
         "step": {
-            "expected_artifacts": ["/work/skalathrax/direct_event_notes.json"],
+            "expected_artifacts": ["/work/skalathrax/direct_event_notes.json", "/work/skalathrax/research_corpus.json"],
         },
     }
     source_map = {
@@ -78,6 +78,7 @@ def main() -> int:
             raise AssertionError(f"NoosphericExtractor failed: {result}")
         output = Path(temp_dir) / "skalathrax" / "direct_event_notes.json"
         data = json.loads(output.read_text(encoding="utf-8"))
+        corpus = json.loads((Path(temp_dir) / "skalathrax" / "research_corpus.json").read_text(encoding="utf-8"))
         event_ids = {event.get("event_id") for event in data.get("events", [])}
         required = {"moon_parley", "dreagher_shoots_anteus", "golden_absolute", "kharn_burns_shelters"}
         if not required.issubset(event_ids):
@@ -102,6 +103,16 @@ def main() -> int:
             raise AssertionError("snapshot fetch failures should be reported as gaps")
         if not any("requires browser render" in gap for gap in data.get("gaps", [])):
             raise AssertionError("render-required snapshots should be reported as gaps")
+        if (
+            not corpus.get("claims")
+            or not corpus.get("events")
+            or not corpus.get("arguments")
+            or not corpus.get("definitions")
+            or not corpus.get("evidence_excerpts")
+            or not corpus.get("open_questions")
+            or corpus.get("confidence", {}).get("claim_count", 0) < 1
+        ):
+            raise AssertionError(f"research corpus should contain general research evidence layers: {corpus}")
         generic_root = Path(temp_dir) / "generic"
         generic_root.mkdir(parents=True, exist_ok=True)
         (generic_root / "source_map.json").write_text(
@@ -133,6 +144,7 @@ def main() -> int:
         if not generic_result.get("ok"):
             raise AssertionError(f"NoosphericExtractor generic fallback failed: {generic_result}")
         generic_data = json.loads((generic_root / "direct_event_notes.json").read_text(encoding="utf-8"))
+        generic_corpus = json.loads((generic_root / "research_corpus.json").read_text(encoding="utf-8"))
         generic_events = generic_data.get("events", [])
         if (
             generic_data.get("extraction_method") != "generic_snapshot_leads"
@@ -144,6 +156,8 @@ def main() -> int:
             or generic_data.get("summary", {}).get("events_with_primary_evidence") < 1
         ):
             raise AssertionError(f"generic fallback should create low-confidence evidence leads: {generic_data}")
+        if not generic_corpus.get("claims") or not generic_corpus.get("arguments") or not generic_corpus.get("quotes"):
+            raise AssertionError(f"generic research corpus should include claims, arguments, and quotes: {generic_corpus}")
     print("[ok] NoosphericExtractor event notes")
     return 0
 

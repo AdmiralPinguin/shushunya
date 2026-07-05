@@ -21,6 +21,15 @@ TASK_CONTRACT_REQUIRED_FIELDS = {"version", "task_id", "kind", "goal", "assigned
 TASK_KINDS = {"chat", "research", "image_generation", "code", "general"}
 WORKER_STEP_FIELDS = {"step_id", "worker", "purpose", "depends_on", "expected_artifacts"}
 WORKER_STEP_REQUIRED_FIELDS = {"step_id", "worker", "purpose"}
+RESEARCH_INTENTS = {
+    "event_reconstruction",
+    "topic_report",
+    "comparison",
+    "qa_answer",
+    "investigation",
+    "longform_article",
+    "book",
+}
 
 
 def slugify(value: str, fallback: str = "task") -> str:
@@ -41,6 +50,84 @@ def slugify(value: str, fallback: str = "task") -> str:
             return slug
     words = re.findall(r"[a-zA-Z0-9]+", lowered)
     return "-".join(words[:6]) or fallback
+
+
+def classify_research_intent(user_task: str) -> dict[str, Any]:
+    text = " ".join(user_task.lower().split())
+    has_question_mark = "?" in user_task
+    event_terms = (
+        "событ",
+        "битв",
+        "сражен",
+        "хронолог",
+        "реконструкц",
+        "timeline",
+        "chronology",
+        "battle",
+        "event",
+        "reconstruct",
+    )
+    comparison_terms = ("сравн", "отлич", "разниц", "против", " vs ", "compare", "comparison", "difference")
+    investigation_terms = ("расслед", "выясн", "проверь", "разбер", "докоп", "investigat", "audit", "verify")
+    book_terms = ("книг", "роман", "манускрипт", "глав", "fb2", "book", "manuscript", "chapters")
+    longform_terms = ("лонгрид", "статья", "эссе", "подробн", "longform", "article", "essay")
+    qa_terms = ("что такое", "кто ", "почему", "как ", "зачем", "where ", "what ", "who ", "why ", "how ")
+
+    if any(term in text for term in book_terms):
+        intent = "book"
+        output_mode = "book_manuscript"
+        required_depth = "comprehensive"
+        source_policy = "primary_and_secondary_sources_required"
+        needs_chapters = True
+    elif any(term in text for term in comparison_terms):
+        intent = "comparison"
+        output_mode = "comparative_review"
+        required_depth = "deep"
+        source_policy = "balanced_sources_for_each_side"
+        needs_chapters = False
+    elif any(term in text for term in investigation_terms):
+        intent = "investigation"
+        output_mode = "investigative_report"
+        required_depth = "deep"
+        source_policy = "evidence_first_with_contradiction_tracking"
+        needs_chapters = False
+    elif any(term in text for term in event_terms):
+        intent = "event_reconstruction"
+        output_mode = "event_reconstruction"
+        required_depth = "comprehensive"
+        source_policy = "chronological_primary_and_secondary_sources"
+        needs_chapters = False
+    elif any(term in text for term in longform_terms):
+        intent = "longform_article"
+        output_mode = "longform_article"
+        required_depth = "deep"
+        source_policy = "broad_sources_with_evidence_trace"
+        needs_chapters = False
+    elif has_question_mark or any(term in text for term in qa_terms):
+        intent = "qa_answer"
+        output_mode = "short_answer"
+        required_depth = "standard"
+        source_policy = "answer_with_citations"
+        needs_chapters = False
+    else:
+        intent = "topic_report"
+        output_mode = "research_report"
+        required_depth = "deep"
+        source_policy = "broad_sources_with_gaps_disclosed"
+        needs_chapters = False
+
+    needs_timeline = intent == "event_reconstruction" or any(term in text for term in event_terms)
+    if intent == "book" and needs_timeline:
+        output_mode = "book_manuscript_with_timeline"
+
+    return {
+        "intent": intent,
+        "output_mode": output_mode,
+        "required_depth": required_depth,
+        "source_policy": source_policy,
+        "needs_timeline": needs_timeline,
+        "needs_chapters": needs_chapters,
+    }
 
 
 @dataclass
@@ -173,13 +260,20 @@ def lore_worker_plan(slug: str) -> list[WorkerPlanStep]:
     ]
 
 
-def research_writing_required_artifacts(slug: str) -> list[str]:
-    return lore_required_artifacts(slug)
+def artifacts_from_plan(plan: list[WorkerPlanStep]) -> list[str]:
+    artifacts: list[str] = []
+    for step in plan:
+        for artifact in step.expected_artifacts:
+            if artifact not in artifacts:
+                artifacts.append(artifact)
+    return artifacts
 
 
-def research_writing_worker_plan(slug: str) -> list[WorkerPlanStep]:
+def research_writing_worker_plan(slug: str, intent_profile: dict[str, Any] | None = None) -> list[WorkerPlanStep]:
     base = f"/work/{slug}"
-    return [
+    profile = intent_profile or classify_research_intent(slug)
+    needs_structure = profile.get("intent") != "qa_answer"
+    plan = [
         WorkerPlanStep(
             step_id="corpus_ingestion",
             worker="CorpusIngestor",
@@ -212,42 +306,60 @@ def research_writing_worker_plan(slug: str) -> list[WorkerPlanStep]:
             worker="NoosphericExtractor",
             purpose="Extract direct claims, events, arguments, or evidence notes with confidence labels and source references.",
             depends_on=["source_rendering"],
-            expected_artifacts=[f"{base}/direct_event_notes.json"],
-        ),
-        WorkerPlanStep(
-            step_id="timeline",
-            worker="Chronologis",
-            purpose="Order extracted material into a useful sequence: chronology for events, argument flow for analysis, or source order for synthesis.",
-            depends_on=["fact_extraction"],
-            expected_artifacts=[f"{base}/timeline.json"],
-        ),
-        WorkerPlanStep(
-            step_id="draft_reconstruction",
-            worker="ScriptoriumDaemon",
-            purpose="Write the requested Russian research/synthesis draft from extracted evidence without inventing unsupported details.",
-            depends_on=["source_discovery", "fact_extraction", "timeline"],
-            expected_artifacts=[f"{base}/reconstruction_ru.md", f"{base}/coverage_report.md"],
-        ),
-        WorkerPlanStep(
-            step_id="critic_review",
-            worker="ReductorVerifier",
-            purpose="Review the draft against the user task, source coverage, extracted evidence, and hallucination risks.",
-            depends_on=["draft_reconstruction"],
-            expected_artifacts=[f"{base}/critic_report.json"],
-        ),
-        WorkerPlanStep(
-            step_id="finalize",
-            worker="FabricatorFinalis",
-            purpose="Package final artifacts only after critic approval or explicit blockers.",
-            depends_on=["critic_review"],
-            expected_artifacts=[f"{base}/final_manifest.json"],
+            expected_artifacts=[f"{base}/direct_event_notes.json", f"{base}/research_corpus.json"],
         ),
     ]
+    draft_dependencies = ["source_discovery", "fact_extraction"]
+    if needs_structure:
+        structure_artifacts = [f"{base}/structure_map.json", f"{base}/timeline.json"]
+        if profile.get("needs_timeline"):
+            structure_artifacts = [f"{base}/timeline.json", f"{base}/structure_map.json"]
+        plan.append(
+            WorkerPlanStep(
+                step_id="structure_mapping",
+                worker="Chronologis",
+                purpose="Build timeline for event tasks or source order, argument flow, and topic structure for analytical synthesis.",
+                depends_on=["fact_extraction"],
+                expected_artifacts=structure_artifacts,
+            )
+        )
+        draft_dependencies.append("structure_mapping")
+    plan.extend(
+        [
+            WorkerPlanStep(
+                step_id="draft_reconstruction",
+                worker="ScriptoriumDaemon",
+                purpose="Write the requested Russian research/synthesis draft from research_corpus and structure_map without unsupported sections.",
+                depends_on=draft_dependencies,
+                expected_artifacts=[f"{base}/reconstruction_ru.md", f"{base}/coverage_report.md"],
+            ),
+            WorkerPlanStep(
+                step_id="critic_review",
+                worker="ReductorVerifier",
+                purpose="Review the draft against the user task, source coverage, extracted evidence, and hallucination risks.",
+                depends_on=["draft_reconstruction"],
+                expected_artifacts=[f"{base}/critic_report.json"],
+            ),
+            WorkerPlanStep(
+                step_id="finalize",
+                worker="FabricatorFinalis",
+                purpose="Package final artifacts only after critic approval or explicit blockers.",
+                depends_on=["critic_review"],
+                expected_artifacts=[f"{base}/final_manifest.json"],
+            ),
+        ]
+    )
+    return plan
+
+
+def research_writing_required_artifacts(slug: str, intent_profile: dict[str, Any] | None = None) -> list[str]:
+    return artifacts_from_plan(research_writing_worker_plan(slug, intent_profile=intent_profile))
 
 
 def build_research_writing_contract(user_task: str, task_id: str | None = None) -> TaskContract:
     slug = slugify(user_task, fallback="research")
     resolved_task_id = task_id or f"iskandar-{slug}-research-writing"
+    intent_profile = classify_research_intent(user_task)
     return TaskContract(
         task_id=resolved_task_id,
         kind="research",
@@ -259,23 +371,27 @@ def build_research_writing_contract(user_task: str, task_id: str | None = None) 
             "Do not let the writer invent facts absent from extraction outputs.",
             "Do not treat a short summary as complete when the task asks for full coverage.",
         ],
-        required_artifacts=research_writing_required_artifacts(slug),
+        required_artifacts=research_writing_required_artifacts(slug, intent_profile=intent_profile),
         completion_criteria=[
             "All required artifacts exist and are structurally valid.",
             "Source coverage separates primary, official, secondary, community, unavailable, and uncertain sources where applicable.",
             "Extracted notes separate direct evidence from interpretation and synthesis.",
+            "Research corpus captures sources, snapshots, claims, events, arguments, confidence, and gaps.",
             "The draft addresses the user's requested form and language while preserving source limitations.",
             "Critic report passes or lists explicit blockers and required revisions.",
         ],
         quality_gates=[
+            f"intent:{intent_profile['intent']}",
+            f"output_mode:{intent_profile['output_mode']}",
             "source_map_created",
-            "evidence_notes_non_empty",
-            "source_order_or_timeline_present",
+            "research_corpus_created",
+            "claims_or_events_non_empty",
+            "source_order_or_timeline_present" if intent_profile.get("intent") != "qa_answer" else "short_answer_evidence_present",
             "writer_uses_only_extracted_evidence",
             "coverage_report_names_gaps",
             "critic_review_passed_or_blocked",
         ],
-        worker_plan=research_writing_worker_plan(slug),
+        worker_plan=research_writing_worker_plan(slug, intent_profile=intent_profile),
     )
 
 

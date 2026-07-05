@@ -6,7 +6,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from ..contracts import TaskContract, build_lore_reconstruction_contract, build_research_writing_contract, validate_task_contract_payload
+from ..contracts import (
+    TaskContract,
+    build_lore_reconstruction_contract,
+    build_research_writing_contract,
+    classify_research_intent,
+    validate_task_contract_payload,
+)
 from ..pipeline import build_dispatch_packets, pipeline_status, write_pipeline_run
 from ..registry import worker_by_name
 
@@ -79,16 +85,22 @@ def step_quality_checks(step_id: str) -> list[str]:
             "blocked or render-required sources remain visible as coverage gaps",
         ],
         "fact_extraction": [
-            "direct event notes are non-empty unless source coverage is explicitly blocked",
-            "facts include confidence labels and source references",
-            "aftermath and interpretation are separated from direct events",
+            "research corpus exists and includes claims, events, arguments, evidence excerpts, confidence, and gaps",
+            "direct event notes remain available for compatibility when events are present",
+            "claims and events include confidence labels and source references",
+            "interpretation and synthesis are separated from directly extracted evidence",
         ],
         "timeline": [
             "timeline orders direct events before consequences and interpretations",
             "contradictions and missing links are preserved as explicit uncertainty",
         ],
+        "structure_mapping": [
+            "structure_map exists and records timeline, source order, argument flow, or topic structure as appropriate",
+            "timeline is populated for event tasks and preserved as compatibility artifact",
+            "analytical tasks expose source_order and argument_flow instead of forcing an event chronology",
+        ],
         "draft_reconstruction": [
-            "draft uses extracted facts and timeline artifacts as inputs",
+            "draft uses research_corpus and structure/timeline artifacts as inputs",
             "coverage report names gaps and source limitations",
             "unsupported narrative invention is treated as a blocker",
         ],
@@ -139,12 +151,19 @@ def step_quality_matrix(contract: TaskContract) -> list[dict[str, Any]]:
 
 def oversight_plan(contract: TaskContract) -> dict[str, Any]:
     planned_step_ids = [step.step_id for step in contract.worker_plan]
+    research_intent = classify_research_intent(contract.goal)
+    required_workers: list[str] = []
+    for step in contract.worker_plan:
+        if step.worker not in required_workers:
+            required_workers.append(step.worker)
     artifacts_by_role = {
         "corpus_index": [artifact for artifact in contract.required_artifacts if artifact.endswith("/corpus_index.json")],
         "source_map": [artifact for artifact in contract.required_artifacts if artifact.endswith("/source_map.json")],
         "source_snapshots": [artifact for artifact in contract.required_artifacts if artifact.endswith("/source_snapshots.json")],
+        "research_corpus": [artifact for artifact in contract.required_artifacts if artifact.endswith("/research_corpus.json")],
         "evidence_notes": [artifact for artifact in contract.required_artifacts if artifact.endswith("/direct_event_notes.json")],
         "timeline": [artifact for artifact in contract.required_artifacts if artifact.endswith("/timeline.json")],
+        "structure_map": [artifact for artifact in contract.required_artifacts if artifact.endswith("/structure_map.json")],
         "draft": [artifact for artifact in contract.required_artifacts if artifact.endswith("/reconstruction_ru.md")],
         "coverage": [artifact for artifact in contract.required_artifacts if artifact.endswith("/coverage_report.md")],
         "critic": [artifact for artifact in contract.required_artifacts if artifact.endswith("/critic_report.json")],
@@ -163,6 +182,14 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
         "kind": "lore_reconstruction_oversight"
         if any("shallow wiki summary" in item for item in contract.non_goals)
         else "research_writing_oversight",
+        "research_intent": research_intent,
+        "pipeline_plan": {
+            "output_mode": research_intent["output_mode"],
+            "needs_timeline": research_intent["needs_timeline"],
+            "needs_chapters": research_intent["needs_chapters"],
+            "required_workers": required_workers,
+            "steps": planned_step_ids,
+        },
         "quality_gates": contract.quality_gates,
         "completion_criteria": contract.completion_criteria,
         "non_goals": contract.non_goals,
@@ -177,11 +204,17 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
             "requires_critic_approval_or_blockers": True,
             "requires_gap_disclosure": True,
             "requires_evidence_trace": True,
+            "output_mode": research_intent["output_mode"],
         },
         "revision_policy": {
             "source_step": "critic_review",
             "final_steps": ["critic_review", "finalize"],
             "allowed_steps": planned_step_ids,
+            "section_rerun_targets": [
+                step_id
+                for step_id in ["source_discovery", "source_acquisition", "source_rendering", "fact_extraction", "structure_mapping", "timeline", "draft_reconstruction", "critic_review"]
+                if step_id in planned_step_ids
+            ],
             "requires_downstream_rerun": True,
             "requires_focused_context": True,
             "requires_gap_disclosure": True,

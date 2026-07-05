@@ -14,6 +14,7 @@ from eye_of_terror.contracts import (
     WORKER_STEP_REQUIRED_FIELDS,
     build_lore_reconstruction_contract,
     build_research_writing_contract,
+    classify_research_intent,
     validate_task_contract_payload,
 )
 from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction, plan_research_writing
@@ -79,6 +80,21 @@ def main() -> int:
     if not required.issubset(names):
         raise AssertionError(f"worker registry missing expected workers: {required - names}")
     print("[ok] worker registry")
+
+    classifier_cases = {
+        "Собери реконструкцию событий Скалатракса по хронологии.": ("event_reconstruction", "event_reconstruction", True, False),
+        "Сравни CrewAI и AutoGen для локального агента.": ("comparison", "comparative_review", False, False),
+        "Что такое квантование модели?": ("qa_answer", "short_answer", False, False),
+        "Напиши книгу на 3 главы о падении легиона.": ("book", "book_manuscript", False, True),
+        "Проверь и выясни, почему пайплайн падает.": ("investigation", "investigative_report", False, False),
+        "Сделай лонгрид о домашних 3D-принтерах.": ("longform_article", "longform_article", False, False),
+    }
+    for classifier_task, expected in classifier_cases.items():
+        profile = classify_research_intent(classifier_task)
+        actual = (profile["intent"], profile["output_mode"], profile["needs_timeline"], profile["needs_chapters"])
+        if actual != expected:
+            raise AssertionError(f"bad research intent classification for {classifier_task!r}: {profile}")
+    print("[ok] research intent classifier")
 
     task = "Собери все известное о событиях Скалатракса и сделай реконструкцию."
     contract = build_lore_reconstruction_contract(task, task_id="test-skalathrax")
@@ -155,10 +171,25 @@ def main() -> int:
     if (
         not generic_plan["ok"]
         or generic_plan["oversight"]["kind"] != "research_writing_oversight"
+        or generic_plan["oversight"]["research_intent"]["intent"] != "topic_report"
         or generic_plan["contract"]["required_artifacts"][0] != "/work/3d/corpus_index.json"
+        or "/work/3d/research_corpus.json" not in generic_plan["contract"]["required_artifacts"]
+        or "/work/3d/structure_map.json" not in generic_plan["contract"]["required_artifacts"]
         or generic_plan["contract"]["worker_plan"][4]["purpose"].find("claims, events, arguments") < 0
     ):
         raise AssertionError(f"bad generic research/writing plan: {generic_plan}")
+    qa_contract = build_research_writing_contract("Что такое llama.cpp?", task_id="test-qa")
+    qa_workers = [step.worker for step in qa_contract.worker_plan]
+    if "Chronologis" in qa_workers or any(artifact.endswith("/timeline.json") for artifact in qa_contract.required_artifacts):
+        raise AssertionError(f"short Q&A should not force Chronologis/timeline: {qa_contract.to_dict()}")
+    event_contract = build_research_writing_contract("Реконструируй события битвы при Скалатраксе.", task_id="test-event-research")
+    event_payload = event_contract.to_dict()
+    if (
+        "Chronologis" not in [step["worker"] for step in event_payload["worker_plan"]]
+        or "/work/skalathrax/timeline.json" not in event_payload["required_artifacts"]
+        or "/work/skalathrax/structure_map.json" not in event_payload["required_artifacts"]
+    ):
+        raise AssertionError(f"event research should include timeline and structure map: {event_payload}")
     print("[ok] research/writing contract")
 
     plan = plan_lore_reconstruction(task, task_id="test-skalathrax").to_dict()
@@ -268,7 +299,7 @@ def main() -> int:
             len(quality_matrix) != len(contract.worker_plan)
             or fact_quality.get("worker") != "NoosphericExtractor"
             or "/work/skalathrax/rendered_snapshots.json" not in fact_quality.get("required_inputs", [])
-            or "direct event notes are non-empty unless source coverage is explicitly blocked" not in fact_quality.get("checks", [])
+            or "research corpus exists and includes claims, events, arguments, evidence excerpts, confidence, and gaps" not in fact_quality.get("checks", [])
             or "critic_review" not in fact_quality.get("revision_targets", [])
             or "finalize" not in fact_quality.get("revision_targets", [])
         ):
