@@ -161,6 +161,16 @@ def source_type(source: dict[str, Any]) -> str:
         return "official_article"
     if host.endswith("lexicanum.com"):
         return "curated_wiki"
+    if host.endswith("wikipedia.org") or host.endswith("britannica.com"):
+        return "encyclopedia"
+    if host.endswith("github.com") and ("official" in source_class or kind in {"repository", "source_repository"}):
+        return "project_repository"
+    if kind in {"documentation", "official_documentation", "official_site"} or "official" in source_class or "documentation" in source_class:
+        return "official_documentation"
+    if host.endswith(".gov") or host.endswith(".edu"):
+        return "institutional_reference"
+    if kind == "general_reference" or source_class == "general_secondary":
+        return "general_reference"
     if host.endswith("fandom.com"):
         return "community_wiki"
     if host.endswith("reddit.com"):
@@ -192,8 +202,13 @@ def ranked_source(source: dict[str, Any]) -> dict[str, Any]:
         "official_catalog": 78,
         "official_article": 76,
         "official_secondary": 72,
+        "official_documentation": 74,
+        "project_repository": 73,
+        "institutional_reference": 68,
+        "encyclopedia": 63,
         "curated_wiki": 62,
         "wiki": 52,
+        "general_reference": 48,
         "community_wiki": 42,
         "community_excerpt": 40,
         "review_or_blog": 34,
@@ -355,6 +370,76 @@ def classify_discovered_result(result: dict[str, Any]) -> dict[str, Any] | None:
             "direct_event_detail_level": "low",
             "source_class": "video_or_transcript_lead",
             "expected_use": "video metadata or transcript lead; requires transcript extraction before narrative use",
+            "discovery_method": "live_search",
+        }
+    if host.endswith("wikipedia.org") or host.endswith("britannica.com"):
+        return {
+            "title": title,
+            "type": "encyclopedia",
+            "language": "unknown",
+            "url": url,
+            "reliability": "medium-high",
+            "direct_event_detail_level": "unknown",
+            "source_class": "secondary_wiki",
+            "expected_use": "general secondary background and cross-checking; do not treat as primary authority",
+            "discovery_method": "live_search",
+        }
+    if host.endswith("github.com"):
+        return {
+            "title": title,
+            "type": "source_repository",
+            "language": "unknown",
+            "url": url,
+            "reliability": "medium-high",
+            "direct_event_detail_level": "unknown",
+            "source_class": "official_project_source",
+            "expected_use": "project repository, release, or source-code authority; cross-check with docs or secondary sources",
+            "discovery_method": "live_search",
+        }
+    if host.endswith(".gov") or host.endswith(".edu"):
+        return {
+            "title": title,
+            "type": "institutional_reference",
+            "language": "unknown",
+            "url": url,
+            "reliability": "high",
+            "direct_event_detail_level": "unknown",
+            "source_class": "institutional_secondary",
+            "expected_use": "institutional reference for definitions, chronology, or context",
+            "discovery_method": "live_search",
+        }
+    if (
+        host.startswith("docs.")
+        or host.startswith("developer.")
+        or host.startswith("dev.")
+        or "/docs" in url.lower()
+        or "documentation" in title.lower()
+    ):
+        return {
+            "title": title,
+            "type": "official_documentation",
+            "language": "unknown",
+            "url": url,
+            "reliability": "high",
+            "direct_event_detail_level": "unknown",
+            "source_class": "official_documentation",
+            "expected_use": "official documentation or developer reference; use as primary/official source for technical topics",
+            "discovery_method": "live_search",
+        }
+    if (
+        host
+        and str(result.get("snippet") or "").strip()
+        and not any(part in host for part in ["reddit.com", "pinterest.", "facebook.", "x.com", "twitter.com", "youtube.com", "youtu.be"])
+    ):
+        return {
+            "title": title,
+            "type": "general_reference",
+            "language": "unknown",
+            "url": url,
+            "reliability": "medium",
+            "direct_event_detail_level": "unknown",
+            "source_class": "general_secondary",
+            "expected_use": "general live-discovered reference; use only after stronger source classes are insufficient",
             "discovery_method": "live_search",
         }
     return None
@@ -635,8 +720,21 @@ def source_coverage(sources: list[dict[str, Any]], discovery_results: list[dict[
     fetched_query_count = len(discovery_results)
     successful_query_count = sum(1 for item in discovery_results if item.get("ok"))
     has_primary = any(kind in {"published_primary", "local_primary"} or "primary" in source_class for kind, source_class in zip(source_types, source_classes))
-    has_official = any(kind in {"published_primary", "local_primary", "official_catalog", "official_article", "official_secondary"} for kind in source_types)
-    has_secondary = any(kind in {"curated_wiki", "wiki", "community_wiki"} for kind in source_types)
+    has_official = any(
+        kind
+        in {
+            "published_primary",
+            "local_primary",
+            "official_catalog",
+            "official_article",
+            "official_secondary",
+            "official_documentation",
+            "project_repository",
+            "institutional_reference",
+        }
+        for kind in source_types
+    )
+    has_secondary = any(kind in {"curated_wiki", "wiki", "community_wiki", "encyclopedia", "institutional_reference", "general_reference"} for kind in source_types)
     live_count = sum(1 for source in sources if source.get("discovery_method") in {"live_search", "cached_live_search"})
     return {
         "source_count": len(sources),
@@ -825,6 +923,8 @@ def source_map_for_contract(
     corpus_candidates = corpus_sources or []
     sources = rank_sources(dedupe_sources(corpus_candidates + sources + cached_sources + live_candidates))
     coverage = source_coverage(sources, discovery_results, playbooks)
+    if not playbooks and live_candidates:
+        discovery_status = "live_discovery_ready" if coverage.get("ready_for_extraction") else "live_discovery_partial"
     corpus_requirements = corpus_requirements_for_sources(sources, corpus_index)
     corpus_summary = corpus_index.get("summary") if isinstance(corpus_index, dict) and isinstance(corpus_index.get("summary"), dict) else {}
     corpus_gaps = corpus_index.get("gaps") if isinstance(corpus_index, dict) and isinstance(corpus_index.get("gaps"), list) else []

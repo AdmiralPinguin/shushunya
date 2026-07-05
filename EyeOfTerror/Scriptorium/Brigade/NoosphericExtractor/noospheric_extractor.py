@@ -485,14 +485,23 @@ def build_research_corpus(source_map: dict[str, Any], source_snapshots: dict[str
     claims = event_claims + claims_from_snapshots(source_snapshots, event_claims)
     evidence_quotes = evidence_quotes_from_notes(notes, source_snapshots)
     gaps = notes.get("gaps", []) if isinstance(notes.get("gaps"), list) else []
+    coverage_risks = [
+        {
+            "risk_id": stable_id("coverage_risk", index),
+            "summary": gap,
+            "status": "open",
+        }
+        for index, gap in enumerate(gaps, start=1)
+        if any(marker in str(gap).lower() for marker in ["blocked", "unavailable", "requires browser", "403", "404"])
+    ]
     contradictions = [
         {
-            "contradiction_id": stable_id("coverage_risk", index),
+            "contradiction_id": stable_id("contradiction", index),
             "summary": gap,
             "status": "unresolved",
         }
         for index, gap in enumerate(gaps, start=1)
-        if any(marker in str(gap).lower() for marker in ["contradict", "uncertain", "blocked", "unavailable", "requires browser", "403"])
+        if any(marker in str(gap).lower() for marker in ["contradict", "conflict", "inconsistent", "uncertain"])
     ]
     snapshots = [snapshot for snapshot in source_snapshots.get("snapshots", []) if isinstance(snapshot, dict)]
     return {
@@ -516,6 +525,7 @@ def build_research_corpus(source_map: dict[str, Any], source_snapshots: dict[str
         "quotes": evidence_quotes,
         "evidence_excerpts": evidence_quotes,
         "contradictions": contradictions,
+        "coverage_risks": coverage_risks,
         "open_questions": [{"question": gap, "reason": "coverage_gap"} for gap in gaps],
         "confidence": {
             "event_summary": notes.get("summary", {}),

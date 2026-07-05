@@ -328,6 +328,8 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
     research_intent = expectations.get("research_intent") if isinstance(expectations.get("research_intent"), dict) else {}
     output_mode = str(research_intent.get("output_mode") or "")
     package_files = list(PACKAGE_FILES)
+    if output_mode and output_mode not in {"event_reconstruction", "book_manuscript_with_timeline"}:
+        package_files = [filename for filename in package_files if filename != "timeline.json"]
     for filename in OPTIONAL_PACKAGE_FILES:
         artifact_path = sibling_artifact(manifest_path, filename)
         if sandbox_path(workspace_root, artifact_path).exists():

@@ -110,9 +110,15 @@ def main() -> int:
             or not corpus.get("definitions")
             or not corpus.get("evidence_excerpts")
             or not corpus.get("open_questions")
+            or not corpus.get("coverage_risks")
             or corpus.get("confidence", {}).get("claim_count", 0) < 1
         ):
             raise AssertionError(f"research corpus should contain general research evidence layers: {corpus}")
+        if corpus.get("contradictions"):
+            raise AssertionError(f"coverage gaps must not be reported as semantic contradictions: {corpus.get('contradictions')}")
+        coverage_risk_text = json.dumps(corpus.get("coverage_risks"), ensure_ascii=False)
+        if "HTTP Error 403" not in coverage_risk_text or "requires browser render" not in coverage_risk_text:
+            raise AssertionError(f"fetch/render gaps should be preserved as coverage risks: {corpus.get('coverage_risks')}")
         generic_root = Path(temp_dir) / "generic"
         generic_root.mkdir(parents=True, exist_ok=True)
         (generic_root / "source_map.json").write_text(

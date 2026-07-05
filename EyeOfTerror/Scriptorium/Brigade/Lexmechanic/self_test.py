@@ -68,6 +68,24 @@ def main() -> int:
             ],
         }
 
+    def generic_research_search(query: str, limit: int) -> dict:
+        return {
+            "ok": True,
+            "source": "fake",
+            "results": [
+                {
+                    "title": "Python 3 Documentation",
+                    "url": "https://docs.python.org/3/",
+                    "snippet": "Official Python documentation and language reference.",
+                },
+                {
+                    "title": "Python (programming language) - Wikipedia",
+                    "url": "https://en.wikipedia.org/wiki/Python_(programming_language)",
+                    "snippet": "General encyclopedia overview of Python history and usage.",
+                },
+            ],
+        }
+
     def noisy_playbook_search(query: str, limit: int) -> dict:
         return {
             "ok": True,
@@ -105,6 +123,14 @@ def main() -> int:
         raise AssertionError(f"review/blog leads should be classified: {discovered['sources']}")
     if classify_discovered_result({"title": "Bad", "url": "https://example.com/nope"}) is not None:
         raise AssertionError("unknown domains must not become source candidates")
+    generic_discovered = source_map_for_contract({"goal": "Python programming language history"}, generic_research_search)
+    generic_types = {source.get("source_type") for source in generic_discovered.get("sources", [])}
+    if "official_documentation" not in generic_types or "encyclopedia" not in generic_types:
+        raise AssertionError(f"generic research discovery should classify official docs and encyclopedia sources: {generic_discovered.get('sources')}")
+    if not generic_discovered.get("source_coverage", {}).get("ready_for_extraction"):
+        raise AssertionError(f"generic official+secondary sources should be extraction-ready: {generic_discovered.get('source_coverage')}")
+    if generic_discovered.get("discovery_status") != "live_discovery_ready":
+        raise AssertionError(f"generic live discovery should record ready status after finding sources: {generic_discovered.get('discovery_status')}")
     if not discovered["discovery_results"] or discovered["discovery_results"][0]["provider"] != "fake":
         raise AssertionError(f"fake discovery was not recorded: {discovered['discovery_results']}")
     if len(fake_search_calls) < 4:
@@ -215,8 +241,8 @@ def main() -> int:
         generic = json.loads((Path(temp_dir) / "generic" / "source_map.json").read_text(encoding="utf-8"))
         if not generic.get("sources") or generic["sources"][0].get("source_type") != "official_article":
             raise AssertionError(f"generic fallback should classify live candidates: {generic['sources']}")
-        if generic.get("discovery_status") != "needs_live_discovery":
-            raise AssertionError(f"generic fallback should request live discovery: {generic}")
+        if generic.get("discovery_status") != "live_discovery_ready":
+            raise AssertionError(f"generic fallback should mark successful live discovery ready: {generic}")
         if not generic.get("discovery_results"):
             raise AssertionError(f"generic fallback should record discovery results: {generic}")
         if not generic.get("discovery_rounds") or len(generic.get("discovery_rounds", [])) < 2:

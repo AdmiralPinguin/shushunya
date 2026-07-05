@@ -375,6 +375,56 @@ def main() -> int:
         manifest = json.loads((base / "final_manifest.json").read_text(encoding="utf-8"))
         if manifest.get("status") != "blocked" or "expected_artifacts do not match" not in json.dumps(manifest):
             raise AssertionError(f"bad quality expectations should block manifest: {manifest}")
+        short_base = root / "python"
+        short_request = {
+            "task_id": "test-python:finalize",
+            "step": {"step_id": "finalize", "expected_artifacts": ["/work/python/final_manifest.json"]},
+            "quality_expectations": {
+                "research_intent": {
+                    "intent": "qa_answer",
+                    "output_mode": "short_answer",
+                    "required_depth": "standard",
+                    "source_policy": "answer_with_citations",
+                    "needs_timeline": False,
+                    "needs_chapters": False,
+                },
+                "step_quality": {
+                    "step_id": "finalize",
+                    "worker": "FabricatorFinalis",
+                    "required_inputs": ["/work/python/critic_report.json"],
+                    "expected_artifacts": ["/work/python/final_manifest.json"],
+                    "checks": ["final manifest matches output mode package"],
+                    "blockers": ["missing expected artifact"],
+                    "revision_targets": ["finalize"],
+                },
+            },
+        }
+        write(short_base / "corpus_index.json", json.dumps({"approved": True}))
+        write(short_base / "source_map.json", json.dumps({"source_coverage": {"ready_for_extraction": True}, "sources": [{"title": "Python Docs"}]}))
+        write(short_base / "source_snapshots.json", json.dumps({"snapshots": []}))
+        write(short_base / "direct_event_notes.json", json.dumps({"events": []}))
+        write(short_base / "reconstruction_ru.md", "# Python\n")
+        write(short_base / "coverage_report.md", "# Coverage\n")
+        write(
+            short_base / "critic_report.json",
+            json.dumps(
+                {
+                    "approved": True,
+                    "status": "approved",
+                    "metrics": {
+                        "source_coverage_ready": True,
+                        "quality_gates": {"applies": True, "passed": True, "output_mode": "short_answer"},
+                    },
+                    "revision_focus": {"present": True},
+                }
+            ),
+        )
+        result = run(short_request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"FabricatorFinalis failed on short answer without timeline: {result}")
+        short_manifest = json.loads((short_base / "final_manifest.json").read_text(encoding="utf-8"))
+        if short_manifest.get("status") != "ready" or "/work/python/timeline.json" in json.dumps(short_manifest):
+            raise AssertionError(f"short answer final package should not require timeline: {short_manifest}")
         (base / "timeline.json").unlink()
         write(
             base / "critic_report.json",
