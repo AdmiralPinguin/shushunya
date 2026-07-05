@@ -695,11 +695,17 @@ def build_coverage_report(
     source_snapshots: dict[str, Any],
     notes: dict[str, Any],
     timeline: dict[str, Any],
+    research_corpus: dict[str, Any] | None = None,
+    synthesis_plan: dict[str, Any] | None = None,
     revision_context: dict[str, Any] | None = None,
 ) -> str:
+    research_corpus = research_corpus or {}
+    synthesis_plan = synthesis_plan or {}
     sources = [item for item in source_map.get("sources", []) if isinstance(item, dict)]
     snapshots = [item for item in source_snapshots.get("snapshots", []) if isinstance(item, dict)]
     events = [item for item in timeline.get("timeline", []) if isinstance(item, dict)]
+    claim_index = claims_by_id(research_corpus)
+    trace_refs = synthesis_plan.get("evidence_trace", {}).get("claim_refs") if isinstance(synthesis_plan.get("evidence_trace"), dict) else []
     notes_by_id = {
         str(item.get("event_id")): item
         for item in notes.get("events", [])
@@ -726,6 +732,19 @@ def build_coverage_report(
         reliability = source.get("reliability", "")
         use = source.get("expected_use", "")
         lines.append(f"- {title} | {source_class} | reliability={reliability} | {use}")
+    lines.extend(["", "## Evidence Trace", ""])
+    if trace_refs:
+        for claim_ref in trace_refs:
+            claim = claim_index.get(str(claim_ref))
+            if claim:
+                lines.append(f"- {claim_ref}: {evidence_line_for_claim(claim)}")
+            else:
+                lines.append(f"- {claim_ref}: missing from research_corpus")
+    elif claim_index:
+        for claim_id, claim in claim_index.items():
+            lines.append(f"- {claim_id}: {evidence_line_for_claim(claim)}")
+    else:
+        lines.append("- no research_corpus claim refs supplied")
     if snapshots:
         lines.extend(["", "## Source Snapshots", ""])
         for snapshot in snapshots:
@@ -897,7 +916,7 @@ def run(
         output_mode = str(synthesis_plan.get("output_mode") or "")
         if output_mode == "event_reconstruction":
             reconstruction = build_reconstruction(source_map, source_snapshots, notes, timeline, revision_context)
-            coverage_report = build_coverage_report(source_map, source_snapshots, notes, timeline, revision_context)
+            coverage_report = build_coverage_report(source_map, source_snapshots, notes, timeline, research_corpus, synthesis_plan, revision_context)
         else:
             reconstruction = ""
             coverage_report = ""
@@ -905,7 +924,7 @@ def run(
     else:
         output_mode = str(research_intent_from_request(request).get("output_mode") or "event_reconstruction")
         reconstruction = build_reconstruction(source_map, source_snapshots, notes, timeline, revision_context)
-        coverage_report = build_coverage_report(source_map, source_snapshots, notes, timeline, revision_context)
+        coverage_report = build_coverage_report(source_map, source_snapshots, notes, timeline, revision_context=revision_context)
     guidance = request_required_scriptorium_guidance(
         "ScriptoriumDaemon",
         request,

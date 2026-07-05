@@ -124,10 +124,22 @@ def main() -> int:
     os.environ["LEXMECHANIC_LIVE_DISCOVERY"] = "1"
     try:
         run_mode(
+            "Сделай короткий report о развитии RISC-V для локальных устройств.",
+            "research_report",
+            "topic_report",
+            ["structure_map.json", "synthesis_plan.json", "quality_gates"],
+        )
+        run_mode(
             "Сравни CrewAI и AutoGen для локального агента.",
             "comparative_review",
             "comparison",
             ["structure_map.json", "synthesis_plan.json", "quality_gates"],
+        )
+        run_mode(
+            "Реконструируй события запуска первого Linux kernel release по хронологии.",
+            "event_reconstruction",
+            "event_reconstruction",
+            ["timeline.json", "structure_map.json", "synthesis_plan.json", "quality_gates"],
         )
         run_mode(
             "Сделай longform article о локальных LLM агентах.",
