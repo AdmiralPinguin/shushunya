@@ -69,11 +69,27 @@ def classify_research_intent(user_task: str) -> dict[str, Any]:
     )
     comparison_terms = ("сравн", "отлич", "разниц", "против", " vs ", "compare", "comparison", "difference")
     investigation_terms = ("расслед", "выясн", "проверь", "разбер", "докоп", "investigat", "audit", "verify")
-    book_terms = ("книг", "роман", "манускрипт", "глав", "fb2", "book", "manuscript", "chapters")
+    book_source_terms = ("книг", "роман", "кодекс", "codex", "novel")
+    book_output_terms = (
+        "напиши книгу",
+        "сделай книгу",
+        "создай книгу",
+        "собери книгу",
+        "манускрипт",
+        "глав",
+        "fb2",
+        "book",
+        "manuscript",
+        "chapters",
+    )
     longform_terms = ("лонгрид", "статья", "эссе", "подробн", "longform", "article", "essay")
     qa_terms = ("что такое", "кто ", "почему", "как ", "зачем", "where ", "what ", "who ", "why ", "how ")
 
-    if any(term in text for term in book_terms):
+    has_event_intent = any(term in text for term in event_terms)
+    has_book_output_intent = any(term in text for term in book_output_terms)
+    has_book_source_mentions = any(term in text for term in book_source_terms)
+
+    if has_book_output_intent:
         intent = "book"
         output_mode = "book_manuscript"
         required_depth = "comprehensive"
@@ -91,11 +107,13 @@ def classify_research_intent(user_task: str) -> dict[str, Any]:
         required_depth = "deep"
         source_policy = "evidence_first_with_contradiction_tracking"
         needs_chapters = False
-    elif any(term in text for term in event_terms):
+    elif has_event_intent:
         intent = "event_reconstruction"
         output_mode = "event_reconstruction"
         required_depth = "comprehensive"
         source_policy = "chronological_primary_and_secondary_sources"
+        if has_book_source_mentions:
+            source_policy = "chronological_primary_book_codex_and_secondary_sources"
         needs_chapters = False
     elif any(term in text for term in longform_terms):
         intent = "longform_article"

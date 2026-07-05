@@ -779,6 +779,31 @@ def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifact
     }
 
 
+def normalize_revision_plan_for_request(revision_plan: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    revision_policy = expectations.get("revision_policy") if isinstance(expectations.get("revision_policy"), dict) else {}
+    allowed_steps = {str(step_id) for step_id in revision_policy.get("allowed_steps", []) if isinstance(step_id, str)}
+    if "timeline" in allowed_steps or "structure_mapping" not in allowed_steps:
+        return revision_plan
+    normalized_steps: list[dict[str, Any]] = []
+    for step in revision_plan.get("steps", []) if isinstance(revision_plan.get("steps"), list) else []:
+        if not isinstance(step, dict):
+            continue
+        updated = dict(step)
+        if updated.get("step_id") == "timeline" and updated.get("worker") == "Chronologis":
+            updated["step_id"] = "structure_mapping"
+        existing = next((item for item in normalized_steps if item.get("step_id") == updated.get("step_id") and item.get("worker") == updated.get("worker")), None)
+        if existing:
+            existing_reasons = [part.strip() for part in str(existing.get("reason") or "").split(" | ") if part.strip()]
+            reason = str(updated.get("reason") or "")
+            if reason and reason not in existing_reasons:
+                existing_reasons.append(reason)
+                existing["reason"] = " | ".join(existing_reasons[:6])
+            continue
+        normalized_steps.append(updated)
+    return {"required": bool(normalized_steps) or bool(revision_plan.get("required")), "steps": sort_revision_steps(normalized_steps)}
+
+
 def quality_expectation_summary(request: dict[str, Any]) -> dict[str, Any]:
     expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
     step_quality = expectations.get("step_quality") if isinstance(expectations.get("step_quality"), dict) else {}
@@ -1135,6 +1160,7 @@ def run(
         report["approved"] = False
         report["status"] = "needs_revision"
         report["revision_plan"] = revision_plan_from_findings(report.get("findings", []), report.get("missing_artifacts", []))
+    report["revision_plan"] = normalize_revision_plan_for_request(report.get("revision_plan", {}), request)
     report["quality_expectations"] = quality_expectation_summary(request)
     host_path = sandbox_path(workspace_root, critic_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)

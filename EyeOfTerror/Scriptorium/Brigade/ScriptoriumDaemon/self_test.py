@@ -149,6 +149,40 @@ def main() -> int:
                 "contradictions": [{"topic": "direct events vs aftermath", "note": "keep aftermath separate"}],
             },
         )
+        write_json(
+            base / "research_corpus.json",
+            {
+                "topic": "Skalathrax",
+                "sources": [{"title": "Kharn: Eater of Worlds"}],
+                "claims": [
+                    {
+                        "claim_id": "event_claim_1",
+                        "claim": "moon parley",
+                        "confidence": "medium",
+                        "source_refs": ["Kharn: Eater of Worlds"],
+                        "evidence_refs": ["Kharn Eater Worlds local"],
+                    }
+                ],
+                "events": [{"event_id": "moon_parley", "summary": "moon parley"}],
+                "evidence_excerpts": [{"quote_id": "evidence_1", "source_ref": "Kharn Eater Worlds local", "excerpt": "parley on a moon"}],
+                "gaps": ["needs chapter evidence"],
+            },
+        )
+        write_json(base / "structure_map.json", {"topic": "Skalathrax", "topic_structure": [], "timeline": [{"event_id": "moon_parley"}]})
+        write_json(
+            base / "synthesis_plan.json",
+            {
+                "topic": "Skalathrax",
+                "intent": "event_reconstruction",
+                "output_mode": "event_reconstruction",
+                "needs_timeline": True,
+                "sections": [
+                    {"section_id": "source_base", "title": "Источники", "requires_evidence": True, "required_claim_refs": ["event_claim_1"]},
+                    {"section_id": "chronology", "title": "Хронология", "requires_evidence": True, "required_claim_refs": ["event_claim_1"]},
+                ],
+                "evidence_trace": {"claim_refs": ["event_claim_1"]},
+            },
+        )
         result = run(request, root)
         if not result.get("ok"):
             raise AssertionError(f"ScriptoriumDaemon failed: {result}")

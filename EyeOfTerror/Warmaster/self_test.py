@@ -84,6 +84,7 @@ def main() -> int:
 
     classifier_cases = {
         "Собери реконструкцию событий Скалатракса по хронологии.": ("event_reconstruction", "event_reconstruction", True, False),
+        "Собери реконструкцию событий Скалатракса по книгам, кодексам и wiki.": ("event_reconstruction", "event_reconstruction", True, False),
         "Сравни CrewAI и AutoGen для локального агента.": ("comparison", "comparative_review", False, False),
         "Что такое квантование модели?": ("qa_answer", "short_answer", False, False),
         "Напиши книгу на 3 главы о падении легиона.": ("book", "book_manuscript", False, True),

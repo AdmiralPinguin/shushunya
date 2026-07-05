@@ -53,6 +53,13 @@ def main() -> int:
     assert_mode("Исследуй историю домашних 3D-принтеров и сделай report.", "topic_report", "research_report", False, False)
     assert_mode("Сравни CrewAI и AutoGen для локального агента.", "comparison", "comparative_review", False, False)
     assert_mode("Реконструируй события битвы при Скалатраксе.", "event_reconstruction", "event_reconstruction", True, False)
+    assert_mode(
+        "Собери максимально полную реконструкцию событий Скалатракса по книгам, кодексам и wiki.",
+        "event_reconstruction",
+        "event_reconstruction",
+        True,
+        False,
+    )
     assert_mode("Сделай longform article о локальных LLM агентах.", "longform_article", "longform_article", False, False)
     assert_mode("Напиши book на 3 chapters о локальных агентах.", "book", "book_manuscript", False, True)
     print("[ok] research mode contracts")

@@ -5,7 +5,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from fabricator_finalis import run as run_without_model
+from fabricator_finalis import normalize_revision_plan_for_request, run as run_without_model
 
 
 MODEL_BRAIN = {"ok": True, "status": "answered", "content": "{\"status\":\"ok\"}"}
@@ -23,6 +23,29 @@ def write(path: Path, content: str) -> None:
 
 
 def main() -> int:
+    normalized_revision = normalize_revision_plan_for_request(
+        {
+            "required": True,
+            "steps": [
+                {
+                    "step_id": "timeline",
+                    "worker": "Chronologis",
+                    "reason": "timeline needs revision",
+                    "source": "critic_finding",
+                    "priority": "blocker",
+                }
+            ],
+        },
+        {
+            "quality_expectations": {
+                "revision_policy": {
+                    "allowed_steps": ["fact_extraction", "structure_mapping", "synthesis_planning", "draft_reconstruction", "critic_review", "finalize"]
+                }
+            }
+        },
+    )
+    if normalized_revision.get("steps", [{}])[0].get("step_id") != "structure_mapping":
+        raise AssertionError(f"research pipeline revision should target structure_mapping instead of legacy timeline: {normalized_revision}")
     request = {
         "task_id": "test-skalathrax:finalize",
         "step": {"step_id": "finalize", "expected_artifacts": ["/work/skalathrax/final_manifest.json"]},

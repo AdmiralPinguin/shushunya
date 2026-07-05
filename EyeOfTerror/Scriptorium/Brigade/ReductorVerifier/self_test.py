@@ -5,7 +5,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from reductor_verifier import run as run_with_model
+from reductor_verifier import normalize_revision_plan_for_request, run as run_with_model
 
 
 def write(path: Path, content: str) -> None:
@@ -42,6 +42,29 @@ def run(request: dict, root: Path) -> dict:
 
 
 def main() -> int:
+    normalized_revision = normalize_revision_plan_for_request(
+        {
+            "required": True,
+            "steps": [
+                {
+                    "step_id": "timeline",
+                    "worker": "Chronologis",
+                    "reason": "timeline needs revision",
+                    "source": "critic_finding",
+                    "priority": "blocker",
+                }
+            ],
+        },
+        {
+            "quality_expectations": {
+                "revision_policy": {
+                    "allowed_steps": ["fact_extraction", "structure_mapping", "synthesis_planning", "draft_reconstruction", "critic_review", "finalize"]
+                }
+            }
+        },
+    )
+    if normalized_revision.get("steps", [{}])[0].get("step_id") != "structure_mapping":
+        raise AssertionError(f"research pipeline revision should target structure_mapping instead of legacy timeline: {normalized_revision}")
     request = {
         "task_id": "test-skalathrax:critic_review",
         "step": {"step_id": "critic_review", "expected_artifacts": ["/work/skalathrax/critic_report.json"]},

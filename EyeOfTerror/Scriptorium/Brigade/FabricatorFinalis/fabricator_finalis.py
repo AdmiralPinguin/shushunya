@@ -198,6 +198,29 @@ def sort_revision_plan(revision_plan: dict[str, Any]) -> dict[str, Any]:
     return {"required": bool(steps) or bool(revision_plan.get("required")), "steps": steps}
 
 
+def normalize_revision_plan_for_request(revision_plan: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    revision_policy = expectations.get("revision_policy") if isinstance(expectations.get("revision_policy"), dict) else {}
+    allowed_steps = {str(step_id) for step_id in revision_policy.get("allowed_steps", []) if isinstance(step_id, str)}
+    if "timeline" in allowed_steps or "structure_mapping" not in allowed_steps:
+        return revision_plan
+    normalized_steps: list[dict[str, Any]] = []
+    for step in revision_plan.get("steps", []) if isinstance(revision_plan.get("steps"), list) else []:
+        if not isinstance(step, dict):
+            continue
+        updated = dict(step)
+        if updated.get("step_id") == "timeline" and updated.get("worker") == "Chronologis":
+            updated["step_id"] = "structure_mapping"
+        add_unique_revision_step(
+            normalized_steps,
+            str(updated.get("step_id") or ""),
+            str(updated.get("worker") or ""),
+            str(updated.get("reason") or ""),
+            str(updated.get("source") or "critic_finding"),
+        )
+    return {"required": bool(normalized_steps) or bool(revision_plan.get("required")), "steps": normalized_steps}
+
+
 def add_required_event_revision_steps(revision_plan: dict[str, Any], event_review: dict[str, Any]) -> dict[str, Any]:
     if event_review.get("required_events_covered") is not False and event_review.get("required_event_evidence_covered") is not False:
         return revision_plan
@@ -431,6 +454,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
                 }
             ],
         }
+    revision_plan = normalize_revision_plan_for_request(revision_plan, request)
     revision_plan = sort_revision_plan(revision_plan)
     remaining_gaps: list[str] = []
     if isinstance(research_corpus.get("gaps"), list):

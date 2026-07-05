@@ -829,10 +829,14 @@ def run(
 
     revision_context = request.get("revision_context") if isinstance(request.get("revision_context"), dict) else None
     if synthesis_plan and research_corpus:
-        reconstruction = ""
-        coverage_report = ""
         output_mode = str(synthesis_plan.get("output_mode") or "")
-        reconstruction, coverage_report = build_mode_draft(source_map, research_corpus, structure_map, synthesis_plan, revision_context)
+        if output_mode == "event_reconstruction":
+            reconstruction = build_reconstruction(source_map, source_snapshots, notes, timeline, revision_context)
+            coverage_report = build_coverage_report(source_map, source_snapshots, notes, timeline, revision_context)
+        else:
+            reconstruction = ""
+            coverage_report = ""
+            reconstruction, coverage_report = build_mode_draft(source_map, research_corpus, structure_map, synthesis_plan, revision_context)
     else:
         output_mode = str(research_intent_from_request(request).get("output_mode") or "event_reconstruction")
         reconstruction = build_reconstruction(source_map, source_snapshots, notes, timeline, revision_context)
