@@ -373,6 +373,38 @@ def main() -> int:
         if not report.get("approved") or gates.get("passed") is not True:
             raise AssertionError(f"supported QA should pass quality gates: {report}")
         write_json(
+            base / "source_map.json",
+            {
+                "discovery_status": "research_ready",
+                "sources": [
+                    {"title": "Vendor documentation", "source_class": "official_documentation", "source_type": "official_documentation"},
+                    {"title": "Independent overview", "source_class": "general_secondary", "source_type": "general_reference"},
+                ],
+                "source_coverage": {
+                    "ready_for_extraction": True,
+                    "has_primary_or_publication": True,
+                    "has_official": True,
+                    "has_secondary_crosscheck": True,
+                    "source_types": ["official_documentation", "general_reference"],
+                },
+            },
+        )
+        result = run(qa_request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"ReductorVerifier failed on generic source classes: {result}")
+        report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
+        warning_text = json.dumps(report.get("warnings", []), ensure_ascii=False)
+        source_mix = report.get("metrics", {}).get("source_mix", {})
+        if (
+            "official primary narrative" in warning_text
+            or "secondary wiki" in warning_text
+            or "No primary, official" in warning_text
+            or "No secondary, reference" in warning_text
+            or source_mix.get("has_primary_or_official") is not True
+            or source_mix.get("has_secondary_or_crosscheck") is not True
+        ):
+            raise AssertionError(f"generic source classes should satisfy source mix checks: {report}")
+        write_json(
             base / "research_corpus.json",
             {
                 "sources": [{"title": "Primary"}],

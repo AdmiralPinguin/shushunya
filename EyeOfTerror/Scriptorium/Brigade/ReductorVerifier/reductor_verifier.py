@@ -107,6 +107,77 @@ def load_event_playbooks() -> list[dict[str, Any]]:
 EVENT_PLAYBOOKS = load_event_playbooks()
 
 
+PRIMARY_SOURCE_MARKERS = {
+    "official",
+    "primary",
+    "publication",
+    "documentation",
+    "standard",
+    "spec",
+    "paper",
+    "journal",
+    "manual",
+    "book",
+    "codex",
+    "novel",
+    "local_primary",
+    "official_primary_narrative",
+    "local_primary_candidate",
+}
+
+SECONDARY_SOURCE_MARKERS = {
+    "secondary",
+    "wiki",
+    "reference",
+    "summary",
+    "review",
+    "article",
+    "analysis",
+    "crosscheck",
+    "community",
+    "institutional_reference",
+    "general_reference",
+    "secondary_wiki",
+    "curated_wiki",
+    "community_wiki",
+}
+
+
+def source_descriptor(source: dict[str, Any]) -> str:
+    fields = [
+        source.get("source_class"),
+        source.get("source_type"),
+        source.get("type"),
+        source.get("discovery_method"),
+        source.get("expected_use"),
+    ]
+    return " ".join(str(item).lower() for item in fields if item)
+
+
+def descriptor_has_marker(descriptor: str, markers: set[str]) -> bool:
+    return any(marker in descriptor for marker in markers)
+
+
+def source_mix_metrics(source_map: dict[str, Any]) -> dict[str, Any]:
+    sources = [source for source in source_map.get("sources", []) if isinstance(source, dict)]
+    source_coverage = source_map.get("source_coverage") if isinstance(source_map.get("source_coverage"), dict) else {}
+    source_types = source_coverage.get("source_types") if isinstance(source_coverage.get("source_types"), list) else []
+    descriptors = [source_descriptor(source) for source in sources]
+    descriptors.extend(str(item).lower() for item in source_types if item)
+    primary_count = sum(1 for descriptor in descriptors if descriptor_has_marker(descriptor, PRIMARY_SOURCE_MARKERS))
+    secondary_count = sum(1 for descriptor in descriptors if descriptor_has_marker(descriptor, SECONDARY_SOURCE_MARKERS))
+    has_primary = bool(source_coverage.get("has_primary_or_publication") or source_coverage.get("has_official") or primary_count)
+    has_secondary = bool(source_coverage.get("has_secondary_crosscheck") or secondary_count)
+    return {
+        "source_count": len(sources),
+        "primary_or_official_count": primary_count,
+        "secondary_or_crosscheck_count": secondary_count,
+        "has_primary_or_official": has_primary,
+        "has_secondary_or_crosscheck": has_secondary,
+        "source_types": source_types,
+    }
+
+
 def playbook_matches(playbook: dict[str, Any], source_map: dict[str, Any], notes: dict[str, Any], timeline: dict[str, Any]) -> bool:
     source_titles = [
         str(source.get("title") or "")
@@ -1086,15 +1157,11 @@ def review_artifacts(
             elif not note_by_event_id.get(event_id, {}).get("evidence_snapshots"):
                 findings.append({"severity": "blocker", "message": f"Required event lacks fetched source evidence: {label}"})
 
-    source_classes = {
-        str(item.get("source_class") or item.get("type") or "")
-        for item in source_map.get("sources", [])
-        if isinstance(item, dict)
-    }
-    if "official_primary_narrative" not in source_classes:
-        warnings.append({"severity": "warning", "message": "No official primary narrative source candidate is listed."})
-    if "secondary_wiki" not in source_classes:
-        warnings.append({"severity": "warning", "message": "No secondary wiki/source summary is listed for cross-checking."})
+    source_mix = source_mix_metrics(source_map)
+    if not source_mix["has_primary_or_official"]:
+        warnings.append({"severity": "warning", "message": "No primary, official, publication, or documentation source candidate is listed."})
+    if not source_mix["has_secondary_or_crosscheck"]:
+        warnings.append({"severity": "warning", "message": "No secondary, reference, or cross-check source is listed."})
     if source_map.get("discovery_status") == "needs_live_discovery":
         findings.append({"severity": "blocker", "message": "Source discovery did not find concrete sources."})
     source_coverage = source_map.get("source_coverage") if isinstance(source_map.get("source_coverage"), dict) else {}
@@ -1182,6 +1249,7 @@ def review_artifacts(
             "generic_evidence_leads": generic_evidence_leads,
             "low_confidence_events": low_confidence_events,
             "source_coverage_ready": bool(source_coverage.get("ready_for_extraction")) if source_coverage else None,
+            "source_mix": source_mix,
             "draft_chars": len(reconstruction),
             "comprehensive_depth": comprehensive_metrics,
             "snapshot_count": len(source_snapshots.get("snapshots", [])),
