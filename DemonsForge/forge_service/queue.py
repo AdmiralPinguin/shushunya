@@ -6,6 +6,7 @@ import mimetypes
 import os
 import queue
 import random
+import sys
 import threading
 import time
 import uuid
@@ -14,11 +15,28 @@ from pathlib import Path
 import psutil
 from PIL import Image
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from . import config
 from .archive_memory import ArchiveMemoryClient, asset_memory_proposal
-from .downloader import DownloadError, download_asset, target_dir_for, validate_download_spec
+from EyeOfTerror.Pictorium.Moriana.moriana_core.asset_catalog import (
+    ENGINE_MODELS,
+    SAMPLERS,
+    SCHEDULERS,
+    clear_registry_caches,
+    find_lora,
+    peft_available,
+    write_json,
+)
+from EyeOfTerror.Pictorium.Moriana.moriana_core.asset_downloader import (
+    DownloadError,
+    download_asset,
+    target_dir_for,
+    validate_download_spec,
+)
 from .engines.diffusers_adapter import DiffusersEngine
-from .registries import ENGINE_MODELS, SAMPLERS, SCHEDULERS, clear_registry_caches, find_lora, peft_available, write_json
 from .schemas import ArtifactRecord, AssetDownloadRecord, JobRecord, JobSpec, JobStatus, JobType, utc_now
 from .storage import ForgeStore
 

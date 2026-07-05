@@ -13,12 +13,15 @@ from typing import Any
 import requests
 from PIL import Image, ImageChops, ImageDraw, ImageStat
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from forge_service.reports import prune_reports
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+ROOT = PROJECT_ROOT / "DemonsForge"
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
+from EyeOfTerror.Pictorium.Moriana.moriana_core.forge_reports import prune_reports
 from forge_test_lock import forge_test_lock
 
 
-ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASE_URL = "http://127.0.0.1:8110"
 REPORTS_DIR = ROOT / "runtime" / "test-reports"
 

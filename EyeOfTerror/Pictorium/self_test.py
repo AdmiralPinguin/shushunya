@@ -68,14 +68,23 @@ def main() -> int:
         thinker_status = PlannerThinker(enabled=False, base_url="", api_key="", model="", timeout=1).status()
         if thinker_status.get("ready"):
             raise AssertionError(f"disabled thinker should not be ready: {thinker_status}")
-    for wrapper in (
-        PROJECT_ROOT / "DemonsForge" / "forge_service" / "planner.py",
-        PROJECT_ROOT / "DemonsForge" / "forge_service" / "thinker.py",
-        PROJECT_ROOT / "DemonsForge" / "forge_service" / "evaluator.py",
-    ):
-        text = wrapper.read_text(encoding="utf-8")
-        if "EyeOfTerror.Pictorium.Moriana.moriana_core" not in text or len(text.splitlines()) > 25:
-            raise AssertionError(f"DemonsForge compatibility wrapper is not clean: {wrapper}")
+    removed_forge_brains = (
+        "planner.py",
+        "thinker.py",
+        "evaluator.py",
+        "characters.py",
+        "registries.py",
+        "downloader.py",
+        "reports.py",
+    )
+    for filename in removed_forge_brains:
+        old_path = PROJECT_ROOT / "DemonsForge" / "forge_service" / filename
+        if old_path.exists():
+            raise AssertionError(f"agent-owned module must not remain in DemonsForge: {old_path}")
+    for filename in ("quality_bench.py", "shushunya_project_bench.py", "long_forge_api.py"):
+        old_path = PROJECT_ROOT / "DemonsForge" / "tests" / filename
+        if old_path.exists():
+            raise AssertionError(f"Pictorium bench must not remain in DemonsForge tests: {old_path}")
     print("[ok] Pictorium Moriana scaffold")
     return 0
 

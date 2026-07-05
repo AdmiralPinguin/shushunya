@@ -27,15 +27,21 @@ embedding image-engine calls inside the general agent loop.
 
 ## DemonsForge Reuse
 
-Moriana should reuse existing DemonsForge internals through stable boundaries:
+Moriana now owns the image-agent logic that was previously mixed into
+DemonsForge:
 
-- `forge_service.planner` and `forge_service.thinker` become Promptwright input.
-- `forge_service.registries` and `forge_service.downloader` become
-  ModelQuartermaster input.
-- `forge_service.client`, `forge_service.queue`, and `forge_service.server`
-  become ForgeDispatcher input.
-- `forge_service.evaluator`, `forge_service.reports`, and
-  `forge_service.storage` become ImageVerifier and ArtifactFinalis input.
+- `moriana_core.promptwright`, `prompt_thinker`, and `project_planner` are
+  Promptwright input.
+- `moriana_core.asset_catalog`, `asset_downloader`, and `character_profiles`
+  are ModelQuartermaster input.
+- `DemonsForge/forge_service/client.py`, `queue.py`, `server.py`, and
+  `projects.py` are ForgeDispatcher runtime input.
+- `moriana_core.image_evaluator`, `forge_reports`, and `benches/` are
+  ImageVerifier and ArtifactFinalis input.
+
+DemonsForge should remain a narrow runtime: schemas, config, engine adapters,
+queue, storage, project masks, and API surface. It should not regain planner,
+thinker, catalog-policy, downloader-policy, report-policy, or bench ownership.
 
 The existing `Warmaster/InnerCircle/ForgeMasterGovernor` remains a planned
 legacy placeholder until Moriana replaces it through a tested registry change.

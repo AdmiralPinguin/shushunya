@@ -3,10 +3,11 @@
 Planned Pictorium worker for model, LoRA, embedding, and reference-asset
 readiness.
 
-Initial source material:
+Owned modules:
 
-- `DemonsForge/forge_service/registries.py`
-- `DemonsForge/forge_service/downloader.py`
+- `EyeOfTerror/Pictorium/Moriana/moriana_core/asset_catalog.py`
+- `EyeOfTerror/Pictorium/Moriana/moriana_core/asset_downloader.py`
+- `EyeOfTerror/Pictorium/Moriana/moriana_core/character_profiles.py`
 - `DemonsForge/quality_assets/asset_profiles.json`
 - `DemonsForge/quality_assets/character_profiles.json`
 

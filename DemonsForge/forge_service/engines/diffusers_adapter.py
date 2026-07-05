@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import config
-from ..registries import ENGINE_MODELS, find_lora
+from EyeOfTerror.Pictorium.Moriana.moriana_core.asset_catalog import ENGINE_MODELS, find_lora
 from ..schemas import JobSpec
 from .base import BaseEngine, EngineError, ProgressCallback
 

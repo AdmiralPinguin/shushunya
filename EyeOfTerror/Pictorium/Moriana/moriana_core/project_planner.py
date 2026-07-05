@@ -3,8 +3,9 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from DemonsForge.forge_service.characters import character_profile_for_text, character_profiles
 from DemonsForge.forge_service.schemas import JobSpec, PlanRequest, ProjectPlanRequest, ProjectSpec, ProjectStep
+
+from .character_profiles import character_profile_for_text, character_profiles
 from .promptwright import plan_txt2img
 
 

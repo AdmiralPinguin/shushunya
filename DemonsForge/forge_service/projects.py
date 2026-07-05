@@ -11,7 +11,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from . import config
 from .schemas import ProjectSpec, utc_now
-from EyeOfTerror.Pictorium.Moriana.moriana_core.project_planner import plan_project  # noqa: F401
 
 
 def _project_path(project_id: str) -> Path:

@@ -225,9 +225,10 @@ passed with real generation:
 
 Architecture:
 
-- `forge_service/registries.py`: engine, model, LoRA, sampler, scheduler and
-  capability discovery. Known engines are registered explicitly; additional
-  local model folders with `model_index.json` are surfaced as discovered models.
+- `../EyeOfTerror/Pictorium/Moriana/moriana_core/asset_catalog.py`: engine,
+  model, LoRA, sampler, scheduler and capability discovery. Known engines are
+  registered explicitly; additional local model folders with `model_index.json`
+  are surfaced as discovered models.
   `/forge/capabilities` exposes implemented job types, service-level jobs,
   unsupported job types, future feature hooks, and per-engine feature flags.
   For thin clients, it also includes stable top-level aliases: `job_types` and
@@ -243,8 +244,9 @@ Architecture:
   lazy diffusers adapter for `txt2img`; unsupported operations fail explicitly.
   Diffusers step callbacks are used when available for live progress and
   cooperative cancellation between inference steps.
-- `forge_service/planner.py`: Russian natural-language planner that returns a
-  valid structured job spec. Missing model/LoRA/control assets become
+- `../EyeOfTerror/Pictorium/Moriana/moriana_core/promptwright.py`: Russian
+  natural-language planner that returns a valid structured job spec. Missing
+  model/LoRA/control assets become
   `asset_request` objects requiring user approval.
   It recognizes engine hints, explicit dimensions like `512x768`, `steps`,
   `seed`, negative prompts and local LoRA references like `lora:name@0.8`.
@@ -258,9 +260,12 @@ Architecture:
   It recognizes `txt2img`, `img2img`, `inpaint`, and `upscale` intent; image
   editing plans include `planner_note` reminders for required source/mask
   inputs instead of pretending those assets exist.
-- `forge_service/projects.py`: lightweight project/workflow planner. It builds
-  `concept_batch`, `comic_storyboard`, and `character_sheet` project specs from
-  ordinary Forge `JobSpec` steps, stores submitted projects under
+- `forge_service/projects.py`: runtime project storage and deterministic mask
+  generation.
+- `../EyeOfTerror/Pictorium/Moriana/moriana_core/project_planner.py`:
+  lightweight project/workflow planner. It builds `concept_batch`,
+  `comic_storyboard`, and `character_sheet` project specs from ordinary Forge
+  `JobSpec` steps. Submitted project records are stored under
   `runtime/projects`, and keeps selection manual until a real semantic/vision
   evaluator is configured. This is the first layer for workflows where the
   forge-agent creates several concepts or panels, then later refines selected
@@ -272,27 +277,30 @@ Architecture:
   Flux first concepts; `engine_strategy=mixed_concept` is an explicit
   diagnostic mode for comparing Flux against SDXL txt2img, while SDXL remains
   the preferred refine/edit workhorse after a source artifact exists.
-- `forge_service/thinker.py`: optional OpenAI-compatible planner thinker. It is
-  advisory only: the deterministic planner builds the baseline plan first, the
-  thinker can return a compact JSON patch, and Forge filters plus validates that
-  patch back into a `JobSpec`. Invalid thinker output falls back to the baseline
-  plan and is reported in `spec.safety.planner_thinker`.
-- `forge_service/downloader.py`: controlled asset downloader abstraction. It
-  accepts only approved jobs, stores source/license/hash metadata, keeps files
-  inside DemonsForge, rejects unverified hosts, validates SHA-256 format, writes
-  through `.part` files, rejects non-weight extensions, requires SHA-256 for
-  generic `.bin` downloads, and enforces `FORGE_MAX_ASSET_DOWNLOAD_BYTES`.
-- `forge_service/evaluator.py`: lightweight artifact evaluator. It reports
-  dimensions, image statistics, source-image differences, inpaint masked versus
-  unmasked differences, and prompt terms from metadata. It deliberately does
-  not claim semantic prompt-adherence scores without a vision/CLIP evaluator.
+- `../EyeOfTerror/Pictorium/Moriana/moriana_core/prompt_thinker.py`: optional
+  OpenAI-compatible planner thinker. It is advisory only: the deterministic
+  planner builds the baseline plan first, the thinker can return a compact JSON
+  patch, and Forge filters plus validates that patch back into a `JobSpec`.
+  Invalid thinker output falls back to the baseline plan and is reported in
+  `spec.safety.planner_thinker`.
+- `../EyeOfTerror/Pictorium/Moriana/moriana_core/asset_downloader.py`:
+  controlled asset downloader abstraction. It accepts only approved jobs,
+  stores source/license/hash metadata, keeps files inside DemonsForge, rejects
+  unverified hosts, validates SHA-256 format, writes through `.part` files,
+  rejects non-weight extensions, requires SHA-256 for generic `.bin` downloads,
+  and enforces `FORGE_MAX_ASSET_DOWNLOAD_BYTES`.
+- `../EyeOfTerror/Pictorium/Moriana/moriana_core/image_evaluator.py`:
+  lightweight artifact evaluator. It reports dimensions, image statistics,
+  source-image differences, inpaint masked versus unmasked differences, and
+  prompt terms from metadata. It deliberately does not claim semantic
+  prompt-adherence scores without a vision/CLIP evaluator.
 - `quality_assets/asset_profiles.json`: quality-facing profile registry for
   LoRA, embedding, control and reference assets. Profiles record intended use,
   trigger words, recommended weights, approval state, license notes and risks.
   `/forge/assets/profiles` merges those profiles with locally discovered files.
 - `quality_assets/character_profiles.json`: style-neutral canonical character
   profile registry. The initial `shushunya` profile biases toward a maximally
-  frightening body-horror interpretation and is injected by the planner when a
+  frightening body-horror interpretation and is injected by Pictorium planning when a
   request mentions Shushunya. Forge records `safety.character_profile` metadata
   and does not assume a local LoRA/IP-Adapter exists.
 - `forge_service/client.py`: thin client intended for later ShushunyaAgent tool
@@ -447,7 +455,7 @@ DemonsForge/bin/python tests/forge_cycle.py --iterations 1
 Long live-API planner/dry-run matrix:
 
 ```bash
-DemonsForge/bin/python tests/long_forge_api.py --cycles 20
+DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.py --cycles 20
 ```
 
 Long-test JSON reports are written under `runtime/test-reports/` unless
@@ -456,7 +464,7 @@ Long-test JSON reports are written under `runtime/test-reports/` unless
 Optional real CPU SDXL generation smoke:
 
 ```bash
-DemonsForge/bin/python tests/long_forge_api.py --cycles 5 --generate
+DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.py --cycles 5 --generate
 ```
 
 Optional CPU SDXL quality probe:
@@ -464,7 +472,7 @@ Optional CPU SDXL quality probe:
 ```bash
 FORGE_EMBEDDED_WORKER=0 ./start-forge-api.sh
 FORGE_WORKER_MAX_JOBS=3 ./start-forge-worker.sh
-DemonsForge/bin/python tests/long_forge_api.py --cycles 1 --quality-generate
+DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.py --cycles 1 --quality-generate
 ```
 
 This runs real `txt2img`, `img2img`, and `inpaint` jobs, writes a JSON report
@@ -477,7 +485,7 @@ Optional SDXL img2img strength sweep:
 
 ```bash
 FORGE_WORKER_MAX_JOBS=3 ./start-forge-worker.sh
-DemonsForge/bin/python tests/long_forge_api.py --cycles 1 --edit-sweep
+DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.py --cycles 1 --edit-sweep
 ```
 
 This runs soft, balanced, and strong `img2img` variants from the same source,
@@ -486,11 +494,11 @@ writes `diff_from_source` metrics, and creates an edit-sweep contact sheet.
 Quality bench:
 
 ```bash
-DemonsForge/bin/python tests/quality_bench.py
+DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/benches/quality_bench.py
 FORGE_WORKER_MAX_JOBS=3 ./start-forge-worker.sh
-DemonsForge/bin/python tests/quality_bench.py --run
+DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/benches/quality_bench.py --run
 FORGE_WORKER_MAX_JOBS=5 ./start-forge-worker.sh
-DemonsForge/bin/python tests/quality_bench.py --run --concept-engines
+DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/benches/quality_bench.py --run --concept-engines
 ```
 
 The default mode is a dry-run validation of the scenario specs. `--run` creates
@@ -518,9 +526,9 @@ reports.
 Shushunya project workflow bench:
 
 ```bash
-DemonsForge/bin/python tests/shushunya_project_bench.py
+DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/benches/project_bench.py
 FORGE_WORKER_MAX_JOBS=4 ./start-forge-worker.sh
-DemonsForge/bin/python tests/shushunya_project_bench.py --run --project-type comic_storyboard --panels 4
+DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/benches/project_bench.py --run --project-type comic_storyboard --panels 4
 ```
 
 The dry-run validates a multi-step project without generation. `--run` submits

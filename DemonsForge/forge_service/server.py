@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import hashlib
+import sys
 import time
 
 import asyncio
@@ -10,14 +11,13 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from . import __version__, config
 from .archive_memory import ArchiveMemoryClient
-from .characters import character_profiles
-from .evaluator import evaluate_artifact
-from .planner import plan_txt2img
-from .projects import create_project_mask, get_project, list_projects, plan_project, save_project
-from .queue import ForgeQueue
-from .registries import (
+from EyeOfTerror.Pictorium.Moriana.moriana_core.asset_catalog import (
     ASPECT_PRESETS,
     SAMPLERS,
     SCHEDULERS,
@@ -28,7 +28,19 @@ from .registries import (
     discover_loras,
     discover_models,
 )
-from .reports import list_reports, prune_reports, report_path, summarize_reports
+from EyeOfTerror.Pictorium.Moriana.moriana_core.character_profiles import character_profiles
+from EyeOfTerror.Pictorium.Moriana.moriana_core.forge_reports import (
+    list_reports,
+    prune_reports,
+    report_path,
+    summarize_reports,
+)
+from EyeOfTerror.Pictorium.Moriana.moriana_core.image_evaluator import evaluate_artifact
+from EyeOfTerror.Pictorium.Moriana.moriana_core.project_planner import plan_project
+from EyeOfTerror.Pictorium.Moriana.moriana_core.prompt_thinker import PlannerThinker
+from EyeOfTerror.Pictorium.Moriana.moriana_core.promptwright import plan_txt2img
+from .projects import create_project_mask, get_project, list_projects, save_project
+from .queue import ForgeQueue
 from .schemas import (
     JobCloneRequest,
     JobSpec,
@@ -41,7 +53,6 @@ from .schemas import (
     utc_now,
 )
 from .storage import ForgeStore
-from .thinker import PlannerThinker
 
 config.force_cpu_runtime()
 config.ensure_dirs()

@@ -6,14 +6,17 @@ import time
 from fastapi.testclient import TestClient
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ROOT = PROJECT_ROOT / "DemonsForge"
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(ROOT))
 
 from forge_service.server import app
 from forge_service.client import DemonsForgeClient
 from forge_service.queue import ForgeQueue
 from forge_service.schemas import JobSpec, PlanRequest
 from forge_service.server import store
-from forge_service.thinker import PlannerThinker
+from EyeOfTerror.Pictorium.Moriana.moriana_core.prompt_thinker import PlannerThinker
 
 
 def wait_for_terminal(client: TestClient, job_id: str) -> dict:

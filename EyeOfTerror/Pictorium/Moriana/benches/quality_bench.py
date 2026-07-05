@@ -13,10 +13,13 @@ import requests
 from PIL import Image, ImageDraw
 
 
-ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+ROOT = PROJECT_ROOT / "DemonsForge"
+sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
 
-from forge_service.reports import prune_reports
+from EyeOfTerror.Pictorium.Moriana.moriana_core.forge_reports import prune_reports
 from forge_test_lock import forge_test_lock
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8110"

@@ -31,6 +31,7 @@
         "EyeOfTerror/Pictorium/Moriana/moriana_core/promptwright.py",
         "EyeOfTerror/Pictorium/Moriana/moriana_core/prompt_thinker.py",
         "EyeOfTerror/Pictorium/Moriana/moriana_core/project_planner.py",
+        "EyeOfTerror/Pictorium/Moriana/moriana_core/character_profiles.py",
         "DemonsForge/forge_service/schemas.py"
       ],
       "expected_artifacts": ["/work/pictorium/image_plan.json"]
@@ -39,8 +40,8 @@
       "name": "ModelQuartermaster",
       "role": "model, LoRA, embedding, and asset readiness inspector",
       "source_modules": [
-        "DemonsForge/forge_service/registries.py",
-        "DemonsForge/forge_service/downloader.py",
+        "EyeOfTerror/Pictorium/Moriana/moriana_core/asset_catalog.py",
+        "EyeOfTerror/Pictorium/Moriana/moriana_core/asset_downloader.py",
         "DemonsForge/quality_assets/asset_profiles.json",
         "DemonsForge/quality_assets/character_profiles.json"
       ],
@@ -62,7 +63,8 @@
       "role": "generated artifact verifier and visual risk reporter",
       "source_modules": [
         "EyeOfTerror/Pictorium/Moriana/moriana_core/image_evaluator.py",
-        "DemonsForge/tests/quality_bench.py"
+        "EyeOfTerror/Pictorium/Moriana/benches/quality_bench.py",
+        "EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.py"
       ],
       "expected_artifacts": ["/work/pictorium/image_verification.json"]
     },
@@ -71,7 +73,8 @@
       "role": "final manifest and delivery packager",
       "source_modules": [
         "DemonsForge/forge_service/storage.py",
-        "DemonsForge/forge_service/reports.py"
+        "EyeOfTerror/Pictorium/Moriana/moriana_core/forge_reports.py",
+        "EyeOfTerror/Pictorium/Moriana/benches/project_bench.py"
       ],
       "expected_artifacts": ["/work/pictorium/final_manifest.json"]
     }

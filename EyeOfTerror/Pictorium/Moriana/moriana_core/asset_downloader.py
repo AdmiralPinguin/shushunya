@@ -7,8 +7,8 @@ from urllib.parse import urlparse
 
 import requests
 
-from . import config
-from .schemas import AssetDownloadSpec
+from DemonsForge.forge_service import config
+from DemonsForge.forge_service.schemas import AssetDownloadSpec
 
 
 APPROVED_HOSTS = {

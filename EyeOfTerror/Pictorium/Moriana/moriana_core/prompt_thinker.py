@@ -9,8 +9,9 @@ import requests
 from pydantic import ValidationError
 
 from DemonsForge.forge_service import config
-from DemonsForge.forge_service.registries import SAMPLERS, SCHEDULERS, capabilities
 from DemonsForge.forge_service.schemas import AssetRequest, JobSpec, PlanRequest
+
+from .asset_catalog import SAMPLERS, SCHEDULERS, capabilities
 
 
 ALLOWED_PATCH_FIELDS = {

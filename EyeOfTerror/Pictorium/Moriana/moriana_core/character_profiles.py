@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from . import config
+from DemonsForge.forge_service import config
 
 
 CHARACTER_PROFILES_PATH = config.QUALITY_ASSETS_DIR / "character_profiles.json"

@@ -13,9 +13,11 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = ROOT.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(ROOT))
 
-from forge_service.reports import prune_reports
+from EyeOfTerror.Pictorium.Moriana.moriana_core.forge_reports import prune_reports
 from forge_test_lock import LOCK_ENV, forge_test_lock
 
 PYTHON = ROOT / "DemonsForge/bin/python"
@@ -50,7 +52,7 @@ def cycle_once(index: int, args: argparse.Namespace) -> dict[str, Any]:
             timeout_seconds=args.self_test_timeout,
         )
     ]
-    bench_command = [str(PYTHON), "tests/quality_bench.py"]
+    bench_command = [str(PYTHON), "../EyeOfTerror/Pictorium/Moriana/benches/quality_bench.py"]
     if args.quality_run:
         bench_command.append("--run")
     if args.concept_engines:

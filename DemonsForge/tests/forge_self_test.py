@@ -15,9 +15,11 @@ import requests
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = ROOT.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(ROOT))
 
-from forge_service.reports import prune_reports
+from EyeOfTerror.Pictorium.Moriana.moriana_core.forge_reports import prune_reports
 from forge_test_lock import forge_test_lock
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8110"
@@ -40,16 +42,20 @@ def run_step(name: str, func) -> dict[str, Any]:
 def py_compile() -> dict[str, Any]:
     files = [
         "forge_service/config.py",
-        "forge_service/evaluator.py",
-        "forge_service/planner.py",
         "forge_service/projects.py",
         "forge_service/queue.py",
-        "forge_service/registries.py",
-        "forge_service/reports.py",
         "forge_service/server.py",
-        "tests/quality_bench.py",
-        "tests/shushunya_project_bench.py",
-        "tests/long_forge_api.py",
+        "../EyeOfTerror/Pictorium/Moriana/moriana_core/asset_catalog.py",
+        "../EyeOfTerror/Pictorium/Moriana/moriana_core/asset_downloader.py",
+        "../EyeOfTerror/Pictorium/Moriana/moriana_core/character_profiles.py",
+        "../EyeOfTerror/Pictorium/Moriana/moriana_core/forge_reports.py",
+        "../EyeOfTerror/Pictorium/Moriana/moriana_core/image_evaluator.py",
+        "../EyeOfTerror/Pictorium/Moriana/moriana_core/project_planner.py",
+        "../EyeOfTerror/Pictorium/Moriana/moriana_core/prompt_thinker.py",
+        "../EyeOfTerror/Pictorium/Moriana/moriana_core/promptwright.py",
+        "../EyeOfTerror/Pictorium/Moriana/benches/quality_bench.py",
+        "../EyeOfTerror/Pictorium/Moriana/benches/project_bench.py",
+        "../EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.py",
         "tests/smoke_forge_api.py",
     ]
     command = [str(ROOT / "DemonsForge/bin/python"), "-m", "py_compile", *files]
@@ -68,7 +74,12 @@ def live_quality_dry_run(base_url: str) -> dict[str, Any]:
     health = requests.get(f"{base_url}/health", timeout=10)
     health.raise_for_status()
     completed = subprocess.run(
-        [str(ROOT / "DemonsForge/bin/python"), "tests/quality_bench.py", "--base-url", base_url],
+        [
+            str(ROOT / "DemonsForge/bin/python"),
+            "../EyeOfTerror/Pictorium/Moriana/benches/quality_bench.py",
+            "--base-url",
+            base_url,
+        ],
         cwd=ROOT,
         text=True,
         capture_output=True,

@@ -6,9 +6,9 @@ from typing import Any
 from datetime import datetime, timezone
 from functools import lru_cache
 
-from . import config
-from . import __version__
-from .characters import character_profiles
+from DemonsForge.forge_service import __version__, config
+
+from .character_profiles import character_profiles
 
 
 ENGINE_MODELS = {

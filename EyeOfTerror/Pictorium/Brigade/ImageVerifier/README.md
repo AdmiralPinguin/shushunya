@@ -5,7 +5,8 @@ Planned Pictorium worker for generated image verification.
 Owned modules:
 
 - `EyeOfTerror/Pictorium/Moriana/moriana_core/image_evaluator.py`
-- `DemonsForge/tests/quality_bench.py`
+- `EyeOfTerror/Pictorium/Moriana/benches/quality_bench.py`
+- `EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.py`
 
 Expected output:
 

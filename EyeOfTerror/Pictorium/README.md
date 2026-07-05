@@ -35,14 +35,14 @@ can pass the common worker API contract.
 
 ## DemonsForge Cleanup Rule
 
-Do not delete DemonsForge planning or report code until the matching Pictorium
-worker exists and has tests. The desired end state is:
+DemonsForge must stay a narrow runtime. The desired end state is:
 
 - Pictorium owns visual intent, policy, verification, and final handoff.
 - DemonsForge owns runtime execution, queueing, engine adapters, and raw
   artifact storage.
 
-The first cleanup pass moved planner, thinker, project-planning, and
-deterministic image-evaluator logic into `Pictorium/Moriana/moriana_core`.
-`DemonsForge/forge_service` keeps compatibility wrappers so existing API
-endpoints and tests keep working during the migration.
+The cleanup pass moved planner, thinker, project-planning, deterministic
+image-evaluator, character-profile, asset-catalog, asset-download, report, and
+bench logic into `Pictorium/Moriana`. DemonsForge imports this logic directly
+where its API still needs to expose it; it must not keep local compatibility
+wrappers for agent-owned modules.
