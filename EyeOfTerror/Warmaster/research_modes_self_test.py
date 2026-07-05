@@ -29,6 +29,10 @@ def assert_mode(task: str, expected_intent: str, expected_mode: str, needs_timel
         raise AssertionError(f"research mode missing synthesis_plan: {payload}")
     if needs_timeline and not any(path.endswith("/timeline.json") for path in artifacts):
         raise AssertionError(f"timeline mode missing timeline: {payload}")
+    if not needs_timeline and any(path.endswith("/timeline.json") for path in artifacts):
+        raise AssertionError(f"non-timeline mode should not require timeline artifact: {payload}")
+    if expected_intent not in {"qa_answer"} and not any(path.endswith("/structure_map.json") for path in artifacts):
+        raise AssertionError(f"structured research mode missing structure_map: {payload}")
     if expected_intent == "qa_answer" and "Chronologis" in workers:
         raise AssertionError(f"short Q&A should not force Chronologis: {payload}")
     if needs_chapters:

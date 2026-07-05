@@ -311,7 +311,7 @@ def research_writing_worker_plan(slug: str, intent_profile: dict[str, Any] | Non
     ]
     draft_dependencies = ["source_discovery", "fact_extraction"]
     if needs_structure:
-        structure_artifacts = [f"{base}/structure_map.json", f"{base}/timeline.json"]
+        structure_artifacts = [f"{base}/structure_map.json"]
         if profile.get("needs_timeline"):
             structure_artifacts = [f"{base}/timeline.json", f"{base}/structure_map.json"]
         plan.append(

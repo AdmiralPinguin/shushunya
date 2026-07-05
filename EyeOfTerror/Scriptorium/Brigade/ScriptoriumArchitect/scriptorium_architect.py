@@ -98,12 +98,37 @@ def claim_refs(research_corpus: dict[str, Any]) -> list[str]:
     return [str(item.get("claim_id") or "") for item in claims if isinstance(item, dict) and item.get("claim_id")]
 
 
-def attach_claim_refs(sections: list[dict[str, Any]], refs: list[str]) -> list[dict[str, Any]]:
+def claim_refs_per_section(output_mode: str) -> int:
+    if output_mode == "short_answer":
+        return 3
+    if output_mode in {"book_manuscript", "book_manuscript_with_timeline", "longform_article"}:
+        return 12
+    if output_mode in {"event_reconstruction", "investigative_report", "comparative_review"}:
+        return 8
+    return 6
+
+
+def attach_claim_refs(sections: list[dict[str, Any]], refs: list[str], output_mode: str) -> list[dict[str, Any]]:
     if not refs:
         return sections
+    if output_mode in {"book_manuscript", "book_manuscript_with_timeline"}:
+        for section in sections:
+            if not section.get("requires_evidence"):
+                continue
+            section_id = str(section.get("section_id") or "")
+            if section_id == "source_base":
+                section["required_claim_refs"] = refs
+            elif section_id == "book_opening":
+                section["required_claim_refs"] = refs
+            elif section_id == "book_body":
+                section["required_claim_refs"] = refs
+            else:
+                section["required_claim_refs"] = refs
+        return sections
+    per_section = claim_refs_per_section(output_mode)
     for index, section in enumerate(sections):
         if section.get("requires_evidence"):
-            section["required_claim_refs"] = refs[index :: max(1, len(sections))][:6] or refs[:3]
+            section["required_claim_refs"] = refs[index :: max(1, len(sections))][:per_section] or refs[: min(per_section, len(refs))]
     return sections
 
 
@@ -118,9 +143,9 @@ def build_book_outline(topic: str, sections: list[dict[str, Any]], refs: list[st
         "title": topic or "Research manuscript",
         "target_language": "ru",
         "chapters": [
-            {"chapter_id": "chapter_01", "title": "Введение и источники", "section_refs": ["source_base"], "required_claim_refs": chapter_refs[0][:6]},
-            {"chapter_id": "chapter_02", "title": "Основной рассказ", "section_refs": [section.get("section_id", "") for section in sections if section.get("requires_evidence")], "required_claim_refs": chapter_refs[1][:8]},
-            {"chapter_id": "chapter_03", "title": "Итоги и открытые вопросы", "section_refs": ["book_close"], "required_claim_refs": chapter_refs[2][:6]},
+            {"chapter_id": "chapter_01", "title": "Введение и источники", "section_refs": ["source_base"], "required_claim_refs": chapter_refs[0]},
+            {"chapter_id": "chapter_02", "title": "Основной рассказ", "section_refs": [section.get("section_id", "") for section in sections if section.get("requires_evidence")], "required_claim_refs": chapter_refs[1]},
+            {"chapter_id": "chapter_03", "title": "Итоги и открытые вопросы", "section_refs": ["book_close"], "required_claim_refs": chapter_refs[2]},
         ],
     }
 
@@ -129,7 +154,7 @@ def build_synthesis_plan(request: dict[str, Any], research_corpus: dict[str, Any
     intent = research_intent_from_request(request)
     output_mode = str(intent.get("output_mode") or "research_report")
     refs = claim_refs(research_corpus)
-    sections = attach_claim_refs(output_mode_sections(output_mode, bool(intent.get("needs_timeline"))), refs)
+    sections = attach_claim_refs(output_mode_sections(output_mode, bool(intent.get("needs_timeline"))), refs, output_mode)
     unsupported_sections = [
         {
             "section_id": section.get("section_id", ""),

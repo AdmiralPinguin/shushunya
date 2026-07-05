@@ -173,7 +173,7 @@ def collect_snapshots(source_map: dict[str, Any], fetcher: FetchFn = default_fet
     }
 
 
-def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
+def run(request: dict[str, Any], workspace_root: Path, fetcher: FetchFn = default_fetch) -> dict[str, Any]:
     step = request.get("step")
     if not isinstance(step, dict):
         return {"ok": False, "worker": "AuspexBrowser", "error": "request.step must be an object"}
@@ -194,7 +194,7 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
     )
     if not guidance.get("ok"):
         return model_unavailable_payload("AuspexBrowser", request.get("task_id"), guidance)
-    snapshots = collect_snapshots(source_map)
+    snapshots = collect_snapshots(source_map, fetcher=fetcher)
     snapshots["model_guidance"] = guidance
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)

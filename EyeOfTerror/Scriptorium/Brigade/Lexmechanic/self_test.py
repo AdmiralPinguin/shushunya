@@ -131,6 +131,13 @@ def main() -> int:
         raise AssertionError(f"generic official+secondary sources should be extraction-ready: {generic_discovered.get('source_coverage')}")
     if generic_discovered.get("discovery_status") != "live_discovery_ready":
         raise AssertionError(f"generic live discovery should record ready status after finding sources: {generic_discovered.get('discovery_status')}")
+    deep_discovered = source_map_for_contract(
+        {"goal": "Сравни CrewAI и AutoGen для локального агента."},
+        generic_research_search,
+        intent_profile={"intent": "comparison", "output_mode": "comparative_review", "required_depth": "deep"},
+    )
+    if deep_discovered.get("depth_profile", {}).get("mode") != "deep" or deep_discovered.get("depth_profile", {}).get("query_budget", 0) <= 10:
+        raise AssertionError(f"deep research intent should expand discovery depth: {deep_discovered.get('depth_profile')}")
     if not discovered["discovery_results"] or discovered["discovery_results"][0]["provider"] != "fake":
         raise AssertionError(f"fake discovery was not recorded: {discovered['discovery_results']}")
     if len(fake_search_calls) < 4:

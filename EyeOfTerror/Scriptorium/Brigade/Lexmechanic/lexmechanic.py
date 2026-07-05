@@ -454,10 +454,13 @@ def generic_search_queries(goal: str) -> list[str]:
     ]
 
 
-def depth_profile_for_goal(goal: str, playbooks: list[dict[str, Any]]) -> dict[str, Any]:
+def depth_profile_for_goal(goal: str, playbooks: list[dict[str, Any]], intent_profile: dict[str, Any] | None = None) -> dict[str, Any]:
     lowered = goal.lower()
+    intent_profile = intent_profile if isinstance(intent_profile, dict) else {}
+    required_depth = str(intent_profile.get("required_depth") or "").lower()
+    output_mode = str(intent_profile.get("output_mode") or "").lower()
     weak_hits = [term for term in WEAK_COMPREHENSIVE_GOAL_TERMS if term in lowered]
-    comprehensive = any(term in lowered for term in STRONG_COMPREHENSIVE_GOAL_TERMS) or len(weak_hits) >= 2
+    comprehensive = required_depth == "comprehensive" or any(term in lowered for term in STRONG_COMPREHENSIVE_GOAL_TERMS) or len(weak_hits) >= 2
     if comprehensive:
         return {
             "mode": "comprehensive",
@@ -470,6 +473,19 @@ def depth_profile_for_goal(goal: str, playbooks: list[dict[str, Any]]) -> dict[s
             "min_direct_evidence_sources": 6,
             "min_primary_evidence_sources": 1,
             "min_draft_chars": 60000,
+        }
+    if required_depth == "deep" or output_mode in {"comparative_review", "investigative_report", "longform_article"}:
+        return {
+            "mode": "deep",
+            "reason": "intent classifier requested deep research depth",
+            "query_budget": 18,
+            "per_query_limit": 8,
+            "per_round_query_limit": 6,
+            "min_source_count": 8,
+            "min_live_candidate_count": 6,
+            "min_direct_evidence_sources": 4,
+            "min_primary_evidence_sources": 0,
+            "min_draft_chars": 12000,
         }
     return {
         "mode": "standard",
@@ -862,6 +878,7 @@ def source_map_for_contract(
     searcher: SearchFn | None = None,
     corpus_sources: list[dict[str, Any]] | None = None,
     corpus_index: dict[str, Any] | None = None,
+    intent_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     goal = str(contract.get("goal") or "")
     playbooks = matching_playbooks(goal)
@@ -874,7 +891,7 @@ def source_map_for_contract(
             if isinstance(source, dict)
         ]
     )
-    depth_profile = depth_profile_for_goal(goal, playbooks)
+    depth_profile = depth_profile_for_goal(goal, playbooks, intent_profile=intent_profile)
     rounds = search_rounds(topic, playbooks, depth_profile)
     cached_sources = cached_sources_for_topic(topic)
     search_queries = [query for round_plan in rounds for query in round_plan.get("queries", []) if isinstance(query, str)]
@@ -990,7 +1007,15 @@ def run(request: dict[str, Any], workspace_root: Path, searcher: SearchFn | None
     )
     if not guidance.get("ok"):
         return model_unavailable_payload("Lexmechanic", request.get("task_id"), guidance)
-    source_map = source_map_for_contract(contract, selected_searcher, corpus_sources=corpus_sources, corpus_index=corpus_index)
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    intent_profile = expectations.get("research_intent") if isinstance(expectations.get("research_intent"), dict) else {}
+    source_map = source_map_for_contract(
+        contract,
+        selected_searcher,
+        corpus_sources=corpus_sources,
+        corpus_index=corpus_index,
+        intent_profile=intent_profile,
+    )
     source_map["model_guidance"] = guidance
     write_source_cache(str(source_map.get("topic") or ""), source_map.get("sources", []))
     host_path = sandbox_path(workspace_root, output_path)

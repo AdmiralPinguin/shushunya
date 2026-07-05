@@ -52,8 +52,8 @@ def main() -> int:
                 os.environ.pop("SHUSHUNYA_CORPUS_DIR", None)
             else:
                 os.environ["SHUSHUNYA_CORPUS_DIR"] = old_corpus_dir
-        if not summary.get("ok"):
-            raise AssertionError(f"local corpus pipeline should complete standard task: {summary}")
+        if summary.get("ok"):
+            raise AssertionError(f"single local source should not satisfy comprehensive lore reconstruction gates: {summary}")
         base = work_dir / "skalathrax"
         source_map = json.loads((base / "source_map.json").read_text(encoding="utf-8"))
         local_sources = [source for source in source_map.get("sources", []) if source.get("discovery_method") == "local_corpus"]
@@ -76,9 +76,15 @@ def main() -> int:
         if "moon_parley" not in event_ids or "kharn_burns_shelters" not in event_ids:
             raise AssertionError(f"local primary source did not become direct event evidence: {local_evidence_events}")
         final_manifest = json.loads((base / "final_manifest.json").read_text(encoding="utf-8"))
-        if final_manifest.get("status") != "ready":
-            raise AssertionError(f"standard local corpus run should produce a ready manifest: {final_manifest}")
-    print("[ok] local corpus pipeline")
+        if final_manifest.get("status") != "blocked":
+            raise AssertionError(f"single-source comprehensive run should produce a blocked manifest: {final_manifest}")
+        revision_workers = {step.get("worker") for step in final_manifest.get("revision_plan", {}).get("steps", [])}
+        if not {"CorpusIngestor", "Lexmechanic", "NoosphericExtractor", "ScriptoriumDaemon"}.issubset(revision_workers):
+            raise AssertionError(f"blocked comprehensive run should request focused upstream and draft revision: {final_manifest}")
+        blockers = json.dumps(final_manifest.get("blockers", []), ensure_ascii=False)
+        if "Comprehensive" not in blockers or "Lucius: The Faultless Blade" not in blockers:
+            raise AssertionError(f"blocked manifest should explain comprehensive source gaps: {final_manifest}")
+    print("[ok] local corpus pipeline strict gate")
     return 0
 
 
