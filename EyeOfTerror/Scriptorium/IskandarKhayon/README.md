@@ -34,13 +34,15 @@ CorpusIngestor
   -> OcularisRenderium
   -> NoosphericExtractor
   -> Chronologis
+  -> ScriptoriumArchitect
   -> ScriptoriumDaemon
   -> ReductorVerifier
   -> FabricatorFinalis
 ```
 
-This compatibility pipeline is still used for explicit lore reconstruction
-training tasks.
+Lore reconstruction is routed through this same research/writing pipeline; it is
+not allowed to bypass `research_corpus.json`, `structure_map.json`, or
+`synthesis_plan.json`.
 
 ## Research/Writing Pipeline
 

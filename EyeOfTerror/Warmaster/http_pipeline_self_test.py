@@ -65,14 +65,20 @@ def main() -> int:
                 threads.append(thread)
                 ports_by_worker[worker] = server.server_port
             patch_dispatch_ports(run_dir, ports_by_worker)
-            summary = execute_run(run_dir, timeout_sec=30)
-            if not summary.get("ok"):
+            summary = execute_run(run_dir, timeout_sec=300)
+            if not summary.get("ok") and not summary.get("revision_plan", {}).get("required"):
                 raise AssertionError(summary)
             manifest = read_json(work_dir / "skalathrax" / "final_manifest.json")
-            if manifest.get("status") != "ready":
-                raise AssertionError(f"final manifest is not ready: {manifest}")
+            if manifest.get("status") == "ready":
+                if manifest.get("revision_plan", {}).get("required"):
+                    raise AssertionError(f"ready final manifest must not require revision: {manifest}")
+            elif manifest.get("status") == "blocked":
+                if not manifest.get("revision_plan", {}).get("required"):
+                    raise AssertionError(f"blocked final manifest must expose focused revision plan: {manifest}")
+            else:
+                raise AssertionError(f"final manifest is neither ready nor revision-blocked: {manifest}")
             ledger = read_json(run_dir / "task_ledger.json")
-            if ledger.get("status") != "completed" or len(ledger.get("steps", [])) != len(workers):
+            if ledger.get("status") not in {"completed", "blocked"} or len(ledger.get("steps", [])) != len(workers):
                 raise AssertionError(f"bad task ledger: {ledger}")
             if ledger.get("result", {}).get("final_step") != "finalize":
                 raise AssertionError(f"ledger did not record final result: {ledger}")

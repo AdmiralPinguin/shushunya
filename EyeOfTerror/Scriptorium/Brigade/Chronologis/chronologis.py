@@ -9,7 +9,7 @@ BRIGADE_ROOT = Path(__file__).resolve().parents[1]
 if str(BRIGADE_ROOT) not in sys.path:
     sys.path.insert(0, str(BRIGADE_ROOT))
 
-from scriptorium_model import model_unavailable_payload, request_required_scriptorium_guidance  # noqa: E402
+from scriptorium_model import model_unavailable_payload, request_required_scriptorium_guidance, research_intent_from_worker_request  # noqa: E402
 
 
 PHASE_ORDER = {
@@ -120,9 +120,7 @@ def build_timeline(notes: dict[str, Any]) -> dict[str, Any]:
 
 
 def research_intent_from_request(request: dict[str, Any]) -> dict[str, Any]:
-    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
-    research_intent = expectations.get("research_intent") if isinstance(expectations.get("research_intent"), dict) else {}
-    return research_intent
+    return research_intent_from_worker_request(request)
 
 
 def build_structure_map(notes: dict[str, Any], research_corpus: dict[str, Any], timeline: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:

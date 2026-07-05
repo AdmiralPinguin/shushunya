@@ -113,6 +113,37 @@ def main() -> int:
         ]
         if empty_chapters:
             raise AssertionError(f"book chapter plan should not create ungrounded chapters when claims exist: {chapter_plan}")
+
+        event_base = root / "event"
+        write_json(
+            event_base / "research_corpus.json",
+            {
+                "topic": "Event fallback",
+                "sources": [{"title": "Primary source"}],
+                "claims": [{"claim_id": "claim_1", "claim": "event claim", "source_refs": ["Primary source"]}],
+                "evidence_excerpts": [{"quote_id": "evidence_1", "source_ref": "Primary source", "excerpt": "event claim"}],
+                "gaps": [],
+            },
+        )
+        write_json(event_base / "structure_map.json", {"topic": "Event fallback", "timeline": [{"event_id": "event_1"}]})
+        fallback_request = {
+            "task_id": "test-event:synthesis_planning",
+            "contract": {
+                "quality_gates": ["intent:event_reconstruction", "output_mode:event_reconstruction"],
+                "required_artifacts": [
+                    "/work/event/timeline.json",
+                    "/work/event/structure_map.json",
+                    "/work/event/synthesis_plan.json",
+                ],
+            },
+            "step": {"expected_artifacts": ["/work/event/synthesis_plan.json"]},
+        }
+        fallback_result = run(fallback_request, root)
+        if not fallback_result.get("ok"):
+            raise AssertionError(f"ScriptoriumArchitect contract fallback failed: {fallback_result}")
+        fallback_plan = json.loads((event_base / "synthesis_plan.json").read_text(encoding="utf-8"))
+        if fallback_plan.get("output_mode") != "event_reconstruction" or fallback_plan.get("needs_timeline") is not True:
+            raise AssertionError(f"contract quality gates should preserve event output mode without oversight: {fallback_plan}")
     print("[ok] ScriptoriumArchitect synthesis plan")
     return 0
 

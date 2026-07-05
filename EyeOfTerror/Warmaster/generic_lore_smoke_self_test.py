@@ -28,7 +28,11 @@ def main() -> int:
         payload = source_step.get("payload") if isinstance(source_step.get("payload"), dict) else {}
         if source_step.get("step_id") != "source_discovery" or payload.get("status") != "blocked":
             raise AssertionError(f"generic lore task did not block at source discovery: {summary}")
-        source_map = root / "work" / "task" / "source_map.json"
+        source_map_artifact = next(
+            (artifact for artifact in plan.contract.required_artifacts if artifact.endswith("/source_map.json")),
+            "/work/research/source_map.json",
+        )
+        source_map = root / "work" / source_map_artifact.removeprefix("/work/")
         if not source_map.exists():
             raise AssertionError("blocked generic source discovery did not write source_map diagnostics")
 

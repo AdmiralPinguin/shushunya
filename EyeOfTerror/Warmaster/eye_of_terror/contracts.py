@@ -452,35 +452,25 @@ def build_research_writing_contract(user_task: str, task_id: str | None = None) 
 
 
 def build_lore_reconstruction_contract(user_task: str, task_id: str | None = None) -> TaskContract:
-    slug = slugify(user_task)
-    resolved_task_id = task_id or f"iskandar-{slug}-lore-reconstruction"
-    return TaskContract(
-        task_id=resolved_task_id,
-        kind="research",
-        goal=user_task.strip(),
-        assigned_governor="IskandarKhayon",
-        non_goals=[
-            "Do not deliver a shallow wiki summary when the task asks for full event coverage.",
-            "Do not hide weak source coverage or inaccessible primary sources.",
-            "Do not let the writer invent facts absent from extraction outputs.",
-        ],
-        required_artifacts=lore_required_artifacts(slug),
-        completion_criteria=[
-            "All required artifacts exist and are structurally valid.",
-            "Source coverage separates official, wiki, community, unavailable, and uncertain sources.",
-            "Direct events are separated from aftermath, interpretation, and reconstruction.",
-            "Critic report passes or lists explicit blockers and required revisions.",
-        ],
-        quality_gates=[
-            "source_map_created",
-            "direct_event_notes_non_empty",
-            "timeline_orders_direct_events",
-            "writer_uses_only_extracted_facts",
-            "coverage_report_names_gaps",
-            "critic_review_passed_or_blocked",
-        ],
-        worker_plan=lore_worker_plan(slug),
-    )
+    contract = build_research_writing_contract(user_task, task_id=task_id)
+    lore_non_goals = [
+        "Do not deliver a shallow wiki summary when the task asks for full event coverage.",
+        "Do not hide weak source coverage or inaccessible primary sources.",
+        "Do not let the writer invent facts absent from extraction outputs.",
+    ]
+    lore_completion = [
+        "Timeline or structure map includes only events with direct evidence or marks them as gaps.",
+        "Direct events are separated from aftermath, interpretation, and reconstruction.",
+        "The reconstruction names coverage gaps and avoids unsupported connective tissue.",
+    ]
+    lore_gates = [
+        "direct_event_notes_created",
+        "timeline_or_structure_map_created",
+    ]
+    contract.non_goals = list(dict.fromkeys([*lore_non_goals, *contract.non_goals]))
+    contract.completion_criteria = list(dict.fromkeys([*contract.completion_criteria, *lore_completion]))
+    contract.quality_gates = list(dict.fromkeys([*contract.quality_gates, *lore_gates]))
+    return contract
 
 
 def code_required_artifacts(slug: str) -> list[str]:

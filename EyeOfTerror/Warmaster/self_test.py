@@ -150,6 +150,7 @@ def main() -> int:
         "OcularisRenderium",
         "NoosphericExtractor",
         "Chronologis",
+        "ScriptoriumArchitect",
         "ScriptoriumDaemon",
         "ReductorVerifier",
         "FabricatorFinalis",
@@ -158,6 +159,13 @@ def main() -> int:
         raise AssertionError(f"wrong Iskandar worker order: {step_workers}")
     if documented_iskandar_pipeline() != expected_order:
         raise AssertionError(f"Iskandar README worker pipeline is out of sync: {documented_iskandar_pipeline()}")
+    for artifact in [
+        "/work/skalathrax/research_corpus.json",
+        "/work/skalathrax/structure_map.json",
+        "/work/skalathrax/synthesis_plan.json",
+    ]:
+        if artifact not in payload["required_artifacts"]:
+            raise AssertionError(f"lore reconstruction must use new research pipeline artifact {artifact}: {payload['required_artifacts']}")
     print("[ok] lore reconstruction contract")
 
     generic_task = "Исследуй историю развития домашних 3D-принтеров и собери связный русский обзор с источниками."
@@ -243,7 +251,8 @@ def main() -> int:
         "source_acquisition",
         "source_rendering",
         "fact_extraction",
-        "timeline",
+        "structure_mapping",
+        "synthesis_planning",
         "draft_reconstruction",
         "critic_review",
         "finalize",
@@ -262,10 +271,13 @@ def main() -> int:
     expected_draft_inputs = [
         "/work/skalathrax/source_map.json",
         "/work/skalathrax/direct_event_notes.json",
+        "/work/skalathrax/research_corpus.json",
         "/work/skalathrax/timeline.json",
+        "/work/skalathrax/structure_map.json",
+        "/work/skalathrax/synthesis_plan.json",
     ]
-    if packets[6].input_artifacts != expected_draft_inputs:
-        raise AssertionError(f"multi-dependency input artifacts were not propagated: {packets[6].to_dict()}")
+    if packets[7].input_artifacts != expected_draft_inputs:
+        raise AssertionError(f"multi-dependency input artifacts were not propagated: {packets[7].to_dict()}")
     print("[ok] Iskandar dispatch packets")
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -293,7 +305,8 @@ def main() -> int:
             "dispatch/source_acquisition.json",
             "dispatch/source_rendering.json",
             "dispatch/fact_extraction.json",
-            "dispatch/timeline.json",
+            "dispatch/structure_mapping.json",
+            "dispatch/synthesis_planning.json",
             "dispatch/draft_reconstruction.json",
             "dispatch/critic_review.json",
             "dispatch/finalize.json",

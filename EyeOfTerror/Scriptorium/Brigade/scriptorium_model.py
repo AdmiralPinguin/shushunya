@@ -97,6 +97,38 @@ def model_unavailable_payload(worker: str, task_id: Any, decision: dict[str, Any
     }
 
 
+def research_intent_from_worker_request(request: dict[str, Any]) -> dict[str, Any]:
+    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
+    intent = expectations.get("research_intent") if isinstance(expectations.get("research_intent"), dict) else {}
+    if intent:
+        return intent
+    step_quality = expectations.get("step_quality") if isinstance(expectations.get("step_quality"), dict) else {}
+    intent = step_quality.get("research_intent") if isinstance(step_quality.get("research_intent"), dict) else {}
+    if intent:
+        return intent
+    contract = request.get("contract") if isinstance(request.get("contract"), dict) else {}
+    gates = contract.get("quality_gates") if isinstance(contract.get("quality_gates"), list) else []
+    required_artifacts = contract.get("required_artifacts") if isinstance(contract.get("required_artifacts"), list) else []
+    profile: dict[str, Any] = {}
+    for gate in gates:
+        text = str(gate)
+        if text.startswith("intent:"):
+            profile["intent"] = text.split(":", 1)[1]
+        elif text.startswith("output_mode:"):
+            profile["output_mode"] = text.split(":", 1)[1]
+    if not profile:
+        return {}
+    output_mode = str(profile.get("output_mode") or "")
+    artifact_text = "\n".join(str(item) for item in required_artifacts)
+    chapter_count = sum(1 for item in required_artifacts if "/chapters/" in str(item) and str(item).endswith(".md"))
+    profile.setdefault("required_depth", "comprehensive" if profile.get("intent") in {"event_reconstruction", "book"} else "deep")
+    profile.setdefault("source_policy", "contract_quality_gates")
+    profile["needs_timeline"] = output_mode in {"event_reconstruction", "book_manuscript_with_timeline"} or any(str(item).endswith("/timeline.json") for item in required_artifacts)
+    profile["needs_chapters"] = "chapter_plan.json" in artifact_text or chapter_count > 0
+    profile["chapter_count"] = chapter_count if profile["needs_chapters"] else 0
+    return profile
+
+
 def parsed_model_content(decision: dict[str, Any]) -> dict[str, Any]:
     content = str(decision.get("content") or "").strip()
     if not content:

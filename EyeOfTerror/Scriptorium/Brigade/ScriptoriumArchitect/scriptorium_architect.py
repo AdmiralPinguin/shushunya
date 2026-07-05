@@ -9,7 +9,7 @@ BRIGADE_ROOT = Path(__file__).resolve().parents[1]
 if str(BRIGADE_ROOT) not in sys.path:
     sys.path.insert(0, str(BRIGADE_ROOT))
 
-from scriptorium_model import model_unavailable_payload, parsed_model_content, request_required_scriptorium_guidance  # noqa: E402
+from scriptorium_model import model_unavailable_payload, parsed_model_content, request_required_scriptorium_guidance, research_intent_from_worker_request  # noqa: E402
 
 
 def sandbox_path(workspace_root: Path, path: str) -> Path:
@@ -34,12 +34,7 @@ def load_optional_json(workspace_root: Path, path: str) -> dict[str, Any]:
 
 
 def research_intent_from_request(request: dict[str, Any]) -> dict[str, Any]:
-    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
-    intent = expectations.get("research_intent") if isinstance(expectations.get("research_intent"), dict) else {}
-    if intent:
-        return intent
-    quality = expectations.get("step_quality") if isinstance(expectations.get("step_quality"), dict) else {}
-    return quality.get("research_intent") if isinstance(quality.get("research_intent"), dict) else {}
+    return research_intent_from_worker_request(request)
 
 
 def output_mode_sections(output_mode: str, needs_timeline: bool) -> list[dict[str, Any]]:

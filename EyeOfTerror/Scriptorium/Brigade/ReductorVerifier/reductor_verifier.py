@@ -11,7 +11,13 @@ BRIGADE_ROOT = Path(__file__).resolve().parents[1]
 if str(BRIGADE_ROOT) not in sys.path:
     sys.path.insert(0, str(BRIGADE_ROOT))
 
-from scriptorium_model import model_unavailable_payload, parsed_model_content, request_required_scriptorium_guidance, request_scriptorium_model_guidance  # noqa: E402
+from scriptorium_model import (
+    model_unavailable_payload,
+    parsed_model_content,
+    request_required_scriptorium_guidance,
+    request_scriptorium_model_guidance,
+    research_intent_from_worker_request,
+)  # noqa: E402
 
 GuidanceFn = Callable[[str, dict[str, Any], str], dict[str, Any]]
 
@@ -960,8 +966,7 @@ def quality_expectation_summary(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def research_intent_from_request(request: dict[str, Any]) -> dict[str, Any]:
-    expectations = request.get("quality_expectations") if isinstance(request.get("quality_expectations"), dict) else {}
-    return expectations.get("research_intent") if isinstance(expectations.get("research_intent"), dict) else {}
+    return research_intent_from_worker_request(request)
 
 
 def load_optional_json(workspace_root: Path, path: str) -> dict[str, Any]:
