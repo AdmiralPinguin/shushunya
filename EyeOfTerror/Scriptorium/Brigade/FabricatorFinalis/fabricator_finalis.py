@@ -39,6 +39,7 @@ ARTIFACT_REWORK_TARGETS = {
     "corpus_index.json": ("corpus_ingestion", "CorpusIngestor"),
     "source_map.json": ("source_discovery", "Lexmechanic"),
     "source_snapshots.json": ("source_acquisition", "AuspexBrowser"),
+    "rendered_snapshots.json": ("source_rendering", "OcularisRenderium"),
     "direct_event_notes.json": ("fact_extraction", "NoosphericExtractor"),
     "research_corpus.json": ("fact_extraction", "NoosphericExtractor"),
     "timeline.json": ("timeline", "Chronologis"),
@@ -247,7 +248,8 @@ def add_required_event_revision_steps(revision_plan: dict[str, Any], event_revie
     else:
         reason = f"Missing required direct events in timeline: {', '.join(missing_timeline_events)}"
     add_unique_revision_step(steps, "fact_extraction", "NoosphericExtractor", reason, "final_readiness")
-    add_unique_revision_step(steps, "timeline", "Chronologis", reason, "final_readiness")
+    add_unique_revision_step(steps, "structure_mapping", "Chronologis", reason, "final_readiness")
+    add_unique_revision_step(steps, "synthesis_planning", "ScriptoriumArchitect", reason, "final_readiness")
     add_unique_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", reason, "final_readiness")
     return {"required": True, "steps": steps}
 
@@ -262,8 +264,10 @@ def add_corpus_requirement_revision_steps(revision_plan: dict[str, Any], corpus_
     add_unique_revision_step(steps, "corpus_ingestion", "CorpusIngestor", reason, "final_readiness")
     add_unique_revision_step(steps, "source_discovery", "Lexmechanic", reason, "final_readiness")
     add_unique_revision_step(steps, "source_acquisition", "AuspexBrowser", reason, "final_readiness")
+    add_unique_revision_step(steps, "source_rendering", "OcularisRenderium", reason, "final_readiness")
     add_unique_revision_step(steps, "fact_extraction", "NoosphericExtractor", reason, "final_readiness")
-    add_unique_revision_step(steps, "timeline", "Chronologis", reason, "final_readiness")
+    add_unique_revision_step(steps, "structure_mapping", "Chronologis", reason, "final_readiness")
+    add_unique_revision_step(steps, "synthesis_planning", "ScriptoriumArchitect", reason, "final_readiness")
     add_unique_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", reason, "final_readiness")
     return {"required": True, "steps": steps}
 

@@ -286,7 +286,7 @@ def main() -> int:
         if report.get("approved") or "generic_extra_event" not in json.dumps(report):
             raise AssertionError(f"generic direct-event coverage should block approval: {report}")
         revision_workers = {step.get("worker") for step in report.get("revision_plan", {}).get("steps", [])}
-        if not {"NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(revision_workers):
+        if not {"NoosphericExtractor", "Chronologis", "ScriptoriumArchitect", "ScriptoriumDaemon"}.issubset(revision_workers):
             raise AssertionError(f"generic direct-event coverage did not produce upstream revision plan: {report}")
         write_json(base / "timeline.json", {"timeline": [{"event_id": "moon_parley"}], "gaps": []})
         result = run(request, root)
@@ -297,7 +297,7 @@ def main() -> int:
             raise AssertionError(f"expected missing events to fail: {report}")
         revision_steps = report.get("revision_plan", {}).get("steps", [])
         revision_workers = {step.get("worker") for step in revision_steps}
-        if not {"NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(revision_workers):
+        if not {"NoosphericExtractor", "Chronologis", "ScriptoriumArchitect", "ScriptoriumDaemon"}.issubset(revision_workers):
             raise AssertionError(f"missing event review did not produce a worker rework plan: {report}")
         write_json(base / "timeline.json", {"timeline": [{"event_id": item} for item in events], "gaps": []})
         write_json(base / "direct_event_notes.json", {"events": [{"event_id": item} for item in events], "gaps": []})
@@ -309,7 +309,7 @@ def main() -> int:
             raise AssertionError(f"expected missing evidence to fail: {report}")
         revision_steps = report.get("revision_plan", {}).get("steps", [])
         revision_workers = {step.get("worker") for step in revision_steps}
-        if not {"AuspexBrowser", "OcularisRenderium", "NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(revision_workers):
+        if not {"AuspexBrowser", "OcularisRenderium", "NoosphericExtractor", "Chronologis", "ScriptoriumArchitect", "ScriptoriumDaemon"}.issubset(revision_workers):
             raise AssertionError(f"missing evidence review did not produce source rework plan: {report}")
         source_acquisition_index = next(
             index for index, step in enumerate(revision_steps) if step.get("step_id") == "source_acquisition"
@@ -317,9 +317,10 @@ def main() -> int:
         source_rendering_index = next(
             index for index, step in enumerate(revision_steps) if step.get("step_id") == "source_rendering"
         )
-        timeline_index = next(index for index, step in enumerate(revision_steps) if step.get("step_id") == "timeline")
+        structure_index = next(index for index, step in enumerate(revision_steps) if step.get("step_id") == "structure_mapping")
+        synthesis_index = next(index for index, step in enumerate(revision_steps) if step.get("step_id") == "synthesis_planning")
         draft_index = next(index for index, step in enumerate(revision_steps) if step.get("step_id") == "draft_reconstruction")
-        if not source_acquisition_index < source_rendering_index < timeline_index < draft_index:
+        if not source_acquisition_index < source_rendering_index < structure_index < synthesis_index < draft_index:
             raise AssertionError(f"revision dependencies are not ordered downstream: {report}")
         qa_request = json.loads(json.dumps(request))
         qa_request["quality_expectations"]["research_intent"] = {

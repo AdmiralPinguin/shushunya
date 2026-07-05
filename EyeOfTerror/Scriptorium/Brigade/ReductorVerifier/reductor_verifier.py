@@ -38,24 +38,28 @@ REVISION_DEPENDENCIES = {
         ("source_discovery", "Lexmechanic"),
         ("source_acquisition", "AuspexBrowser"),
         ("fact_extraction", "NoosphericExtractor"),
-        ("timeline", "Chronologis"),
+        ("structure_mapping", "Chronologis"),
+        ("synthesis_planning", "ScriptoriumArchitect"),
         ("draft_reconstruction", "ScriptoriumDaemon"),
     ],
     "source_discovery": [
         ("source_acquisition", "AuspexBrowser"),
         ("fact_extraction", "NoosphericExtractor"),
-        ("timeline", "Chronologis"),
+        ("structure_mapping", "Chronologis"),
+        ("synthesis_planning", "ScriptoriumArchitect"),
         ("draft_reconstruction", "ScriptoriumDaemon"),
     ],
     "source_acquisition": [
         ("source_rendering", "OcularisRenderium"),
         ("fact_extraction", "NoosphericExtractor"),
-        ("timeline", "Chronologis"),
+        ("structure_mapping", "Chronologis"),
+        ("synthesis_planning", "ScriptoriumArchitect"),
         ("draft_reconstruction", "ScriptoriumDaemon"),
     ],
     "source_rendering": [
         ("fact_extraction", "NoosphericExtractor"),
-        ("timeline", "Chronologis"),
+        ("structure_mapping", "Chronologis"),
+        ("synthesis_planning", "ScriptoriumArchitect"),
         ("draft_reconstruction", "ScriptoriumDaemon"),
     ],
     "fact_extraction": [
@@ -841,11 +845,13 @@ def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifact
         lowered = message.lower()
         if "missing required direct event in timeline" in lowered:
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
-            add_revision_step(steps, "timeline", "Chronologis", message, "critic_finding")
+            add_revision_step(steps, "structure_mapping", "Chronologis", message, "critic_finding")
+            add_revision_step(steps, "synthesis_planning", "ScriptoriumArchitect", message, "critic_finding")
             add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
         elif "timeline event lacks extracted direct-event note" in lowered:
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
-            add_revision_step(steps, "timeline", "Chronologis", message, "critic_finding")
+            add_revision_step(steps, "structure_mapping", "Chronologis", message, "critic_finding")
+            add_revision_step(steps, "synthesis_planning", "ScriptoriumArchitect", message, "critic_finding")
             add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
         elif (
             "draft does not visibly cover" in lowered
@@ -887,11 +893,13 @@ def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifact
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
         elif "comprehensive task has too few extracted direct events" in lowered:
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
-            add_revision_step(steps, "timeline", "Chronologis", message, "critic_finding")
+            add_revision_step(steps, "structure_mapping", "Chronologis", message, "critic_finding")
+            add_revision_step(steps, "synthesis_planning", "ScriptoriumArchitect", message, "critic_finding")
             add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
         elif "comprehensive draft is too short" in lowered:
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
-            add_revision_step(steps, "timeline", "Chronologis", message, "critic_finding")
+            add_revision_step(steps, "structure_mapping", "Chronologis", message, "critic_finding")
+            add_revision_step(steps, "synthesis_planning", "ScriptoriumArchitect", message, "critic_finding")
             add_revision_step(steps, "draft_reconstruction", "ScriptoriumDaemon", message, "critic_finding")
         elif "source set is not extraction-ready" in lowered or "source coverage is not extraction-ready" in lowered:
             add_revision_step(steps, "source_discovery", "Lexmechanic", message, "critic_finding")

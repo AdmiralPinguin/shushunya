@@ -236,7 +236,7 @@ def main() -> int:
         ):
             raise AssertionError(f"missing required event evidence should block final readiness: {manifest}")
         evidence_revision_workers = {step.get("worker") for step in manifest.get("revision_plan", {}).get("steps", [])}
-        if not {"NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(evidence_revision_workers):
+        if not {"NoosphericExtractor", "Chronologis", "ScriptoriumArchitect", "ScriptoriumDaemon"}.issubset(evidence_revision_workers):
             raise AssertionError(f"missing required event evidence should produce downstream revision plan: {manifest}")
         write(
             base / "direct_event_notes.json",
@@ -284,13 +284,13 @@ def main() -> int:
         ):
             raise AssertionError(f"missing required event should block final readiness: {manifest}")
         revision_workers = {step.get("worker") for step in manifest.get("revision_plan", {}).get("steps", [])}
-        if not {"NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(revision_workers):
+        if not {"NoosphericExtractor", "Chronologis", "ScriptoriumArchitect", "ScriptoriumDaemon"}.issubset(revision_workers):
             raise AssertionError(f"missing required event should produce downstream revision plan: {manifest}")
         revision_steps = manifest.get("revision_plan", {}).get("steps", [])
         revision_step_ids = [step.get("step_id") for step in revision_steps]
         if len(revision_step_ids) != len(set(revision_step_ids)):
             raise AssertionError(f"final manifest revision plan should not duplicate step ids: {manifest}")
-        if revision_step_ids != ["fact_extraction", "timeline", "draft_reconstruction"]:
+        if revision_step_ids != ["fact_extraction", "structure_mapping", "synthesis_planning", "draft_reconstruction"]:
             raise AssertionError(f"final manifest revision plan should follow pipeline order: {manifest}")
         draft_revision = next((step for step in revision_steps if step.get("step_id") == "draft_reconstruction"), {})
         if "critic already requested draft rebuild" not in draft_revision.get("reason", "") or "Missing required direct events" not in draft_revision.get("reason", ""):
@@ -344,7 +344,7 @@ def main() -> int:
         if manifest.get("corpus_requirements", {}).get("missing_primary_texts", [{}])[0].get("title") != "Kharn: Eater of Worlds":
             raise AssertionError(f"final manifest should preserve corpus requirements: {manifest}")
         corpus_revision_workers = {step.get("worker") for step in manifest.get("revision_plan", {}).get("steps", [])}
-        if not {"CorpusIngestor", "Lexmechanic", "AuspexBrowser", "NoosphericExtractor", "Chronologis", "ScriptoriumDaemon"}.issubset(corpus_revision_workers):
+        if not {"CorpusIngestor", "Lexmechanic", "AuspexBrowser", "OcularisRenderium", "NoosphericExtractor", "Chronologis", "ScriptoriumArchitect", "ScriptoriumDaemon"}.issubset(corpus_revision_workers):
             raise AssertionError(f"missing corpus requirements should produce full upstream revision plan: {manifest}")
         write(
             base / "critic_report.json",
