@@ -8,7 +8,32 @@ from pathlib import Path
 from scriptorium_architect import run as run_without_model
 
 
-MODEL_BRAIN = {"ok": True, "status": "answered", "content": "{\"status\":\"ok\"}"}
+MODEL_BRAIN = {
+    "ok": True,
+    "status": "answered",
+    "content": json.dumps(
+        {
+            "status": "ok",
+            "book_outline": {
+                "chapters": [
+                    {
+                        "chapter_id": "chapter_01",
+                        "title": "Модельная глава с доказательством",
+                        "section_refs": ["source_base"],
+                        "required_claim_refs": ["claim_1"],
+                    },
+                    {
+                        "chapter_id": "chapter_02",
+                        "title": "Недоказанная модельная глава",
+                        "section_refs": ["book_body"],
+                        "required_claim_refs": ["missing_claim"],
+                    },
+                ]
+            },
+        },
+        ensure_ascii=False,
+    ),
+}
 
 
 def run(request: dict, *args, **kwargs) -> dict:
@@ -74,6 +99,10 @@ def main() -> int:
             raise AssertionError(f"supported corpus should not create unsupported sections: {plan}")
         if len(outline.get("chapters", [])) != 3 or len(chapter_plan.get("chapters", [])) != 3:
             raise AssertionError(f"book outline and chapter plan should have three baseline chapters: {outline} {chapter_plan}")
+        if outline.get("planning_method") != "model_guided_evidence_outline" or chapter_plan.get("chapters", [{}])[0].get("title") != "Модельная глава с доказательством":
+            raise AssertionError(f"grounded model outline chapter should be accepted: {outline} {chapter_plan}")
+        if "Недоказанная модельная глава" in json.dumps(chapter_plan, ensure_ascii=False):
+            raise AssertionError(f"ungrounded model outline chapters must be rejected: {chapter_plan}")
         empty_chapters = [
             chapter.get("chapter_id")
             for chapter in chapter_plan.get("chapters", [])

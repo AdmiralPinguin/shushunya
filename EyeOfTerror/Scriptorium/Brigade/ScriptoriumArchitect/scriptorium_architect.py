@@ -9,7 +9,7 @@ BRIGADE_ROOT = Path(__file__).resolve().parents[1]
 if str(BRIGADE_ROOT) not in sys.path:
     sys.path.insert(0, str(BRIGADE_ROOT))
 
-from scriptorium_model import model_unavailable_payload, request_required_scriptorium_guidance  # noqa: E402
+from scriptorium_model import model_unavailable_payload, parsed_model_content, request_required_scriptorium_guidance  # noqa: E402
 
 
 def sandbox_path(workspace_root: Path, path: str) -> Path:
@@ -98,6 +98,17 @@ def claim_refs(research_corpus: dict[str, Any]) -> list[str]:
     return [str(item.get("claim_id") or "") for item in claims if isinstance(item, dict) and item.get("claim_id")]
 
 
+def unique_strings(values: Any) -> list[str]:
+    result: list[str] = []
+    if not isinstance(values, list):
+        return result
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
 def claim_refs_per_section(output_mode: str) -> int:
     if output_mode == "short_answer":
         return 3
@@ -132,21 +143,120 @@ def attach_claim_refs(sections: list[dict[str, Any]], refs: list[str], output_mo
     return sections
 
 
-def build_book_outline(topic: str, sections: list[dict[str, Any]], refs: list[str]) -> dict[str, Any]:
-    chapter_refs = [refs[index::3] for index in range(3)] if refs else [[], [], []]
+def balanced_claim_groups(refs: list[str], chapter_count: int = 3) -> list[list[str]]:
+    groups: list[list[str]] = [[] for _ in range(chapter_count)]
+    for index, ref in enumerate(refs):
+        groups[index % chapter_count].append(ref)
     if refs:
-        for index, values in enumerate(chapter_refs):
-            if not values:
-                chapter_refs[index] = refs[: min(3, len(refs))]
+        for index, group in enumerate(groups):
+            if not group:
+                groups[index] = refs[: min(3, len(refs))]
+    return groups
+
+
+def model_chapter_candidates(guidance: dict[str, Any], valid_refs: set[str]) -> list[dict[str, Any]]:
+    parsed = parsed_model_content(guidance)
+    raw_chapters: Any = []
+    if isinstance(parsed.get("book_outline"), dict):
+        raw_chapters = parsed["book_outline"].get("chapters", [])
+    if not raw_chapters and isinstance(parsed.get("chapter_plan"), dict):
+        raw_chapters = parsed["chapter_plan"].get("chapters", [])
+    if not raw_chapters:
+        raw_chapters = parsed.get("chapters", [])
+    chapters: list[dict[str, Any]] = []
+    for raw in raw_chapters if isinstance(raw_chapters, list) else []:
+        if not isinstance(raw, dict):
+            continue
+        refs = [ref for ref in unique_strings(raw.get("required_claim_refs")) if ref in valid_refs]
+        if not refs:
+            continue
+        chapter_id = str(raw.get("chapter_id") or f"chapter_{len(chapters) + 1:02d}").strip()
+        if not chapter_id.startswith("chapter_"):
+            chapter_id = f"chapter_{len(chapters) + 1:02d}"
+        chapters.append(
+            {
+                "chapter_id": chapter_id,
+                "title": str(raw.get("title") or f"Глава {len(chapters) + 1}").strip(),
+                "section_refs": unique_strings(raw.get("section_refs")),
+                "required_claim_refs": refs,
+                "planning_source": "model_guidance",
+            }
+        )
+    return chapters
+
+
+def fallback_chapter_titles(output_mode: str, needs_timeline: bool) -> list[str]:
+    if output_mode == "book_manuscript_with_timeline" or needs_timeline:
+        return ["Источники и предыстория", "Ход событий", "Итоги и спорные места"]
+    return ["Источники и постановка темы", "Основной анализ", "Выводы и открытые вопросы"]
+
+
+def next_chapter_id(used_ids: set[str], preferred_index: int) -> str:
+    index = preferred_index
+    while True:
+        chapter_id = f"chapter_{index:02d}"
+        if chapter_id not in used_ids:
+            return chapter_id
+        index += 1
+
+
+def fill_book_chapters(
+    model_chapters: list[dict[str, Any]],
+    sections: list[dict[str, Any]],
+    refs: list[str],
+    output_mode: str,
+    needs_timeline: bool,
+    chapter_count: int = 3,
+) -> list[dict[str, Any]]:
+    chapters: list[dict[str, Any]] = []
+    used_ids: set[str] = set()
+    for chapter in model_chapters:
+        chapter_id = str(chapter.get("chapter_id") or f"chapter_{len(chapters) + 1:02d}")
+        if chapter_id in used_ids:
+            chapter_id = next_chapter_id(used_ids, len(chapters) + 1)
+        updated = dict(chapter)
+        updated["chapter_id"] = chapter_id
+        chapters.append(updated)
+        used_ids.add(chapter_id)
+        if len(chapters) >= chapter_count:
+            return chapters
+    groups = balanced_claim_groups(refs, chapter_count)
+    titles = fallback_chapter_titles(output_mode, needs_timeline)
+    evidence_sections = [str(section.get("section_id") or "") for section in sections if section.get("requires_evidence")]
+    while len(chapters) < chapter_count:
+        index = len(chapters)
+        chapter_id = next_chapter_id(used_ids, index + 1)
+        refs_for_chapter = groups[index] if index < len(groups) else refs[: min(3, len(refs))]
+        section_refs = ["source_base"] if index == 0 else evidence_sections if index == 1 else ["book_close"]
+        chapters.append(
+            {
+                "chapter_id": chapter_id,
+                "title": titles[index] if index < len(titles) else f"Глава {index + 1}",
+                "section_refs": section_refs,
+                "required_claim_refs": refs_for_chapter,
+                "planning_source": "evidence_balanced_fallback",
+            }
+        )
+        used_ids.add(chapter_id)
+    return chapters
+
+
+def build_book_outline(
+    topic: str,
+    sections: list[dict[str, Any]],
+    refs: list[str],
+    output_mode: str,
+    needs_timeline: bool,
+    guidance: dict[str, Any],
+) -> dict[str, Any]:
+    model_chapters = model_chapter_candidates(guidance, set(refs))
+    chapters = fill_book_chapters(model_chapters, sections, refs, output_mode, needs_timeline)
     return {
         "version": 1,
         "title": topic or "Research manuscript",
         "target_language": "ru",
-        "chapters": [
-            {"chapter_id": "chapter_01", "title": "Введение и источники", "section_refs": ["source_base"], "required_claim_refs": chapter_refs[0]},
-            {"chapter_id": "chapter_02", "title": "Основной рассказ", "section_refs": [section.get("section_id", "") for section in sections if section.get("requires_evidence")], "required_claim_refs": chapter_refs[1]},
-            {"chapter_id": "chapter_03", "title": "Итоги и открытые вопросы", "section_refs": ["book_close"], "required_claim_refs": chapter_refs[2]},
-        ],
+        "planning_method": "model_guided_evidence_outline" if model_chapters else "evidence_balanced_outline",
+        "chapters": chapters,
     }
 
 
@@ -244,8 +354,20 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
     if plan.get("needs_chapters"):
         book_outline_path = next((str(item) for item in expected_artifacts if str(item).endswith("/book_outline.json")), sibling_artifact(synthesis_path, "book_outline.json"))
         chapter_plan_path = next((str(item) for item in expected_artifacts if str(item).endswith("/chapter_plan.json")), sibling_artifact(synthesis_path, "chapter_plan.json"))
-        outline = build_book_outline(str(plan.get("topic") or ""), plan.get("sections", []), plan.get("evidence_trace", {}).get("claim_refs", []))
-        chapter_plan = {"version": 1, "chapters": outline["chapters"], "continuity_requirements": ["preserve source limits", "do not add unsupported scenes"]}
+        outline = build_book_outline(
+            str(plan.get("topic") or ""),
+            plan.get("sections", []),
+            plan.get("evidence_trace", {}).get("claim_refs", []),
+            str(plan.get("output_mode") or ""),
+            bool(plan.get("needs_timeline")),
+            guidance,
+        )
+        chapter_plan = {
+            "version": 1,
+            "planning_method": outline.get("planning_method", ""),
+            "chapters": outline["chapters"],
+            "continuity_requirements": ["preserve source limits", "do not add unsupported scenes", "each chapter must retain its required evidence trace"],
+        }
         write_json(workspace_root, book_outline_path, outline)
         write_json(workspace_root, chapter_plan_path, chapter_plan)
         artifacts.extend([book_outline_path, chapter_plan_path])
