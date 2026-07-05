@@ -174,6 +174,9 @@ def main() -> int:
         not generic_plan["ok"]
         or generic_plan["oversight"]["kind"] != "research_writing_oversight"
         or generic_plan["oversight"]["research_intent"]["intent"] != "topic_report"
+        or generic_plan["oversight"]["pipeline_plan"]["intent"] != "topic_report"
+        or generic_plan["oversight"]["pipeline_plan"]["required_depth"] != "deep"
+        or not generic_plan["oversight"]["pipeline_plan"]["source_policy"]
         or generic_plan["contract"]["required_artifacts"][0] != "/work/3d/corpus_index.json"
         or "/work/3d/research_corpus.json" not in generic_plan["contract"]["required_artifacts"]
         or "/work/3d/structure_map.json" not in generic_plan["contract"]["required_artifacts"]
@@ -204,6 +207,13 @@ def main() -> int:
     ]:
         if artifact not in book_payload["required_artifacts"]:
             raise AssertionError(f"book contract missing required artifact {artifact}: {book_payload}")
+    book_plan = plan_research_writing("Напиши book на 3 chapters о локальных агентах.", task_id="test-book").to_dict()
+    if (
+        book_plan.get("oversight", {}).get("final_review", {}).get("deliverable_role") != "fb2"
+        or book_plan.get("oversight", {}).get("final_review", {}).get("deliverable_artifacts") != ["/work/book-3-chapters/manuscript.fb2"]
+        or book_plan.get("oversight", {}).get("pipeline_plan", {}).get("intent") != "book"
+    ):
+        raise AssertionError(f"book oversight should expose fb2 deliverable and selected intent: {book_plan}")
     print("[ok] research/writing contract")
 
     plan = plan_lore_reconstruction(task, task_id="test-skalathrax").to_dict()

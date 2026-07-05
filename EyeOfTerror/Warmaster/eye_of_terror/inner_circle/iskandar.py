@@ -194,7 +194,10 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
         else "research_writing_oversight",
         "research_intent": research_intent,
         "pipeline_plan": {
+            "intent": research_intent["intent"],
             "output_mode": research_intent["output_mode"],
+            "required_depth": research_intent["required_depth"],
+            "source_policy": research_intent["source_policy"],
             "needs_timeline": research_intent["needs_timeline"],
             "needs_chapters": research_intent["needs_chapters"],
             "required_workers": required_workers,
@@ -210,7 +213,10 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
             "critic_step": "critic_review",
             "final_step": "finalize",
             "final_artifact": artifacts_by_role["final"][0] if artifacts_by_role["final"] else "",
-            "deliverable_role": "draft",
+            "deliverable_role": "fb2" if research_intent["output_mode"] in {"book_manuscript", "book_manuscript_with_timeline"} else "draft",
+            "deliverable_artifacts": artifacts_by_role["fb2"]
+            if research_intent["output_mode"] in {"book_manuscript", "book_manuscript_with_timeline"}
+            else artifacts_by_role["draft"],
             "requires_critic_approval_or_blockers": True,
             "requires_gap_disclosure": True,
             "requires_evidence_trace": True,
