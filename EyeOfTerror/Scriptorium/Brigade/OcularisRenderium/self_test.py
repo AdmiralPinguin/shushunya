@@ -5,7 +5,16 @@ import json
 import tempfile
 from pathlib import Path
 
-from ocularis_renderium import render_snapshots, run, validate_public_url
+from ocularis_renderium import render_snapshots, run as run_without_model, validate_public_url
+
+
+MODEL_BRAIN = {"ok": True, "status": "answered", "content": "{\"status\":\"ok\"}"}
+
+
+def run(request: dict, *args, **kwargs) -> dict:
+    enriched = dict(request)
+    enriched["model_brain"] = MODEL_BRAIN
+    return run_without_model(enriched, *args, **kwargs)
 
 
 def main() -> int:

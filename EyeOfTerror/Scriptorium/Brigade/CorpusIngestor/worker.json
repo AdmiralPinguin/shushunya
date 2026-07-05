@@ -3,6 +3,11 @@
   "port": 7013,
   "role": "local corpus indexer",
   "status": "prototype",
-  "capabilities": ["local_corpus_scan", "primary_text_candidates", "epub_fb2_text_extraction"],
+  "capabilities": ["model_guided_corpus_triage", "local_corpus_scan", "primary_text_candidates", "epub_fb2_text_extraction"],
+  "model_brain": {
+    "required": true,
+    "role": "CorpusIngestor",
+    "failure_policy": "block worker execution when model_brain is unavailable"
+  },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

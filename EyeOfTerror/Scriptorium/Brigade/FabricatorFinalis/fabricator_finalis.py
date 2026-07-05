@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
+
+BRIGADE_ROOT = Path(__file__).resolve().parents[1]
+if str(BRIGADE_ROOT) not in sys.path:
+    sys.path.insert(0, str(BRIGADE_ROOT))
+
+from scriptorium_model import model_unavailable_payload, request_required_scriptorium_guidance  # noqa: E402
 
 
 PACKAGE_FILES = [
@@ -403,6 +410,15 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
         manifest = build_manifest(workspace_root, manifest_path, request)
     except (ValueError, json.JSONDecodeError) as exc:
         return {"ok": False, "worker": "FabricatorFinalis", "error": str(exc)}
+    guidance = request_required_scriptorium_guidance(
+        "FabricatorFinalis",
+        request,
+        {"task_id": request.get("task_id"), "step": step, "manifest": manifest},
+        "Decide final package readiness from the critic report, artifacts, blockers, and gaps. Return JSON guidance only.",
+    )
+    if not guidance.get("ok"):
+        return model_unavailable_payload("FabricatorFinalis", request.get("task_id"), guidance)
+    manifest["model_guidance"] = guidance
     host_path = sandbox_path(workspace_root, manifest_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -413,6 +429,7 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
         "status": manifest["status"],
         "summary": f"Final manifest written: {manifest['status']}.",
         "artifacts": [manifest_path],
+        "model_guidance": guidance,
         "gaps": [item["message"] for item in manifest["blockers"]],
         "revision_plan": manifest.get("revision_plan", {}),
         "confidence": "medium",

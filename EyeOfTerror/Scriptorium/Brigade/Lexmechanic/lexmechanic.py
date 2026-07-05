@@ -11,11 +11,15 @@ from urllib.parse import urlparse
 
 PLAYBOOK_DIR = Path(__file__).resolve().parent / "playbooks"
 REPO_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "EyeOfTerror" / "Warmaster" / "MobileGateway" / "ShushunyaAgent").exists())
+BRIGADE_ROOT = REPO_ROOT / "EyeOfTerror" / "Scriptorium" / "Brigade"
 SHUSHUNYA_AGENT_DIR = REPO_ROOT / "EyeOfTerror" / "Warmaster" / "MobileGateway" / "ShushunyaAgent"
 if str(SHUSHUNYA_AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(SHUSHUNYA_AGENT_DIR))
+if str(BRIGADE_ROOT) not in sys.path:
+    sys.path.insert(0, str(BRIGADE_ROOT))
 
 from shushunya_agent.web_tools import web_search  # noqa: E402
+from scriptorium_model import model_unavailable_payload, request_required_scriptorium_guidance  # noqa: E402
 
 
 class SearchConfig:
@@ -873,7 +877,21 @@ def run(request: dict[str, Any], workspace_root: Path, searcher: SearchFn | None
     if selected_searcher is False:
         selected_searcher = None
     corpus_sources, corpus_index = load_corpus_sources(request, workspace_root)
+    guidance = request_required_scriptorium_guidance(
+        "Lexmechanic",
+        request,
+        {
+            "task_id": request.get("task_id"),
+            "contract": contract,
+            "step": step,
+            "corpus_summary": corpus_index.get("summary") if isinstance(corpus_index, dict) else {},
+        },
+        "Decide source discovery strategy, source classes, and search risks for this research task. Return JSON guidance only.",
+    )
+    if not guidance.get("ok"):
+        return model_unavailable_payload("Lexmechanic", request.get("task_id"), guidance)
     source_map = source_map_for_contract(contract, selected_searcher, corpus_sources=corpus_sources, corpus_index=corpus_index)
+    source_map["model_guidance"] = guidance
     write_source_cache(str(source_map.get("topic") or ""), source_map.get("sources", []))
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)
@@ -894,6 +912,7 @@ def run(request: dict[str, Any], workspace_root: Path, searcher: SearchFn | None
             "status": "blocked",
             "summary": summary,
             "artifacts": [output_path],
+            "model_guidance": guidance,
             "gaps": source_map["coverage_gaps"],
             "revision_plan": {
                 "required": True,
@@ -916,6 +935,7 @@ def run(request: dict[str, Any], workspace_root: Path, searcher: SearchFn | None
         "status": "completed",
         "summary": f"Source map written with {source_count} source candidates.",
         "artifacts": [output_path],
+        "model_guidance": guidance,
         "gaps": source_map["coverage_gaps"],
         "confidence": "medium",
     }

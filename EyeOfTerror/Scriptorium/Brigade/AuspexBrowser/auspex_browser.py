@@ -9,11 +9,15 @@ from urllib.parse import urlparse, urlunparse
 
 
 REPO_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "EyeOfTerror" / "Warmaster" / "MobileGateway" / "ShushunyaAgent").exists())
+BRIGADE_ROOT = REPO_ROOT / "EyeOfTerror" / "Scriptorium" / "Brigade"
 SHUSHUNYA_AGENT_DIR = REPO_ROOT / "EyeOfTerror" / "Warmaster" / "MobileGateway" / "ShushunyaAgent"
 if str(SHUSHUNYA_AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(SHUSHUNYA_AGENT_DIR))
+if str(BRIGADE_ROOT) not in sys.path:
+    sys.path.insert(0, str(BRIGADE_ROOT))
 
 from shushunya_agent.web_tools import web_fetch  # noqa: E402
+from scriptorium_model import model_unavailable_payload, request_required_scriptorium_guidance  # noqa: E402
 
 CORPUS_INGESTOR_DIR = Path(__file__).resolve().parents[1] / "CorpusIngestor"
 if str(CORPUS_INGESTOR_DIR) not in sys.path:
@@ -182,7 +186,16 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
     if not source_host_path.exists():
         return {"ok": False, "worker": "AuspexBrowser", "error": "source_map is missing", "missing": source_path}
     source_map = json.loads(source_host_path.read_text(encoding="utf-8"))
+    guidance = request_required_scriptorium_guidance(
+        "AuspexBrowser",
+        request,
+        {"task_id": request.get("task_id"), "step": step, "source_map": source_map},
+        "Decide source acquisition priorities and fetch risk handling. Return JSON guidance only.",
+    )
+    if not guidance.get("ok"):
+        return model_unavailable_payload("AuspexBrowser", request.get("task_id"), guidance)
     snapshots = collect_snapshots(source_map)
+    snapshots["model_guidance"] = guidance
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(json.dumps(snapshots, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -193,6 +206,7 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
         "status": "completed",
         "summary": f"Fetched {snapshots['summary']['fetched_ok']} source URLs; {snapshots['summary']['failed']} failed.",
         "artifacts": [output_path],
+        "model_guidance": guidance,
         "gaps": [item["source_title"] for item in snapshots["skipped"]],
         "confidence": "medium",
     }

@@ -8,7 +8,16 @@ import zipfile
 from pathlib import Path
 
 import corpus_ingestor
-from corpus_ingestor import run, scan_corpus
+from corpus_ingestor import run as run_without_model, scan_corpus
+
+
+MODEL_BRAIN = {"ok": True, "status": "answered", "content": "{\"status\":\"ok\"}"}
+
+
+def run(request: dict, *args, **kwargs) -> dict:
+    enriched = dict(request)
+    enriched["model_brain"] = MODEL_BRAIN
+    return run_without_model(enriched, *args, **kwargs)
 
 
 def main() -> int:

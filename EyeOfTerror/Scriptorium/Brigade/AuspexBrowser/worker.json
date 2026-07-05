@@ -3,6 +3,11 @@
   "port": 7009,
   "role": "browser worker",
   "status": "prototype",
-  "capabilities": ["http_fetch", "source_snapshots", "blocked_source_recording"],
+  "capabilities": ["model_guided_acquisition", "http_fetch", "source_snapshots", "blocked_source_recording"],
+  "model_brain": {
+    "required": true,
+    "role": "AuspexBrowser",
+    "failure_policy": "block worker execution when model_brain is unavailable"
+  },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

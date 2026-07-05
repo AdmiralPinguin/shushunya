@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
 
 PLAYBOOK_DIR = Path(__file__).resolve().parent / "playbooks"
+BRIGADE_ROOT = Path(__file__).resolve().parents[1]
+if str(BRIGADE_ROOT) not in sys.path:
+    sys.path.insert(0, str(BRIGADE_ROOT))
+
+from scriptorium_model import model_unavailable_payload, request_required_scriptorium_guidance  # noqa: E402
 
 
 def load_playbook(path: Path) -> dict[str, Any]:
@@ -351,7 +357,21 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
     source_snapshots = load_optional_snapshots(workspace_root, output_path)
     rendered_snapshots = load_optional_rendered_snapshots(workspace_root, output_path)
     source_snapshots = merge_rendered_snapshots(source_snapshots, rendered_snapshots)
+    guidance = request_required_scriptorium_guidance(
+        "NoosphericExtractor",
+        request,
+        {
+            "task_id": request.get("task_id"),
+            "step": step,
+            "source_map": source_map,
+            "source_snapshots": source_snapshots,
+        },
+        "Extract the claims/events/arguments that matter for the task and identify evidence risks. Return JSON guidance only.",
+    )
+    if not guidance.get("ok"):
+        return model_unavailable_payload("NoosphericExtractor", request.get("task_id"), guidance)
     notes = extract_events(source_map, source_snapshots)
+    notes["model_guidance"] = guidance
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(json.dumps(notes, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -362,6 +382,7 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
         "status": "completed",
         "summary": f"Extracted {len(notes['events'])} direct event notes.",
         "artifacts": [output_path],
+        "model_guidance": guidance,
         "gaps": notes["gaps"],
         "confidence": "medium",
     }

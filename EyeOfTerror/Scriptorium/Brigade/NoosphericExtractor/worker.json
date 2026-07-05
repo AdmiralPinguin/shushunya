@@ -3,6 +3,11 @@
   "port": 7003,
   "role": "fact extractor",
   "status": "prototype",
-  "capabilities": ["fact_extraction", "confidence_labels", "contradiction_notes", "generic_snapshot_evidence_leads"],
+  "capabilities": ["model_guided_evidence_extraction", "fact_extraction", "confidence_labels", "contradiction_notes", "generic_snapshot_evidence_leads"],
+  "model_brain": {
+    "required": true,
+    "role": "NoosphericExtractor",
+    "failure_policy": "block worker execution when model_brain is unavailable"
+  },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

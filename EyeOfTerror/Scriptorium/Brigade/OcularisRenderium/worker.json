@@ -3,6 +3,11 @@
   "port": 7012,
   "role": "javascript render and screenshot worker",
   "status": "prototype",
-  "capabilities": ["javascript_render", "dom_snapshot", "screenshot", "network_trace", "render_required_sources"],
+  "capabilities": ["model_guided_render_triage", "javascript_render", "dom_snapshot", "screenshot", "network_trace", "render_required_sources"],
+  "model_brain": {
+    "required": true,
+    "role": "OcularisRenderium",
+    "failure_policy": "block worker execution when model_brain is unavailable"
+  },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

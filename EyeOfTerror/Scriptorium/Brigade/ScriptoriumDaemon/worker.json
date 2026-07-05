@@ -7,7 +7,8 @@
   "model_brain": {
     "required": true,
     "role": "ScriptoriumDaemon",
-    "guidance_artifact": "scriptorium_model_guidance.json"
+    "guidance_artifact": "scriptorium_model_guidance.json",
+    "failure_policy": "block worker execution when model_brain is unavailable"
   },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

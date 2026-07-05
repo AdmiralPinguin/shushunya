@@ -4,9 +4,16 @@ import ipaddress
 import json
 import os
 import socket
+import sys
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
+
+BRIGADE_ROOT = Path(__file__).resolve().parents[1]
+if str(BRIGADE_ROOT) not in sys.path:
+    sys.path.insert(0, str(BRIGADE_ROOT))
+
+from scriptorium_model import model_unavailable_payload, request_required_scriptorium_guidance  # noqa: E402
 
 
 RenderFn = Callable[[str, int], dict[str, Any]]
@@ -146,8 +153,17 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
     if not source_host_path.exists():
         return {"ok": False, "worker": "OcularisRenderium", "error": "source_snapshots is missing", "missing": source_path}
     source_snapshots = json.loads(source_host_path.read_text(encoding="utf-8"))
+    guidance = request_required_scriptorium_guidance(
+        "OcularisRenderium",
+        request,
+        {"task_id": request.get("task_id"), "step": step, "source_snapshots": source_snapshots},
+        "Decide which render-required sources matter and what render blockers must be preserved. Return JSON guidance only.",
+    )
+    if not guidance.get("ok"):
+        return model_unavailable_payload("OcularisRenderium", request.get("task_id"), guidance)
     timeout_ms = max(1000, min(int(request.get("render_timeout_ms") or 30000), 120000))
     rendered = render_snapshots(source_snapshots, timeout_ms=timeout_ms)
+    rendered["model_guidance"] = guidance
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(json.dumps(rendered, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -159,6 +175,7 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
         "status": "completed",
         "summary": f"Rendered {summary['render_ok']} of {summary['render_requested']} render-required sources.",
         "artifacts": [output_path],
+        "model_guidance": guidance,
         "gaps": [item["source_title"] for item in rendered["rendered_snapshots"] if not item.get("ok")],
         "confidence": "medium" if summary["render_ok"] else "low",
     }

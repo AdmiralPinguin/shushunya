@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
+
+BRIGADE_ROOT = Path(__file__).resolve().parents[1]
+if str(BRIGADE_ROOT) not in sys.path:
+    sys.path.insert(0, str(BRIGADE_ROOT))
+
+from scriptorium_model import model_unavailable_payload, request_required_scriptorium_guidance  # noqa: E402
 
 
 PHASE_ORDER = {
@@ -96,7 +103,16 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
     if not notes_host_path.exists():
         return {"ok": False, "worker": "Chronologis", "error": "direct_event_notes is missing", "missing": notes_path}
     notes = json.loads(notes_host_path.read_text(encoding="utf-8"))
+    guidance = request_required_scriptorium_guidance(
+        "Chronologis",
+        request,
+        {"task_id": request.get("task_id"), "step": step, "notes": notes},
+        "Order extracted material for the requested task and identify chronology/source-order risks. Return JSON guidance only.",
+    )
+    if not guidance.get("ok"):
+        return model_unavailable_payload("Chronologis", request.get("task_id"), guidance)
     timeline = build_timeline(notes)
+    timeline["model_guidance"] = guidance
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(json.dumps(timeline, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -107,6 +123,7 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
         "status": "completed",
         "summary": f"Timeline written with {len(timeline['timeline'])} events.",
         "artifacts": [output_path],
+        "model_guidance": guidance,
         "gaps": timeline["gaps"],
         "confidence": "medium",
     }

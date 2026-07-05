@@ -20,14 +20,19 @@ METADATA_SUFFIXES = (".metadata.json", ".meta.json")
 REPO_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "EyeOfTerror" / "Warmaster" / "MobileGateway" / "ShushunyaAgent").exists())
 DEFAULT_CORPUS_ROOT = REPO_ROOT / "Corpus"
 LEXMECHANIC_PLAYBOOK_DIR = REPO_ROOT / "EyeOfTerror" / "Scriptorium" / "Brigade" / "Lexmechanic" / "playbooks"
+BRIGADE_ROOT = REPO_ROOT / "EyeOfTerror" / "Scriptorium" / "Brigade"
 SHUSHUNYA_AGENT_DIR = REPO_ROOT / "EyeOfTerror" / "Warmaster" / "MobileGateway" / "ShushunyaAgent"
 if str(SHUSHUNYA_AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(SHUSHUNYA_AGENT_DIR))
+if str(BRIGADE_ROOT) not in sys.path:
+    sys.path.insert(0, str(BRIGADE_ROOT))
 
 try:
     from shushunya_agent.web_tools import extract_epub_text  # type: ignore
 except Exception:  # pragma: no cover - fallback is only for unusual import failures.
     extract_epub_text = None
+
+from scriptorium_model import model_unavailable_payload, request_required_scriptorium_guidance  # noqa: E402
 
 
 class TextExtractor(html.parser.HTMLParser):
@@ -379,7 +384,16 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
     if not isinstance(expected_artifacts, list) or not expected_artifacts:
         return {"ok": False, "worker": "CorpusIngestor", "error": "step.expected_artifacts is empty"}
     output_path = str(expected_artifacts[0])
+    guidance = request_required_scriptorium_guidance(
+        "CorpusIngestor",
+        request,
+        {"task_id": request.get("task_id"), "contract": contract, "step": step},
+        "Decide how the local corpus should be inspected for this research task. Return JSON guidance only.",
+    )
+    if not guidance.get("ok"):
+        return model_unavailable_payload("CorpusIngestor", request.get("task_id"), guidance)
     index = scan_corpus(contract)
+    index["model_guidance"] = guidance
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -391,6 +405,7 @@ def run(request: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
         "status": "completed",
         "summary": f"Indexed {summary.get('sources_matched', 0)} matching local corpus sources from {summary.get('files_scanned', 0)} files.",
         "artifacts": [output_path],
+        "model_guidance": guidance,
         "gaps": index.get("gaps", []),
         "confidence": "medium",
     }

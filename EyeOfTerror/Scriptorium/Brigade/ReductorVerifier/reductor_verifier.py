@@ -11,7 +11,7 @@ BRIGADE_ROOT = Path(__file__).resolve().parents[1]
 if str(BRIGADE_ROOT) not in sys.path:
     sys.path.insert(0, str(BRIGADE_ROOT))
 
-from scriptorium_model import parsed_model_content, request_scriptorium_model_guidance  # noqa: E402
+from scriptorium_model import model_unavailable_payload, parsed_model_content, request_required_scriptorium_guidance, request_scriptorium_model_guidance  # noqa: E402
 
 GuidanceFn = Callable[[str, dict[str, Any], str], dict[str, Any]]
 
@@ -827,8 +827,9 @@ def review_artifacts(
         findings.append({"severity": "blocker", "message": "Draft package does not expose coverage gaps clearly."})
     comprehensive_findings, comprehensive_metrics = comprehensive_depth_findings(source_map, notes, reconstruction, required_events)
     findings.extend(comprehensive_findings)
-    model_guidance = request_guidance(
+    model_guidance = request_required_scriptorium_guidance(
         "ReductorVerifier",
+        request,
         model_review_payload(request, source_map, notes, timeline, reconstruction, coverage, findings, warnings, comprehensive_metrics),
         (
             "You are an independent Scriptorium critic. Check whether the draft actually satisfies the user's "
@@ -836,7 +837,10 @@ def review_artifacts(
             "whether the revision plan points to the right upstream workers. Return JSON with status, blockers, "
             "warnings, and evidence_notes. Do not waive hard source/evidence blockers."
         ),
+        request_guidance,
     )
+    if not model_guidance.get("ok"):
+        return model_unavailable_payload("ReductorVerifier", request.get("task_id"), model_guidance)
     model_blockers, model_warnings = model_review_findings(model_guidance)
     findings.extend(model_blockers)
     warnings.extend(model_warnings)
@@ -903,6 +907,8 @@ def run(
         report = review_artifacts(workspace_root, critic_path, request, request_guidance)
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
         return {"ok": False, "worker": "ReductorVerifier", "error": str(exc)}
+    if report.get("error_code") == "model_brain_unavailable":
+        return report
     expectation_findings = quality_expectation_findings(request)
     if expectation_findings:
         report.setdefault("findings", []).extend(expectation_findings)

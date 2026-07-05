@@ -7,7 +7,7 @@
   "model_brain": {
     "required": true,
     "role": "ReductorVerifier",
-    "failure_policy": "record warning; keep hard deterministic blockers authoritative"
+    "failure_policy": "block worker execution when model_brain is unavailable; keep hard deterministic blockers authoritative"
   },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

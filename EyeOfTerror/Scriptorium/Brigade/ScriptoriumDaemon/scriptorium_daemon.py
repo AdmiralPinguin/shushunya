@@ -24,7 +24,7 @@ BRIGADE_ROOT = Path(__file__).resolve().parents[1]
 if str(BRIGADE_ROOT) not in sys.path:
     sys.path.insert(0, str(BRIGADE_ROOT))
 
-from scriptorium_model import parsed_model_content, request_scriptorium_model_guidance  # noqa: E402
+from scriptorium_model import model_unavailable_payload, parsed_model_content, request_required_scriptorium_guidance, request_scriptorium_model_guidance  # noqa: E402
 
 GuidanceFn = Callable[[str, dict[str, Any], str], dict[str, Any]]
 
@@ -506,15 +506,19 @@ def run(
     revision_context = request.get("revision_context") if isinstance(request.get("revision_context"), dict) else None
     reconstruction = build_reconstruction(source_map, source_snapshots, notes, timeline, revision_context)
     coverage_report = build_coverage_report(source_map, source_snapshots, notes, timeline, revision_context)
-    guidance = request_guidance(
+    guidance = request_required_scriptorium_guidance(
         "ScriptoriumDaemon",
+        request,
         model_payload(request, source_map, notes, timeline, reconstruction, coverage_report),
         (
             "You are the Scriptorium writer. Improve the Russian reconstruction only from supplied facts, "
             "timeline, evidence excerpts, and gaps. Do not invent unsupported events. Return JSON with optional "
             "reconstruction_ru_markdown or appendix_markdown plus warnings."
         ),
+        request_guidance,
     )
+    if not guidance.get("ok"):
+        return model_unavailable_payload("ScriptoriumDaemon", request.get("task_id"), guidance)
     reconstruction, coverage_report = apply_model_guidance(reconstruction, coverage_report, guidance)
     for output_path, content in ((reconstruction_path, reconstruction), (coverage_path, coverage_report)):
         host_path = sandbox_path(workspace_root, output_path)

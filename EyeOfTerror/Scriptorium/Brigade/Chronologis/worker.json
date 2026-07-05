@@ -3,6 +3,11 @@
   "port": 7004,
   "role": "timeline builder",
   "status": "prototype",
-  "capabilities": ["timeline", "sequence_repair", "gap_detection", "uncertainty_summary"],
+  "capabilities": ["model_guided_ordering", "timeline", "sequence_repair", "gap_detection", "uncertainty_summary"],
+  "model_brain": {
+    "required": true,
+    "role": "Chronologis",
+    "failure_policy": "block worker execution when model_brain is unavailable"
+  },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }

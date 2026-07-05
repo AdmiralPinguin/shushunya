@@ -6,7 +6,16 @@ import tempfile
 from pathlib import Path
 
 import lexmechanic
-from lexmechanic import classify_discovered_result, run, source_map_for_contract
+from lexmechanic import classify_discovered_result, run as run_without_model, source_map_for_contract
+
+
+MODEL_BRAIN = {"ok": True, "status": "answered", "content": "{\"status\":\"ok\"}"}
+
+
+def run(request: dict, *args, **kwargs) -> dict:
+    enriched = dict(request)
+    enriched["model_brain"] = MODEL_BRAIN
+    return run_without_model(enriched, *args, **kwargs)
 
 
 def main() -> int:

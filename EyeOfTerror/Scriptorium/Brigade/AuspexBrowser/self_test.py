@@ -7,7 +7,16 @@ import tempfile
 from pathlib import Path
 
 import auspex_browser
-from auspex_browser import collect_snapshots, run
+from auspex_browser import collect_snapshots, run as run_without_model
+
+
+MODEL_BRAIN = {"ok": True, "status": "answered", "content": "{\"status\":\"ok\"}"}
+
+
+def run(request: dict, *args, **kwargs) -> dict:
+    enriched = dict(request)
+    enriched["model_brain"] = MODEL_BRAIN
+    return run_without_model(enriched, *args, **kwargs)
 
 
 def main() -> int:

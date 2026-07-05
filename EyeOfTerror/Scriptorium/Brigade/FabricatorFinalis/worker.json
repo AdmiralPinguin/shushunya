@@ -3,6 +3,11 @@
   "port": 7007,
   "role": "finalizer, packager, telegram sender",
   "status": "prototype",
-  "capabilities": ["fb2", "markdown_bundle", "telegram_send_document", "critic_metric_manifest"],
+  "capabilities": ["model_guided_final_readiness", "fb2", "markdown_bundle", "telegram_send_document", "critic_metric_manifest"],
+  "model_brain": {
+    "required": true,
+    "role": "FabricatorFinalis",
+    "failure_policy": "block worker execution when model_brain is unavailable"
+  },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
 }
