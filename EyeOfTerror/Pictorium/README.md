@@ -1,31 +1,45 @@
 # Pictorium
 
-Pictorium is the EyeOfTerror visual-generation department. It owns image
-planning, model/resource selection, DemonsForge dispatch, generated artifact
-verification, and final visual-package handoff.
+Pictorium is the EyeOfTerror visual-generation department. It owns visual
+intent planning, model/resource policy, Forge runtime API, queueing, storage,
+verification, comics workflows, video workflows, and final visual-package
+handoff.
 
-The department is intentionally separate from `DemonsForge`:
+`DemonsForge` is intentionally narrow: it keeps graphical engine adapters,
+local model folders, and direct standalone model demo scripts. Anything that is
+API, queue, schema, project orchestration, policy, reporting, testing, or worker
+coordination belongs here.
 
-- `DemonsForge` remains the image engine, job queue, runtime API, and artifact
-  store.
-- `Pictorium` is the governor/brigade layer that turns user intent into
-  supervised image-generation runs.
-- `Warmaster` routes image tasks to this department only after the governor
-  service and worker chain are active.
-
-## Planned Topology
+## Topology
 
 ```text
 EyeOfTerror/Pictorium/
+  Brigades/
+    Image/
+      Workers/
+        Promptwright/
+        ModelQuartermaster/
+        ForgeDispatcher/
+        ImageVerifier/
+        ArtifactFinalis/
+    Comics/
+    Video/
   Moriana/
     contracts/
-  Brigade/
-    Promptwright/
-    ModelQuartermaster/
-    ForgeDispatcher/
-    ImageVerifier/
-    ArtifactFinalis/
+    forge_runtime/
+    forge_tests/
+    moriana_core/
+    scripts/
 ```
+
+## Brigades
+
+- `Image`: still images, edits, inpaint, upscale, LoRA/IP-Adapter readiness,
+  verification, and delivery.
+- `Comics`: storyboards, multi-panel pages, lettering, continuity, character
+  consistency, and long-form visual packaging.
+- `Video`: future video backends, GPU scheduling, clips, and image-to-video or
+  text-to-video workflows.
 
 ## Activation Rule
 
@@ -33,16 +47,18 @@ Pictorium is scaffolded but not active. Do not switch the image governor to
 `active` until Moriana can prepare a valid Warmaster run package and the brigade
 can pass the common worker API contract.
 
-## DemonsForge Cleanup Rule
+## DemonsForge Boundary
 
-DemonsForge must stay a narrow runtime. The desired end state is:
+Allowed under `DemonsForge`:
 
-- Pictorium owns visual intent, policy, verification, and final handoff.
-- DemonsForge owns runtime execution, queueing, engine adapters, and raw
-  artifact storage.
+- graphical engine adapters;
+- local models, LoRAs, embeddings, generated artifacts, and runtime data;
+- direct standalone model demo/download scripts.
 
-The cleanup pass moved planner, thinker, project-planning, deterministic
-image-evaluator, character-profile, asset-catalog, asset-download, report, and
-bench logic into `Pictorium/Moriana`. DemonsForge imports this logic directly
-where its API still needs to expose it; it must not keep local compatibility
-wrappers for agent-owned modules.
+Not allowed under `DemonsForge`:
+
+- API server/client;
+- queue/storage/project orchestration;
+- schemas/contracts;
+- planner/thinker/policy/reporting;
+- Pictorium tests or bench scenarios.

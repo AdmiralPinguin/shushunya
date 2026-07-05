@@ -6,7 +6,7 @@ from typing import Any
 
 from PIL import Image, ImageChops, ImageStat
 
-from DemonsForge.forge_service import config
+from EyeOfTerror.Pictorium.Moriana.forge_runtime import config
 
 
 _STOPWORDS = {

@@ -15,9 +15,10 @@ from PIL import Image, ImageDraw
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 ROOT = PROJECT_ROOT / "DemonsForge"
+TESTS_ROOT = PROJECT_ROOT / "EyeOfTerror" / "Pictorium" / "Moriana" / "forge_tests"
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "tests"))
+sys.path.insert(0, str(TESTS_ROOT))
 
 from EyeOfTerror.Pictorium.Moriana.moriana_core.forge_reports import prune_reports
 from forge_test_lock import forge_test_lock

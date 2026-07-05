@@ -2,7 +2,9 @@
 set -euo pipefail
 
 BASE_URL="${FORGE_BASE_URL:-http://127.0.0.1:8110}"
-PYTHON_BIN="${PYTHON_BIN:-$(dirname "$0")/DemonsForge/bin/python}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+PYTHON_BIN="${PYTHON_BIN:-$PROJECT_ROOT/DemonsForge/DemonsForge/bin/python}"
 
 curl_json() {
   local method="$1"

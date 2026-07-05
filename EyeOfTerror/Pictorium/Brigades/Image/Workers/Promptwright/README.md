@@ -7,7 +7,7 @@ Owned modules:
 - `EyeOfTerror/Pictorium/Moriana/moriana_core/promptwright.py`
 - `EyeOfTerror/Pictorium/Moriana/moriana_core/prompt_thinker.py`
 - `EyeOfTerror/Pictorium/Moriana/moriana_core/project_planner.py`
-- `DemonsForge/forge_service/schemas.py`
+- `EyeOfTerror/Pictorium/Moriana/forge_runtime/schemas.py`
 
 Expected output:
 

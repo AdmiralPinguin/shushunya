@@ -4,10 +4,10 @@ Planned Pictorium worker for DemonsForge job submission and monitoring.
 
 Initial source material:
 
-- `DemonsForge/forge_service/client.py`
-- `DemonsForge/forge_service/queue.py`
-- `DemonsForge/forge_service/server.py`
-- `DemonsForge/forge_service/projects.py`
+- `EyeOfTerror/Pictorium/Moriana/forge_runtime/client.py`
+- `EyeOfTerror/Pictorium/Moriana/forge_runtime/queue.py`
+- `EyeOfTerror/Pictorium/Moriana/forge_runtime/server.py`
+- `EyeOfTerror/Pictorium/Moriana/forge_runtime/projects.py`
 
 Expected output:
 

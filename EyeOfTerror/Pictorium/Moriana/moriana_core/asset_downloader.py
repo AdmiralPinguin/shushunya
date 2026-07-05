@@ -7,8 +7,8 @@ from urllib.parse import urlparse
 
 import requests
 
-from DemonsForge.forge_service import config
-from DemonsForge.forge_service.schemas import AssetDownloadSpec
+from EyeOfTerror.Pictorium.Moriana.forge_runtime import config
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import AssetDownloadSpec
 
 
 APPROVED_HOSTS = {

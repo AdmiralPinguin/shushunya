@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import re
 
-from DemonsForge.forge_service.archive_memory import ArchiveMemoryClient
-from DemonsForge.forge_service.schemas import AssetRequest, JobSpec, JobType, LoraRef, PlanRequest
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.archive_memory import ArchiveMemoryClient
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import (
+    AssetRequest,
+    JobSpec,
+    JobType,
+    LoraRef,
+    PlanRequest,
+)
 
 from .asset_catalog import ASPECT_PRESETS, SCHEDULERS, capabilities
 from .character_profiles import character_profile_for_text

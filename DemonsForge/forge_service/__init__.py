@@ -1,4 +1,4 @@
-"""DemonsForge backend-agnostic HTTP image generation service."""
+"""DemonsForge low-level graphical engine adapters."""
 
 __all__ = ["__version__"]
 

@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")"
-ARCHIVE_ENV="$PWD/../ArchiveOfHeresy/.env"
-FORGE_ENV="$PWD/.env"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+FORGE_ROOT="$PROJECT_ROOT/DemonsForge"
+cd "$PROJECT_ROOT"
+ARCHIVE_ENV="$PROJECT_ROOT/ArchiveOfHeresy/.env"
+FORGE_ENV="$FORGE_ROOT/.env"
 if [ -f "$ARCHIVE_ENV" ]; then
   set -a
   # shellcheck disable=SC1090
@@ -16,7 +19,7 @@ if [ -f "$FORGE_ENV" ]; then
   . "$FORGE_ENV"
   set +a
 fi
-export HF_HOME="$PWD/hf_home"
+export HF_HOME="$FORGE_ROOT/hf_home"
 export CUDA_VISIBLE_DEVICES=""
 export FORGE_MEMORY_ENABLED="${FORGE_MEMORY_ENABLED:-1}"
 export FORGE_MEMORY_NAMESPACE="${FORGE_MEMORY_NAMESPACE:-demonsforge}"
@@ -34,4 +37,4 @@ export KMP_BLOCKTIME="${KMP_BLOCKTIME:-0}"
 export GOMP_SPINCOUNT="${GOMP_SPINCOUNT:-0}"
 export MKL_DYNAMIC="${MKL_DYNAMIC:-FALSE}"
 
-exec "$PWD/DemonsForge/bin/python" "$PWD/run_forge_worker.py"
+exec "$FORGE_ROOT/DemonsForge/bin/python" "$SCRIPT_DIR/run_forge_worker.py"

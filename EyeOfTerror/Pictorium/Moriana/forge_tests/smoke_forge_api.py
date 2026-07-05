@@ -6,16 +6,16 @@ import time
 from fastapi.testclient import TestClient
 from PIL import Image
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
 ROOT = PROJECT_ROOT / "DemonsForge"
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(ROOT))
 
-from forge_service.server import app
-from forge_service.client import DemonsForgeClient
-from forge_service.queue import ForgeQueue
-from forge_service.schemas import JobSpec, PlanRequest
-from forge_service.server import store
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.server import app
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.client import DemonsForgeClient
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.queue import ForgeQueue
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import JobSpec, PlanRequest
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.server import store
 from EyeOfTerror.Pictorium.Moriana.moriana_core.prompt_thinker import PlannerThinker
 
 
@@ -31,7 +31,7 @@ def wait_for_terminal(client: TestClient, job_id: str) -> dict:
 
 
 def main() -> None:
-    root = Path(__file__).resolve().parents[1]
+    root = ROOT
     test_inputs = root / "runtime" / "test_inputs"
     test_inputs.mkdir(parents=True, exist_ok=True)
     input_image = test_inputs / "upscale_source.png"

@@ -8,8 +8,8 @@ from typing import Any
 import requests
 from pydantic import ValidationError
 
-from DemonsForge.forge_service import config
-from DemonsForge.forge_service.schemas import AssetRequest, JobSpec, PlanRequest
+from EyeOfTerror.Pictorium.Moriana.forge_runtime import config
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import AssetRequest, JobSpec, PlanRequest
 
 from .asset_catalog import SAMPLERS, SCHEDULERS, capabilities
 

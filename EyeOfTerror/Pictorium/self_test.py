@@ -18,9 +18,10 @@ EXPECTED_WORKERS = {
     "ImageVerifier",
     "ArtifactFinalis",
 }
+EXPECTED_BRIGADES = {"Image", "Comics", "Video"}
 
 try:
-    from DemonsForge.forge_service.schemas import PlanRequest, ProjectPlanRequest
+    from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import PlanRequest, ProjectPlanRequest
     from EyeOfTerror.Pictorium.Moriana.moriana_core.prompt_thinker import PlannerThinker
     from EyeOfTerror.Pictorium.Moriana.moriana_core.promptwright import plan_txt2img
     from EyeOfTerror.Pictorium.Moriana.moriana_core.project_planner import plan_project
@@ -43,11 +44,20 @@ def main() -> int:
     if governor.get("planned_port") != 7103:
         raise AssertionError(f"Moriana should inherit planned image governor port 7103: {governor}")
     workers = payload.get("workers") if isinstance(payload.get("workers"), list) else []
+    brigades = payload.get("brigades") if isinstance(payload.get("brigades"), list) else []
+    brigade_names = {str(item.get("name") or "") for item in brigades if isinstance(item, dict)}
+    if brigade_names != EXPECTED_BRIGADES:
+        raise AssertionError(f"unexpected brigade set: {brigade_names}")
+    for brigade in brigades:
+        raw_path = str(brigade.get("path") or "")
+        readme = PROJECT_ROOT / raw_path / "README.md"
+        if not readme.exists():
+            raise AssertionError(f"missing brigade README: {readme}")
     names = {str(item.get("name") or "") for item in workers if isinstance(item, dict)}
     if names != EXPECTED_WORKERS:
         raise AssertionError(f"unexpected worker set: {names}")
     for name in EXPECTED_WORKERS:
-        readme = PICTORIUM / "Brigade" / name / "README.md"
+        readme = PICTORIUM / "Brigades" / "Image" / "Workers" / name / "README.md"
         if not readme.exists():
             raise AssertionError(f"missing worker README: {readme}")
     for worker in workers:
@@ -76,6 +86,14 @@ def main() -> int:
         "registries.py",
         "downloader.py",
         "reports.py",
+        "archive_memory.py",
+        "client.py",
+        "config.py",
+        "projects.py",
+        "queue.py",
+        "schemas.py",
+        "server.py",
+        "storage.py",
     )
     for filename in removed_forge_brains:
         old_path = PROJECT_ROOT / "DemonsForge" / "forge_service" / filename
@@ -85,6 +103,26 @@ def main() -> int:
         old_path = PROJECT_ROOT / "DemonsForge" / "tests" / filename
         if old_path.exists():
             raise AssertionError(f"Pictorium bench must not remain in DemonsForge tests: {old_path}")
+    forge_service = PROJECT_ROOT / "DemonsForge" / "forge_service"
+    allowed_forge_files = {
+        forge_service / "__init__.py",
+        forge_service / "engines" / "__init__.py",
+        forge_service / "engines" / "base.py",
+        forge_service / "engines" / "diffusers_adapter.py",
+    }
+    for path in forge_service.rglob("*.py"):
+        if path not in allowed_forge_files:
+            raise AssertionError(f"non-engine Python module must not remain in DemonsForge: {path}")
+    old_tests = PROJECT_ROOT / "DemonsForge" / "tests"
+    if old_tests.exists() and any(old_tests.rglob("*.py")):
+        raise AssertionError(f"Pictorium tests must not remain in DemonsForge/tests: {old_tests}")
+    for filename in ("run_forge_api.py", "run_forge_worker.py"):
+        old_path = PROJECT_ROOT / "DemonsForge" / filename
+        if old_path.exists():
+            raise AssertionError(f"Forge runtime script must not remain in DemonsForge: {old_path}")
+    old_brigade_dir = PICTORIUM / "Brigade"
+    if old_brigade_dir.exists():
+        raise AssertionError(f"old single Brigade directory must not remain: {old_brigade_dir}")
     print("[ok] Pictorium Moriana scaffold")
     return 0
 

@@ -14,10 +14,12 @@ from typing import Any
 import requests
 
 
-ROOT = Path(__file__).resolve().parents[1]
-PROJECT_ROOT = ROOT.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+ROOT = PROJECT_ROOT / "DemonsForge"
+TESTS_ROOT = PROJECT_ROOT / "EyeOfTerror" / "Pictorium" / "Moriana" / "forge_tests"
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(TESTS_ROOT))
 
 from EyeOfTerror.Pictorium.Moriana.moriana_core.forge_reports import prune_reports
 from forge_test_lock import forge_test_lock
@@ -41,10 +43,14 @@ def run_step(name: str, func) -> dict[str, Any]:
 
 def py_compile() -> dict[str, Any]:
     files = [
-        "forge_service/config.py",
-        "forge_service/projects.py",
-        "forge_service/queue.py",
-        "forge_service/server.py",
+        "../EyeOfTerror/Pictorium/Moriana/forge_runtime/config.py",
+        "../EyeOfTerror/Pictorium/Moriana/forge_runtime/projects.py",
+        "../EyeOfTerror/Pictorium/Moriana/forge_runtime/queue.py",
+        "../EyeOfTerror/Pictorium/Moriana/forge_runtime/server.py",
+        "../EyeOfTerror/Pictorium/Moriana/forge_runtime/client.py",
+        "../EyeOfTerror/Pictorium/Moriana/forge_runtime/schemas.py",
+        "../EyeOfTerror/Pictorium/Moriana/forge_runtime/storage.py",
+        "../EyeOfTerror/Pictorium/Moriana/forge_runtime/archive_memory.py",
         "../EyeOfTerror/Pictorium/Moriana/moriana_core/asset_catalog.py",
         "../EyeOfTerror/Pictorium/Moriana/moriana_core/asset_downloader.py",
         "../EyeOfTerror/Pictorium/Moriana/moriana_core/character_profiles.py",
@@ -56,7 +62,7 @@ def py_compile() -> dict[str, Any]:
         "../EyeOfTerror/Pictorium/Moriana/benches/quality_bench.py",
         "../EyeOfTerror/Pictorium/Moriana/benches/project_bench.py",
         "../EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.py",
-        "tests/smoke_forge_api.py",
+        "../EyeOfTerror/Pictorium/Moriana/forge_tests/smoke_forge_api.py",
     ]
     command = [str(ROOT / "DemonsForge/bin/python"), "-m", "py_compile", *files]
     completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=120)
@@ -66,8 +72,8 @@ def py_compile() -> dict[str, Any]:
 
 
 def smoke_test() -> dict[str, Any]:
-    runpy.run_path(str(ROOT / "tests/smoke_forge_api.py"), run_name="__main__")
-    return {"script": "tests/smoke_forge_api.py"}
+    runpy.run_path(str(TESTS_ROOT / "smoke_forge_api.py"), run_name="__main__")
+    return {"script": "EyeOfTerror/Pictorium/Moriana/forge_tests/smoke_forge_api.py"}
 
 
 def live_quality_dry_run(base_url: str) -> dict[str, Any]:

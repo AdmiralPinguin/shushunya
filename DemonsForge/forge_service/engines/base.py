@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Callable
 
-from ..schemas import JobSpec
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import JobSpec
 
 ProgressCallback = Callable[[float, str], None]
 

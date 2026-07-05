@@ -225,25 +225,36 @@ passed with real generation:
 
 Architecture:
 
+- `forge_service/engines/`: graphical backend adapters. The current vertical slice uses a
+  lazy diffusers adapter for `txt2img`; unsupported operations fail explicitly.
+  Diffusers step callbacks are used when available for live progress and
+  cooperative cancellation between inference steps.
+- `models/`, `loras/`, `embeddings/`, `control_assets/`, `quality_assets/`,
+  `artifacts/`, and `runtime/`: local model, asset, artifact, and runtime data
+  directories consumed by Pictorium.
+- `app.py`, `app_sdxl.py`, `app_flux.py`, `download_*.py`, and the matching
+  simple shell scripts: direct standalone model demos/download helpers.
+
+Pictorium owns everything above the graphical engine:
+
+- `../EyeOfTerror/Pictorium/Moriana/forge_runtime/`: API server/client, queue,
+  schemas, storage, project masks, memory bridge, and runtime scripts.
+- `../EyeOfTerror/Pictorium/Moriana/moriana_core/`: prompt planning, asset
+  policy, character profiles, reports, and artifact verification.
+- `../EyeOfTerror/Pictorium/Moriana/forge_tests/` and `benches/`: runtime smoke
+  tests and visual quality scenarios.
+
+Older notes about the Pictorium-owned runtime:
+
 - `../EyeOfTerror/Pictorium/Moriana/moriana_core/asset_catalog.py`: engine,
   model, LoRA, sampler, scheduler and capability discovery. Known engines are
   registered explicitly; additional local model folders with `model_index.json`
   are surfaced as discovered models.
-  `/forge/capabilities` exposes implemented job types, service-level jobs,
-  unsupported job types, future feature hooks, and per-engine feature flags.
-  For thin clients, it also includes stable top-level aliases: `job_types` and
-  `defaults`.
-- `forge_service/queue.py`: single-worker VRAM/RAM-aware job queue with
-  progress logs, cancellation state, runtime status and idle model unload. It
-  can run embedded in the API process or as a separate worker process polling
-  SQLite. `/forge/queue/recover-stale` can mark old interrupted `running` jobs
-  as failed after a dry-run check.
-- `forge_service/storage.py`: SQLite job and gallery store at
-  `runtime/forge.sqlite3`.
-- `forge_service/engines/`: backend adapters. The current vertical slice uses a
-  lazy diffusers adapter for `txt2img`; unsupported operations fail explicitly.
-  Diffusers step callbacks are used when available for live progress and
-  cooperative cancellation between inference steps.
+- `../EyeOfTerror/Pictorium/Moriana/forge_runtime/queue.py`: single-worker
+  VRAM/RAM-aware job queue with progress logs, cancellation state, runtime
+  status and idle model unload.
+- `../EyeOfTerror/Pictorium/Moriana/forge_runtime/storage.py`: SQLite job and
+  gallery store at `runtime/forge.sqlite3`.
 - `../EyeOfTerror/Pictorium/Moriana/moriana_core/promptwright.py`: Russian
   natural-language planner that returns a valid structured job spec. Missing
   model/LoRA/control assets become
@@ -260,8 +271,8 @@ Architecture:
   It recognizes `txt2img`, `img2img`, `inpaint`, and `upscale` intent; image
   editing plans include `planner_note` reminders for required source/mask
   inputs instead of pretending those assets exist.
-- `forge_service/projects.py`: runtime project storage and deterministic mask
-  generation.
+- `../EyeOfTerror/Pictorium/Moriana/forge_runtime/projects.py`: runtime project
+  storage and deterministic mask generation.
 - `../EyeOfTerror/Pictorium/Moriana/moriana_core/project_planner.py`:
   lightweight project/workflow planner. It builds `concept_batch`,
   `comic_storyboard`, and `character_sheet` project specs from ordinary Forge
@@ -303,8 +314,8 @@ Architecture:
   frightening body-horror interpretation and is injected by Pictorium planning when a
   request mentions Shushunya. Forge records `safety.character_profile` metadata
   and does not assume a local LoRA/IP-Adapter exists.
-- `forge_service/client.py`: thin client intended for later ShushunyaAgent tool
-  integration.
+- `../EyeOfTerror/Pictorium/Moriana/forge_runtime/client.py`: thin client
+  intended for later ShushunyaAgent tool integration.
 
 Runtime logs are appended as JSONL to `runtime/logs/jobs.jsonl`. Loaded
 diffusers pipelines are automatically unloaded after
@@ -447,9 +458,9 @@ IP-Adapter, or reference assets must become an `asset_request` with
 Smoke test without heavy image generation:
 
 ```bash
-DemonsForge/bin/python tests/smoke_forge_api.py
-DemonsForge/bin/python tests/forge_self_test.py
-DemonsForge/bin/python tests/forge_cycle.py --iterations 1
+DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/forge_tests/smoke_forge_api.py
+DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/forge_tests/forge_self_test.py
+DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/forge_tests/forge_cycle.py --iterations 1
 ```
 
 Long live-API planner/dry-run matrix:
@@ -470,8 +481,8 @@ DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.p
 Optional CPU SDXL quality probe:
 
 ```bash
-FORGE_EMBEDDED_WORKER=0 ./start-forge-api.sh
-FORGE_WORKER_MAX_JOBS=3 ./start-forge-worker.sh
+FORGE_EMBEDDED_WORKER=0 ../EyeOfTerror/Pictorium/Moriana/scripts/start-forge-api.sh
+FORGE_WORKER_MAX_JOBS=3 ../EyeOfTerror/Pictorium/Moriana/scripts/start-forge-worker.sh
 DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.py --cycles 1 --quality-generate
 ```
 
@@ -484,7 +495,7 @@ produced an image.
 Optional SDXL img2img strength sweep:
 
 ```bash
-FORGE_WORKER_MAX_JOBS=3 ./start-forge-worker.sh
+FORGE_WORKER_MAX_JOBS=3 ../EyeOfTerror/Pictorium/Moriana/scripts/start-forge-worker.sh
 DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.py --cycles 1 --edit-sweep
 ```
 
@@ -495,9 +506,9 @@ Quality bench:
 
 ```bash
 DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/benches/quality_bench.py
-FORGE_WORKER_MAX_JOBS=3 ./start-forge-worker.sh
+FORGE_WORKER_MAX_JOBS=3 ../EyeOfTerror/Pictorium/Moriana/scripts/start-forge-worker.sh
 DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/benches/quality_bench.py --run
-FORGE_WORKER_MAX_JOBS=5 ./start-forge-worker.sh
+FORGE_WORKER_MAX_JOBS=5 ../EyeOfTerror/Pictorium/Moriana/scripts/start-forge-worker.sh
 DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/benches/quality_bench.py --run --concept-engines
 ```
 
@@ -513,9 +524,9 @@ txt2img behavior can be compared against SDXL editing workflows.
 Nightly/local cycles:
 
 ```bash
-DemonsForge/bin/python tests/forge_cycle.py --iterations 3 --sleep-seconds 600
-FORGE_WORKER_MAX_JOBS=5 ./start-forge-worker.sh
-DemonsForge/bin/python tests/forge_cycle.py --iterations 1 --quality-run --concept-engines
+DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/forge_tests/forge_cycle.py --iterations 3 --sleep-seconds 600
+FORGE_WORKER_MAX_JOBS=5 ../EyeOfTerror/Pictorium/Moriana/scripts/start-forge-worker.sh
+DemonsForge/bin/python ../EyeOfTerror/Pictorium/Moriana/forge_tests/forge_cycle.py --iterations 1 --quality-run --concept-engines
 ```
 
 The cycle runner executes `forge_self_test.py` and `quality_bench.py`, records

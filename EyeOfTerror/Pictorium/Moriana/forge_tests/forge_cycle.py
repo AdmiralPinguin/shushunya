@@ -12,10 +12,12 @@ from pathlib import Path
 from typing import Any
 
 
-ROOT = Path(__file__).resolve().parents[1]
-PROJECT_ROOT = ROOT.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+ROOT = PROJECT_ROOT / "DemonsForge"
+TESTS_ROOT = PROJECT_ROOT / "EyeOfTerror" / "Pictorium" / "Moriana" / "forge_tests"
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(TESTS_ROOT))
 
 from EyeOfTerror.Pictorium.Moriana.moriana_core.forge_reports import prune_reports
 from forge_test_lock import LOCK_ENV, forge_test_lock
@@ -48,7 +50,7 @@ def cycle_once(index: int, args: argparse.Namespace) -> dict[str, Any]:
     steps = [
         run_command(
             "self_test",
-            [str(PYTHON), "tests/forge_self_test.py"],
+            [str(PYTHON), str(TESTS_ROOT / "forge_self_test.py")],
             timeout_seconds=args.self_test_timeout,
         )
     ]

@@ -8,9 +8,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .. import config
+from EyeOfTerror.Pictorium.Moriana.forge_runtime import config
 from EyeOfTerror.Pictorium.Moriana.moriana_core.asset_catalog import ENGINE_MODELS, find_lora
-from ..schemas import JobSpec
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import JobSpec
 from .base import BaseEngine, EngineError, ProgressCallback
 
 

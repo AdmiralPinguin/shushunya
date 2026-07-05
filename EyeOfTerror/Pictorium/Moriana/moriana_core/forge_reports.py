@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from DemonsForge.forge_service import config
+from EyeOfTerror.Pictorium.Moriana.forge_runtime import config
 
 
 REPORTS_DIR = config.RUNTIME_DIR / "test-reports"

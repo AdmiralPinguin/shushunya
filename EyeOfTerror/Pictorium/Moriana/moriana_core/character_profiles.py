@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from DemonsForge.forge_service import config
+from EyeOfTerror.Pictorium.Moriana.forge_runtime import config
 
 
 CHARACTER_PROFILES_PATH = config.QUALITY_ASSETS_DIR / "character_profiles.json"

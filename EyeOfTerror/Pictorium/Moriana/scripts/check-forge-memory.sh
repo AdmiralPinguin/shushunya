@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
 BASE_URL="${FORGE_BASE_URL:-http://127.0.0.1:8110}"
 QUERY="${1:-DemonsForge CPU GPU memory}"
 
-PYTHON="$PWD/DemonsForge/bin/python"
+PYTHON="$PROJECT_ROOT/DemonsForge/DemonsForge/bin/python"
 QUERY_ENCODED="$("$PYTHON" -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$QUERY")"
 
 request() {

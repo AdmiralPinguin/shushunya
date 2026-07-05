@@ -2,7 +2,8 @@ from pathlib import Path
 import os
 
 
-ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+ROOT = PROJECT_ROOT / "DemonsForge"
 MODELS_DIR = ROOT / "models"
 LORAS_DIR = ROOT / "loras"
 EMBEDDINGS_DIR = ROOT / "embeddings"

@@ -18,11 +18,30 @@
     ]
   },
   "backend": {
-    "name": "DemonsForge",
+    "name": "Pictorium ForgeRuntime",
+    "engine_package": "DemonsForge/forge_service/engines",
+    "scope": "Pictorium-owned API, queue, storage, schemas, project runtime, and scripts around graphical engines",
     "default_url": "http://127.0.0.1:8110",
     "adapter_worker": "ForgeRelay",
     "adapter_port": 7010
   },
+  "brigades": [
+    {
+      "name": "Image",
+      "role": "still image generation, editing, inpaint, upscale, verification, and delivery",
+      "path": "EyeOfTerror/Pictorium/Brigades/Image"
+    },
+    {
+      "name": "Comics",
+      "role": "storyboards, multi-panel pages, lettering, continuity, and long-form visual projects",
+      "path": "EyeOfTerror/Pictorium/Brigades/Comics"
+    },
+    {
+      "name": "Video",
+      "role": "future video backends, GPU scheduling, clips, and image-to-video/text-to-video workflows",
+      "path": "EyeOfTerror/Pictorium/Brigades/Video"
+    }
+  ],
   "workers": [
     {
       "name": "Promptwright",
@@ -32,7 +51,7 @@
         "EyeOfTerror/Pictorium/Moriana/moriana_core/prompt_thinker.py",
         "EyeOfTerror/Pictorium/Moriana/moriana_core/project_planner.py",
         "EyeOfTerror/Pictorium/Moriana/moriana_core/character_profiles.py",
-        "DemonsForge/forge_service/schemas.py"
+        "EyeOfTerror/Pictorium/Moriana/forge_runtime/schemas.py"
       ],
       "expected_artifacts": ["/work/pictorium/image_plan.json"]
     },
@@ -51,10 +70,10 @@
       "name": "ForgeDispatcher",
       "role": "DemonsForge job submitter and monitor",
       "source_modules": [
-        "DemonsForge/forge_service/client.py",
-        "DemonsForge/forge_service/queue.py",
-        "DemonsForge/forge_service/server.py",
-        "DemonsForge/forge_service/projects.py"
+        "EyeOfTerror/Pictorium/Moriana/forge_runtime/client.py",
+        "EyeOfTerror/Pictorium/Moriana/forge_runtime/queue.py",
+        "EyeOfTerror/Pictorium/Moriana/forge_runtime/server.py",
+        "EyeOfTerror/Pictorium/Moriana/forge_runtime/projects.py"
       ],
       "expected_artifacts": ["/work/pictorium/forge_jobs.json"]
     },
@@ -72,7 +91,7 @@
       "name": "ArtifactFinalis",
       "role": "final manifest and delivery packager",
       "source_modules": [
-        "DemonsForge/forge_service/storage.py",
+        "EyeOfTerror/Pictorium/Moriana/forge_runtime/storage.py",
         "EyeOfTerror/Pictorium/Moriana/moriana_core/forge_reports.py",
         "EyeOfTerror/Pictorium/Moriana/benches/project_bench.py"
       ],

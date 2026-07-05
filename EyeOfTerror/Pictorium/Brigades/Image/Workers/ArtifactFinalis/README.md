@@ -4,7 +4,7 @@ Planned Pictorium worker for final package and delivery manifest creation.
 
 Owned modules:
 
-- `DemonsForge/forge_service/storage.py`
+- `EyeOfTerror/Pictorium/Moriana/forge_runtime/storage.py`
 - `EyeOfTerror/Pictorium/Moriana/moriana_core/forge_reports.py`
 - `EyeOfTerror/Pictorium/Moriana/benches/project_bench.py`
 
