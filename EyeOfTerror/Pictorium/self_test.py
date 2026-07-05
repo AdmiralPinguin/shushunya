@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 PICTORIUM = PROJECT_ROOT / "EyeOfTerror" / "Pictorium"
 CONTRACT = PICTORIUM / "Moriana" / "contracts" / "moriana_department.json"
 EXPECTED_WORKERS = {
@@ -15,6 +18,17 @@ EXPECTED_WORKERS = {
     "ImageVerifier",
     "ArtifactFinalis",
 }
+
+try:
+    from DemonsForge.forge_service.schemas import PlanRequest, ProjectPlanRequest
+    from EyeOfTerror.Pictorium.Moriana.moriana_core.prompt_thinker import PlannerThinker
+    from EyeOfTerror.Pictorium.Moriana.moriana_core.promptwright import plan_txt2img
+    from EyeOfTerror.Pictorium.Moriana.moriana_core.project_planner import plan_project
+except ModuleNotFoundError as exc:
+    PlanRequest = ProjectPlanRequest = PlannerThinker = plan_txt2img = plan_project = None  # type: ignore[assignment]
+    OPTIONAL_IMPORT_ERROR = str(exc)
+else:
+    OPTIONAL_IMPORT_ERROR = ""
 
 
 def main() -> int:
@@ -41,6 +55,27 @@ def main() -> int:
             source = PROJECT_ROOT / str(raw_path)
             if not source.exists():
                 raise AssertionError(f"mapped DemonsForge source does not exist: {source}")
+    if OPTIONAL_IMPORT_ERROR:
+        if "pydantic" not in OPTIONAL_IMPORT_ERROR:
+            raise AssertionError(f"unexpected optional import failure: {OPTIONAL_IMPORT_ERROR}")
+    else:
+        spec = plan_txt2img(PlanRequest(request="smoke test portrait image 512x512", use_memory=False, use_thinker=False))
+        if spec.type.value != "txt2img" or spec.width != 512 or spec.height != 512:
+            raise AssertionError(f"Promptwright failed to plan a basic image spec: {spec}")
+        project = plan_project(ProjectPlanRequest(request="comic storyboard smoke test", panels=2, use_memory=False, use_thinker=False))
+        if project.project_type != "comic_storyboard" or len(project.steps) != 2:
+            raise AssertionError(f"ProjectPlanner failed to plan storyboard: {project}")
+        thinker_status = PlannerThinker(enabled=False, base_url="", api_key="", model="", timeout=1).status()
+        if thinker_status.get("ready"):
+            raise AssertionError(f"disabled thinker should not be ready: {thinker_status}")
+    for wrapper in (
+        PROJECT_ROOT / "DemonsForge" / "forge_service" / "planner.py",
+        PROJECT_ROOT / "DemonsForge" / "forge_service" / "thinker.py",
+        PROJECT_ROOT / "DemonsForge" / "forge_service" / "evaluator.py",
+    ):
+        text = wrapper.read_text(encoding="utf-8")
+        if "EyeOfTerror.Pictorium.Moriana.moriana_core" not in text or len(text.splitlines()) > 25:
+            raise AssertionError(f"DemonsForge compatibility wrapper is not clean: {wrapper}")
     print("[ok] Pictorium Moriana scaffold")
     return 0
 

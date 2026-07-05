@@ -2,10 +2,11 @@
 
 Planned Pictorium worker for image intent parsing and prompt/job-spec planning.
 
-Initial source material:
+Owned modules:
 
-- `DemonsForge/forge_service/planner.py`
-- `DemonsForge/forge_service/thinker.py`
+- `EyeOfTerror/Pictorium/Moriana/moriana_core/promptwright.py`
+- `EyeOfTerror/Pictorium/Moriana/moriana_core/prompt_thinker.py`
+- `EyeOfTerror/Pictorium/Moriana/moriana_core/project_planner.py`
 - `DemonsForge/forge_service/schemas.py`
 
 Expected output:

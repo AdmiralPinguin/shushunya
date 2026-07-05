@@ -28,8 +28,9 @@
       "name": "Promptwright",
       "role": "image prompt and job-spec planner",
       "source_modules": [
-        "DemonsForge/forge_service/planner.py",
-        "DemonsForge/forge_service/thinker.py",
+        "EyeOfTerror/Pictorium/Moriana/moriana_core/promptwright.py",
+        "EyeOfTerror/Pictorium/Moriana/moriana_core/prompt_thinker.py",
+        "EyeOfTerror/Pictorium/Moriana/moriana_core/project_planner.py",
         "DemonsForge/forge_service/schemas.py"
       ],
       "expected_artifacts": ["/work/pictorium/image_plan.json"]
@@ -60,7 +61,7 @@
       "name": "ImageVerifier",
       "role": "generated artifact verifier and visual risk reporter",
       "source_modules": [
-        "DemonsForge/forge_service/evaluator.py",
+        "EyeOfTerror/Pictorium/Moriana/moriana_core/image_evaluator.py",
         "DemonsForge/tests/quality_bench.py"
       ],
       "expected_artifacts": ["/work/pictorium/image_verification.json"]

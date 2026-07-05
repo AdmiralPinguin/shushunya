@@ -41,3 +41,8 @@ worker exists and has tests. The desired end state is:
 - Pictorium owns visual intent, policy, verification, and final handoff.
 - DemonsForge owns runtime execution, queueing, engine adapters, and raw
   artifact storage.
+
+The first cleanup pass moved planner, thinker, project-planning, and
+deterministic image-evaluator logic into `Pictorium/Moriana/moriana_core`.
+`DemonsForge/forge_service` keeps compatibility wrappers so existing API
+endpoints and tests keep working during the migration.
