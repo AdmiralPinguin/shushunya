@@ -51,8 +51,8 @@ def model_env_defaults() -> dict[str, str]:
     return {
         "EYE_MODEL_BASE_URL": os.environ.get("EYE_MODEL_BASE_URL", os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8080/v1")),
         "EYE_MODEL_NAME": os.environ.get("EYE_MODEL_NAME", os.environ.get("LLM_MODEL", os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"))),
-        "EYE_MODEL_TIMEOUT_SEC": os.environ.get("EYE_MODEL_TIMEOUT_SEC", "45"),
-        "EYE_MODEL_MAX_TOKENS": os.environ.get("EYE_MODEL_MAX_TOKENS", "512"),
+        "EYE_MODEL_TIMEOUT_SEC": os.environ.get("EYE_MODEL_TIMEOUT_SEC", "180"),
+        "EYE_MODEL_MAX_TOKENS": os.environ.get("EYE_MODEL_MAX_TOKENS", "1024"),
     }
 
 

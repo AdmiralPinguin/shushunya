@@ -497,6 +497,92 @@ def comprehensive_depth_findings(
     return findings, metrics
 
 
+def mode_gate_thresholds(output_mode: str) -> dict[str, Any]:
+    defaults = {
+        "min_sources": 4,
+        "min_confirmed_claims": 3,
+        "min_evidence_coverage_percent": 60,
+        "max_unresolved_contradictions": 2,
+        "min_draft_chars": 3500,
+    }
+    by_mode = {
+        "short_answer": {"min_sources": 1, "min_confirmed_claims": 1, "min_evidence_coverage_percent": 50, "max_unresolved_contradictions": 1, "min_draft_chars": 400},
+        "research_report": defaults,
+        "comparative_review": {"min_sources": 4, "min_confirmed_claims": 4, "min_evidence_coverage_percent": 65, "max_unresolved_contradictions": 2, "min_draft_chars": 4500},
+        "investigative_report": {"min_sources": 5, "min_confirmed_claims": 4, "min_evidence_coverage_percent": 70, "max_unresolved_contradictions": 4, "min_draft_chars": 5500},
+        "event_reconstruction": {"min_sources": 4, "min_confirmed_claims": 4, "min_evidence_coverage_percent": 70, "max_unresolved_contradictions": 3, "min_draft_chars": 7000},
+        "longform_article": {"min_sources": 6, "min_confirmed_claims": 6, "min_evidence_coverage_percent": 70, "max_unresolved_contradictions": 3, "min_draft_chars": 10000},
+        "book_manuscript": {"min_sources": 6, "min_confirmed_claims": 6, "min_evidence_coverage_percent": 75, "max_unresolved_contradictions": 4, "min_draft_chars": 12000},
+        "book_manuscript_with_timeline": {"min_sources": 6, "min_confirmed_claims": 6, "min_evidence_coverage_percent": 75, "max_unresolved_contradictions": 4, "min_draft_chars": 12000},
+    }
+    thresholds = dict(defaults)
+    thresholds.update(by_mode.get(output_mode, {}))
+    return thresholds
+
+
+def claim_has_evidence(claim: dict[str, Any]) -> bool:
+    for field_name in ("source_refs", "evidence_refs"):
+        values = claim.get(field_name)
+        if isinstance(values, list) and any(str(item).strip() for item in values):
+            return True
+    return False
+
+
+def mode_quality_gates(
+    output_mode: str,
+    research_corpus: dict[str, Any],
+    structure_map: dict[str, Any],
+    reconstruction: str,
+    synthesis_plan: dict[str, Any],
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    if not synthesis_plan:
+        return [], {"applies": False, "passed": True, "output_mode": output_mode}
+    claims = [item for item in research_corpus.get("claims", []) if isinstance(item, dict)]
+    confirmed_claims = [claim for claim in claims if claim_has_evidence(claim)]
+    source_count = len(research_corpus.get("sources", []) if isinstance(research_corpus.get("sources"), list) else [])
+    evidence_coverage_percent = int(round((len(confirmed_claims) / max(1, len(claims))) * 100))
+    corpus_contradictions = research_corpus.get("contradictions") if isinstance(research_corpus.get("contradictions"), list) else []
+    structure_contradictions = structure_map.get("contradictions") if isinstance(structure_map.get("contradictions"), list) else []
+    unresolved_contradictions = [
+        item
+        for item in [*corpus_contradictions, *structure_contradictions]
+        if isinstance(item, dict) and str(item.get("status") or "unresolved") != "resolved"
+    ]
+    thresholds = mode_gate_thresholds(output_mode)
+    checks = {
+        "min_sources": source_count >= thresholds["min_sources"],
+        "min_confirmed_claims": len(confirmed_claims) >= thresholds["min_confirmed_claims"],
+        "evidence_coverage_percent": evidence_coverage_percent >= thresholds["min_evidence_coverage_percent"],
+        "unresolved_contradiction_count": len(unresolved_contradictions) <= thresholds["max_unresolved_contradictions"],
+        "draft_length_by_mode": len(reconstruction) >= thresholds["min_draft_chars"],
+        "critic_approval_required": True,
+    }
+    findings: list[dict[str, str]] = []
+    if not checks["min_sources"]:
+        findings.append({"severity": "blocker", "message": f"Quality gate failed for {output_mode}: sources {source_count}/{thresholds['min_sources']}."})
+    if not checks["min_confirmed_claims"]:
+        findings.append({"severity": "blocker", "message": f"Quality gate failed for {output_mode}: confirmed claims {len(confirmed_claims)}/{thresholds['min_confirmed_claims']}."})
+    if not checks["evidence_coverage_percent"]:
+        findings.append({"severity": "blocker", "message": f"Quality gate failed for {output_mode}: evidence coverage {evidence_coverage_percent}%/{thresholds['min_evidence_coverage_percent']}%."})
+    if not checks["unresolved_contradiction_count"]:
+        findings.append({"severity": "blocker", "message": f"Quality gate failed for {output_mode}: unresolved contradictions {len(unresolved_contradictions)}/{thresholds['max_unresolved_contradictions']}."})
+    if not checks["draft_length_by_mode"]:
+        findings.append({"severity": "blocker", "message": f"Quality gate failed for {output_mode}: draft length {len(reconstruction)}/{thresholds['min_draft_chars']} chars."})
+    return findings, {
+        "applies": True,
+        "passed": not findings,
+        "output_mode": output_mode,
+        "thresholds": thresholds,
+        "checks": checks,
+        "source_count": source_count,
+        "claim_count": len(claims),
+        "confirmed_claim_count": len(confirmed_claims),
+        "evidence_coverage_percent": evidence_coverage_percent,
+        "unresolved_contradiction_count": len(unresolved_contradictions),
+        "draft_chars": len(reconstruction),
+    }
+
+
 def text_contains_markers(text: str, markers: list[str]) -> bool:
     lowered = text.lower()
     return all(marker.lower() in lowered for marker in markers)
@@ -707,6 +793,7 @@ def model_review_payload(
     findings: list[dict[str, str]],
     warnings: list[dict[str, str]],
     comprehensive_metrics: dict[str, Any],
+    quality_gates: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "task_id": request.get("task_id"),
@@ -721,6 +808,7 @@ def model_review_payload(
             "timeline_count": len(timeline.get("timeline", [])) if isinstance(timeline.get("timeline"), list) else 0,
             "draft_chars": len(reconstruction),
             "comprehensive_depth": comprehensive_metrics,
+            "quality_gates": quality_gates,
         },
         "source_map": source_map,
         "direct_event_notes": notes,
@@ -788,6 +876,7 @@ def review_artifacts(
     intent = research_intent_from_request(request)
     output_mode = str(intent.get("output_mode") or "")
     needs_timeline = bool(intent.get("needs_timeline"))
+    timeline_active = needs_timeline or output_mode == "event_reconstruction" or not intent
     has_synthesis_plan = artifact_exists(workspace_root, synthesis_plan_path)
     contract = request.get("contract") if isinstance(request.get("contract"), dict) else {}
     required_artifacts = contract.get("required_artifacts") if isinstance(contract.get("required_artifacts"), list) else []
@@ -804,7 +893,7 @@ def review_artifacts(
     ]
     if has_synthesis_plan or contract_requires_synthesis:
         required_paths.extend([research_corpus_path, synthesis_plan_path])
-    if needs_timeline or artifact_exists(workspace_root, timeline_path):
+    if timeline_active:
         required_paths.append(timeline_path)
     if artifact_exists(workspace_root, structure_path) or contract_requires_structure:
         required_paths.append(structure_path)
@@ -844,7 +933,7 @@ def review_artifacts(
     findings: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
     note_event_ids = set(note_by_event_id)
-    if needs_timeline or timeline_event_ids:
+    if timeline_active:
         for event_id in sorted(note_event_ids - timeline_event_ids):
             findings.append({"severity": "blocker", "message": f"Missing required direct event in timeline: {event_id}"})
         for event_id in sorted(timeline_event_ids - note_event_ids):
@@ -852,7 +941,7 @@ def review_artifacts(
     for event_id, note in sorted(note_by_event_id.items()):
         if not isinstance(note, dict) or not note.get("evidence_snapshots"):
             findings.append({"severity": "blocker", "message": f"Required event lacks fetched source evidence: {event_id}"})
-    required_events = required_review_events(source_map, notes, timeline) if needs_timeline or output_mode == "event_reconstruction" or not intent else []
+    required_events = required_review_events(source_map, notes, timeline) if timeline_active else []
     for event in required_events:
         event_id = str(event.get("event_id") or "")
         label = required_event_label(event)
@@ -897,10 +986,12 @@ def review_artifacts(
                 findings.append({"severity": "blocker", "message": f"Book output missing required artifact: {path}"})
     comprehensive_findings, comprehensive_metrics = comprehensive_depth_findings(source_map, notes, reconstruction, required_events)
     findings.extend(comprehensive_findings)
+    gate_findings, quality_gates = mode_quality_gates(output_mode, research_corpus, structure_map, reconstruction, synthesis_plan)
+    findings.extend(gate_findings)
     model_guidance = request_required_scriptorium_guidance(
         "ReductorVerifier",
         request,
-        model_review_payload(request, source_map, notes, timeline, reconstruction, coverage, findings, warnings, comprehensive_metrics),
+        model_review_payload(request, source_map, notes, timeline, reconstruction, coverage, findings, warnings, comprehensive_metrics, quality_gates),
         (
             "You are an independent Scriptorium critic. Check whether the draft actually satisfies the user's "
             "research/writing task, whether chronology is complete, whether unsupported invention exists, and "
@@ -961,6 +1052,7 @@ def review_artifacts(
             "claim_count": len(research_corpus.get("claims", []) if isinstance(research_corpus.get("claims"), list) else []),
             "evidence_trace_count": len(synthesis_plan.get("evidence_trace", {}).get("claim_refs", []) if isinstance(synthesis_plan.get("evidence_trace"), dict) else []),
             "structure_sections": len(structure_map.get("topic_structure", []) if isinstance(structure_map.get("topic_structure"), list) else []),
+            "quality_gates": quality_gates,
         },
     }
 

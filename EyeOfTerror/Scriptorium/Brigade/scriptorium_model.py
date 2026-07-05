@@ -18,18 +18,18 @@ from EyeOfTerror.model_brain import request_model_decision  # noqa: E402
 def _runtime_defaults(role: str) -> dict[str, str]:
     if role == "ScriptoriumDaemon":
         return {
-            "EYE_MODEL_TIMEOUT_SEC": "120",
+            "EYE_MODEL_TIMEOUT_SEC": "240",
             "EYE_MODEL_MAX_TOKENS": "4096",
             "EYE_MODEL_MAX_CONTEXT_CHARS": "60000",
         }
     if role == "ReductorVerifier":
         return {
-            "EYE_MODEL_TIMEOUT_SEC": "90",
+            "EYE_MODEL_TIMEOUT_SEC": "180",
             "EYE_MODEL_MAX_TOKENS": "2048",
             "EYE_MODEL_MAX_CONTEXT_CHARS": "60000",
         }
     return {
-        "EYE_MODEL_TIMEOUT_SEC": "45",
+        "EYE_MODEL_TIMEOUT_SEC": "180",
         "EYE_MODEL_MAX_TOKENS": "1024",
         "EYE_MODEL_MAX_CONTEXT_CHARS": "30000",
     }

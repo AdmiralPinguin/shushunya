@@ -298,6 +298,72 @@ def main() -> int:
         draft_index = next(index for index, step in enumerate(revision_steps) if step.get("step_id") == "draft_reconstruction")
         if not source_acquisition_index < source_rendering_index < timeline_index < draft_index:
             raise AssertionError(f"revision dependencies are not ordered downstream: {report}")
+        qa_request = json.loads(json.dumps(request))
+        qa_request["quality_expectations"]["research_intent"] = {
+            "intent": "qa_answer",
+            "output_mode": "short_answer",
+            "required_depth": "standard",
+            "source_policy": "answer_with_citations",
+            "needs_timeline": False,
+            "needs_chapters": False,
+        }
+        write_json(
+            base / "source_map.json",
+            {
+                "discovery_status": "research_ready",
+                "sources": [
+                    {"title": "Primary", "source_class": "official_primary_narrative"},
+                    {"title": "Secondary", "source_class": "secondary_wiki"},
+                ],
+                "source_coverage": {"ready_for_extraction": True},
+            },
+        )
+        write_json(base / "direct_event_notes.json", {"events": [], "gaps": []})
+        write_json(
+            base / "research_corpus.json",
+            {
+                "sources": [{"title": "Primary"}],
+                "claims": [{"claim_id": "claim_1", "claim": "Supported answer.", "source_refs": ["Primary"]}],
+                "evidence_excerpts": [{"quote_id": "evidence_1", "source_ref": "Primary", "excerpt": "Supported answer."}],
+                "gaps": [],
+            },
+        )
+        write_json(
+            base / "synthesis_plan.json",
+            {
+                "output_mode": "short_answer",
+                "evidence_trace": {"claim_refs": ["claim_1"]},
+                "sections": [{"section_id": "answer", "requires_evidence": True, "required_claim_refs": ["claim_1"]}],
+                "unsupported_sections": [],
+            },
+        )
+        write(
+            base / "reconstruction_ru.md",
+            ("Supported answer. Evidence trace: claim_1. " * 20) + "\n## Что еще надо проверить\n- none\n",
+        )
+        write(base / "coverage_report.md", "## Evidence Trace\n- claim_1\n## Unsupported Sections\n- none\n## Gaps\n- none\n")
+        result = run(qa_request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"ReductorVerifier failed on QA quality gates: {result}")
+        report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
+        gates = report.get("metrics", {}).get("quality_gates", {})
+        if not report.get("approved") or gates.get("passed") is not True:
+            raise AssertionError(f"supported QA should pass quality gates: {report}")
+        write_json(
+            base / "research_corpus.json",
+            {
+                "sources": [{"title": "Primary"}],
+                "claims": [{"claim_id": "claim_1", "claim": "Unsupported answer.", "source_refs": []}],
+                "evidence_excerpts": [],
+                "gaps": [],
+            },
+        )
+        result = run(qa_request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"ReductorVerifier failed on QA failed gates: {result}")
+        report = json.loads((base / "critic_report.json").read_text(encoding="utf-8"))
+        if report.get("approved") or report.get("metrics", {}).get("quality_gates", {}).get("passed") is not False:
+            raise AssertionError(f"unsupported QA should fail quality gates: {report}")
         write_json(
             base / "source_map.json",
             {

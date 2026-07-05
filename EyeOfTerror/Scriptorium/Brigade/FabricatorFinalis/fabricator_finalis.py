@@ -370,6 +370,8 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
     source_coverage_ready = critic_metrics.get("source_coverage_ready")
     comprehensive_depth = critic_metrics.get("comprehensive_depth") if isinstance(critic_metrics.get("comprehensive_depth"), dict) else {}
     comprehensive_depth_ready = comprehensive_depth.get("passed") if comprehensive_depth.get("mode") == "comprehensive" else True
+    quality_gates = critic_metrics.get("quality_gates") if isinstance(critic_metrics.get("quality_gates"), dict) else {}
+    quality_gates_ready = quality_gates.get("passed") if quality_gates.get("applies") else True
     readiness_blockers: list[dict[str, str]] = []
     if source_coverage_ready is False:
         readiness_blockers.append({"severity": "blocker", "message": "Final package source coverage is not extraction-ready."})
@@ -378,6 +380,8 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         readiness_blockers.append({"severity": "blocker", "message": f"Final package contains invalid JSON artifacts: {joined}."})
     if comprehensive_depth_ready is False:
         readiness_blockers.append({"severity": "blocker", "message": "Final package does not satisfy comprehensive depth requirements."})
+    if quality_gates_ready is False:
+        readiness_blockers.append({"severity": "blocker", "message": "Final package does not satisfy output-mode quality gates."})
     if event_review.get("required_events_covered") is False:
         missing_events = ", ".join(event_review.get("missing_required_events", [])[:8])
         readiness_blockers.append({"severity": "blocker", "message": f"Final package is missing required direct events in timeline: {missing_events}."})
@@ -396,6 +400,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "quality_expectations_ok": not quality_blockers,
         "source_coverage_ready": source_coverage_ready,
         "comprehensive_depth_ready": comprehensive_depth_ready,
+        "quality_gates_ready": quality_gates_ready,
         "required_events_covered": event_review.get("required_events_covered"),
         "required_event_evidence_covered": event_review.get("required_event_evidence_covered"),
         "corpus_requirements_satisfied": not bool(corpus_requirements.get("required")),
@@ -441,6 +446,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "package_file_errors": package_file_errors,
         "critic_status": critic.get("status", "missing"),
         "critic_metrics": critic_metrics,
+        "quality_gates": quality_gates,
         "event_review": event_review,
         "corpus_diagnostics": corpus_diagnostics,
         "corpus_requirements": corpus_requirements,

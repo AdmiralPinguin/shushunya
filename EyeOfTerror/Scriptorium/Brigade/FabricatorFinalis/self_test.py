@@ -107,6 +107,43 @@ def main() -> int:
             raise AssertionError(f"ready manifest should summarize required event coverage: {manifest}")
         if manifest.get("corpus_diagnostics", {}).get("non_matching_count") != 36:
             raise AssertionError(f"ready manifest should preserve corpus diagnostics: {manifest}")
+        write(
+            base / "critic_report.json",
+            json.dumps(
+                {
+                    "approved": True,
+                    "status": "passed_with_warnings",
+                    "required_direct_events": ["moon_parley", "kharn_burns_shelters"],
+                    "metrics": {
+                        "source_coverage_ready": True,
+                        "quality_gates": {
+                            "applies": True,
+                            "passed": False,
+                            "output_mode": "research_report",
+                        },
+                    },
+                    "revision_focus": {"present": True},
+                }
+            ),
+        )
+        result = run(request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"FabricatorFinalis failed on quality gate blocker: {result}")
+        manifest = json.loads((base / "final_manifest.json").read_text(encoding="utf-8"))
+        if manifest.get("status") != "blocked" or manifest.get("readiness_checks", {}).get("quality_gates_ready") is not False:
+            raise AssertionError(f"failed quality gates should block final readiness: {manifest}")
+        write(
+            base / "critic_report.json",
+            json.dumps(
+                {
+                    "approved": True,
+                    "status": "passed_with_warnings",
+                    "required_direct_events": ["moon_parley", "kharn_burns_shelters"],
+                    "metrics": {"generic_evidence_leads": 1, "low_confidence_events": 1, "source_coverage_ready": True},
+                    "revision_focus": {"present": True, "coverage_items": ["Source step: critic_review"]},
+                }
+            ),
+        )
         write(base / "source_map.json", "{")
         result = run(request, root)
         if not result.get("ok"):

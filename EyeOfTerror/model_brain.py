@@ -41,8 +41,8 @@ def model_settings() -> dict[str, Any]:
         "enabled": True,
         "base_url": base_url,
         "model": os.environ.get("EYE_MODEL_NAME") or os.environ.get("ARCHIVE_DEFAULT_MODEL") or os.environ.get("LLM_MODEL") or DEFAULT_MODEL,
-        "timeout_sec": _float_env("EYE_MODEL_TIMEOUT_SEC", 45.0, 1.0, 600.0),
-        "max_tokens": _int_env("EYE_MODEL_MAX_TOKENS", 512, 32, 4096),
+        "timeout_sec": _float_env("EYE_MODEL_TIMEOUT_SEC", 180.0, 1.0, 600.0),
+        "max_tokens": _int_env("EYE_MODEL_MAX_TOKENS", 1024, 32, 4096),
         "max_context_chars": _int_env("EYE_MODEL_MAX_CONTEXT_CHARS", 12000, 1000, 120000),
     }
 
