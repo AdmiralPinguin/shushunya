@@ -18,6 +18,16 @@ def fake_guidance(role: str, payload: dict, instructions: str) -> dict:
         raise AssertionError(f"unexpected role: {role}")
     if not payload.get("timeline") and not payload.get("synthesis_plan"):
         raise AssertionError(f"writer model payload should include timeline or synthesis_plan: {payload}")
+    output_mode = payload.get("synthesis_plan", {}).get("output_mode")
+    chapter_drafts = {}
+    if output_mode == "book_manuscript":
+        chapter_drafts = {
+            "chapter_01": (
+                "# Глава 1\n\n"
+                "Модельная глава разворачивает первое подтвержденное утверждение, не выходя за пределы корпуса.\n\n"
+                "> Evidence trace: claim_1 | confidence=medium | sources=Primary\n"
+            )
+        }
     return {
         "ok": True,
         "status": "answered",
@@ -26,6 +36,7 @@ def fake_guidance(role: str, payload: dict, instructions: str) -> dict:
             {
                 "status": "draft_augmented",
                 "appendix_markdown": "Модельная редактура сохранила источниковые ограничения и усилила связность черновика.",
+                "chapter_drafts": chapter_drafts,
                 "warnings": [],
             },
             ensure_ascii=False,
@@ -310,13 +321,15 @@ def main() -> int:
         chapter_3 = (book_base / "chapters/chapter_03.md").read_text(encoding="utf-8")
         if chapter_1 == chapter_2 or "Evidence trace: claim_1" not in chapter_1 or "Evidence trace: claim_2" not in chapter_2:
             raise AssertionError("book chapters should be chapter-specific, not duplicated whole-draft copies")
+        if "Модельная глава" not in chapter_1:
+            raise AssertionError(f"grounded model chapter draft should be accepted: {chapter_1}")
         if "не развернута" not in chapter_3:
             raise AssertionError("chapter without evidence should be explicitly blocked instead of invented")
         continuity = json.loads((book_base / "continuity_report.json").read_text(encoding="utf-8"))
         if continuity.get("status") != "needs_revision" or "chapter_03" not in continuity.get("missing_evidence_trace_chapters", []):
             raise AssertionError(f"continuity report should block ungrounded chapters: {continuity}")
         editor = json.loads((book_base / "editor_report.json").read_text(encoding="utf-8"))
-        if editor.get("status") != "completed" or editor.get("grounded_chapter_count") != 2:
+        if editor.get("status") != "completed" or editor.get("grounded_chapter_count") != 2 or editor.get("model_drafted_chapter_count") != 1:
             raise AssertionError(f"editor report should summarize grounded chapters: {editor}")
         fb2 = (book_base / "manuscript.fb2").read_text(encoding="utf-8")
         if fb2.count("<section>") != 3:

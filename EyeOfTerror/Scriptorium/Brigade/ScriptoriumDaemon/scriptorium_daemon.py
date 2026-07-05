@@ -207,6 +207,43 @@ def evidence_line_for_claim(claim: dict[str, Any]) -> str:
     return f"Evidence trace: {claim.get('claim_id', '')} | confidence={confidence} | sources={refs_text}"
 
 
+def model_chapter_drafts(decision: dict[str, Any]) -> dict[str, str]:
+    parsed = parsed_model_content(decision)
+    raw = parsed.get("chapter_drafts") or parsed.get("chapters") or {}
+    drafts: dict[str, str] = {}
+    if isinstance(raw, dict):
+        for chapter_id, markdown in raw.items():
+            text = str(markdown or "").strip()
+            if chapter_id and text:
+                drafts[str(chapter_id)] = text
+    elif isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            chapter_id = str(item.get("chapter_id") or "").strip()
+            markdown = str(item.get("markdown") or item.get("draft_markdown") or item.get("content") or "").strip()
+            if chapter_id and markdown:
+                drafts[chapter_id] = markdown
+    return drafts
+
+
+def required_evidence_markers(claims: list[dict[str, Any]]) -> list[str]:
+    return [
+        f"Evidence trace: {claim.get('claim_id')}"
+        for claim in claims
+        if str(claim.get("claim_id") or "").strip()
+    ]
+
+
+def model_chapter_is_grounded(markdown: str, claims: list[dict[str, Any]]) -> tuple[bool, str]:
+    if not claims:
+        return False, "chapter has no grounded claims"
+    missing = [marker for marker in required_evidence_markers(claims) if marker not in markdown]
+    if missing:
+        return False, f"model draft missed evidence markers: {', '.join(missing)}"
+    return True, ""
+
+
 def section_claims(section: dict[str, Any], claim_index: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     refs = section.get("required_claim_refs") if isinstance(section.get("required_claim_refs"), list) else []
     return [claim_index[str(ref)] for ref in refs if str(ref) in claim_index]
@@ -337,11 +374,16 @@ def build_chapter_markdown(
     claim_index: dict[str, dict[str, Any]],
     synthesis_plan: dict[str, Any],
     research_corpus: dict[str, Any],
+    model_drafts: dict[str, str] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     chapter_id = str(chapter.get("chapter_id") or f"chapter_{index:02d}")
     title = str(chapter.get("title") or f"Глава {index}")
     claim_refs = chapter_required_claim_refs(chapter, synthesis_plan)
     claims = [claim_index[claim_ref] for claim_ref in claim_refs if claim_ref in claim_index]
+    model_drafts = model_drafts or {}
+    model_draft = str(model_drafts.get(chapter_id) or "").strip()
+    model_draft_used = False
+    model_draft_rejected = ""
     lines = [
         f"# {title}",
         "",
@@ -350,7 +392,19 @@ def build_chapter_markdown(
         "",
     ]
     missing_claim_refs = [claim_ref for claim_ref in claim_refs if claim_ref not in claim_index]
-    if claims:
+    if model_draft:
+        model_draft_ok, model_draft_rejected = model_chapter_is_grounded(model_draft, claims)
+        if model_draft_ok:
+            lines = []
+            if not model_draft.startswith("#"):
+                lines.extend([f"# {title}", ""])
+            lines.append(model_draft)
+            if not model_draft.endswith("\n"):
+                lines.append("")
+            model_draft_used = True
+        else:
+            lines.extend(["Модельный черновик главы отклонён: " + model_draft_rejected, ""])
+    if claims and not model_draft_used:
         for claim in claims:
             claim_text = str(claim.get("claim") or "").strip()
             if claim_text:
@@ -375,6 +429,8 @@ def build_chapter_markdown(
         "missing_claim_refs": missing_claim_refs,
         "char_count": len("\n".join(lines)),
         "has_evidence_trace": bool(claims),
+        "model_draft_used": model_draft_used,
+        "model_draft_rejected": model_draft_rejected,
     }
     return "\n".join(lines).rstrip() + "\n", record
 
@@ -427,10 +483,17 @@ def build_editor_report(chapter_records: list[dict[str, Any]], synthesis_plan: d
             "unsupported sections blocked",
             "evidence trace retained",
             "chapter minimum substance checked",
+            "model chapter drafts accepted only with required evidence trace",
         ],
         "unsupported_sections": unsupported,
         "short_chapters": short_chapters,
         "grounded_chapter_count": sum(1 for record in chapter_records if record.get("has_evidence_trace")),
+        "model_drafted_chapter_count": sum(1 for record in chapter_records if record.get("model_draft_used")),
+        "rejected_model_drafts": {
+            str(record.get("chapter_id") or ""): record.get("model_draft_rejected")
+            for record in chapter_records
+            if record.get("model_draft_rejected")
+        },
         "chapter_count": len(chapter_records),
     }
 
@@ -442,6 +505,7 @@ def write_book_artifacts(
     draft: str,
     synthesis_plan: dict[str, Any],
     research_corpus: dict[str, Any] | None = None,
+    model_guidance: dict[str, Any] | None = None,
 ) -> list[str]:
     paths = [str(item) for item in expected_artifacts]
     chapter_paths = [path for path in paths if "/chapters/" in path and path.endswith(".md")]
@@ -450,13 +514,14 @@ def write_book_artifacts(
     artifacts: list[str] = []
     research_corpus = research_corpus or {}
     claim_index = claims_by_id(research_corpus)
+    model_drafts = model_chapter_drafts(model_guidance or {})
     chapter_plan_path = sibling_artifact(reconstruction_path, "chapter_plan.json")
     chapter_plan = load_optional_json_artifact(workspace_root, chapter_plan_path)
     chapters = chapter_plan.get("chapters") if isinstance(chapter_plan.get("chapters"), list) else []
     chapter_records: list[dict[str, Any]] = []
     for index, chapter_path in enumerate(chapter_paths, start=1):
         chapter = chapters[index - 1] if index - 1 < len(chapters) and isinstance(chapters[index - 1], dict) else {}
-        content, record = build_chapter_markdown(chapter, index, claim_index, synthesis_plan, research_corpus)
+        content, record = build_chapter_markdown(chapter, index, claim_index, synthesis_plan, research_corpus, model_drafts)
         sandbox_path(workspace_root, chapter_path).parent.mkdir(parents=True, exist_ok=True)
         sandbox_path(workspace_root, chapter_path).write_text(content, encoding="utf-8")
         record["path"] = chapter_path
@@ -861,7 +926,7 @@ def run(
         host_path.write_text(content, encoding="utf-8")
     extra_artifacts = []
     if output_mode in {"book_manuscript", "book_manuscript_with_timeline"}:
-        extra_artifacts = write_book_artifacts(workspace_root, expected_artifacts, reconstruction_path, reconstruction, synthesis_plan, research_corpus)
+        extra_artifacts = write_book_artifacts(workspace_root, expected_artifacts, reconstruction_path, reconstruction, synthesis_plan, research_corpus, guidance)
     guidance_path = write_model_guidance_artifact(workspace_root, reconstruction_path, guidance)
     return {
         "ok": True,
