@@ -448,6 +448,79 @@ def main() -> int:
         short_manifest = json.loads((short_base / "final_manifest.json").read_text(encoding="utf-8"))
         if short_manifest.get("status") != "ready" or "/work/python/timeline.json" in json.dumps(short_manifest):
             raise AssertionError(f"short answer final package should not require timeline: {short_manifest}")
+        book_base = root / "bookfinal"
+        book_request = {
+            "task_id": "test-book:finalize",
+            "step": {"step_id": "finalize", "expected_artifacts": ["/work/bookfinal/final_manifest.json"]},
+            "quality_expectations": {
+                "research_intent": {
+                    "intent": "book",
+                    "output_mode": "book_manuscript",
+                    "required_depth": "comprehensive",
+                    "source_policy": "broad_sources_with_gaps_disclosed",
+                    "needs_timeline": False,
+                    "needs_chapters": True,
+                },
+                "step_quality": {
+                    "step_id": "finalize",
+                    "worker": "FabricatorFinalis",
+                    "required_inputs": ["/work/bookfinal/critic_report.json"],
+                    "expected_artifacts": ["/work/bookfinal/final_manifest.json"],
+                    "checks": ["book final package exposes fb2 deliverable"],
+                    "blockers": ["missing expected artifact"],
+                    "revision_targets": ["finalize"],
+                },
+            },
+        }
+        for filename, payload in {
+            "corpus_index.json": {"approved": True},
+            "source_map.json": {"source_coverage": {"ready_for_extraction": True}, "sources": [{"title": "Source"}]},
+            "source_snapshots.json": {"snapshots": []},
+            "direct_event_notes.json": {"events": []},
+            "research_corpus.json": {"sources": [{"title": "Source"}], "claims": [{"claim_id": "claim_1", "source_refs": ["Source"]}], "gaps": []},
+            "structure_map.json": {"topic_structure": []},
+            "synthesis_plan.json": {"output_mode": "book_manuscript", "evidence_trace": {"claim_refs": ["claim_1"]}},
+            "book_outline.json": {"chapters": [{"chapter_id": "chapter_01", "required_claim_refs": ["claim_1"]}]},
+            "chapter_plan.json": {"chapters": [{"chapter_id": "chapter_01", "required_claim_refs": ["claim_1"]}]},
+            "continuity_report.json": {"status": "completed"},
+            "editor_report.json": {"status": "completed"},
+            "critic_report.json": {
+                "approved": True,
+                "status": "passed",
+                "metrics": {
+                    "source_coverage_ready": True,
+                    "quality_gates": {"applies": True, "passed": True, "output_mode": "book_manuscript"},
+                },
+            },
+        }.items():
+            write(book_base / filename, json.dumps(payload))
+        write(book_base / "reconstruction_ru.md", "# Draft\n")
+        write(book_base / "coverage_report.md", "# Coverage\n")
+        write(book_base / "chapters/chapter_01.md", "# Глава 1\n\nEvidence trace: claim_1.\n")
+        write(book_base / "manuscript_ru.md", "# Глава 1\n\nEvidence trace: claim_1.\n")
+        write(book_base / "manuscript.fb2", "<FictionBook><body><section><p>Evidence trace: claim_1.</p></section></body></FictionBook>\n")
+        result = run(book_request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"FabricatorFinalis failed on book final package: {result}")
+        book_manifest = json.loads((book_base / "final_manifest.json").read_text(encoding="utf-8"))
+        fb2_file = next((item for item in book_manifest.get("files", []) if item.get("path") == "/work/bookfinal/manuscript.fb2"), {})
+        if (
+            book_manifest.get("status") != "ready"
+            or book_manifest.get("deliverable") != "/work/bookfinal/manuscript.fb2"
+            or book_manifest.get("draft_deliverable") != "/work/bookfinal/reconstruction_ru.md"
+            or fb2_file.get("kind") != "fb2"
+            or book_manifest.get("readiness_checks", {}).get("book_continuity_ready") is not True
+            or book_manifest.get("readiness_checks", {}).get("book_editor_ready") is not True
+        ):
+            raise AssertionError(f"book final manifest should expose mode-specific fb2 deliverable: {book_manifest}")
+        write(book_base / "continuity_report.json", json.dumps({"status": "needs_revision"}))
+        result = run(book_request, root)
+        if not result.get("ok"):
+            raise AssertionError(f"FabricatorFinalis failed on bad book continuity: {result}")
+        book_manifest = json.loads((book_base / "final_manifest.json").read_text(encoding="utf-8"))
+        if book_manifest.get("status") != "blocked" or book_manifest.get("readiness_checks", {}).get("book_continuity_ready") is not False:
+            raise AssertionError(f"book continuity should independently block final readiness: {book_manifest}")
+        write(book_base / "continuity_report.json", json.dumps({"status": "completed"}))
         (base / "timeline.json").unlink()
         write(
             base / "critic_report.json",

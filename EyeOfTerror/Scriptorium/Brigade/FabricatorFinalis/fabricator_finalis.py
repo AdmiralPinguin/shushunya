@@ -80,6 +80,19 @@ def sibling_artifact(output_path: str, filename: str) -> str:
     return f"{parent}/{filename}"
 
 
+def package_file_kind(filename: str) -> str:
+    lowered = filename.lower()
+    if lowered.endswith(".md"):
+        return "markdown"
+    if lowered.endswith(".fb2"):
+        return "fb2"
+    if lowered.endswith(".pdf"):
+        return "pdf"
+    if lowered.endswith(".json"):
+        return "json"
+    return "artifact"
+
+
 def load_json(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -371,7 +384,7 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
             {
                 "path": artifact_path,
                 "bytes": host_path.stat().st_size,
-                "kind": "markdown" if filename.endswith(".md") else "json",
+                "kind": package_file_kind(filename),
             }
         )
         if filename.endswith(".json"):
@@ -431,12 +444,33 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         "corpus_requirements_satisfied": not bool(corpus_requirements.get("required")),
     }
     if output_mode in {"book_manuscript", "book_manuscript_with_timeline"}:
-        readiness_checks["book_manifest_complete"] = all(
+        book_manifest_complete = all(
             sandbox_path(workspace_root, sibling_artifact(manifest_path, filename)).exists()
             for filename in ["book_outline.json", "chapter_plan.json", "continuity_report.json", "editor_report.json", "manuscript_ru.md", "manuscript.fb2"]
         )
-        if not readiness_checks["book_manifest_complete"]:
+        readiness_checks["book_manifest_complete"] = book_manifest_complete
+        continuity = {}
+        editor = {}
+        continuity_path = sandbox_path(workspace_root, sibling_artifact(manifest_path, "continuity_report.json"))
+        editor_path = sandbox_path(workspace_root, sibling_artifact(manifest_path, "editor_report.json"))
+        if continuity_path.exists():
+            try:
+                continuity = load_json(continuity_path)
+            except (OSError, ValueError, json.JSONDecodeError):
+                continuity = {}
+        if editor_path.exists():
+            try:
+                editor = load_json(editor_path)
+            except (OSError, ValueError, json.JSONDecodeError):
+                editor = {}
+        readiness_checks["book_continuity_ready"] = continuity.get("status") == "completed" if continuity else False
+        readiness_checks["book_editor_ready"] = editor.get("status") == "completed" if editor else False
+        if not book_manifest_complete:
             readiness_blockers.append({"severity": "blocker", "message": "Book output is missing outline, chapter plan, manuscript, fb2, continuity, or editor artifact."})
+        if book_manifest_complete and not readiness_checks["book_continuity_ready"]:
+            readiness_blockers.append({"severity": "blocker", "message": f"Book continuity report is not completed: {continuity.get('status', 'missing')}."})
+        if book_manifest_complete and not readiness_checks["book_editor_ready"]:
+            readiness_blockers.append({"severity": "blocker", "message": f"Book editor report is not completed: {editor.get('status', 'missing')}."})
     status = "ready" if approved and not missing and not quality_blockers and not readiness_blockers else "blocked"
     revision_plan = merge_revision_plan(critic, missing, package_file_errors)
     revision_plan = add_required_event_revision_steps(revision_plan, event_review)
@@ -461,12 +495,16 @@ def build_manifest(workspace_root: Path, manifest_path: str, request: dict[str, 
         remaining_gaps.extend(str(item) for item in research_corpus.get("gaps", []) if item)
     remaining_gaps.extend(str(item.get("message") or "") for item in critic.get("findings", []) if isinstance(item, dict) and item.get("message"))
     remaining_gaps = list(dict.fromkeys(remaining_gaps))
+    is_book_output = output_mode in {"book_manuscript", "book_manuscript_with_timeline"}
+    draft_deliverable = sibling_artifact(manifest_path, "reconstruction_ru.md")
+    book_deliverable = sibling_artifact(manifest_path, "manuscript.fb2") if is_book_output else ""
     return {
         "status": status,
         "approved": approved,
         "output_mode": output_mode,
-        "deliverable": sibling_artifact(manifest_path, "reconstruction_ru.md"),
-        "book_deliverable": sibling_artifact(manifest_path, "manuscript.fb2") if output_mode in {"book_manuscript", "book_manuscript_with_timeline"} else "",
+        "deliverable": book_deliverable or draft_deliverable,
+        "draft_deliverable": draft_deliverable,
+        "book_deliverable": book_deliverable,
         "files": files,
         "missing": missing,
         "package_file_errors": package_file_errors,
