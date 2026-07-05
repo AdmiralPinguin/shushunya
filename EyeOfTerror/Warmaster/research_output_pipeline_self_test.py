@@ -124,9 +124,21 @@ def main() -> int:
     os.environ["LEXMECHANIC_LIVE_DISCOVERY"] = "1"
     try:
         run_mode(
+            "Кто такой Искандар Хайон? Дай короткий ответ с источниками.",
+            "short_answer",
+            "qa_answer",
+            ["synthesis_plan.json", "quality_gates"],
+        )
+        run_mode(
             "Сделай короткий report о развитии RISC-V для локальных устройств.",
             "research_report",
             "topic_report",
+            ["structure_map.json", "synthesis_plan.json", "quality_gates"],
+        )
+        run_mode(
+            "Проверь и выясни, почему локальный агент теряет контекст.",
+            "investigative_report",
+            "investigation",
             ["structure_map.json", "synthesis_plan.json", "quality_gates"],
         )
         run_mode(
