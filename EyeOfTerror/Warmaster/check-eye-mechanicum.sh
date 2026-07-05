@@ -9,6 +9,7 @@ PYTHONPATH=EyeOfTerror/Mechanicum/CodeBrigade python3 EyeOfTerror/Mechanicum/Cod
 PYTHONPATH=EyeOfTerror/Mechanicum python3 EyeOfTerror/Mechanicum/contracts_self_test.py
 PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/self_test.py
 PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/research_modes_self_test.py
+PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/research_revision_loop_self_test.py
 PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/governors_self_test.py
 PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/generic_lore_smoke_self_test.py
 PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/local_corpus_pipeline_self_test.py
