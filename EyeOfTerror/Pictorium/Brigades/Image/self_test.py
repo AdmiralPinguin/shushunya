@@ -68,6 +68,7 @@ def _main() -> int:
         or long_spec.get("steps") != 8
         or "512x512" in str(long_spec.get("prompt") or "")
         or "steps 8" in str(long_spec.get("prompt") or "").lower()
+        or len(str(long_spec.get("prompt") or "").split()) > 45
         or compaction.get("kind") != "prompt_compaction"
     ):
         raise AssertionError(f"Promptwright prompt compaction failed: {long_spec}")

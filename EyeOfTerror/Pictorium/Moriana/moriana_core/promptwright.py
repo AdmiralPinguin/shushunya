@@ -30,7 +30,7 @@ QUALITY_PRESETS = {
     "quality": {"steps": 24, "guidance_scale": 1.0},
 }
 
-PROMPT_MAX_WORDS = 70
+PROMPT_MAX_WORDS = 45
 
 EDIT_PRESETS = {
     "edit_soft": {"strength": 0.35, "steps": 12},
