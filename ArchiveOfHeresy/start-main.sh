@@ -2,6 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Ensure the CPU embedding server is up (vector memory depends on it).
+systemctl --user start shushunya-embedder.service 2>/dev/null || true
 ENV_DIR="$ROOT/ArchiveOfHeresy"
 RUNTIME_DIR="$ROOT/runtime"
 PID_FILE="$RUNTIME_DIR/archive-main.pid"

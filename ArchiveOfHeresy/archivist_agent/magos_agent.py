@@ -7,6 +7,7 @@ from pathlib import Path
 from archivist_agent.agent import FocusBookshelf, clamp_importance, extract_json, now_iso, trim_text
 from archivist_agent.vector_memory import VECTOR_TOP_K, latest_user_message, tokenize
 from archivist_agent.graph_memory import GRAPH_TOP_K
+from semantic_memory import SEMANTIC_MIN_SCORE, semantic_scores
 
 
 MAGOS_MODEL = os.environ.get(
@@ -131,7 +132,9 @@ class Magos:
                 },
             )
             if decision is None:
-                decision = self.fallback_decision(query, focus_candidates, wiki_context, vector_context, graph_context)
+                # No mechanical fallback: if the model is down here, the answer
+                # model (same host) is down too, so there is nothing to serve.
+                return None
 
             focus_result = self.apply_focus_decision(index, decision, conversation_id, turn_id)
             self.last_result = {
@@ -191,15 +194,30 @@ class Magos:
             index = json.loads(index_path.read_text(encoding="utf-8"))
         except Exception:
             return ""
-        scored = []
+        candidates = []
         for page in index.get("pages", []):
             path = self.wiki_root / page.get("path", "")
             if not path.exists():
                 continue
             content = path.read_text(encoding="utf-8")
-            score = token_overlap(query, " ".join([page.get("title", ""), page.get("kind", ""), content]))
-            if score >= MAGOS_MIN_WIKI_SCORE:
-                scored.append((score, page, content))
+            text = " ".join([page.get("title", ""), page.get("kind", ""), content])
+            candidates.append((page, content, text))
+        # Semantic gather: high recall including cross-language and paraphrase
+        # (lexical token overlap misses e.g. a Russian query vs an English page).
+        # Noise is fine here — the Magos LLM curates only relevant facts downstream.
+        # Falls back to lexical when the embedder is unavailable.
+        semantic = semantic_scores(query, [(str(i), text[:600]) for i, (_p, _c, text) in enumerate(candidates)])
+        scored = []
+        if semantic is not None:
+            for i, (page, content, _text) in enumerate(candidates):
+                score = semantic.get(str(i), 0.0)
+                if score >= SEMANTIC_MIN_SCORE:
+                    scored.append((score, page, content))
+        else:
+            for page, content, text in candidates:
+                score = token_overlap(query, text)
+                if score >= MAGOS_MIN_WIKI_SCORE:
+                    scored.append((score, page, content))
         scored.sort(key=lambda item: (-item[0], item[1].get("updated_at") or ""))
         lines = []
         for score, page, content in scored[:limit]:
@@ -282,34 +300,6 @@ class Magos:
             "new_importance": clamp_importance(decision.get("new_importance")),
             "reason": trim_text(decision.get("reason"), 500),
             "memory_context": trim_text(decision.get("memory_context"), MAGOS_CONTEXT_CHARS),
-        }
-
-    def fallback_decision(self, query, focus_candidates, wiki_context, vector_context, graph_context):
-        best = None
-        for focus in focus_candidates:
-            score = token_overlap(query, f"{focus.get('title', '')}\n{focus.get('excerpt', '')}")
-            if best is None or score > best[0]:
-                best = (score, focus)
-
-        action = "keep_active"
-        focus_id = ""
-        if best and best[0] >= 0.34 and best[1].get("status") == "active":
-            action = "use_existing"
-            focus_id = best[1].get("id") or ""
-        elif best and best[0] >= 0.55:
-            action = "use_existing"
-            focus_id = best[1].get("id") or ""
-        elif not any(item.get("status") == "active" for item in focus_candidates):
-            action = "new_empty"
-
-        memory_parts = [part for part in [wiki_context, vector_context, graph_context] if part]
-        return {
-            "focus_action": action,
-            "focus_id": focus_id,
-            "new_title": safe_title(query),
-            "new_importance": 3,
-            "reason": f"fallback token-overlap focus routing; best_score={(best or [0])[0]:.3f}",
-            "memory_context": trim_text("\n\n".join(memory_parts), MAGOS_CONTEXT_CHARS),
         }
 
     def apply_focus_decision(self, index, decision, conversation_id, turn_id):

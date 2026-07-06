@@ -37,10 +37,15 @@ ArchiveOfHeresy/wiki/namespaces/**/*.tmp
 ArchiveOfHeresy/wiki/namespaces/**/pages/*.md
 ArchiveOfHeresy/vector/*.sqlite3
 ArchiveOfHeresy/vector/*.sqlite3-*
+ArchiveOfHeresy/vector.gemma.bak.*/
 ArchiveOfHeresy/graph/*.sqlite3
 ArchiveOfHeresy/graph/*.sqlite3-*
 ArchiveOfHeresy/graph/namespaces/**/*.sqlite3
 ArchiveOfHeresy/graph/namespaces/**/*.sqlite3-*
+ArchiveOfHeresy/semantic/*.sqlite3
+ArchiveOfHeresy/semantic/*.sqlite3-*
+ArchiveOfHeresy/embedder/
+ArchiveOfHeresy/*.bak-*
 
 # DemonsForge local runtimes, model weights, caches, and outputs
 DemonsForge/DemonsForge/

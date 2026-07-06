@@ -73,7 +73,8 @@ public class MainActivity extends Activity {
     private static final String NOTIFICATION_CHANNEL_ID = "shushunya_answers";
     private static final int CHAT_HISTORY_LIMIT = 120;
     private static final int AGENT_HISTORY_LIMIT = 12;
-    private static final String SERVER_CHAT_SESSION_ID = "redmagic9-shushunya-m";
+    private static final String SERVER_CHAT_SESSION_ID = "shushunya-main";
+    private static final String SERVER_MEMORY_NAMESPACE = "shushunya";
     private static final int REQUEST_NOTIFICATIONS = 42;
     private static final String DEFAULT_BASE_URL = "https://chat.shushunya.com";
     private static final String MOBILE_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; ShushunyaM/2.4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36";
@@ -181,6 +182,14 @@ public class MainActivity extends Activity {
         addMessage(false, "Шушуня здесь. Пиши, брат, пока нити судьбы не спутались окончательно.", false);
         loadServerChatHistory();
         loadAgentHistoryAndRestore();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (TAB_CHAT.equals(currentTab)) {
+            loadServerChatHistory();
+        }
     }
 
     @Override
@@ -1283,7 +1292,7 @@ public class MainActivity extends Activity {
         }
         if ("task".equals(type)) {
             String taskId = event.optString("task_id", "").trim();
-            String namespace = event.optString("memory_namespace", "agent").trim();
+            String namespace = event.optString("memory_namespace", SERVER_MEMORY_NAMESPACE).trim();
             if (!taskId.isEmpty()) {
                 currentAgentTaskId = taskId;
             }
@@ -1358,7 +1367,8 @@ public class MainActivity extends Activity {
         payload.put("task_id", taskId);
         payload.put("technical", true);
         payload.put("max_steps", 200);
-        payload.put("memory_namespace", "warmaster");
+        payload.put("memory_namespace", SERVER_MEMORY_NAMESPACE);
+        payload.put("client_source", "mobile");
         payload.put("archive_task", true);
         payload.put("task_memory", true);
         payload.put("include_stderr", false);
@@ -1427,7 +1437,8 @@ public class MainActivity extends Activity {
         payload.put("task_id", taskId);
         payload.put("technical", true);
         payload.put("max_steps", 200);
-        payload.put("memory_namespace", "warmaster");
+        payload.put("memory_namespace", SERVER_MEMORY_NAMESPACE);
+        payload.put("client_source", "mobile");
         payload.put("archive_task", true);
         payload.put("task_memory", true);
         payload.put("include_stderr", false);
@@ -1651,7 +1662,8 @@ public class MainActivity extends Activity {
         payload.put("task", task);
         payload.put("technical", true);
         payload.put("max_steps", 200);
-        payload.put("memory_namespace", "warmaster");
+        payload.put("memory_namespace", SERVER_MEMORY_NAMESPACE);
+        payload.put("client_source", "mobile");
         payload.put("archive_task", true);
         payload.put("task_memory", true);
         payload.put("include_steps", false);
@@ -1991,6 +2003,7 @@ public class MainActivity extends Activity {
         translatorView.setVisibility(translator ? View.VISIBLE : View.GONE);
         agentView.setVisibility(agent ? View.VISIBLE : View.GONE);
         if (chat) {
+            loadServerChatHistory();
             translatorView.setPadding(0, dp(10), 0, 0);
             agentView.setPadding(0, dp(6), 0, 0);
             scrollView.setPadding(0, 0, 0, lastKeyboardHeight > 0 ? lastKeyboardHeight + inputPanel.getHeight() + dp(14) : 0);
@@ -2494,6 +2507,8 @@ public class MainActivity extends Activity {
         payload.put("user", SERVER_CHAT_SESSION_ID);
         payload.put("archive_enabled", true);
         payload.put("focus_enabled", true);
+        payload.put("memory_namespace", SERVER_MEMORY_NAMESPACE);
+        payload.put("client_source", "mobile");
         payload.put("max_tokens", 2048);
         payload.put("temperature", 0.4);
         payload.put("stream", true);
@@ -2558,6 +2573,8 @@ public class MainActivity extends Activity {
         payload.put("user", SERVER_CHAT_SESSION_ID);
         payload.put("archive_enabled", true);
         payload.put("focus_enabled", true);
+        payload.put("memory_namespace", SERVER_MEMORY_NAMESPACE);
+        payload.put("client_source", "mobile");
         payload.put("max_tokens", 2048);
         payload.put("temperature", 0.4);
         payload.put("stream", false);

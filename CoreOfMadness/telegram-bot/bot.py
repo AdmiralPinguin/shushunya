@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
@@ -38,6 +39,11 @@ STREAM_ENABLED = os.environ.get("STREAM_ENABLED", "1").strip().lower() not in ("
 STREAM_DRAFT_INTERVAL = float(os.environ.get("STREAM_DRAFT_INTERVAL", "1.1"))
 STREAM_FINAL_DRAFT_TIMEOUT = float(os.environ.get("STREAM_FINAL_DRAFT_TIMEOUT", "30"))
 TELEGRAM_MEMORY_NAMESPACE = os.environ.get("TELEGRAM_MEMORY_NAMESPACE", "telegram").strip() or "telegram"
+SHARED_CHAT_SESSION_ID = os.environ.get("ARCHIVE_SHARED_CHAT_SESSION_ID", "shushunya-main").strip() or "shushunya-main"
+SHARED_MEMORY_NAMESPACE = os.environ.get("ARCHIVE_SHARED_MEMORY_NAMESPACE", "shushunya").strip() or "shushunya"
+TELEGRAM_SHARED_CHAT_ENABLED = os.environ.get("TELEGRAM_SHARED_CHAT_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
+TELEGRAM_SHARED_DELIVERY_ENABLED = os.environ.get("TELEGRAM_SHARED_DELIVERY_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
+TELEGRAM_SHARED_DELIVERY_CHAT_ID = os.environ.get("TELEGRAM_SHARED_DELIVERY_CHAT_ID", "7791909246").strip()
 ARCHIVE_ALLOWLIST = {
     item.strip().lower()
     for item in os.environ.get("TELEGRAM_ARCHIVE_ALLOWLIST", "7791909246,@Ebuchaya_psina").split(",")
@@ -48,6 +54,7 @@ API_URL = f"https://api.telegram.org/bot{TOKEN}"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SITE_BACKGROUND_PATH = Path(os.environ.get("SHUSHUNYA_SITE_BACKGROUND_PATH", PROJECT_ROOT / "ShushunyaSite" / "background.jpg"))
 RUNNING = True
+LAST_SHARED_DELIVERED_ID = 0
 
 
 def stop(_signum, _frame):
@@ -186,8 +193,96 @@ def archive_flags(chat_id, username=None):
     return {
         "archive_enabled": allowed,
         "focus_enabled": allowed,
-        "memory_namespace": TELEGRAM_MEMORY_NAMESPACE,
+        "memory_namespace": SHARED_MEMORY_NAMESPACE,
+        "client_source": "telegram",
     }
+
+
+def archive_get(path, timeout=30):
+    headers = {}
+    if LLM_API_KEY and LLM_BASE_URL:
+        headers["Authorization"] = f"Bearer {LLM_API_KEY}"
+    req = urllib.request.Request(f"{LLM_BASE_URL}{path}", headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def shared_chat_answer(chat_id, text, username=None):
+    payload = {
+        "session_id": SHARED_CHAT_SESSION_ID,
+        "user": SHARED_CHAT_SESSION_ID,
+        "model": LLM_MODEL,
+        **archive_flags(chat_id, username=username),
+        "max_tokens": MAX_TOKENS,
+        "temperature": TEMPERATURE,
+        "stream": False,
+        "system_prompt": SYSTEM_PROMPT,
+        "text": text,
+    }
+    started = request_json(f"{LLM_BASE_URL}/archive/mobile/chat/start", payload, timeout=30)
+    job_id = str(started.get("job_id") or "").strip()
+    if not job_id:
+        raise RuntimeError(f"Archive did not return job_id: {started}")
+    while RUNNING:
+        snapshot = archive_get(f"/archive/mobile/job?job_id={job_id}", timeout=30)
+        status = snapshot.get("status")
+        if status == "done":
+            response = snapshot.get("response") or {}
+            message = str(response.get("message") or "").strip()
+            if message:
+                return message
+            llm = response.get("response") or {}
+            choices = llm.get("choices") or []
+            if choices:
+                return str(((choices[0].get("message") or {}).get("content")) or "").strip()
+            return "Archive завершил задачу без текста ответа."
+        if status == "failed":
+            raise RuntimeError(snapshot.get("error") or "Archive chat job failed")
+        time.sleep(1.2)
+    return "Telegram bot stopped before Archive finished."
+
+
+def fetch_shared_chat_messages(after_id=0, limit=50):
+    session = urllib.parse.quote(SHARED_CHAT_SESSION_ID, safe="")
+    return archive_get(f"/archive/chat/messages?session_id={session}&after_id={int(after_id or 0)}&limit={int(limit)}", timeout=20)
+
+
+def initialize_shared_delivery_cursor():
+    global LAST_SHARED_DELIVERED_ID
+    if not TELEGRAM_SHARED_DELIVERY_ENABLED:
+        return
+    try:
+        payload = fetch_shared_chat_messages(after_id=0, limit=1)
+        messages = payload.get("messages") or []
+        if messages:
+            LAST_SHARED_DELIVERED_ID = int(messages[-1].get("id") or 0)
+    except Exception as exc:
+        print(f"Shared delivery cursor init failed: {exc}", file=sys.stderr, flush=True)
+
+
+def deliver_shared_chat_updates():
+    global LAST_SHARED_DELIVERED_ID
+    if not TELEGRAM_SHARED_DELIVERY_ENABLED or not TELEGRAM_SHARED_DELIVERY_CHAT_ID:
+        return
+    try:
+        payload = fetch_shared_chat_messages(after_id=LAST_SHARED_DELIVERED_ID, limit=50)
+    except Exception as exc:
+        print(f"Shared delivery poll failed: {exc}", file=sys.stderr, flush=True)
+        return
+    for message in payload.get("messages") or []:
+        try:
+            msg_id = int(message.get("id") or 0)
+        except (TypeError, ValueError):
+            msg_id = 0
+        LAST_SHARED_DELIVERED_ID = max(LAST_SHARED_DELIVERED_ID, msg_id)
+        role = str(message.get("role") or "")
+        source = str(message.get("source") or "unknown")
+        content = str(message.get("content") or "").strip()
+        if role != "assistant" or not content:
+            continue
+        if source.startswith("telegram"):
+            continue
+        send_message(TELEGRAM_SHARED_DELIVERY_CHAT_ID, content)
 
 
 def continuation_messages(answer_parts):
@@ -430,7 +525,9 @@ def handle_message(message):
 
     send_typing(chat_id)
     try:
-        if STREAM_ENABLED:
+        if TELEGRAM_SHARED_CHAT_ENABLED:
+            send_message(chat_id, shared_chat_answer(chat_id, text, username=username))
+        elif STREAM_ENABLED:
             send_message(chat_id, stream_llm(chat_id, text, username=username))
         else:
             send_message(chat_id, ask_llm(chat_id, text, username=username))
@@ -450,6 +547,7 @@ def main():
 
     offset = None
     print(f"Telegram bot started. LLM: {LLM_BASE_URL}, model: {LLM_MODEL}", flush=True)
+    initialize_shared_delivery_cursor()
 
     while RUNNING:
         payload = {"timeout": 30, "allowed_updates": ["message"]}
@@ -462,6 +560,7 @@ def main():
                 offset = update["update_id"] + 1
                 if "message" in update:
                     handle_message(update["message"])
+            deliver_shared_chat_updates()
         except Exception as exc:
             print(f"Polling error: {exc}", file=sys.stderr, flush=True)
             time.sleep(3)

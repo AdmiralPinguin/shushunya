@@ -6,6 +6,8 @@ import sqlite3
 import uuid
 from pathlib import Path
 
+from semantic_memory import SEMANTIC_MIN_SCORE, semantic_scores
+
 
 GRAPH_INTERVAL_MESSAGES = int(os.environ.get("ARCHIVE_GRAPH_INTERVAL_MESSAGES", "20"))
 GRAPH_MAX_RECENT_TURNS = int(os.environ.get("ARCHIVE_GRAPH_MAX_RECENT_TURNS", "12"))
@@ -511,13 +513,30 @@ class GraphMemory:
         scored_nodes = []
         with sqlite3.connect(self.db_path) as db:
             db.row_factory = sqlite3.Row
-            for row in db.execute("SELECT * FROM graph_nodes"):
-                text = " ".join([row["name"], row["kind"], row["summary"], row["aliases_json"], row["status"]])
-                score = overlap_score(query_tokens, text)
-                if score > 0:
-                    item = dict(row)
-                    item["score"] = score
-                    scored_nodes.append(item)
+            rows = list(db.execute("SELECT * FROM graph_nodes"))
+            # Graph nodes are short (name + summary), so e5 separates them cleanly
+            # (unlike whole wiki pages). Rank semantically for cross-language /
+            # paraphrase recall; the Magos LLM curates. Fall back to lexical overlap
+            # when the embedder is unavailable.
+            semantic = semantic_scores(
+                query,
+                [(str(i), " ".join([r["name"], r["summary"], r["aliases_json"]])[:600]) for i, r in enumerate(rows)],
+            )
+            if semantic is not None:
+                for i, row in enumerate(rows):
+                    score = semantic.get(str(i), 0.0)
+                    if score >= SEMANTIC_MIN_SCORE:
+                        item = dict(row)
+                        item["score"] = score
+                        scored_nodes.append(item)
+            else:
+                for row in rows:
+                    text = " ".join([row["name"], row["kind"], row["summary"], row["aliases_json"], row["status"]])
+                    score = overlap_score(query_tokens, text)
+                    if score > 0:
+                        item = dict(row)
+                        item["score"] = score
+                        scored_nodes.append(item)
             scored_nodes.sort(key=lambda item: (-item["score"], -int(item["importance"] or 0), item["updated_at"]))
             nodes = scored_nodes[:limit]
             node_ids = {node["id"] for node in nodes}
