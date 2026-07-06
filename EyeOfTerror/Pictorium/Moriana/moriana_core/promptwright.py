@@ -30,6 +30,8 @@ QUALITY_PRESETS = {
     "quality": {"steps": 24, "guidance_scale": 1.0},
 }
 
+PROMPT_MAX_WORDS = 70
+
 EDIT_PRESETS = {
     "edit_soft": {"strength": 0.35, "steps": 12},
     "edit_balanced": {"strength": 0.62, "steps": 14},
@@ -248,6 +250,48 @@ def _merge_negative(base: str | None, addition: str | None, supports_negative: b
     return ", ".join(merged)
 
 
+def _strip_prompt_controls(text: str) -> str:
+    cleaned = re.sub(r"\b\d{3,4}\s*[xх]\s*\d{3,4}\b", " ", text, flags=re.I)
+    cleaned = re.sub(r"\b(?:steps|шаг(?:ов|и|а)?)\s*[:=]?\s*\d{1,3}\b", " ", cleaned, flags=re.I)
+    cleaned = re.sub(r"\b(?:seed|batch|cfg|guidance)\s*[:=]?\s*[0-9.]+\b", " ", cleaned, flags=re.I)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip(" ,.;")
+
+
+def _compact_prompt(prompt: str, *, max_words: int = PROMPT_MAX_WORDS) -> tuple[str, dict[str, object]]:
+    source = prompt.strip()
+    cleaned = _strip_prompt_controls(source)
+    chunks = [chunk.strip() for chunk in re.split(r"[,;\n]+", cleaned) if chunk.strip()]
+    selected: list[str] = []
+    seen = set()
+    word_count = 0
+    for chunk in chunks:
+        words = chunk.split()
+        if not words:
+            continue
+        key = chunk.lower()
+        if key in seen:
+            continue
+        remaining = max_words - word_count
+        if remaining <= 0:
+            break
+        if len(words) > remaining:
+            words = words[:remaining]
+            chunk = " ".join(words)
+        selected.append(chunk)
+        seen.add(key)
+        word_count += len(words)
+    compacted = ", ".join(selected).strip(" ,.;") or cleaned or source
+    return compacted, {
+        "kind": "prompt_compaction",
+        "max_words": max_words,
+        "source_word_count": len(source.split()),
+        "compacted_word_count": len(compacted.split()),
+        "controls_stripped": cleaned != source,
+        "truncated": len(compacted.split()) < len(cleaned.split()),
+    }
+
+
 def _job_type(text: str) -> JobType:
     lowered = text.lower()
     if any(token in lowered for token in ["inpaint", "инпейнт", "замаж", "маск", "mask"]):
@@ -315,9 +359,11 @@ def build_heuristic_plan(request: PlanRequest) -> JobSpec:
         additions.append(str(character_profile.get("canonical_prompt", "")))
     if additions:
         prompt = f"{prompt}, {', '.join(item for item in additions if item)}"
+    prompt, prompt_compaction = _compact_prompt(prompt)
     safety: dict[str, object] = {
         "memory_context": _memory_context(text, enabled=request.use_memory),
         "quality_preset": quality_preset,
+        "prompt_compaction": prompt_compaction,
     }
     if character_profile:
         safety["character_profile"] = {

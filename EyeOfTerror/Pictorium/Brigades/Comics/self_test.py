@@ -73,6 +73,14 @@ def _main() -> int:
         assert_execution_packet(panels, "Panelwright")
         assert_revision_packet(panels, "Panelwright")
         assert_model_guidance(panels, "Panelwright")
+        if panels.get("runtime_constraints") != {"width": 512, "height": 512, "steps": 8, "preferred_engine": None}:
+            raise AssertionError(f"Panelwright did not preserve CPU-safe runtime constraints: {panels}")
+        for panel in panels.get("panels", []):
+            if not isinstance(panel, dict):
+                raise AssertionError(f"Panelwright returned non-object panel package: {panel}")
+            spec = panel.get("image_plan", {}).get("job_spec", {}) if isinstance(panel.get("image_plan"), dict) else {}
+            if spec.get("width") != 512 or spec.get("height") != 512 or spec.get("steps") != 8:
+                raise AssertionError(f"Panelwright panel spec is not live-safe: {spec}")
         final = build_layout_manifest(
             {
                 "scenario": scenario["scenario"],

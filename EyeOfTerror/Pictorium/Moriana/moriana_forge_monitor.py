@@ -46,15 +46,20 @@ def monitor_forge_job(
             "artifacts": [],
         }
     store = ForgeStore(db_path)
-    if run_inline_once:
-        ForgeQueue(store, start_worker=False).run_pending_once()
-    deadline = time.monotonic() + max(0.0, float(max_wait_sec))
-    record = store.get_job(job_id)
-    while record is not None and record.status.value not in TERMINAL_STATUSES and time.monotonic() < deadline:
-        time.sleep(max(0.05, float(poll_interval_sec)))
-        if run_inline_once:
-            ForgeQueue(store, start_worker=False).run_pending_once()
+    inline_queue = ForgeQueue(store, start_worker=False) if run_inline_once else None
+    try:
+        if inline_queue is not None:
+            inline_queue.run_pending_once()
+        deadline = time.monotonic() + max(0.0, float(max_wait_sec))
         record = store.get_job(job_id)
+        while record is not None and record.status.value not in TERMINAL_STATUSES and time.monotonic() < deadline:
+            time.sleep(max(0.05, float(poll_interval_sec)))
+            if inline_queue is not None:
+                inline_queue.run_pending_once()
+            record = store.get_job(job_id)
+    finally:
+        if inline_queue is not None:
+            inline_queue.unload_engines()
     if record is None:
         return {
             "ok": False,

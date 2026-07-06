@@ -27,6 +27,7 @@ from EyeOfTerror.Pictorium.Moriana.forge_tests.moriana_live_quality_trials impor
     selected_trials as selected_live_trials,
     trial_task_id as live_trial_task_id,
 )
+from EyeOfTerror.Pictorium.Moriana import moriana_forge_monitor as forge_monitor_module
 from EyeOfTerror.Pictorium.Moriana.moriana_forge_monitor import monitor_forge_job
 from EyeOfTerror.Pictorium.Moriana.moriana_governor import create_or_execute_run, make_handler, prepare_run
 from EyeOfTerror.Pictorium.Moriana.moriana_executor import execute_revision_run
@@ -107,6 +108,41 @@ def _main() -> int:
         monitored = monitor_forge_job(db_path=forge_db_path, job_record=completed_job.model_dump(mode="json"))
         if not monitored.get("ok") or monitored.get("artifact_paths") != [str(forge_artifact_path)]:
             raise AssertionError(f"Forge monitor did not resolve completed job artifact: {monitored}")
+
+        inline_cleanup_job = JobRecord(
+            id="inline-cleanup-job",
+            spec=JobSpec(prompt="inline cleanup test image", width=512, height=512),
+            status=JobStatus.queued,
+            progress=0.0,
+        )
+        forge_store.create_job(inline_cleanup_job)
+        unload_calls: list[bool] = []
+
+        class FakeInlineQueue:
+            def __init__(self, store: ForgeStore, start_worker: bool = True):
+                self.store = store
+                self.start_worker = start_worker
+
+            def run_pending_once(self) -> bool:
+                self.store.update_job("inline-cleanup-job", status=JobStatus.succeeded.value, progress=1.0)
+                return True
+
+            def unload_engines(self, engine_name: str | None = None) -> dict[str, object]:
+                unload_calls.append(True)
+                return {"ok": True, "engine": engine_name, "unloaded": ["fake"]}
+
+        original_queue = forge_monitor_module.ForgeQueue
+        forge_monitor_module.ForgeQueue = FakeInlineQueue  # type: ignore[assignment]
+        try:
+            inline_monitored = monitor_forge_job(
+                db_path=forge_db_path,
+                job_record=inline_cleanup_job.model_dump(mode="json"),
+                run_inline_once=True,
+            )
+        finally:
+            forge_monitor_module.ForgeQueue = original_queue
+        if not unload_calls or inline_monitored.get("status") != "succeeded":
+            raise AssertionError(f"inline Forge monitor must unload engines after run_inline_once: {inline_monitored}")
         live_report = build_live_trial_report(
             [
                 {

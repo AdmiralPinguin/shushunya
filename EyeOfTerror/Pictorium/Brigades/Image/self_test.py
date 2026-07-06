@@ -48,6 +48,29 @@ def _main() -> int:
     spec = plan["job_spec"]
     if spec.get("width") != 512 or spec.get("height") != 512:
         raise AssertionError(f"Promptwright dimensions failed: {spec}")
+    long_plan = prepare_image_plan(
+        {
+            "request": (
+                "cinematic comic panel, ancient forge, tech-priest, ritual altar, "
+                "same character, same style, no text, no speech bubbles, dramatic smoke, "
+                "red light, brass machinery, readable composition, detailed background, "
+                "continuity reference, establishing shot, 512x512 steps 8"
+            ),
+            "use_memory": False,
+            "use_thinker": False,
+        }
+    )
+    long_spec = long_plan.get("job_spec", {}) if isinstance(long_plan.get("job_spec"), dict) else {}
+    compaction = long_spec.get("safety", {}).get("prompt_compaction", {}) if isinstance(long_spec.get("safety"), dict) else {}
+    if (
+        long_spec.get("width") != 512
+        or long_spec.get("height") != 512
+        or long_spec.get("steps") != 8
+        or "512x512" in str(long_spec.get("prompt") or "")
+        or "steps 8" in str(long_spec.get("prompt") or "").lower()
+        or compaction.get("kind") != "prompt_compaction"
+    ):
+        raise AssertionError(f"Promptwright prompt compaction failed: {long_spec}")
 
     resources = inspect_resources({"job_spec": spec})
     if "capabilities" not in resources or "resource_report" not in resources:

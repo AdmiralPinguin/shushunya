@@ -696,6 +696,7 @@ def execute_comic_run(
         {
             "storyboard": storyboard.get("storyboard", {}),
             "character_sheet": character_sheet.get("character_sheet", {}),
+            "source_task": task,
             "submit": submit,
             "db_path": str(run_dir / "forge.sqlite3"),
         }
