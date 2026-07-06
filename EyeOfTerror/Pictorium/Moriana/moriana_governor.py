@@ -13,7 +13,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from EyeOfTerror.Warmaster.eye_of_terror.brigade import contract_required_workers, worker_availability
-from EyeOfTerror.Warmaster.eye_of_terror.contracts import TaskContract, build_image_generation_contract, validate_task_contract_payload
+from EyeOfTerror.Warmaster.eye_of_terror.contracts import (
+    TaskContract,
+    build_comics_generation_contract,
+    build_image_generation_contract,
+    validate_task_contract_payload,
+)
 from EyeOfTerror.Warmaster.eye_of_terror.pipeline import build_dispatch_packets, pipeline_status, write_pipeline_run
 from EyeOfTerror.Warmaster.eye_of_terror.registry import worker_by_name
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ArtifactFinalis.worker import worker_contract as artifact_finalis_contract
@@ -21,11 +26,18 @@ from EyeOfTerror.Pictorium.Brigades.Image.Workers.ForgeDispatcher.worker import 
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ImageVerifier.worker import worker_contract as image_verifier_contract
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ModelQuartermaster.worker import worker_contract as model_quartermaster_contract
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.Promptwright.worker import worker_contract as promptwright_contract
+from EyeOfTerror.Pictorium.Brigades.Comics.Workers.CharacterSheetwright.worker import worker_contract as character_sheetwright_contract
+from EyeOfTerror.Pictorium.Brigades.Comics.Workers.LayoutFinalis.worker import worker_contract as layout_finalis_contract
+from EyeOfTerror.Pictorium.Brigades.Comics.Workers.Panelwright.worker import worker_contract as panelwright_contract
+from EyeOfTerror.Pictorium.Brigades.Comics.Workers.ScenarioScribe.worker import worker_contract as scenario_scribe_contract
+from EyeOfTerror.Pictorium.Brigades.Comics.Workers.StoryboardArchitect.worker import worker_contract as storyboard_architect_contract
 from EyeOfTerror.Pictorium.Moriana.moriana_core.asset_catalog import capabilities as forge_capabilities
 
 
 GOVERNOR = "Moriana"
-REQUIRED_WORKERS = ["Promptwright", "ModelQuartermaster", "ForgeDispatcher", "ImageVerifier", "ArtifactFinalis"]
+IMAGE_WORKERS = ["Promptwright", "ModelQuartermaster", "ForgeDispatcher", "ImageVerifier", "ArtifactFinalis"]
+COMICS_WORKERS = ["ScenarioScribe", "StoryboardArchitect", "CharacterSheetwright", "Panelwright", "LayoutFinalis"]
+REQUIRED_WORKERS = [*IMAGE_WORKERS, *COMICS_WORKERS]
 
 
 def worker_metadata(path: str) -> dict[str, Any]:
@@ -59,6 +71,26 @@ def step_quality_checks(step_id: str) -> list[str]:
             "final manifest rolls up blockers and artifacts",
             "delivery readiness is explicit and auditable",
         ],
+        "scenario": [
+            "scenario captures title, cast, style, and ordered beats",
+            "panel count matches the user request or conservative default",
+        ],
+        "storyboard": [
+            "every beat maps to an ordered panel",
+            "panel prompts prohibit generated text and preserve continuity",
+        ],
+        "character_sheet": [
+            "character sheet planning uses Image Brigade Promptwright",
+            "continuity source is explicit before panel generation",
+        ],
+        "panel_generation": [
+            "each panel has Image Brigade prompt, resource, and Forge dry-run evidence",
+            "panel blockers are reported per panel",
+        ],
+        "layout_manifest": [
+            "page layout preserves reading order",
+            "final manifest rolls up panel artifacts and blockers",
+        ],
     }
     return checks.get(step_id, ["expected artifacts exist and satisfy the step purpose"])
 
@@ -70,6 +102,11 @@ def step_role_policy(step_id: str) -> dict[str, Any]:
         "forge_dispatch": "forge_runtime_validation_and_queued_submit",
         "image_verification": "read_only_artifact_verification",
         "finalize": "read_only_final_manifest_packaging",
+        "scenario": "comic_scenario_planning",
+        "storyboard": "comic_storyboard_planning",
+        "character_sheet": "image_brigade_character_reference_planning",
+        "panel_generation": "image_brigade_panel_execution_package",
+        "layout_manifest": "comic_layout_and_manifest_packaging",
     }
     return {
         "role": policies.get(step_id, "image_worker"),
@@ -110,16 +147,24 @@ def step_quality_matrix(contract: TaskContract) -> list[dict[str, Any]]:
 
 def oversight_plan(contract: TaskContract) -> dict[str, Any]:
     planned_step_ids = [step.step_id for step in contract.worker_plan]
+    is_comics = "layout_manifest" in planned_step_ids
     artifact_roles = {
         "plan": [artifact for artifact in contract.required_artifacts if artifact.endswith("/image_plan.json")],
         "resources": [artifact for artifact in contract.required_artifacts if artifact.endswith("/resource_report.json")],
         "dispatch": [artifact for artifact in contract.required_artifacts if artifact.endswith("/forge_jobs.json")],
         "verification": [artifact for artifact in contract.required_artifacts if artifact.endswith("/image_verification.json")],
+        "scenario": [artifact for artifact in contract.required_artifacts if artifact.endswith("/scenario.json")],
+        "storyboard": [artifact for artifact in contract.required_artifacts if artifact.endswith("/storyboard.json")],
+        "character_sheet": [artifact for artifact in contract.required_artifacts if artifact.endswith("/character_sheet.json")],
+        "panels": [artifact for artifact in contract.required_artifacts if artifact.endswith("/panels.json")],
+        "layout": [artifact for artifact in contract.required_artifacts if artifact.endswith("/layout.json")],
         "final": [artifact for artifact in contract.required_artifacts if artifact.endswith("/final_manifest.json")],
     }
+    critic_step = "panel_generation" if is_comics else "image_verification"
+    final_step = "layout_manifest" if is_comics else "finalize"
     return {
         "governor": contract.assigned_governor,
-        "kind": "image_generation_oversight",
+        "kind": "comic_generation_oversight" if is_comics else "image_generation_oversight",
         "quality_gates": contract.quality_gates,
         "completion_criteria": contract.completion_criteria,
         "non_goals": contract.non_goals,
@@ -134,17 +179,17 @@ def oversight_plan(contract: TaskContract) -> dict[str, Any]:
         ],
         "step_quality_matrix": step_quality_matrix(contract),
         "final_review": {
-            "critic_step": "image_verification",
-            "final_step": "finalize",
+            "critic_step": critic_step,
+            "final_step": final_step,
             "final_artifact": artifact_roles["final"][0] if artifact_roles["final"] else "",
-            "deliverable_role": "image_manifest",
+            "deliverable_role": "comic_manifest" if is_comics else "image_manifest",
             "requires_critic_approval_or_blockers": True,
             "requires_gap_disclosure": True,
             "requires_evidence_trace": True,
         },
         "revision_policy": {
-            "source_step": "image_verification",
-            "final_steps": ["image_verification", "finalize"],
+            "source_step": critic_step,
+            "final_steps": [critic_step, final_step],
             "allowed_steps": planned_step_ids,
             "requires_downstream_rerun": True,
             "requires_focused_context": True,
@@ -235,7 +280,12 @@ class MorianaPlan:
 
 
 def plan_image_task(task: str, task_id: str | None = None) -> MorianaPlan:
-    return MorianaPlan(build_image_generation_contract(task, task_id=task_id))
+    return MorianaPlan(build_comics_generation_contract(task, task_id=task_id) if is_comics_task(task) else build_image_generation_contract(task, task_id=task_id))
+
+
+def is_comics_task(task: str) -> bool:
+    lowered = task.lower()
+    return any(term in lowered for term in ["комикс", "comic", "storyboard", "раскадров", "панел", "panel"])
 
 
 def required_workers() -> list[str]:
@@ -249,6 +299,11 @@ def service_capabilities() -> dict[str, Any]:
         forge_dispatcher_contract(),
         image_verifier_contract(),
         artifact_finalis_contract(),
+        scenario_scribe_contract(),
+        storyboard_architect_contract(),
+        character_sheetwright_contract(),
+        panelwright_contract(),
+        layout_finalis_contract(),
     ]
     availability = worker_availability(REQUIRED_WORKERS)
     return {
@@ -260,7 +315,7 @@ def service_capabilities() -> dict[str, Any]:
         "worker_availability": availability,
         "brigades": [
             {"name": "Image", "status": "active", "path": "EyeOfTerror/Pictorium/Brigades/Image"},
-            {"name": "Comics", "status": "planned", "path": "EyeOfTerror/Pictorium/Brigades/Comics"},
+            {"name": "Comics", "status": "active", "path": "EyeOfTerror/Pictorium/Brigades/Comics"},
             {"name": "Video", "status": "planned", "path": "EyeOfTerror/Pictorium/Brigades/Video"},
         ],
         "worker_contracts": contracts,
@@ -272,6 +327,11 @@ def service_capabilities() -> dict[str, Any]:
             "queued_image_submit",
             "artifact_verification",
             "final_manifest",
+            "comic_scenario_planning",
+            "comic_storyboarding",
+            "comic_character_sheet_planning",
+            "comic_panel_package_generation",
+            "comic_layout_manifest",
         ],
         "endpoints": ["GET /health", "GET /capabilities", "POST /plan", "POST /prepare_run"],
     }

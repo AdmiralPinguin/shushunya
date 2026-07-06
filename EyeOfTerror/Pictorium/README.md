@@ -36,16 +36,17 @@ EyeOfTerror/Pictorium/
 
 - `Image`: still images, edits, inpaint, upscale, LoRA/IP-Adapter readiness,
   verification, and delivery.
-- `Comics`: storyboards, multi-panel pages, lettering, continuity, character
-  consistency, and long-form visual packaging.
+- `Comics`: active first-pass pipeline for scenarios, storyboards,
+  character-sheet planning, panel packages, layout, and final comic manifests.
 - `Video`: future video backends, GPU scheduling, clips, and image-to-video or
   text-to-video workflows.
 
 ## Activation State
 
 Pictorium is active for still-image tasks through Moriana and the Image
-Brigade. Comics and Video remain planned departments and must reuse the Image
-Brigade execution layer instead of duplicating Forge runtime ownership.
+Brigade. Comics is active for first-pass storyboard and panel-package
+workflows, and reuses the Image Brigade execution layer instead of duplicating
+Forge runtime ownership. Video remains planned.
 
 ## DemonsForge Boundary
 

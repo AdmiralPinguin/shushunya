@@ -1,0 +1,14 @@
+{
+  "name": "CharacterSheetwright",
+  "port": 7029,
+  "role": "comic character sheet planner using Image Brigade",
+  "status": "prototype",
+  "capabilities": ["character_sheet_plan", "image_brigade_promptwright"],
+  "model_brain": {
+    "required": true,
+    "role": "CharacterSheetwright",
+    "failure_policy": "block semantic continuity critique when model_brain is unavailable; deterministic Image Brigade character-sheet planning remains available"
+  },
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
+  "callable": "EyeOfTerror.Pictorium.Brigades.Comics.Workers.CharacterSheetwright.worker:handle"
+}

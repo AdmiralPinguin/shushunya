@@ -154,6 +154,31 @@
       "name": "ArtifactFinalis",
       "role": "final manifest and delivery package builder",
       "path": "EyeOfTerror/Pictorium/Brigades/Image/Workers/ArtifactFinalis"
+    },
+    "7027": {
+      "name": "ScenarioScribe",
+      "role": "comic scenario planner",
+      "path": "EyeOfTerror/Pictorium/Brigades/Comics/Workers/ScenarioScribe"
+    },
+    "7028": {
+      "name": "StoryboardArchitect",
+      "role": "storyboard and continuity planner",
+      "path": "EyeOfTerror/Pictorium/Brigades/Comics/Workers/StoryboardArchitect"
+    },
+    "7029": {
+      "name": "CharacterSheetwright",
+      "role": "comic character sheet planner using Image Brigade",
+      "path": "EyeOfTerror/Pictorium/Brigades/Comics/Workers/CharacterSheetwright"
+    },
+    "7030": {
+      "name": "Panelwright",
+      "role": "per-panel Image Brigade package builder",
+      "path": "EyeOfTerror/Pictorium/Brigades/Comics/Workers/Panelwright"
+    },
+    "7031": {
+      "name": "LayoutFinalis",
+      "role": "comic layout and final manifest builder",
+      "path": "EyeOfTerror/Pictorium/Brigades/Comics/Workers/LayoutFinalis"
     }
   }
 }

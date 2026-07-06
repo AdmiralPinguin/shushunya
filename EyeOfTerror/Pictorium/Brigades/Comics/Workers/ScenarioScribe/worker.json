@@ -1,0 +1,14 @@
+{
+  "name": "ScenarioScribe",
+  "port": 7027,
+  "role": "comic scenario planner",
+  "status": "prototype",
+  "capabilities": ["scenario", "beats", "cast_style_constraints"],
+  "model_brain": {
+    "required": true,
+    "role": "ScenarioScribe",
+    "failure_policy": "block autonomous scenario expansion when model_brain is unavailable; deterministic scenario scaffolding remains available for dry-run validation"
+  },
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
+  "callable": "EyeOfTerror.Pictorium.Brigades.Comics.Workers.ScenarioScribe.worker:handle"
+}

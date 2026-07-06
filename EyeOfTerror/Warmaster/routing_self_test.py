@@ -17,6 +17,9 @@ def main() -> int:
     image = route_message("сделай рисовалку stable diffusion")
     if not image.ok or image.kind != "image_generation" or image.governor != "Moriana":
         raise AssertionError(image)
+    comic = route_message("сделай комикс 4 панели про техножреца")
+    if not comic.ok or comic.kind != "image_generation" or comic.governor != "Moriana":
+        raise AssertionError(comic)
     unknown = route_message("сделай что-нибудь")
     if unknown.ok or unknown.kind != "general":
         raise AssertionError(unknown)

@@ -1,0 +1,14 @@
+{
+  "name": "LayoutFinalis",
+  "port": 7031,
+  "role": "comic layout and final manifest builder",
+  "status": "prototype",
+  "capabilities": ["page_layout", "final_manifest", "blocker_rollup"],
+  "model_brain": {
+    "required": true,
+    "role": "LayoutFinalis",
+    "failure_policy": "block semantic layout critique when model_brain is unavailable; deterministic manifest packaging remains available"
+  },
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
+  "callable": "EyeOfTerror.Pictorium.Brigades.Comics.Workers.LayoutFinalis.worker:handle"
+}

@@ -39,8 +39,9 @@ engine area:
 1. `Brigades/Image`: current still-image workflows.
    Workers: Promptwright, ModelQuartermaster, ForgeDispatcher, ImageVerifier,
    ArtifactFinalis.
-2. `Brigades/Comics`: planned long-form visual workflows: storyboards,
-   multi-panel pages, lettering, character consistency, and layout.
+2. `Brigades/Comics`: active first-pass long-form visual workflows:
+   scenarios, storyboards, character-sheet planning, panel packages, lettering
+   constraints, character consistency, and layout.
 3. `Brigades/Video`: planned motion workflows: video backends, clip contracts,
    GPU scheduling, and text/image-to-video verification.
 

@@ -571,6 +571,85 @@ def build_image_generation_contract(user_task: str, task_id: str | None = None) 
     )
 
 
+def comics_required_artifacts(slug: str) -> list[str]:
+    return artifacts_from_plan(comics_worker_plan(slug))
+
+
+def comics_worker_plan(slug: str) -> list[WorkerPlanStep]:
+    base = f"/work/{slug}"
+    return [
+        WorkerPlanStep(
+            step_id="scenario",
+            worker="ScenarioScribe",
+            purpose="Turn the user request into a compact comic scenario with premise, cast, visual style, and beats.",
+            expected_artifacts=[f"{base}/scenario.json"],
+        ),
+        WorkerPlanStep(
+            step_id="storyboard",
+            worker="StoryboardArchitect",
+            purpose="Convert scenario beats into ordered panels with camera, composition, continuity, and panel text constraints.",
+            depends_on=["scenario"],
+            expected_artifacts=[f"{base}/storyboard.json"],
+        ),
+        WorkerPlanStep(
+            step_id="character_sheet",
+            worker="CharacterSheetwright",
+            purpose="Prepare character-sheet image plans through Image Brigade so panel continuity has a reusable visual reference.",
+            depends_on=["scenario"],
+            expected_artifacts=[f"{base}/character_sheet.json"],
+        ),
+        WorkerPlanStep(
+            step_id="panel_generation",
+            worker="Panelwright",
+            purpose="Prepare per-panel Image Brigade run packages and Forge dry-runs without duplicating Forge runtime logic.",
+            depends_on=["storyboard", "character_sheet"],
+            expected_artifacts=[f"{base}/panels.json", f"{base}/panel_forge_jobs.json"],
+        ),
+        WorkerPlanStep(
+            step_id="layout_manifest",
+            worker="LayoutFinalis",
+            purpose="Assemble page layout, panel dependencies, generated or pending artifacts, blockers, and final comic manifest.",
+            depends_on=["panel_generation"],
+            expected_artifacts=[f"{base}/layout.json", f"{base}/final_manifest.json"],
+        ),
+    ]
+
+
+def build_comics_generation_contract(user_task: str, task_id: str | None = None) -> TaskContract:
+    slug = slugify(user_task, fallback="comic")
+    resolved_task_id = task_id or f"moriana-{slug}-comic"
+    plan = comics_worker_plan(slug)
+    return TaskContract(
+        task_id=resolved_task_id,
+        kind="image_generation",
+        goal=user_task.strip(),
+        assigned_governor="Moriana",
+        non_goals=[
+            "Do not bypass Image Brigade for panel image planning, resource checks, dispatch, or verification.",
+            "Do not treat a storyboard as generated panels.",
+            "Do not hide continuity, lettering, page-layout, or missing-artifact blockers.",
+            "Do not auto-download external character/style assets without explicit approval.",
+        ],
+        required_artifacts=artifacts_from_plan(plan),
+        completion_criteria=[
+            "ScenarioScribe produced a scenario with cast, style, and ordered beats.",
+            "StoryboardArchitect produced ordered panel plans with continuity notes.",
+            "CharacterSheetwright produced Image Brigade character-sheet planning evidence.",
+            "Panelwright produced per-panel Image Brigade plans and Forge validation evidence.",
+            "LayoutFinalis produced layout and final manifest with blockers and delivery status.",
+        ],
+        quality_gates=[
+            "scenario_created",
+            "storyboard_created",
+            "character_sheet_image_plan_created",
+            "panel_image_plans_created",
+            "layout_and_final_manifest_created",
+            "image_brigade_execution_layer_used",
+        ],
+        worker_plan=plan,
+    )
+
+
 def code_worker_plan(slug: str) -> list[WorkerPlanStep]:
     base = f"/work/{slug}"
     return [

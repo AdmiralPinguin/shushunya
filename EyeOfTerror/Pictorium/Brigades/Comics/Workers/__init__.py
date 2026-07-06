@@ -1,0 +1,1 @@
+"""Comics brigade workers."""

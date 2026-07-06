@@ -72,6 +72,23 @@ def main() -> int:
         )
         if not final.get("ok") or final.get("final_manifest", {}).get("status") != "ready":
             raise AssertionError(f"final image manifest is not ready: {final}")
+
+        comic_task = "сделай комикс 3 панели про техножреца у древней кузни"
+        comic_id = "moriana-e2e-comic"
+        comic_preflight = preflight_task(comic_task, comic_id, run_root)
+        if (
+            not comic_preflight.get("ok")
+            or comic_preflight.get("governor") != "Moriana"
+            or comic_preflight.get("contract_summary", {}).get("steps", [])[0].get("worker") != "ScenarioScribe"
+        ):
+            raise AssertionError(f"Warmaster preflight did not route comic through Moriana: {comic_preflight}")
+        comic_prepared = prepare_task(comic_task, comic_id, run_root)
+        if not comic_prepared.get("ok") or comic_prepared.get("governor") != "Moriana":
+            raise AssertionError(f"Warmaster prepare did not create Moriana comic run: {comic_prepared}")
+        comic_status = load_json(Path(str(comic_prepared["run_dir"])) / "status.json")
+        comic_workers = [step.get("worker") for step in comic_status.get("steps", []) if isinstance(step, dict)]
+        if comic_workers != ["ScenarioScribe", "StoryboardArchitect", "CharacterSheetwright", "Panelwright", "LayoutFinalis"]:
+            raise AssertionError(f"bad comic dispatch order: {comic_workers}")
     print("[ok] Moriana Warmaster -> Image Brigade -> ForgeRuntime e2e")
     return 0
 

@@ -19,7 +19,8 @@ low-level graphical engine package.
 ## Brigades
 
 - `Image`: still image generation/editing and current real Forge workflows.
-- `Comics`: long-form visual sequences, panels, lettering, and consistency.
+- `Comics`: active first-pass scenario, storyboard, character sheet, panel
+  package, layout, and manifest workflows on top of Image Brigade.
 - `Video`: future motion-generation backends and GPU scheduling.
 
 ## Current Image Workers
@@ -31,6 +32,15 @@ low-level graphical engine package.
 - `ImageVerifier`: evaluates artifacts, metadata, dimensions, and edit risks.
 - `ArtifactFinalis`: writes final manifest, gallery metadata, and delivery
   handoff.
+
+## Current Comics Workers
+
+- `ScenarioScribe`: turns a comic request into scenario, cast, style, and beats.
+- `StoryboardArchitect`: maps beats into ordered panel prompts and continuity.
+- `CharacterSheetwright`: prepares character-sheet plans through Image Brigade.
+- `Panelwright`: prepares per-panel Image Brigade plans, resource checks, and
+  Forge dry-runs.
+- `LayoutFinalis`: assembles page layout and final comic manifest.
 
 ## DemonsForge Boundary
 

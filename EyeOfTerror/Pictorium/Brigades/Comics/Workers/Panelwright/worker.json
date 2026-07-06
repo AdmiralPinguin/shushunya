@@ -1,0 +1,14 @@
+{
+  "name": "Panelwright",
+  "port": 7030,
+  "role": "per-panel Image Brigade package builder",
+  "status": "prototype",
+  "capabilities": ["panel_image_plans", "resource_checks", "forge_dry_run", "image_brigade_execution_layer"],
+  "model_brain": {
+    "required": true,
+    "role": "Panelwright",
+    "failure_policy": "block semantic panel repair when model_brain is unavailable; deterministic Image Brigade panel packages remain available"
+  },
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
+  "callable": "EyeOfTerror.Pictorium.Brigades.Comics.Workers.Panelwright.worker:handle"
+}

@@ -11,16 +11,25 @@ if str(PROJECT_ROOT) not in sys.path:
 
 PICTORIUM = PROJECT_ROOT / "EyeOfTerror" / "Pictorium"
 CONTRACT = PICTORIUM / "Moriana" / "contracts" / "moriana_department.json"
-EXPECTED_WORKERS = {
+EXPECTED_IMAGE_WORKERS = {
     "Promptwright",
     "ModelQuartermaster",
     "ForgeDispatcher",
     "ImageVerifier",
     "ArtifactFinalis",
 }
+EXPECTED_COMICS_WORKERS = {
+    "ScenarioScribe",
+    "StoryboardArchitect",
+    "CharacterSheetwright",
+    "Panelwright",
+    "LayoutFinalis",
+}
+EXPECTED_WORKERS = EXPECTED_IMAGE_WORKERS | EXPECTED_COMICS_WORKERS
 EXPECTED_BRIGADES = {"Image", "Comics", "Video"}
 
 try:
+    from EyeOfTerror.Pictorium.Brigades.Comics.self_test import main as comics_brigade_self_test
     from EyeOfTerror.Pictorium.Brigades.Image.self_test import main as image_brigade_self_test
     from EyeOfTerror.Pictorium.Moriana.moriana_governor import plan_image_task, service_capabilities
     from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import PlanRequest, ProjectPlanRequest
@@ -28,7 +37,7 @@ try:
     from EyeOfTerror.Pictorium.Moriana.moriana_core.promptwright import plan_txt2img
     from EyeOfTerror.Pictorium.Moriana.moriana_core.project_planner import plan_project
 except ModuleNotFoundError as exc:
-    image_brigade_self_test = plan_image_task = service_capabilities = None  # type: ignore[assignment]
+    comics_brigade_self_test = image_brigade_self_test = plan_image_task = service_capabilities = None  # type: ignore[assignment]
     PlanRequest = ProjectPlanRequest = PlannerThinker = plan_txt2img = plan_project = None  # type: ignore[assignment]
     OPTIONAL_IMPORT_ERROR = str(exc)
 else:
@@ -52,7 +61,7 @@ def main() -> int:
     if brigade_names != EXPECTED_BRIGADES:
         raise AssertionError(f"unexpected brigade set: {brigade_names}")
     brigade_status = {str(item.get("name") or ""): str(item.get("status") or "") for item in brigades if isinstance(item, dict)}
-    if brigade_status.get("Image") != "active" or brigade_status.get("Comics") != "planned" or brigade_status.get("Video") != "planned":
+    if brigade_status.get("Image") != "active" or brigade_status.get("Comics") != "active" or brigade_status.get("Video") != "planned":
         raise AssertionError(f"unexpected brigade statuses: {brigade_status}")
     for brigade in brigades:
         raw_path = str(brigade.get("path") or "")
@@ -62,14 +71,12 @@ def main() -> int:
     names = {str(item.get("name") or "") for item in workers if isinstance(item, dict)}
     if names != EXPECTED_WORKERS:
         raise AssertionError(f"unexpected worker set: {names}")
-    for name in EXPECTED_WORKERS:
-        readme = PICTORIUM / "Brigades" / "Image" / "Workers" / name / "README.md"
-        if not readme.exists():
-            raise AssertionError(f"missing worker README: {readme}")
-        worker_py = PICTORIUM / "Brigades" / "Image" / "Workers" / name / "worker.py"
-        worker_json = PICTORIUM / "Brigades" / "Image" / "Workers" / name / "worker.json"
-        if not worker_py.exists() or not worker_json.exists():
-            raise AssertionError(f"worker must expose callable module and metadata: {name}")
+    for brigade_name, expected_workers in (("Image", EXPECTED_IMAGE_WORKERS), ("Comics", EXPECTED_COMICS_WORKERS)):
+        for name in expected_workers:
+            worker_py = PICTORIUM / "Brigades" / brigade_name / "Workers" / name / "worker.py"
+            worker_json = PICTORIUM / "Brigades" / brigade_name / "Workers" / name / "worker.json"
+            if not worker_py.exists() or not worker_json.exists():
+                raise AssertionError(f"worker must expose callable module and metadata: {brigade_name}/{name}")
     for worker in workers:
         for raw_path in worker.get("source_modules", []) if isinstance(worker, dict) else []:
             source = PROJECT_ROOT / str(raw_path)
@@ -91,15 +98,23 @@ def main() -> int:
         image_plan = plan_image_task("нарисуй тестовую картинку 512x512", task_id="moriana-self-test-image").to_dict()
         if not image_plan.get("ok") or image_plan.get("contract", {}).get("assigned_governor") != "Moriana":
             raise AssertionError(f"Moriana failed to plan image task: {image_plan}")
+        comic_plan = plan_image_task("сделай комикс 3 панели про кузню", task_id="moriana-self-test-comic").to_dict()
+        if (
+            not comic_plan.get("ok")
+            or comic_plan.get("contract", {}).get("assigned_governor") != "Moriana"
+            or comic_plan.get("contract", {}).get("worker_plan", [])[0].get("worker") != "ScenarioScribe"
+        ):
+            raise AssertionError(f"Moriana failed to plan comic task: {comic_plan}")
         capabilities_payload = service_capabilities()
         if (
             not capabilities_payload.get("ok")
-            or capabilities_payload.get("required_workers") != sorted(EXPECTED_WORKERS)
-            and set(capabilities_payload.get("required_workers", [])) != EXPECTED_WORKERS
+            or set(capabilities_payload.get("required_workers", [])) != EXPECTED_WORKERS
         ):
             raise AssertionError(f"Moriana capabilities are incomplete: {capabilities_payload}")
         if image_brigade_self_test() != 0:
             raise AssertionError("Image Brigade self-test failed")
+        if comics_brigade_self_test() != 0:
+            raise AssertionError("Comics Brigade self-test failed")
     removed_forge_brains = (
         "planner.py",
         "thinker.py",

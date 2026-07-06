@@ -14,7 +14,11 @@
       "forge",
       "flux",
       "sdxl",
-      "lora"
+      "lora",
+      "комикс",
+      "storyboard",
+      "раскадров",
+      "панел"
     ]
   },
   "backend": {
@@ -34,7 +38,7 @@
     },
     {
       "name": "Comics",
-      "status": "planned",
+      "status": "active",
       "role": "storyboards, multi-panel pages, lettering, continuity, and long-form visual projects",
       "path": "EyeOfTerror/Pictorium/Brigades/Comics"
     },
@@ -109,6 +113,57 @@
         "EyeOfTerror/Pictorium/Brigades/Image/Workers/ArtifactFinalis/worker.json"
       ],
       "expected_artifacts": ["/work/pictorium/final_manifest.json"]
+    },
+    {
+      "name": "ScenarioScribe",
+      "role": "comic scenario planner",
+      "source_modules": [
+        "EyeOfTerror/Pictorium/Brigades/Comics/worker_api.py",
+        "EyeOfTerror/Pictorium/Brigades/Comics/Workers/ScenarioScribe/worker.py",
+        "EyeOfTerror/Pictorium/Brigades/Comics/Workers/ScenarioScribe/worker.json"
+      ],
+      "expected_artifacts": ["/work/pictorium/scenario.json"]
+    },
+    {
+      "name": "StoryboardArchitect",
+      "role": "storyboard and continuity planner",
+      "source_modules": [
+        "EyeOfTerror/Pictorium/Brigades/Comics/worker_api.py",
+        "EyeOfTerror/Pictorium/Brigades/Comics/Workers/StoryboardArchitect/worker.py",
+        "EyeOfTerror/Pictorium/Brigades/Comics/Workers/StoryboardArchitect/worker.json"
+      ],
+      "expected_artifacts": ["/work/pictorium/storyboard.json"]
+    },
+    {
+      "name": "CharacterSheetwright",
+      "role": "comic character sheet planner using Image Brigade",
+      "source_modules": [
+        "EyeOfTerror/Pictorium/Brigades/Comics/Workers/CharacterSheetwright/worker.py",
+        "EyeOfTerror/Pictorium/Brigades/Comics/Workers/CharacterSheetwright/worker.json",
+        "EyeOfTerror/Pictorium/Brigades/Image/Workers/Promptwright/worker.py"
+      ],
+      "expected_artifacts": ["/work/pictorium/character_sheet.json"]
+    },
+    {
+      "name": "Panelwright",
+      "role": "per-panel Image Brigade package builder",
+      "source_modules": [
+        "EyeOfTerror/Pictorium/Brigades/Comics/Workers/Panelwright/worker.py",
+        "EyeOfTerror/Pictorium/Brigades/Comics/Workers/Panelwright/worker.json",
+        "EyeOfTerror/Pictorium/Brigades/Image/Workers/Promptwright/worker.py",
+        "EyeOfTerror/Pictorium/Brigades/Image/Workers/ModelQuartermaster/worker.py",
+        "EyeOfTerror/Pictorium/Brigades/Image/Workers/ForgeDispatcher/worker.py"
+      ],
+      "expected_artifacts": ["/work/pictorium/panels.json", "/work/pictorium/panel_forge_jobs.json"]
+    },
+    {
+      "name": "LayoutFinalis",
+      "role": "comic layout and final manifest builder",
+      "source_modules": [
+        "EyeOfTerror/Pictorium/Brigades/Comics/Workers/LayoutFinalis/worker.py",
+        "EyeOfTerror/Pictorium/Brigades/Comics/Workers/LayoutFinalis/worker.json"
+      ],
+      "expected_artifacts": ["/work/pictorium/layout.json", "/work/pictorium/final_manifest.json"]
     }
   ],
   "activation_requirements": [
