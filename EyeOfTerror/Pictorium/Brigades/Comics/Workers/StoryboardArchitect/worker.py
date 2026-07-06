@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import execution_packet, require_payload, response
+from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import (
+    execution_packet,
+    guidance_blockers,
+    require_payload,
+    response,
+    revision_packet,
+    with_model_guidance,
+    worker_model_guidance,
+)
 from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import worker_contract as base_contract
 
 
@@ -22,6 +30,39 @@ def worker_contract() -> dict[str, Any]:
 
 def build_storyboard(payload: dict[str, Any] | None) -> dict[str, Any]:
     data = require_payload(payload)
+    guidance = worker_model_guidance(
+        WORKER,
+        "storyboard and continuity planner",
+        data,
+        "Turn scenario beats into structured panel plans with camera, composition, continuity, image_request, risks, and confidence.",
+    )
+    model_blockers = guidance_blockers(guidance, worker=WORKER, step="storyboard")
+    if model_blockers:
+        return response(
+            WORKER,
+            with_model_guidance(
+                {
+                    "artifact": "/work/pictorium/storyboard.json",
+                    "blockers": model_blockers,
+                    "execution_packet": execution_packet(
+                        worker=WORKER,
+                        step="storyboard",
+                        produced_artifacts=["/work/pictorium/storyboard.json"],
+                        blockers=model_blockers,
+                    ),
+                    "revision_packet": revision_packet(
+                        worker=WORKER,
+                        source_step="storyboard",
+                        blockers=model_blockers,
+                        default_target_worker=WORKER,
+                        default_target_step="storyboard",
+                        action="retry StoryboardArchitect after model_brain returns structured JSON",
+                    ),
+                },
+                guidance,
+            ),
+            ok=False,
+        )
     scenario = data.get("scenario") if isinstance(data.get("scenario"), dict) else {}
     beats = scenario.get("beats") if isinstance(scenario.get("beats"), list) else []
     if not beats:
@@ -54,17 +95,20 @@ def build_storyboard(payload: dict[str, Any] | None) -> dict[str, Any]:
     }
     return response(
         WORKER,
-        {
-            "artifact": "/work/pictorium/storyboard.json",
-            "storyboard": storyboard,
-            "execution_packet": execution_packet(
-                worker=WORKER,
-                step="storyboard",
-                produced_artifacts=["/work/pictorium/storyboard.json"],
-                next_steps=["character_sheet", "panel_generation"],
-                handoff={"panel_count": len(panels), "reading_order": storyboard["layout_policy"]["reading_order"]},
-            ),
-        },
+        with_model_guidance(
+            {
+                "artifact": "/work/pictorium/storyboard.json",
+                "storyboard": storyboard,
+                "execution_packet": execution_packet(
+                    worker=WORKER,
+                    step="storyboard",
+                    produced_artifacts=["/work/pictorium/storyboard.json"],
+                    next_steps=["character_sheet", "panel_generation"],
+                    handoff={"panel_count": len(panels), "reading_order": storyboard["layout_policy"]["reading_order"]},
+                ),
+            },
+            guidance,
+        ),
     )
 
 

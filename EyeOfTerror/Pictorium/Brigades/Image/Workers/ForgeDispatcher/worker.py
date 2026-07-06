@@ -3,7 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from EyeOfTerror.Pictorium.Brigades.Image.worker_api import execution_packet, model_dump, require_payload, response, revision_packet
+from EyeOfTerror.Pictorium.Brigades.Image.worker_api import (
+    execution_packet,
+    guidance_blockers,
+    model_dump,
+    require_payload,
+    response,
+    revision_packet,
+    with_model_guidance,
+    worker_model_guidance,
+)
 from EyeOfTerror.Pictorium.Brigades.Image.worker_api import worker_contract as base_contract
 from EyeOfTerror.Pictorium.Moriana.forge_runtime.queue import ForgeQueue
 from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import JobSpec
@@ -32,6 +41,13 @@ def _store(data: dict[str, Any]) -> ForgeStore:
 
 def prepare_dispatch(payload: dict[str, Any] | None) -> dict[str, Any]:
     data = require_payload(payload)
+    guidance = worker_model_guidance(
+        WORKER,
+        "ForgeRuntime dry-run validator and job submitter",
+        data,
+        "Validate dispatch readiness and return structured JSON about submit/wait/retry risks without inventing completed artifacts.",
+    )
+    model_blockers = guidance_blockers(guidance, worker=WORKER, step="forge_dispatch")
     raw_spec = data.get("job_spec") if isinstance(data.get("job_spec"), dict) else data.get("spec")
     if not isinstance(raw_spec, dict):
         raise ValueError("ForgeDispatcher requires job_spec")
@@ -41,29 +57,33 @@ def prepare_dispatch(payload: dict[str, Any] | None) -> dict[str, Any]:
     try:
         validation = queue.validate(spec)
     except Exception as exc:
+        blockers = [{"code": "forge_validation_failed", "message": str(exc)}, *model_blockers]
         return response(
             WORKER,
-            {
-                "artifact": "/work/pictorium/forge_jobs.json",
-                "dispatch": {"valid": False, "submitted": False},
-                "job_spec": model_dump(spec),
-                "blockers": [{"code": "forge_validation_failed", "message": str(exc)}],
-                "execution_packet": execution_packet(
-                    worker=WORKER,
-                    step="forge_dispatch",
-                    produced_artifacts=["/work/pictorium/forge_jobs.json"],
-                    blockers=[{"code": "forge_validation_failed", "message": str(exc)}],
-                    handoff={"submitted": False},
-                ),
-                "revision_packet": revision_packet(
-                    worker=WORKER,
-                    source_step="forge_dispatch",
-                    blockers=[{"code": "forge_validation_failed", "message": str(exc), "target_worker": "Promptwright", "target_step": "image_planning"}],
-                    default_target_worker="Promptwright",
-                    default_target_step="image_planning",
-                    action="produce a Forge-valid job_spec",
-                ),
-            },
+            with_model_guidance(
+                {
+                    "artifact": "/work/pictorium/forge_jobs.json",
+                    "dispatch": {"valid": False, "submitted": False},
+                    "job_spec": model_dump(spec),
+                    "blockers": blockers,
+                    "execution_packet": execution_packet(
+                        worker=WORKER,
+                        step="forge_dispatch",
+                        produced_artifacts=["/work/pictorium/forge_jobs.json"],
+                        blockers=blockers,
+                        handoff={"submitted": False},
+                    ),
+                    "revision_packet": revision_packet(
+                        worker=WORKER,
+                        source_step="forge_dispatch",
+                        blockers=blockers,
+                        default_target_worker="Promptwright",
+                        default_target_step="image_planning",
+                        action="produce a Forge-valid job_spec",
+                    ),
+                },
+                guidance,
+            ),
             ok=False,
         )
     job_record = None
@@ -71,33 +91,38 @@ def prepare_dispatch(payload: dict[str, Any] | None) -> dict[str, Any]:
         job_record = queue.submit(spec)
     return response(
         WORKER,
-        {
-            "artifact": "/work/pictorium/forge_jobs.json",
-            "dispatch": {
-                "valid": True,
-                "submitted": submit,
-                "resource_estimate": validation.get("resource_estimate", {}),
-                "queue_state": queue.queue_state(),
+        with_model_guidance(
+            {
+                "artifact": "/work/pictorium/forge_jobs.json",
+                "dispatch": {
+                    "valid": True,
+                    "submitted": submit,
+                    "resource_estimate": validation.get("resource_estimate", {}),
+                    "queue_state": queue.queue_state(),
+                },
+                "job_spec": model_dump(spec),
+                "job_record": model_dump(job_record) if job_record else None,
+                "blockers": model_blockers,
+                "execution_packet": execution_packet(
+                    worker=WORKER,
+                    step="forge_dispatch",
+                    produced_artifacts=["/work/pictorium/forge_jobs.json"],
+                    next_steps=[] if model_blockers else ["image_verification"],
+                    blockers=model_blockers,
+                    handoff={"submitted": submit, "job_id": job_record.id if job_record else ""},
+                ),
+                "revision_packet": revision_packet(
+                    worker=WORKER,
+                    source_step="forge_dispatch",
+                    blockers=model_blockers,
+                    default_target_worker="Promptwright",
+                    default_target_step="image_planning",
+                    action="produce a Forge-valid job_spec",
+                ),
             },
-            "job_spec": model_dump(spec),
-            "job_record": model_dump(job_record) if job_record else None,
-            "blockers": [],
-            "execution_packet": execution_packet(
-                worker=WORKER,
-                step="forge_dispatch",
-                produced_artifacts=["/work/pictorium/forge_jobs.json"],
-                next_steps=["image_verification"],
-                handoff={"submitted": submit, "job_id": job_record.id if job_record else ""},
-            ),
-            "revision_packet": revision_packet(
-                worker=WORKER,
-                source_step="forge_dispatch",
-                blockers=[],
-                default_target_worker="Promptwright",
-                default_target_step="image_planning",
-                action="produce a Forge-valid job_spec",
-            ),
-        },
+            guidance,
+        ),
+        ok=not model_blockers,
     )
 
 

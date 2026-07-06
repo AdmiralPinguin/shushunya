@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from EyeOfTerror.Pictorium.Brigades.Image.worker_api import execution_packet, model_dump, require_payload, response
+from EyeOfTerror.Pictorium.Brigades.Image.worker_api import (
+    execution_packet,
+    guidance_blockers,
+    model_dump,
+    require_payload,
+    response,
+    revision_packet,
+    with_model_guidance,
+    worker_model_guidance,
+)
 from EyeOfTerror.Pictorium.Brigades.Image.worker_api import task_text as payload_task_text
 from EyeOfTerror.Pictorium.Brigades.Image.worker_api import worker_contract as base_contract
 from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import PlanRequest, ProjectPlanRequest
@@ -28,6 +37,40 @@ def prepare_image_plan(payload: dict[str, Any] | None) -> dict[str, Any]:
     request = payload_task_text(data)
     if not request:
         raise ValueError("Promptwright requires request, task, or contract.goal")
+    guidance = worker_model_guidance(
+        WORKER,
+        "image intent parser and Forge job/project planner",
+        data,
+        "Parse the visual task into a concise executable image-generation plan. Preserve user constraints and return structured JSON.",
+    )
+    model_blockers = guidance_blockers(guidance, worker=WORKER, step="image_planning")
+    if model_blockers:
+        return response(
+            WORKER,
+            with_model_guidance(
+                {
+                    "plan_kind": "blocked",
+                    "artifact": "/work/pictorium/image_plan.json",
+                    "blockers": model_blockers,
+                    "execution_packet": execution_packet(
+                        worker=WORKER,
+                        step="image_planning",
+                        produced_artifacts=["/work/pictorium/image_plan.json"],
+                        blockers=model_blockers,
+                    ),
+                    "revision_packet": revision_packet(
+                        worker=WORKER,
+                        source_step="image_planning",
+                        blockers=model_blockers,
+                        default_target_worker=WORKER,
+                        default_target_step="image_planning",
+                        action="retry Promptwright after model_brain returns structured JSON",
+                    ),
+                },
+                guidance,
+            ),
+            ok=False,
+        )
     mode = str(data.get("mode") or data.get("plan_kind") or "job").strip().lower()
     use_memory = bool(data.get("use_memory", False))
     use_thinker = bool(data.get("use_thinker", False))
@@ -49,19 +92,22 @@ def prepare_image_plan(payload: dict[str, Any] | None) -> dict[str, Any]:
         )
         return response(
             WORKER,
-            {
-                "plan_kind": "project",
-                "artifact": "/work/pictorium/image_plan.json",
-                "project_spec": model_dump(project),
-                "job_spec": model_dump(project.steps[0].spec) if project.steps else {},
-                "execution_packet": execution_packet(
-                    worker=WORKER,
-                    step="image_planning",
-                    produced_artifacts=["/work/pictorium/image_plan.json"],
-                    next_steps=["resource_readiness"],
-                    handoff={"plan_kind": "project", "project_step_count": len(project.steps)},
-                ),
-            },
+            with_model_guidance(
+                {
+                    "plan_kind": "project",
+                    "artifact": "/work/pictorium/image_plan.json",
+                    "project_spec": model_dump(project),
+                    "job_spec": model_dump(project.steps[0].spec) if project.steps else {},
+                    "execution_packet": execution_packet(
+                        worker=WORKER,
+                        step="image_planning",
+                        produced_artifacts=["/work/pictorium/image_plan.json"],
+                        next_steps=["resource_readiness"],
+                        handoff={"plan_kind": "project", "project_step_count": len(project.steps)},
+                    ),
+                },
+                guidance,
+            ),
         )
     spec = plan_txt2img(
         PlanRequest(
@@ -73,18 +119,21 @@ def prepare_image_plan(payload: dict[str, Any] | None) -> dict[str, Any]:
     )
     return response(
         WORKER,
-        {
-            "plan_kind": "job",
-            "artifact": "/work/pictorium/image_plan.json",
-            "job_spec": model_dump(spec),
-            "execution_packet": execution_packet(
-                worker=WORKER,
-                step="image_planning",
-                produced_artifacts=["/work/pictorium/image_plan.json"],
-                next_steps=["resource_readiness"],
-                handoff={"plan_kind": "job", "prompt_ready": bool(spec.prompt)},
-            ),
-        },
+        with_model_guidance(
+            {
+                "plan_kind": "job",
+                "artifact": "/work/pictorium/image_plan.json",
+                "job_spec": model_dump(spec),
+                "execution_packet": execution_packet(
+                    worker=WORKER,
+                    step="image_planning",
+                    produced_artifacts=["/work/pictorium/image_plan.json"],
+                    next_steps=["resource_readiness"],
+                    handoff={"plan_kind": "job", "prompt_ready": bool(spec.prompt)},
+                ),
+            },
+            guidance,
+        ),
     )
 
 

@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from EyeOfTerror.Pictorium.pictorium_model import (
+    attach_model_guidance,
+    model_guidance_blockers,
+    pictorium_model_contract,
+    request_pictorium_model_guidance,
+)
+
 
 API_VERSION = 1
 
@@ -56,8 +63,21 @@ def worker_contract(
         "callable": "handle(payload: dict) -> dict",
         "capabilities": capabilities,
         "input_fields": inputs,
-        "output_fields": [*outputs, "execution_packet", "revision_packet"],
+        "output_fields": [*outputs, "execution_packet", "revision_packet", "model_guidance"],
+        "model_brain": pictorium_model_contract(name, role),
     }
+
+
+def worker_model_guidance(worker: str, role: str, payload: dict[str, Any], instructions: str) -> dict[str, Any]:
+    return request_pictorium_model_guidance(worker, role, payload, instructions=instructions)
+
+
+def guidance_blockers(guidance: dict[str, Any], *, worker: str, step: str) -> list[dict[str, Any]]:
+    return model_guidance_blockers(guidance, target_worker=worker, target_step=step)
+
+
+def with_model_guidance(payload: dict[str, Any], guidance: dict[str, Any]) -> dict[str, Any]:
+    return attach_model_guidance(payload, guidance)
 
 
 def execution_packet(

@@ -17,6 +17,7 @@ if str(WARMMASTER_ROOT) not in sys.path:
     sys.path.insert(0, str(WARMMASTER_ROOT))
 
 from EyeOfTerror.Pictorium.Moriana.moriana_governor import make_handler
+from EyeOfTerror.Pictorium.testing.fake_model_server import fake_pictorium_model
 
 
 def request_json(base: str, method: str, path: str, payload: dict[str, object] | None = None) -> dict[str, object]:
@@ -34,7 +35,7 @@ def request_json(base: str, method: str, path: str, payload: dict[str, object] |
     return result
 
 
-def main() -> int:
+def _main() -> int:
     with tempfile.TemporaryDirectory(prefix="moriana-service-self-test-") as tmp:
         run_root = Path(tmp) / "runs"
         server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(run_root))
@@ -133,6 +134,11 @@ def main() -> int:
             thread.join(timeout=5)
     print("[ok] Moriana HTTP service endpoints")
     return 0
+
+
+def main() -> int:
+    with fake_pictorium_model():
+        return _main()
 
 
 if __name__ == "__main__":

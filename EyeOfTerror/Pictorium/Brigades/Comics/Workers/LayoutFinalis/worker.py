@@ -3,7 +3,15 @@ from __future__ import annotations
 from math import ceil
 from typing import Any
 
-from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import execution_packet, require_payload, response, revision_packet
+from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import (
+    execution_packet,
+    guidance_blockers,
+    require_payload,
+    response,
+    revision_packet,
+    with_model_guidance,
+    worker_model_guidance,
+)
 from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import worker_contract as base_contract
 
 
@@ -29,6 +37,12 @@ def _blockers_from(value: Any) -> list[dict[str, Any]]:
 
 def build_layout_manifest(payload: dict[str, Any] | None) -> dict[str, Any]:
     data = require_payload(payload)
+    guidance = worker_model_guidance(
+        WORKER,
+        "comic layout and final manifest builder",
+        data,
+        "Review comic layout, panel continuity, delivery readiness, and revision needs as structured JSON.",
+    )
     scenario = data.get("scenario") if isinstance(data.get("scenario"), dict) else {}
     storyboard = data.get("storyboard") if isinstance(data.get("storyboard"), dict) else {}
     character_sheet = data.get("character_sheet") if isinstance(data.get("character_sheet"), dict) else {}
@@ -37,6 +51,7 @@ def build_layout_manifest(payload: dict[str, Any] | None) -> dict[str, Any]:
     blockers = [
         *_blockers_from(character_sheet),
         *_blockers_from(panels_payload),
+        *guidance_blockers(guidance, worker=WORKER, step="layout_manifest"),
     ]
     panels_per_page = max(1, min(6, int(data.get("panels_per_page") or 4)))
     pages = []
@@ -74,28 +89,31 @@ def build_layout_manifest(payload: dict[str, Any] | None) -> dict[str, Any]:
     }
     return response(
         WORKER,
-        {
-            "artifact": "/work/pictorium/layout.json",
-            "final_artifact": "/work/pictorium/final_manifest.json",
-            "layout": layout,
-            "final_manifest": manifest,
-            "blockers": blockers,
-            "execution_packet": execution_packet(
-                worker=WORKER,
-                step="layout_manifest",
-                produced_artifacts=["/work/pictorium/layout.json", "/work/pictorium/final_manifest.json"],
-                blockers=blockers,
-                handoff=manifest["handoff"],
-            ),
-            "revision_packet": revision_packet(
-                worker=WORKER,
-                source_step="layout_manifest",
-                blockers=blockers,
-                default_target_worker="Panelwright",
-                default_target_step="panel_generation",
-                action="clear panel, character-sheet, or layout blockers and rebuild the manifest",
-            ),
-        },
+        with_model_guidance(
+            {
+                "artifact": "/work/pictorium/layout.json",
+                "final_artifact": "/work/pictorium/final_manifest.json",
+                "layout": layout,
+                "final_manifest": manifest,
+                "blockers": blockers,
+                "execution_packet": execution_packet(
+                    worker=WORKER,
+                    step="layout_manifest",
+                    produced_artifacts=["/work/pictorium/layout.json", "/work/pictorium/final_manifest.json"],
+                    blockers=blockers,
+                    handoff=manifest["handoff"],
+                ),
+                "revision_packet": revision_packet(
+                    worker=WORKER,
+                    source_step="layout_manifest",
+                    blockers=blockers,
+                    default_target_worker="Panelwright",
+                    default_target_step="panel_generation",
+                    action="clear panel, character-sheet, or layout blockers and rebuild the manifest",
+                ),
+            },
+            guidance,
+        ),
         ok=not blockers,
     )
 

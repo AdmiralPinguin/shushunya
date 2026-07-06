@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import execution_packet, require_payload, response, revision_packet
+from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import (
+    execution_packet,
+    guidance_blockers,
+    require_payload,
+    response,
+    revision_packet,
+    with_model_guidance,
+    worker_model_guidance,
+)
 from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import worker_contract as base_contract
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ForgeDispatcher.worker import prepare_dispatch
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ModelQuartermaster.worker import inspect_resources
@@ -24,6 +32,12 @@ def worker_contract() -> dict[str, Any]:
 
 def build_panel_packages(payload: dict[str, Any] | None) -> dict[str, Any]:
     data = require_payload(payload)
+    guidance = worker_model_guidance(
+        WORKER,
+        "per-panel Image Brigade package builder",
+        data,
+        "Prepare panel-level image execution packages and structured continuity risks before delegating Image Brigade workers.",
+    )
     storyboard = data.get("storyboard") if isinstance(data.get("storyboard"), dict) else {}
     panels = storyboard.get("panels") if isinstance(storyboard.get("panels"), list) else []
     if not panels:
@@ -31,7 +45,7 @@ def build_panel_packages(payload: dict[str, Any] | None) -> dict[str, Any]:
     submit = bool(data.get("submit", False))
     db_path = data.get("db_path")
     panel_packages = []
-    blockers: list[dict[str, Any]] = []
+    blockers: list[dict[str, Any]] = guidance_blockers(guidance, worker=WORKER, step="panel_generation")
     for panel in panels:
         request = str(panel.get("image_request") or panel.get("caption") or panel.get("id") or "").strip()
         image_plan = prepare_image_plan({"request": request, "use_memory": False, "use_thinker": False})
@@ -56,44 +70,47 @@ def build_panel_packages(payload: dict[str, Any] | None) -> dict[str, Any]:
         )
     return response(
         WORKER,
-        {
-            "artifact": "/work/pictorium/panels.json",
-            "panel_jobs_artifact": "/work/pictorium/panel_forge_jobs.json",
-            "panels": panel_packages,
-            "panel_forge_jobs": [
-                {"panel_id": item["panel_id"], "dispatch": item["dispatch"].get("dispatch", {})}
-                for item in panel_packages
-            ],
-            "blockers": blockers,
-            "image_brigade_used": ["Promptwright", "ModelQuartermaster", "ForgeDispatcher"],
-            "execution_packet": execution_packet(
-                worker=WORKER,
-                step="panel_generation",
-                produced_artifacts=["/work/pictorium/panels.json", "/work/pictorium/panel_forge_jobs.json"],
-                next_steps=[] if blockers else ["layout_manifest"],
-                blockers=blockers,
-                handoff={
-                    "panel_count": len(panel_packages),
-                    "image_brigade_used": ["Promptwright", "ModelQuartermaster", "ForgeDispatcher"],
-                    "submit": submit,
-                },
-            ),
-            "revision_packet": revision_packet(
-                worker=WORKER,
-                source_step="panel_generation",
-                blockers=[
-                    {
-                        **blocker,
-                        "target_worker": blocker.get("target_worker") or ("Promptwright" if blocker.get("source") in {"resources", "dispatch"} else "Panelwright"),
-                        "target_step": blocker.get("target_step") or "panel_generation",
-                    }
-                    for blocker in blockers
+        with_model_guidance(
+            {
+                "artifact": "/work/pictorium/panels.json",
+                "panel_jobs_artifact": "/work/pictorium/panel_forge_jobs.json",
+                "panels": panel_packages,
+                "panel_forge_jobs": [
+                    {"panel_id": item["panel_id"], "dispatch": item["dispatch"].get("dispatch", {})}
+                    for item in panel_packages
                 ],
-                default_target_worker="Panelwright",
-                default_target_step="panel_generation",
-                action="rebuild failed panel packages and rerun downstream layout",
-            ),
-        },
+                "blockers": blockers,
+                "image_brigade_used": ["Promptwright", "ModelQuartermaster", "ForgeDispatcher"],
+                "execution_packet": execution_packet(
+                    worker=WORKER,
+                    step="panel_generation",
+                    produced_artifacts=["/work/pictorium/panels.json", "/work/pictorium/panel_forge_jobs.json"],
+                    next_steps=[] if blockers else ["layout_manifest"],
+                    blockers=blockers,
+                    handoff={
+                        "panel_count": len(panel_packages),
+                        "image_brigade_used": ["Promptwright", "ModelQuartermaster", "ForgeDispatcher"],
+                        "submit": submit,
+                    },
+                ),
+                "revision_packet": revision_packet(
+                    worker=WORKER,
+                    source_step="panel_generation",
+                    blockers=[
+                        {
+                            **blocker,
+                            "target_worker": blocker.get("target_worker") or ("Promptwright" if blocker.get("source") in {"resources", "dispatch"} else "Panelwright"),
+                            "target_step": blocker.get("target_step") or "panel_generation",
+                        }
+                        for blocker in blockers
+                    ],
+                    default_target_worker="Panelwright",
+                    default_target_step="panel_generation",
+                    action="rebuild failed panel packages and rerun downstream layout",
+                ),
+            },
+            guidance,
+        ),
         ok=not blockers,
     )
 

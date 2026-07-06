@@ -20,6 +20,7 @@ from EyeOfTerror.Pictorium.Brigades.Image.Workers.ForgeDispatcher.worker import 
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ImageVerifier.worker import verify_image
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ModelQuartermaster.worker import inspect_resources
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.Promptwright.worker import prepare_image_plan
+from EyeOfTerror.Pictorium.testing.fake_model_server import fake_pictorium_model
 from EyeOfTerror.Warmaster.eye_of_terror.task_prepare import prepare_task, preflight_task
 
 
@@ -27,7 +28,7 @@ def load_json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def main() -> int:
+def _main() -> int:
     task = "нарисуй картинку тестового механикум-алтаря stable diffusion 512x512"
     with tempfile.TemporaryDirectory(prefix="moriana-e2e-") as tmp:
         root = Path(tmp)
@@ -91,6 +92,11 @@ def main() -> int:
             raise AssertionError(f"bad comic dispatch order: {comic_workers}")
     print("[ok] Moriana Warmaster -> Image Brigade -> ForgeRuntime e2e")
     return 0
+
+
+def main() -> int:
+    with fake_pictorium_model():
+        return _main()
 
 
 if __name__ == "__main__":

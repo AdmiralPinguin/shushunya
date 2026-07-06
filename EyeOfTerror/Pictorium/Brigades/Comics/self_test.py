@@ -14,6 +14,7 @@ from EyeOfTerror.Pictorium.Brigades.Comics.Workers.LayoutFinalis.worker import b
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.Panelwright.worker import build_panel_packages
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.ScenarioScribe.worker import build_scenario
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.StoryboardArchitect.worker import build_storyboard
+from EyeOfTerror.Pictorium.testing.fake_model_server import fake_pictorium_model
 
 
 def assert_execution_packet(payload: dict[str, object], worker: str) -> None:
@@ -28,21 +29,32 @@ def assert_revision_packet(payload: dict[str, object], worker: str) -> None:
         raise AssertionError(f"{worker} did not return revision_packet: {payload}")
 
 
-def main() -> int:
+def assert_model_guidance(payload: dict[str, object], worker: str) -> None:
+    guidance = payload.get("model_guidance") if isinstance(payload.get("model_guidance"), dict) else {}
+    if guidance.get("kind") != "pictorium_worker_model_guidance" or guidance.get("worker") != worker or guidance.get("status") != "answered":
+        raise AssertionError(f"{worker} did not return answered model_guidance: {payload}")
+    if not isinstance(guidance.get("decision"), dict) or not guidance.get("decision"):
+        raise AssertionError(f"{worker} model_guidance did not contain structured decision: {payload}")
+
+
+def _main() -> int:
     task = "сделай комикс 4 панели про техножреца который запускает древнюю кузню"
     scenario = build_scenario({"request": task})
     if not scenario.get("ok") or scenario.get("scenario", {}).get("panel_count") != 4:
         raise AssertionError(f"ScenarioScribe failed: {scenario}")
     assert_execution_packet(scenario, "ScenarioScribe")
+    assert_model_guidance(scenario, "ScenarioScribe")
     storyboard = build_storyboard({"scenario": scenario["scenario"]})
     if not storyboard.get("ok") or len(storyboard.get("storyboard", {}).get("panels", [])) != 4:
         raise AssertionError(f"StoryboardArchitect failed: {storyboard}")
     assert_execution_packet(storyboard, "StoryboardArchitect")
+    assert_model_guidance(storyboard, "StoryboardArchitect")
     character_sheet = build_character_sheet({"scenario": scenario["scenario"]})
     if not character_sheet.get("ok") or "Promptwright" not in character_sheet.get("image_brigade_used", []):
         raise AssertionError(f"CharacterSheetwright failed: {character_sheet}")
     assert_execution_packet(character_sheet, "CharacterSheetwright")
     assert_revision_packet(character_sheet, "CharacterSheetwright")
+    assert_model_guidance(character_sheet, "CharacterSheetwright")
     with tempfile.TemporaryDirectory(prefix="pictorium-comics-self-test-") as tmp:
         panels = build_panel_packages(
             {
@@ -60,6 +72,7 @@ def main() -> int:
             raise AssertionError(f"Panelwright failed: {panels}")
         assert_execution_packet(panels, "Panelwright")
         assert_revision_packet(panels, "Panelwright")
+        assert_model_guidance(panels, "Panelwright")
         final = build_layout_manifest(
             {
                 "scenario": scenario["scenario"],
@@ -72,10 +85,16 @@ def main() -> int:
         raise AssertionError(f"LayoutFinalis failed: {final}")
     assert_execution_packet(final, "LayoutFinalis")
     assert_revision_packet(final, "LayoutFinalis")
+    assert_model_guidance(final, "LayoutFinalis")
     if not final.get("final_manifest", {}).get("handoff", {}).get("uses_image_brigade_execution_layer"):
         raise AssertionError(f"Comics final manifest did not preserve Image Brigade evidence: {final}")
     print("[ok] Pictorium Comics Brigade workers")
     return 0
+
+
+def main() -> int:
+    with fake_pictorium_model():
+        return _main()
 
 
 if __name__ == "__main__":

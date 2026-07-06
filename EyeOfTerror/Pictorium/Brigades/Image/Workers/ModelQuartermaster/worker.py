@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from EyeOfTerror.Pictorium.Brigades.Image.worker_api import execution_packet, require_payload, response, revision_packet
+from EyeOfTerror.Pictorium.Brigades.Image.worker_api import (
+    execution_packet,
+    guidance_blockers,
+    require_payload,
+    response,
+    revision_packet,
+    with_model_guidance,
+    worker_model_guidance,
+)
 from EyeOfTerror.Pictorium.Brigades.Image.worker_api import worker_contract as base_contract
 from EyeOfTerror.Pictorium.Moriana.moriana_core.asset_catalog import asset_profiles, capabilities
 
@@ -50,6 +58,12 @@ def _engine_report(caps: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any]
 
 def inspect_resources(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     data = require_payload(payload)
+    guidance = worker_model_guidance(
+        WORKER,
+        "model, LoRA, embedding, and asset readiness inspector",
+        data,
+        "Inspect the visual generation request and advise model, LoRA, asset, and parameter readiness as structured JSON.",
+    )
     caps = capabilities()
     spec = data.get("job_spec") if isinstance(data.get("job_spec"), dict) else {}
     if not spec and isinstance(data.get("project_spec"), dict):
@@ -68,31 +82,35 @@ def inspect_resources(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         "embedding_count": len(caps.get("embeddings", [])),
         "asset_profile_count": len(asset_profiles().get("profiles", [])),
     }
+    blockers = [*engine_report["blockers"], *guidance_blockers(guidance, worker=WORKER, step="resource_readiness")]
     return response(
         WORKER,
-        {
-            "artifact": "/work/pictorium/resource_report.json",
-            "capabilities": caps,
-            "resource_report": report,
-            "blockers": engine_report["blockers"],
-            "execution_packet": execution_packet(
-                worker=WORKER,
-                step="resource_readiness",
-                produced_artifacts=["/work/pictorium/resource_report.json"],
-                next_steps=[] if engine_report["blockers"] else ["forge_dispatch"],
-                blockers=engine_report["blockers"],
-                handoff={"engine": engine_report["engine"], "model": engine_report["model"]},
-            ),
-            "revision_packet": revision_packet(
-                worker=WORKER,
-                source_step="resource_readiness",
-                blockers=engine_report["blockers"],
-                default_target_worker="ModelQuartermaster",
-                default_target_step="resource_readiness",
-                action="choose available model, remove unsupported LoRA/negative prompt, or request asset approval",
-            ),
-        },
-        ok=not engine_report["blockers"],
+        with_model_guidance(
+            {
+                "artifact": "/work/pictorium/resource_report.json",
+                "capabilities": caps,
+                "resource_report": report,
+                "blockers": blockers,
+                "execution_packet": execution_packet(
+                    worker=WORKER,
+                    step="resource_readiness",
+                    produced_artifacts=["/work/pictorium/resource_report.json"],
+                    next_steps=[] if blockers else ["forge_dispatch"],
+                    blockers=blockers,
+                    handoff={"engine": engine_report["engine"], "model": engine_report["model"]},
+                ),
+                "revision_packet": revision_packet(
+                    worker=WORKER,
+                    source_step="resource_readiness",
+                    blockers=blockers,
+                    default_target_worker="ModelQuartermaster",
+                    default_target_step="resource_readiness",
+                    action="choose available model, remove unsupported LoRA/negative prompt, or request asset approval",
+                ),
+            },
+            guidance,
+        ),
+        ok=not blockers,
     )
 
 

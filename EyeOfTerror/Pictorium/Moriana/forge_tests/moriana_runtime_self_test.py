@@ -25,6 +25,7 @@ from EyeOfTerror.Pictorium.Moriana.moriana_forge_monitor import monitor_forge_jo
 from EyeOfTerror.Pictorium.Moriana.moriana_governor import create_or_execute_run, make_handler, prepare_run
 from EyeOfTerror.Pictorium.Moriana.moriana_executor import execute_revision_run
 from EyeOfTerror.Pictorium.Moriana.moriana_runtime import MorianaRunStore
+from EyeOfTerror.Pictorium.testing.fake_model_server import fake_pictorium_model
 
 
 def load_json(path: Path) -> dict[str, object]:
@@ -63,7 +64,7 @@ def artifact_types(run_dir: Path) -> set[str]:
     return {str(item.get("type") or "") for item in registry.get("artifacts", []) if isinstance(item, dict)}
 
 
-def main() -> int:
+def _main() -> int:
     with tempfile.TemporaryDirectory(prefix="moriana-runtime-self-test-") as tmp:
         run_root = Path(tmp) / "runtime" / "pictorium" / "runs"
         forge_db_path = Path(tmp) / "forge-monitor.sqlite3"
@@ -362,6 +363,11 @@ def main() -> int:
 
     print("[ok] Moriana runtime, artifact registry, revision loop, and app API")
     return 0
+
+
+def main() -> int:
+    with fake_pictorium_model():
+        return _main()
 
 
 if __name__ == "__main__":

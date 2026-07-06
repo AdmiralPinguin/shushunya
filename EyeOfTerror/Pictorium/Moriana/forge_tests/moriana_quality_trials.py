@@ -19,6 +19,7 @@ if str(WARMMASTER_ROOT) not in sys.path:
     sys.path.insert(0, str(WARMMASTER_ROOT))
 
 from EyeOfTerror.Pictorium.Moriana.moriana_governor import create_or_execute_run
+from EyeOfTerror.Pictorium.testing.fake_model_server import fake_pictorium_model
 
 
 TRIALS = [
@@ -177,7 +178,7 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def main() -> int:
+def _main() -> int:
     parser = argparse.ArgumentParser(description="Run Moriana visual quality trial suite.")
     parser.add_argument("--report-json", default="")
     args = parser.parse_args()
@@ -215,6 +216,11 @@ def main() -> int:
         )
     )
     return 0
+
+
+def main() -> int:
+    with fake_pictorium_model():
+        return _main()
 
 
 if __name__ == "__main__":

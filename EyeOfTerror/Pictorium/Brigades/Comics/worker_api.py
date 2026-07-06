@@ -11,6 +11,9 @@ from EyeOfTerror.Pictorium.Brigades.Image.worker_api import (
     response,
     revision_packet,
     task_text,
+    guidance_blockers,
+    with_model_guidance,
+    worker_model_guidance,
     worker_contract,
 )
 
@@ -64,5 +67,8 @@ __all__ = [
     "revision_packet",
     "split_beats",
     "task_text",
+    "guidance_blockers",
+    "with_model_guidance",
+    "worker_model_guidance",
     "worker_contract",
 ]
