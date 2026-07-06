@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -31,7 +32,9 @@ from EyeOfTerror.Pictorium.Brigades.Comics.Workers.LayoutFinalis.worker import w
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.Panelwright.worker import worker_contract as panelwright_contract
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.ScenarioScribe.worker import worker_contract as scenario_scribe_contract
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.StoryboardArchitect.worker import worker_contract as storyboard_architect_contract
+from EyeOfTerror.Pictorium.Moriana.moriana_executor import execute_comic_run, execute_image_run
 from EyeOfTerror.Pictorium.Moriana.moriana_core.asset_catalog import capabilities as forge_capabilities
+from EyeOfTerror.Pictorium.Moriana.moriana_runtime import MorianaRunStore, write_json_atomic
 
 
 GOVERNOR = "Moriana"
@@ -333,7 +336,19 @@ def service_capabilities() -> dict[str, Any]:
             "comic_panel_package_generation",
             "comic_layout_manifest",
         ],
-        "endpoints": ["GET /health", "GET /capabilities", "POST /plan", "POST /prepare_run"],
+        "endpoints": [
+            "GET /health",
+            "GET /capabilities",
+            "POST /plan",
+            "POST /prepare_run",
+            "POST /runs",
+            "GET /runs",
+            "GET /runs/{run_id}/status",
+            "GET /runs/{run_id}/artifacts",
+            "GET /runs/{run_id}/final",
+            "POST /runs/{run_id}/revise",
+            "POST /runs/{run_id}/accept",
+        ],
     }
 
 
@@ -354,7 +369,36 @@ def prepare_run(task: str, task_id: str | None, run_dir: Path) -> dict[str, Any]
     if not payload.get("ok"):
         return {"ok": False, "governor": GOVERNOR, "error": "plan is not ready", "plan": payload}
     status = write_pipeline_run(plan.contract, run_dir, oversight=payload["oversight"])
-    return {"ok": bool(status.get("ok")), "governor": GOVERNOR, "task_id": plan.contract.task_id, "run_dir": str(run_dir), "status": status}
+    task_kind = "comic" if is_comics_task(task) else "image"
+    runtime_status = MorianaRunStore(run_dir.parent).ensure_run(plan.contract.task_id, task, task_kind, payload)
+    runtime_status.update(status)
+    write_json_atomic(run_dir / "status.json", runtime_status)
+    return {"ok": bool(status.get("ok")), "governor": GOVERNOR, "task_id": plan.contract.task_id, "run_dir": str(run_dir), "status": runtime_status}
+
+
+def create_or_execute_run(run_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    task = str(payload.get("task") or payload.get("request") or "").strip()
+    if not task:
+        raise ValueError("task is required")
+    plan = plan_image_task(task, task_id=str(payload.get("task_id") or "").strip() or None)
+    plan_payload = plan.to_dict()
+    if not plan_payload.get("ok"):
+        return {"ok": False, "governor": GOVERNOR, "error": "plan is not ready", "plan": plan_payload}
+    task_kind = "comic" if is_comics_task(task) else "image"
+    store = MorianaRunStore(run_root)
+    status = store.create_run(plan.contract.task_id, task, task_kind, plan_payload)
+    if not bool(payload.get("execute", False)):
+        return {"ok": True, "governor": GOVERNOR, "run_id": plan.contract.task_id, "run_dir": status["run_dir"], "status": status}
+    if task_kind == "comic":
+        return execute_comic_run(store, plan.contract.task_id, task, submit=bool(payload.get("submit", False)))
+    return execute_image_run(
+        store,
+        plan.contract.task_id,
+        task,
+        submit=bool(payload.get("submit", False)),
+        test_artifact_mode=str(payload.get("test_artifact_mode") or ""),
+        max_revision_cycles=int(payload.get("max_revision_cycles") or 1),
+    )
 
 
 def response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -388,12 +432,35 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
             response(self, 200, {"ok": True, "governor": GOVERNOR})
 
         def do_GET(self) -> None:
-            if self.path == "/health":
+            parsed = urlparse(self.path)
+            path = parsed.path.rstrip("/") or "/"
+            store = MorianaRunStore(default_run_root)
+            if path == "/health":
                 response(self, 200, {"ok": True, "governor": GOVERNOR})
                 return
-            if self.path == "/capabilities":
+            if path == "/capabilities":
                 response(self, 200, service_capabilities())
                 return
+            if path == "/runs":
+                response(self, 200, {"ok": True, "governor": GOVERNOR, "runs": store.list_runs()})
+                return
+            parts = [part for part in path.split("/") if part]
+            if len(parts) == 3 and parts[0] == "runs":
+                run_id = parts[1]
+                try:
+                    if parts[2] == "status":
+                        response(self, 200, {"ok": True, "governor": GOVERNOR, "status": store.status(run_id)})
+                        return
+                    if parts[2] == "artifacts":
+                        response(self, 200, {"ok": True, "governor": GOVERNOR, "run_id": run_id, "artifacts": store.artifacts(run_id)})
+                        return
+                    if parts[2] == "final":
+                        final = store.final_result(run_id)
+                        response(self, 200 if not final.get("error") else 404, {"ok": not bool(final.get("error")), "governor": GOVERNOR, "run_id": run_id, "final": final})
+                        return
+                except FileNotFoundError:
+                    response(self, 404, {"ok": False, "governor": GOVERNOR, "error": "run not found", "run_id": run_id})
+                    return
             response(self, 404, {"ok": False, "governor": GOVERNOR, "error": "not found"})
 
         def do_POST(self) -> None:
@@ -401,16 +468,32 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                 payload = payload_from(self)
                 task = str(payload.get("task") or payload.get("request") or "").strip()
                 task_id = str(payload.get("task_id") or "").strip() or None
-                if self.path == "/plan":
+                parsed = urlparse(self.path)
+                path = parsed.path.rstrip("/") or "/"
+                store = MorianaRunStore(default_run_root)
+                if path == "/plan":
                     response(self, 200, plan_image_task(task, task_id=task_id).to_dict())
                     return
-                if self.path == "/prepare_run":
+                if path == "/prepare_run":
                     if not task:
                         raise ValueError("task is required")
                     planned = plan_image_task(task, task_id=task_id)
                     run_dir = resolve_run_dir(default_run_root, str(payload.get("run_dir") or ""), planned.contract.task_id)
                     response(self, 200, prepare_run(task, planned.contract.task_id, run_dir))
                     return
+                if path == "/runs":
+                    response(self, 200, create_or_execute_run(default_run_root, payload))
+                    return
+                parts = [part for part in path.split("/") if part]
+                if len(parts) == 3 and parts[0] == "runs":
+                    run_id = parts[1]
+                    if parts[2] == "revise":
+                        reason = str(payload.get("reason") or "manual revision requested").strip()
+                        response(self, 200, {"ok": True, "governor": GOVERNOR, "run_id": run_id, "revision": store.request_revision(run_id, reason), "status": store.status(run_id)})
+                        return
+                    if parts[2] == "accept":
+                        response(self, 200, {"ok": True, "governor": GOVERNOR, "run_id": run_id, "final": store.accept_final(run_id), "status": store.status(run_id)})
+                        return
                 response(self, 404, {"ok": False, "governor": GOVERNOR, "error": "not found"})
             except Exception as exc:  # noqa: BLE001 - service boundary must return structured JSON.
                 response(self, 400, {"ok": False, "governor": GOVERNOR, "error": str(exc)})
@@ -428,7 +511,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Serve Moriana as the Pictorium image governor.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7103)
-    parser.add_argument("--run-root", default=str(REPO_ROOT / "EyeOfTerror" / "Warmaster" / "runs" / "live_task_runs"))
+    parser.add_argument("--run-root", default=str(REPO_ROOT / "runtime" / "pictorium" / "runs"))
     args = parser.parse_args()
     serve(args.host, args.port, Path(args.run_root))
     return 0

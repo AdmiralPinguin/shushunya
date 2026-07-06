@@ -7,8 +7,7 @@ low-level graphical engine package.
 ## Responsibility
 
 - Convert visual user requests into strict image task contracts.
-- Select text-to-image, image-to-image, inpaint, upscale, comics, and future
-  video flows.
+- Select text-to-image, image-to-image, inpaint, upscale, and comics flows.
 - Decide which engine should be used: SD3.5, SDXL, Flux, or a future backend.
 - Detect required models, LoRAs, embeddings, ControlNet units, IP-Adapters, and
   reference assets.
@@ -21,7 +20,38 @@ low-level graphical engine package.
 - `Image`: still image generation/editing and current real Forge workflows.
 - `Comics`: active first-pass scenario, storyboard, character sheet, panel
   package, layout, and manifest workflows on top of Image Brigade.
-- `Video`: future motion-generation backends and GPU scheduling.
+- `Video`: intentionally out of the current active scope.
+
+## Run Runtime
+
+Moriana owns visual run state under `runtime/pictorium/runs/<run_id>/` by
+default. A run workspace contains the user request, Moriana plan, brigade
+decisions, prompts, parameters, results, errors, revisions, artifacts, and final
+manifest in one auditable directory.
+
+The runtime tracks these statuses:
+
+- `created`
+- `planning`
+- `generating`
+- `checking`
+- `revising`
+- `completed`
+- `failed`
+
+The artifact registry records every prompt, dispatch package, verification
+report, image, comic panel package, layout, error, revision plan, and final
+manifest with creator, step, attempt, status, and rejection reason.
+
+Application-facing endpoints:
+
+- `POST /runs`
+- `GET /runs`
+- `GET /runs/{run_id}/status`
+- `GET /runs/{run_id}/artifacts`
+- `GET /runs/{run_id}/final`
+- `POST /runs/{run_id}/revise`
+- `POST /runs/{run_id}/accept`
 
 ## Current Image Workers
 

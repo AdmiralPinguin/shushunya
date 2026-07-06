@@ -74,8 +74,31 @@ def main() -> int:
                 or not run_dir.exists()
                 or not (run_dir / "contract.json").exists()
                 or not (run_dir / "dispatch" / "scenario.json").exists()
+                or not (run_dir / "artifact_registry.json").exists()
             ):
                 raise AssertionError(f"bad prepare_run payload: {prepared}")
+            executed = request_json(
+                base,
+                "POST",
+                "/runs",
+                {
+                    "task": "нарисуй HTTP smoke картинку 512x512",
+                    "task_id": "moriana-http-exec-image",
+                    "execute": True,
+                    "test_artifact_mode": "good",
+                },
+            )
+            if not executed.get("ok") or executed.get("status", {}).get("status") != "completed":
+                raise AssertionError(f"bad /runs execution payload: {executed}")
+            status = request_json(base, "GET", "/runs/moriana-http-exec-image/status")
+            if status.get("status", {}).get("status") != "completed":
+                raise AssertionError(f"bad /runs/{{id}}/status payload: {status}")
+            artifacts = request_json(base, "GET", "/runs/moriana-http-exec-image/artifacts")
+            if not artifacts.get("artifacts"):
+                raise AssertionError(f"bad /runs/{{id}}/artifacts payload: {artifacts}")
+            final = request_json(base, "GET", "/runs/moriana-http-exec-image/final")
+            if final.get("final", {}).get("status") != "ready":
+                raise AssertionError(f"bad /runs/{{id}}/final payload: {final}")
         finally:
             server.shutdown()
             thread.join(timeout=5)

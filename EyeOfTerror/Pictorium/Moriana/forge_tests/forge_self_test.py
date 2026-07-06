@@ -59,7 +59,9 @@ def py_compile() -> dict[str, Any]:
         "../EyeOfTerror/Pictorium/Moriana/moriana_core/project_planner.py",
         "../EyeOfTerror/Pictorium/Moriana/moriana_core/prompt_thinker.py",
         "../EyeOfTerror/Pictorium/Moriana/moriana_core/promptwright.py",
+        "../EyeOfTerror/Pictorium/Moriana/moriana_executor.py",
         "../EyeOfTerror/Pictorium/Moriana/moriana_governor.py",
+        "../EyeOfTerror/Pictorium/Moriana/moriana_runtime.py",
         "../EyeOfTerror/Pictorium/Brigades/Image/worker_api.py",
         "../EyeOfTerror/Pictorium/Brigades/Image/Workers/Promptwright/worker.py",
         "../EyeOfTerror/Pictorium/Brigades/Image/Workers/ModelQuartermaster/worker.py",
@@ -80,6 +82,7 @@ def py_compile() -> dict[str, Any]:
         "../EyeOfTerror/Pictorium/Moriana/forge_tests/smoke_forge_api.py",
         "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_e2e_self_test.py",
         "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_service_self_test.py",
+        "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_runtime_self_test.py",
     ]
     command = [str(ROOT / "DemonsForge/bin/python"), "-m", "py_compile", *files]
     completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=120)
