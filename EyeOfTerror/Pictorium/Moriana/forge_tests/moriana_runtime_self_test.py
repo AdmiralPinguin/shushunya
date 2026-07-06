@@ -118,6 +118,19 @@ def _main() -> int:
         for required_type in ("prompt", "resource_report", "dispatch", "verification", "image", "final", "quality_report", "revision_decision"):
             if required_type not in success_types:
                 raise AssertionError(f"image success registry missing {required_type}: {success_types}")
+        success_registry = load_json(success_dir / "artifact_registry.json")
+        worker_artifacts = [
+            item
+            for item in success_registry.get("artifacts", [])
+            if isinstance(item, dict)
+            and item.get("created_by") != "Moriana"
+            and item.get("type") in {"prompt", "resource_report", "dispatch", "verification", "final"}
+        ]
+        if not worker_artifacts or any(item.get("metadata", {}).get("model_guidance_status") != "answered" for item in worker_artifacts):
+            raise AssertionError(f"Moriana registry did not preserve worker model guidance status: {worker_artifacts}")
+        image_plan_payload = load_json(success_dir / "prompts" / "image_plan_attempt_01.json")
+        if image_plan_payload.get("model_guidance", {}).get("status") != "answered" or not image_plan_payload.get("model_guidance", {}).get("decision"):
+            raise AssertionError(f"image plan did not preserve structured model guidance: {image_plan_payload}")
         success_quality = load_json(success_dir / "final" / "quality_report.json")
         if success_quality.get("next_action") != "accept_final" or not success_quality.get("delivery_ready"):
             raise AssertionError(f"image success quality report should be ready: {success_quality}")

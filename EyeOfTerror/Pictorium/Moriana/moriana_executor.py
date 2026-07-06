@@ -39,6 +39,12 @@ def register_json_artifact(
     rejection_reason: str = "",
 ) -> dict[str, Any]:
     path = store.write_step(run_id, f"{step}_attempt_{attempt:02d}", payload, subdir=subdir)
+    model_guidance = payload.get("model_guidance") if isinstance(payload.get("model_guidance"), dict) else {}
+    metadata = {"ok": payload.get("ok"), "worker": payload.get("worker")}
+    if model_guidance:
+        metadata["model_guidance_status"] = model_guidance.get("status")
+        metadata["model_guidance_required"] = model_guidance.get("required")
+        metadata["model_guidance_kind"] = model_guidance.get("kind")
     return store.register_artifact(
         run_id,
         artifact_type=artifact_type,
@@ -48,7 +54,7 @@ def register_json_artifact(
         attempt=attempt,
         status=status,
         rejection_reason=rejection_reason,
-        metadata={"ok": payload.get("ok"), "worker": payload.get("worker")},
+        metadata=metadata,
     )
 
 
