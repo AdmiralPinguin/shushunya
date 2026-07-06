@@ -100,6 +100,41 @@ def smoke_test() -> dict[str, Any]:
     return {"script": "EyeOfTerror/Pictorium/Moriana/forge_tests/smoke_forge_api.py"}
 
 
+def demonsforge_boundary_test() -> dict[str, Any]:
+    forbidden = (
+        "EyeOfTerror.Warmaster",
+        "EyeOfTerror.Pictorium.Brigades",
+        "moriana_governor",
+        "moriana_executor",
+        "moriana_quality",
+        "moriana_revision",
+        "Promptwright",
+        "ModelQuartermaster",
+        "ForgeDispatcher",
+        "ImageVerifier",
+        "ArtifactFinalis",
+        "ScenarioScribe",
+        "StoryboardArchitect",
+        "CharacterSheetwright",
+        "Panelwright",
+        "LayoutFinalis",
+    )
+    ignored_parts = {"DemonsForge", "runtime", "artifacts", "__pycache__"}
+    violations = []
+    checked = 0
+    for path in ROOT.rglob("*.py"):
+        if any(part in ignored_parts for part in path.relative_to(ROOT).parts):
+            continue
+        checked += 1
+        text = path.read_text(encoding="utf-8")
+        for marker in forbidden:
+            if marker in text:
+                violations.append({"path": str(path.relative_to(PROJECT_ROOT)), "marker": marker})
+    if violations:
+        raise RuntimeError(json.dumps({"violations": violations}, ensure_ascii=False))
+    return {"checked_python_files": checked, "forbidden_markers": len(forbidden)}
+
+
 def moriana_quality_trials() -> dict[str, Any]:
     completed = subprocess.run(
         [
@@ -114,6 +149,22 @@ def moriana_quality_trials() -> dict[str, Any]:
     if completed.returncode != 0:
         raise RuntimeError((completed.stderr or completed.stdout).strip())
     return {"script": "EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_quality_trials.py", "stdout": completed.stdout.strip()}
+
+
+def moriana_e2e_self_test() -> dict[str, Any]:
+    completed = subprocess.run(
+        [
+            str(ROOT / "DemonsForge/bin/python"),
+            "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_e2e_self_test.py",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        timeout=120,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError((completed.stderr or completed.stdout).strip())
+    return {"script": "EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_e2e_self_test.py", "stdout": completed.stdout.strip()}
 
 
 def live_quality_dry_run(base_url: str) -> dict[str, Any]:
@@ -191,6 +242,8 @@ def _main() -> int:
     }
     report["steps"].append(run_step("py_compile", py_compile))
     report["steps"].append(run_step("smoke_test", smoke_test))
+    report["steps"].append(run_step("demonsforge_boundary_test", demonsforge_boundary_test))
+    report["steps"].append(run_step("moriana_e2e_self_test", moriana_e2e_self_test))
     report["steps"].append(run_step("moriana_quality_trials", moriana_quality_trials))
     if not args.skip_live:
         live_step = run_step("live_quality_bench_dry_run", lambda: live_quality_dry_run(args.base_url.rstrip("/")))
