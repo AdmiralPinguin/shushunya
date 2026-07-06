@@ -1031,12 +1031,12 @@ def prepare_messages(
     if include_system_prompt:
         prepared.append(persona_page_context(memory_namespace))
     query = latest_user_message(query_messages if query_messages is not None else messages)
+    if magos_message:
+        prepared.append(magos_message)
     if include_focus:
         focus_message = focus_context_message(memory_namespace)
         if focus_message:
             prepared.append(focus_message)
-    if magos_message:
-        prepared.append(magos_message)
     if administratum_message:
         prepared.append(administratum_message)
     # Memory retrieval into the prompt now flows only through Magos's curated
