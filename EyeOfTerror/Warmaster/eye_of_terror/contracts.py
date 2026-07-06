@@ -18,7 +18,7 @@ TASK_CONTRACT_FIELDS = {
     "worker_plan",
 }
 TASK_CONTRACT_REQUIRED_FIELDS = {"version", "task_id", "kind", "goal", "assigned_governor", "completion_criteria"}
-TASK_KINDS = {"chat", "research", "image_generation", "code", "general"}
+TASK_KINDS = {"chat", "research", "image_generation", "image_series_generation", "comic_generation", "code", "general"}
 WORKER_STEP_FIELDS = {"step_id", "worker", "purpose", "depends_on", "expected_artifacts"}
 WORKER_STEP_REQUIRED_FIELDS = {"step_id", "worker", "purpose"}
 RESEARCH_INTENTS = {
@@ -541,9 +541,10 @@ def build_image_generation_contract(user_task: str, task_id: str | None = None) 
     slug = slugify(user_task, fallback="image")
     resolved_task_id = task_id or f"moriana-{slug}-image"
     plan = image_worker_plan(slug)
+    kind = "image_series_generation" if is_image_series_request(user_task) else "image_generation"
     return TaskContract(
         task_id=resolved_task_id,
-        kind="image_generation",
+        kind=kind,
         goal=user_task.strip(),
         assigned_governor="Moriana",
         non_goals=[
@@ -569,6 +570,13 @@ def build_image_generation_contract(user_task: str, task_id: str | None = None) 
         ],
         worker_plan=plan,
     )
+
+
+def is_image_series_request(user_task: str) -> bool:
+    lowered = user_task.lower()
+    if any(term in lowered for term in ("серия", "серию", "серии", "набор картинок", "несколько картинок", "image series", "series of images", "batch of images")):
+        return True
+    return bool(re.search(r"\b\d{1,2}\s*(?:картин|изображен|images|pictures)\b", lowered))
 
 
 def comics_required_artifacts(slug: str) -> list[str]:
@@ -621,7 +629,7 @@ def build_comics_generation_contract(user_task: str, task_id: str | None = None)
     plan = comics_worker_plan(slug)
     return TaskContract(
         task_id=resolved_task_id,
-        kind="image_generation",
+        kind="comic_generation",
         goal=user_task.strip(),
         assigned_governor="Moriana",
         non_goals=[

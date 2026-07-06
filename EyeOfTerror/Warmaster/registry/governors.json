@@ -23,8 +23,8 @@
   "Moriana": {
     "status": "active",
     "port": 7103,
-    "task_kinds": ["image_generation"],
-    "route_terms": ["картин", "image", "stable diffusion", "рисовал", "forge", "flux", "sdxl", "lora", "комикс", "storyboard", "раскадров", "панел"],
+    "task_kinds": ["image_generation", "image_series_generation", "comic_generation"],
+    "route_terms": ["картин", "изображен", "серия", "image", "stable diffusion", "рисовал", "forge", "flux", "sdxl", "lora", "комикс", "storyboard", "раскадров", "панел"],
     "service": "EyeOfTerror.Pictorium.Moriana.moriana_governor"
   }
 }

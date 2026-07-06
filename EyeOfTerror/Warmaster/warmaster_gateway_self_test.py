@@ -719,6 +719,26 @@ def main() -> int:
                 or image_preflight.get("governor_plan_actions", {}).get("next_action", {}).get("kind") != "prepare_run"
             ):
                 raise AssertionError(f"image route should preflight through Moriana: {image_preflight}")
+            comic_preflight = request_json(base + "/task_preflight", {"message": "сделай комикс 4 панели про техножреца", "task_id": "supported-comic"})
+            if (
+                not comic_preflight.get("ok")
+                or comic_preflight.get("governor") != "Moriana"
+                or comic_preflight.get("route", {}).get("kind") != "comic_generation"
+                or comic_preflight.get("contract_summary", {}).get("assigned_governor") != "Moriana"
+                or comic_preflight.get("contract_summary", {}).get("kind") != "comic_generation"
+                or comic_preflight.get("contract_summary", {}).get("step_count") != 5
+                or comic_preflight.get("governor_plan_actions", {}).get("next_action", {}).get("kind") != "prepare_run"
+            ):
+                raise AssertionError(f"comic route should preflight through Moriana: {comic_preflight}")
+            series_preflight = request_json(base + "/task_preflight", {"message": "сделай серию 3 изображения про одну кузню", "task_id": "supported-image-series"})
+            if (
+                not series_preflight.get("ok")
+                or series_preflight.get("governor") != "Moriana"
+                or series_preflight.get("route", {}).get("kind") != "image_series_generation"
+                or series_preflight.get("contract_summary", {}).get("kind") != "image_series_generation"
+                or series_preflight.get("contract_summary", {}).get("step_count") != 5
+            ):
+                raise AssertionError(f"image series route should preflight through Moriana: {series_preflight}")
             try:
                 request_json(
                     base + "/task",

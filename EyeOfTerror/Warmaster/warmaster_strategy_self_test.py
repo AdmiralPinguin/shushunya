@@ -25,6 +25,34 @@ def main() -> int:
         ):
             raise AssertionError(f"code preflight must route to Ceraxia contract, not research: {code_preflight}")
 
+        comic_preflight = preflight_task(
+            "сделай комикс 4 панели про техножреца",
+            "warmaster-comic-preflight",
+            run_root,
+            governor_transport="local",
+        )
+        if (
+            not comic_preflight.get("ok")
+            or comic_preflight.get("governor") != "Moriana"
+            or comic_preflight.get("route", {}).get("kind") != "comic_generation"
+            or comic_preflight.get("contract_summary", {}).get("kind") != "comic_generation"
+        ):
+            raise AssertionError(f"comic preflight must route to Moriana comic contract: {comic_preflight}")
+
+        series_preflight = preflight_task(
+            "сделай серию 3 изображения про одну кузню",
+            "warmaster-series-preflight",
+            run_root,
+            governor_transport="local",
+        )
+        if (
+            not series_preflight.get("ok")
+            or series_preflight.get("governor") != "Moriana"
+            or series_preflight.get("route", {}).get("kind") != "image_series_generation"
+            or series_preflight.get("contract_summary", {}).get("kind") != "image_series_generation"
+        ):
+            raise AssertionError(f"series preflight must route to Moriana series contract: {series_preflight}")
+
         mixed_task = "собери обзор источников по RISC-V и реализуй python демо код"
         mixed_preflight = payload_with_task_view(
             preflight_task(mixed_task, "warmaster-mixed-preflight", run_root, governor_transport="local"),

@@ -60,6 +60,16 @@ def has_strategic_support_signal(matched_terms: list[str]) -> bool:
     return any(term.lower().strip() not in WEAK_SUPPORT_TERMS for term in matched_terms)
 
 
+def route_kind_for(governor: Any, lowered_message: str) -> str:
+    kinds = list(governor.task_kinds)
+    if governor.name == "Moriana":
+        if any(term in lowered_message for term in ("комикс", "comic", "storyboard", "раскадров", "панел", "panel")):
+            return "comic_generation" if "comic_generation" in kinds else (kinds[0] if kinds else "general")
+        if any(term in lowered_message for term in ("серия", "серию", "серии", "набор картинок", "несколько картинок", "image series", "series of images", "batch of images")):
+            return "image_series_generation" if "image_series_generation" in kinds else (kinds[0] if kinds else "general")
+    return kinds[0] if kinds else "general"
+
+
 def route_message(message: str) -> RouteDecision:
     lowered = message.lower()
     candidates = []
@@ -75,7 +85,7 @@ def route_message(message: str) -> RouteDecision:
             "name": governor.name,
             "status": governor.status,
             "active": governor.active(),
-            "kind": governor.task_kinds[0] if governor.task_kinds else "general",
+            "kind": route_kind_for(governor, lowered),
             "score": score,
             "matched_terms": matched_terms,
         }
@@ -87,11 +97,11 @@ def route_message(message: str) -> RouteDecision:
     if active_candidates:
         active_ranked = sorted(active_candidates, key=lambda item: item[0], reverse=True)
         _, governor, matched_terms = active_ranked[0]
-        kind = governor.task_kinds[0] if governor.task_kinds else "general"
+        kind = route_kind_for(governor, lowered)
         supporting = [
             {
                 "name": candidate.name,
-                "kind": candidate.task_kinds[0] if candidate.task_kinds else "general",
+                "kind": route_kind_for(candidate, lowered),
                 "score": score,
                 "matched_terms": terms,
             }
@@ -116,7 +126,7 @@ def route_message(message: str) -> RouteDecision:
         )
     # Only inactive governors matched: report the strongest one for a useful hint.
     _, governor, matched_terms = max(candidates, key=lambda item: item[0])
-    kind = governor.task_kinds[0] if governor.task_kinds else "general"
+    kind = route_kind_for(governor, lowered)
     return RouteDecision(
         False,
         governor.name,
