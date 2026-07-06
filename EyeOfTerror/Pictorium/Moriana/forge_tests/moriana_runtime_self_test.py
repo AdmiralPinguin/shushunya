@@ -176,6 +176,31 @@ def main() -> int:
         if pending.get("ok") or not rejected_results or pending.get("forge_monitor", {}).get("status") != "queued":
             raise AssertionError(f"pending Forge job was not tracked as a rejected runtime result: {pending}")
 
+        series = create_or_execute_run(
+            run_root,
+            {
+                "task": "сделай серию 3 изображения про один и тот же древний механикум-алтарь 512x512",
+                "task_id": "image-series-success",
+                "execute": True,
+                "test_artifact_mode": "series_good",
+            },
+        )
+        series_dir = Path(str(series["run_dir"]))
+        series_registry = load_json(series_dir / "artifact_registry.json")
+        series_images = [
+            item
+            for item in series_registry.get("artifacts", [])
+            if isinstance(item, dict) and item.get("type") == "image" and item.get("status") == "accepted"
+        ]
+        if (
+            not series.get("ok")
+            or series.get("status", {}).get("task_kind") != "image_series"
+            or series.get("final", {}).get("kind") != "pictorium_image_series_final_manifest"
+            or series.get("final", {}).get("series_count") != 3
+            or len(series_images) != 3
+        ):
+            raise AssertionError(f"image series run did not complete as a real series: {series}")
+
         comic = create_or_execute_run(
             run_root,
             {

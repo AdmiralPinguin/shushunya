@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +64,18 @@ def blockers_from(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 def job_spec_dimensions(job_spec: dict[str, Any]) -> tuple[int, int]:
     return int(job_spec.get("width") or 512), int(job_spec.get("height") or 512)
+
+
+def requested_image_count(task: str, default: int = 3) -> int:
+    lowered = task.lower()
+    for pattern in (
+        r"\b(\d{1,2})\s*(?:картин|изображен|images|pictures)\b",
+        r"(?:серия|series|batch)\s*(?:из|of)?\s*(\d{1,2})",
+    ):
+        match = re.search(pattern, lowered)
+        if match:
+            return max(2, min(8, int(match.group(1))))
+    return default
 
 
 def execute_image_run(
@@ -186,6 +199,138 @@ def execute_image_run(
         "final": final_payload,
         "artifacts": store.artifacts(run_id),
         "forge_monitor": forge_monitor,
+    }
+
+
+def execute_image_series_run(
+    store: MorianaRunStore,
+    run_id: str,
+    task: str,
+    *,
+    submit: bool = False,
+    test_artifact_mode: str = "",
+    wait_for_result: bool = False,
+    max_wait_sec: float = 0.0,
+    poll_interval_sec: float = 0.5,
+    run_inline_once: bool = False,
+) -> dict[str, Any]:
+    run_dir = store.run_dir(run_id)
+    count = requested_image_count(task)
+    store.set_status(run_id, "planning", f"Image Brigade is preparing {count} linked image packages", attempt_count=1)
+    items = []
+    all_blockers: list[dict[str, Any]] = []
+    accepted_artifact_ids = []
+    for index in range(1, count + 1):
+        step_prefix = f"series_{index:02d}"
+        image_task = f"{task}. Image {index} of {count}. Keep style and subject continuity across the series."
+        plan = prepare_image_plan({"request": image_task, "use_memory": False, "use_thinker": False})
+        register_json_artifact(store, run_id, step=f"{step_prefix}_image_plan", payload=plan, artifact_type="prompt", created_by="Promptwright", attempt=1, subdir="prompts")
+        job_spec = plan.get("job_spec") if isinstance(plan.get("job_spec"), dict) else {}
+        resources = inspect_resources({"job_spec": job_spec})
+        register_json_artifact(store, run_id, step=f"{step_prefix}_resource_report", payload=resources, artifact_type="resource_report", created_by="ModelQuartermaster", attempt=1, subdir="parameters")
+        forge_db_path = run_dir / "forge.sqlite3"
+        dispatch = prepare_dispatch({"job_spec": job_spec, "submit": submit, "db_path": str(forge_db_path)})
+        register_json_artifact(store, run_id, step=f"{step_prefix}_forge_dispatch", payload=dispatch, artifact_type="dispatch", created_by="ForgeDispatcher", attempt=1)
+        store.set_status(run_id, "generating", f"Series image {index}/{count} dispatch package prepared", attempt_count=1)
+        artifact_path = ""
+        forge_monitor = {}
+        if submit and (wait_for_result or run_inline_once):
+            forge_monitor = monitor_forge_job(
+                db_path=forge_db_path,
+                job_record=dispatch.get("job_record") if isinstance(dispatch.get("job_record"), dict) else None,
+                max_wait_sec=max_wait_sec,
+                poll_interval_sec=poll_interval_sec,
+                run_inline_once=run_inline_once,
+            )
+            register_json_artifact(
+                store,
+                run_id,
+                step=f"{step_prefix}_forge_monitor",
+                payload=forge_monitor,
+                artifact_type="result",
+                created_by="Moriana",
+                attempt=1,
+                status="accepted" if forge_monitor.get("ok") else "rejected",
+                subdir="results",
+                rejection_reason="; ".join(str(item.get("code") or "") for item in forge_monitor.get("blockers", []) if isinstance(item, dict)),
+            )
+            paths = forge_monitor.get("artifact_paths") if isinstance(forge_monitor.get("artifact_paths"), list) else []
+            artifact_path = str(paths[0]) if paths else ""
+        if test_artifact_mode in {"good", "series_good"}:
+            width, height = job_spec_dimensions(job_spec)
+            synthetic_path = run_dir / "artifacts" / f"series_image_{index:02d}.png"
+            make_synthetic_image(synthetic_path, width, height, (60 + index * 12, 70 + index * 8, 90 + index * 5))
+            artifact_path = str(synthetic_path)
+        store.set_status(run_id, "checking", f"ImageVerifier is checking series image {index}/{count}", attempt_count=1)
+        verification = verify_image({"artifact_path": artifact_path, "job_spec": job_spec, "job_record": dispatch.get("job_record")})
+        blockers = [*blockers_from(resources), *blockers_from(dispatch), *blockers_from(forge_monitor), *blockers_from(verification)]
+        all_blockers.extend({"series_index": index, **blocker} for blocker in blockers)
+        register_json_artifact(
+            store,
+            run_id,
+            step=f"{step_prefix}_image_verification",
+            payload=verification,
+            artifact_type="verification",
+            created_by="ImageVerifier",
+            attempt=1,
+            status="accepted" if not blockers else "rejected",
+            rejection_reason="; ".join(str(item.get("code") or "") for item in blockers),
+        )
+        image_artifact_id = ""
+        if artifact_path:
+            image_record = store.register_artifact(
+                run_id,
+                artifact_type="image",
+                path=Path(artifact_path),
+                created_by="ForgeDispatcher",
+                step=f"{step_prefix}_image_generation",
+                attempt=1,
+                status="accepted" if not blockers else "rejected",
+                rejection_reason="; ".join(str(item.get("message") or item.get("code") or "") for item in blockers),
+                metadata={"job_spec": job_spec, "series_index": index, "series_count": count},
+            )
+            image_artifact_id = str(image_record["artifact_id"])
+            if not blockers:
+                accepted_artifact_ids.append(image_artifact_id)
+        items.append(
+            {
+                "index": index,
+                "prompt_artifact": f"/work/pictorium/series/{index:02d}/image_plan.json",
+                "job_id": dispatch.get("job_record", {}).get("id") if isinstance(dispatch.get("job_record"), dict) else "",
+                "artifact_path": artifact_path,
+                "artifact_id": image_artifact_id,
+                "status": "accepted" if not blockers else "blocked",
+                "blockers": blockers,
+            }
+        )
+    final_payload = {
+        "kind": "pictorium_image_series_final_manifest",
+        "run_id": run_id,
+        "status": "ready" if not all_blockers and len(accepted_artifact_ids) == count else "blocked",
+        "series_count": count,
+        "accepted_artifact_ids": accepted_artifact_ids,
+        "items": items,
+        "blockers": all_blockers,
+        "artifact_registry": str(run_dir / "artifact_registry.json"),
+        "handoff": {
+            "ready_for_delivery": not all_blockers and len(accepted_artifact_ids) == count,
+            "requires_generation": len(accepted_artifact_ids) < count,
+            "requires_revision": bool(all_blockers),
+        },
+        "attempt": 1,
+    }
+    if all_blockers:
+        store.set_status(run_id, "revising", "one or more series images need revision", attempt_count=1)
+        store.write_revision(run_id, 1, all_blockers, "revise blocked series images and rerun final packaging")
+    store.write_final(run_id, final_payload, final_artifact_id=accepted_artifact_ids[0] if accepted_artifact_ids else "")
+    return {
+        "ok": final_payload["status"] == "ready",
+        "governor": "Moriana",
+        "run_id": run_id,
+        "run_dir": str(run_dir),
+        "status": store.status(run_id),
+        "final": final_payload,
+        "artifacts": store.artifacts(run_id),
     }
 
 

@@ -7,7 +7,8 @@ low-level graphical engine package.
 ## Responsibility
 
 - Convert visual user requests into strict image task contracts.
-- Select text-to-image, image-to-image, inpaint, upscale, and comics flows.
+- Select text-to-image, image-to-image, inpaint, upscale, image-series, and
+  comics flows.
 - Decide which engine should be used: SD3.5, SDXL, Flux, or a future backend.
 - Detect required models, LoRAs, embeddings, ControlNet units, IP-Adapters, and
   reference assets.
@@ -18,6 +19,8 @@ low-level graphical engine package.
 ## Brigades
 
 - `Image`: still image generation/editing and current real Forge workflows.
+- `Image series`: repeated Image Brigade execution with one shared run registry
+  and a series final manifest.
 - `Comics`: active first-pass scenario, storyboard, character sheet, panel
   package, layout, and manifest workflows on top of Image Brigade.
 - `Video`: intentionally out of the current active scope.

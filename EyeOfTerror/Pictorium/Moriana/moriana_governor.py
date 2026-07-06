@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import re
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -32,7 +33,7 @@ from EyeOfTerror.Pictorium.Brigades.Comics.Workers.LayoutFinalis.worker import w
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.Panelwright.worker import worker_contract as panelwright_contract
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.ScenarioScribe.worker import worker_contract as scenario_scribe_contract
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.StoryboardArchitect.worker import worker_contract as storyboard_architect_contract
-from EyeOfTerror.Pictorium.Moriana.moriana_executor import execute_comic_run, execute_image_run
+from EyeOfTerror.Pictorium.Moriana.moriana_executor import execute_comic_run, execute_image_run, execute_image_series_run
 from EyeOfTerror.Pictorium.Moriana.moriana_core.asset_catalog import capabilities as forge_capabilities
 from EyeOfTerror.Pictorium.Moriana.moriana_runtime import MorianaRunStore, write_json_atomic
 
@@ -291,6 +292,15 @@ def is_comics_task(task: str) -> bool:
     return any(term in lowered for term in ["комикс", "comic", "storyboard", "раскадров", "панел", "panel"])
 
 
+def is_image_series_task(task: str) -> bool:
+    lowered = task.lower()
+    if is_comics_task(task):
+        return False
+    if any(term in lowered for term in ["серия", "серию", "серии", "набор картинок", "несколько картинок", "image series", "series of images", "batch of images"]):
+        return True
+    return bool(re.search(r"\b\d{1,2}\s*(?:картин|изображен|images|pictures)\b", lowered))
+
+
 def required_workers() -> list[str]:
     return list(REQUIRED_WORKERS)
 
@@ -313,7 +323,7 @@ def service_capabilities() -> dict[str, Any]:
         "ok": True,
         "governor": GOVERNOR,
         "api_version": 1,
-        "task_kinds": ["image_generation"],
+        "task_kinds": ["image_generation", "image_series_generation", "comic_generation"],
         "required_workers": REQUIRED_WORKERS,
         "worker_availability": availability,
         "brigades": [
@@ -369,7 +379,7 @@ def prepare_run(task: str, task_id: str | None, run_dir: Path) -> dict[str, Any]
     if not payload.get("ok"):
         return {"ok": False, "governor": GOVERNOR, "error": "plan is not ready", "plan": payload}
     status = write_pipeline_run(plan.contract, run_dir, oversight=payload["oversight"])
-    task_kind = "comic" if is_comics_task(task) else "image"
+    task_kind = "comic" if is_comics_task(task) else ("image_series" if is_image_series_task(task) else "image")
     runtime_status = MorianaRunStore(run_dir.parent).ensure_run(plan.contract.task_id, task, task_kind, payload)
     runtime_status.update(status)
     write_json_atomic(run_dir / "status.json", runtime_status)
@@ -384,13 +394,25 @@ def create_or_execute_run(run_root: Path, payload: dict[str, Any]) -> dict[str, 
     plan_payload = plan.to_dict()
     if not plan_payload.get("ok"):
         return {"ok": False, "governor": GOVERNOR, "error": "plan is not ready", "plan": plan_payload}
-    task_kind = "comic" if is_comics_task(task) else "image"
+    task_kind = "comic" if is_comics_task(task) else ("image_series" if is_image_series_task(task) else "image")
     store = MorianaRunStore(run_root)
     status = store.create_run(plan.contract.task_id, task, task_kind, plan_payload)
     if not bool(payload.get("execute", False)):
         return {"ok": True, "governor": GOVERNOR, "run_id": plan.contract.task_id, "run_dir": status["run_dir"], "status": status}
     if task_kind == "comic":
         return execute_comic_run(store, plan.contract.task_id, task, submit=bool(payload.get("submit", False)))
+    if task_kind == "image_series":
+        return execute_image_series_run(
+            store,
+            plan.contract.task_id,
+            task,
+            submit=bool(payload.get("submit", False)),
+            test_artifact_mode=str(payload.get("test_artifact_mode") or ""),
+            wait_for_result=bool(payload.get("wait_for_result", False)),
+            max_wait_sec=float(payload.get("max_wait_sec") or 0.0),
+            poll_interval_sec=float(payload.get("poll_interval_sec") or 0.5),
+            run_inline_once=bool(payload.get("run_inline_once", False)),
+        )
     return execute_image_run(
         store,
         plan.contract.task_id,
