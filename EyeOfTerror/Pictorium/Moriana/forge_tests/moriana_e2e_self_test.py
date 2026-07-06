@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import sys
+import tempfile
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+WARMMASTER_ROOT = PROJECT_ROOT / "EyeOfTerror" / "Warmaster"
+if str(WARMMASTER_ROOT) not in sys.path:
+    sys.path.insert(0, str(WARMMASTER_ROOT))
+
+from PIL import Image
+
+from EyeOfTerror.Pictorium.Brigades.Image.Workers.ArtifactFinalis.worker import build_final_manifest
+from EyeOfTerror.Pictorium.Brigades.Image.Workers.ForgeDispatcher.worker import prepare_dispatch
+from EyeOfTerror.Pictorium.Brigades.Image.Workers.ImageVerifier.worker import verify_image
+from EyeOfTerror.Pictorium.Brigades.Image.Workers.ModelQuartermaster.worker import inspect_resources
+from EyeOfTerror.Pictorium.Brigades.Image.Workers.Promptwright.worker import prepare_image_plan
+from EyeOfTerror.Warmaster.eye_of_terror.task_prepare import prepare_task, preflight_task
+
+
+def load_json(path: Path) -> dict[str, object]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def main() -> int:
+    task = "нарисуй картинку тестового механикум-алтаря stable diffusion 512x512"
+    with tempfile.TemporaryDirectory(prefix="moriana-e2e-") as tmp:
+        root = Path(tmp)
+        run_root = root / "runs"
+        task_id = "moriana-e2e-image"
+        preflight = preflight_task(task, task_id, run_root)
+        if (
+            not preflight.get("ok")
+            or preflight.get("governor") != "Moriana"
+            or preflight.get("contract_summary", {}).get("step_count") != 5
+        ):
+            raise AssertionError(f"Warmaster preflight did not route through Moriana: {preflight}")
+
+        prepared = prepare_task(task, task_id, run_root)
+        if not prepared.get("ok") or prepared.get("governor") != "Moriana":
+            raise AssertionError(f"Warmaster prepare did not create Moriana run: {prepared}")
+        run_dir = Path(str(prepared["run_dir"]))
+        status = load_json(run_dir / "status.json")
+        if status.get("governor") != "Moriana" or status.get("step_count") != 5:
+            raise AssertionError(f"bad prepared status: {status}")
+        dispatch_workers = [step.get("worker") for step in status.get("steps", []) if isinstance(step, dict)]
+        if dispatch_workers != ["Promptwright", "ModelQuartermaster", "ForgeDispatcher", "ImageVerifier", "ArtifactFinalis"]:
+            raise AssertionError(f"bad dispatch order: {dispatch_workers}")
+
+        plan = prepare_image_plan({"request": task, "use_memory": False, "use_thinker": False})
+        resources = inspect_resources({"job_spec": plan["job_spec"]})
+        dispatch = prepare_dispatch({"job_spec": plan["job_spec"], "submit": True, "db_path": str(root / "forge.sqlite3")})
+        if not dispatch.get("ok") or not dispatch.get("job_record"):
+            raise AssertionError(f"Forge dispatch did not submit queued job: {dispatch}")
+
+        artifact_path = root / "artifact.png"
+        Image.new("RGB", (512, 512), (80, 72, 64)).save(artifact_path)
+        verification = verify_image({"artifact_path": str(artifact_path), "job_spec": plan["job_spec"], "job_record": dispatch["job_record"]})
+        final = build_final_manifest(
+            {
+                "plan": plan,
+                "resources": resources,
+                "dispatch": dispatch,
+                "verification": verification,
+                "artifacts": [str(artifact_path)],
+            }
+        )
+        if not final.get("ok") or final.get("final_manifest", {}).get("status") != "ready":
+            raise AssertionError(f"final image manifest is not ready: {final}")
+    print("[ok] Moriana Warmaster -> Image Brigade -> ForgeRuntime e2e")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

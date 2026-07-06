@@ -3,8 +3,8 @@
   "department": "Pictorium",
   "governor": {
     "name": "Moriana",
-    "status": "planned",
-    "planned_port": 7103,
+    "status": "active",
+    "port": 7103,
     "task_kinds": ["image_generation"],
     "route_terms": [
       "картин",
@@ -28,16 +28,19 @@
   "brigades": [
     {
       "name": "Image",
+      "status": "active",
       "role": "still image generation, editing, inpaint, upscale, verification, and delivery",
       "path": "EyeOfTerror/Pictorium/Brigades/Image"
     },
     {
       "name": "Comics",
+      "status": "planned",
       "role": "storyboards, multi-panel pages, lettering, continuity, and long-form visual projects",
       "path": "EyeOfTerror/Pictorium/Brigades/Comics"
     },
     {
       "name": "Video",
+      "status": "planned",
       "role": "future video backends, GPU scheduling, clips, and image-to-video/text-to-video workflows",
       "path": "EyeOfTerror/Pictorium/Brigades/Video"
     }
@@ -51,7 +54,9 @@
         "EyeOfTerror/Pictorium/Moriana/moriana_core/prompt_thinker.py",
         "EyeOfTerror/Pictorium/Moriana/moriana_core/project_planner.py",
         "EyeOfTerror/Pictorium/Moriana/moriana_core/character_profiles.py",
-        "EyeOfTerror/Pictorium/Moriana/forge_runtime/schemas.py"
+        "EyeOfTerror/Pictorium/Moriana/forge_runtime/schemas.py",
+        "EyeOfTerror/Pictorium/Brigades/Image/Workers/Promptwright/worker.py",
+        "EyeOfTerror/Pictorium/Brigades/Image/Workers/Promptwright/worker.json"
       ],
       "expected_artifacts": ["/work/pictorium/image_plan.json"]
     },
@@ -62,7 +67,9 @@
         "EyeOfTerror/Pictorium/Moriana/moriana_core/asset_catalog.py",
         "EyeOfTerror/Pictorium/Moriana/moriana_core/asset_downloader.py",
         "DemonsForge/quality_assets/asset_profiles.json",
-        "DemonsForge/quality_assets/character_profiles.json"
+        "DemonsForge/quality_assets/character_profiles.json",
+        "EyeOfTerror/Pictorium/Brigades/Image/Workers/ModelQuartermaster/worker.py",
+        "EyeOfTerror/Pictorium/Brigades/Image/Workers/ModelQuartermaster/worker.json"
       ],
       "expected_artifacts": ["/work/pictorium/resource_report.json"]
     },
@@ -73,7 +80,9 @@
         "EyeOfTerror/Pictorium/Moriana/forge_runtime/client.py",
         "EyeOfTerror/Pictorium/Moriana/forge_runtime/queue.py",
         "EyeOfTerror/Pictorium/Moriana/forge_runtime/server.py",
-        "EyeOfTerror/Pictorium/Moriana/forge_runtime/projects.py"
+        "EyeOfTerror/Pictorium/Moriana/forge_runtime/projects.py",
+        "EyeOfTerror/Pictorium/Brigades/Image/Workers/ForgeDispatcher/worker.py",
+        "EyeOfTerror/Pictorium/Brigades/Image/Workers/ForgeDispatcher/worker.json"
       ],
       "expected_artifacts": ["/work/pictorium/forge_jobs.json"]
     },
@@ -83,7 +92,9 @@
       "source_modules": [
         "EyeOfTerror/Pictorium/Moriana/moriana_core/image_evaluator.py",
         "EyeOfTerror/Pictorium/Moriana/benches/quality_bench.py",
-        "EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.py"
+        "EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.py",
+        "EyeOfTerror/Pictorium/Brigades/Image/Workers/ImageVerifier/worker.py",
+        "EyeOfTerror/Pictorium/Brigades/Image/Workers/ImageVerifier/worker.json"
       ],
       "expected_artifacts": ["/work/pictorium/image_verification.json"]
     },
@@ -93,7 +104,9 @@
       "source_modules": [
         "EyeOfTerror/Pictorium/Moriana/forge_runtime/storage.py",
         "EyeOfTerror/Pictorium/Moriana/moriana_core/forge_reports.py",
-        "EyeOfTerror/Pictorium/Moriana/benches/project_bench.py"
+        "EyeOfTerror/Pictorium/Moriana/benches/project_bench.py",
+        "EyeOfTerror/Pictorium/Brigades/Image/Workers/ArtifactFinalis/worker.py",
+        "EyeOfTerror/Pictorium/Brigades/Image/Workers/ArtifactFinalis/worker.json"
       ],
       "expected_artifacts": ["/work/pictorium/final_manifest.json"]
     }

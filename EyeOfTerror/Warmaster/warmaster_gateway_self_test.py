@@ -12,8 +12,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import eye_of_terror.brigade as brigade
+import eye_of_terror.local_executor as local_executor
 import eye_of_terror.task_prepare as task_prepare
 import eye_of_terror.warmaster_gateway as warmaster_gateway
+from EyeOfTerror.model_brain import model_contract
 from eye_of_terror.inner_circle.iskandar_service import make_handler as make_iskandar_handler
 from eye_of_terror.warmaster_gateway import brigade_readiness_summary, cancel_http_worker_tasks, compact_brigade_readiness, make_handler, parse_limit, parse_nonnegative_int, prepare_run_root, requested_step_ids_from_payload, resolve_run_child_path, resume_step_ids_from_run, revision_step_ids_from_run, valid_task_id, validate_service_host
 from eye_of_terror.ledger import TaskLedger
@@ -22,6 +24,23 @@ from eye_of_terror.pipeline import write_pipeline_run
 
 
 LOCAL_EXEC_TIMEOUT_SEC = 600
+
+
+def fake_model_decision(owner: str, role: str, request: dict, *, layer: str = "worker", instructions: str = "") -> dict:
+    return {
+        **model_contract(owner, role, layer=layer),
+        "ok": True,
+        "status": "answered",
+        "elapsed_ms": 1,
+        "content": json.dumps({"status": "ok", "owner": owner, "layer": layer}, ensure_ascii=False),
+        "finish_reason": "stop",
+        "error": "",
+    }
+
+
+def install_fast_model_brain() -> None:
+    warmaster_gateway.request_model_decision = fake_model_decision
+    local_executor.request_model_decision = fake_model_decision
 
 
 def write_gateway_test_corpus(corpus_root: Path) -> None:
@@ -145,6 +164,7 @@ def make_bad_prepare_handler(run_root: Path) -> type[BaseHTTPRequestHandler]:
 
 
 def main() -> int:
+    install_fast_model_brain()
     if parse_limit("999999", default=20) != 200 or parse_limit("bad", default=20) != 20:
         raise AssertionError("limit parser did not clamp values")
     if parse_nonnegative_int("42", default=0) != 42 or parse_nonnegative_int("bad", default=7) != 7:
@@ -170,7 +190,7 @@ def main() -> int:
     readiness = brigade_readiness_summary(
         governors=[
             {"name": "IskandarKhayon", "status": "active", "runtime": {"reachable": False}},
-            {"name": "ForgeMasterGovernor", "status": "planned", "runtime": {"reachable": False}},
+            {"name": "Moriana", "status": "active", "runtime": {"reachable": False}},
         ],
         workers=[
             {"name": "Lexmechanic", "status": "prototype", "runtime": {"reachable": True}},
@@ -187,8 +207,8 @@ def main() -> int:
     )
     if (
         readiness.get("ready")
-        or readiness.get("blocker_count") != 3
-        or readiness.get("warning_count") != 2
+        or readiness.get("blocker_count") != 4
+        or readiness.get("warning_count") != 1
         or not any("IskandarKhayon" in blocker for blocker in readiness.get("blockers", []))
     ):
         raise AssertionError(f"bad brigade readiness summary: {readiness}")
@@ -689,41 +709,16 @@ def main() -> int:
                 or code_task.get("model_brain", {}).get("status") != "answered"
             ):
                 raise AssertionError(f"code route should create a Ceraxia run: {code_task}")
-            try:
-                request_json(base + "/task_preflight", {"message": "сделай рисовалку stable diffusion", "task_id": "unsupported-image"})
-            except urllib.error.HTTPError as exc:
-                if exc.code != 400:
-                    raise
-                rejected_preflight = json.loads(exc.read().decode("utf-8"))
-                if (
-                    rejected_preflight.get("error_code") != "governor_inactive"
-                    or rejected_preflight.get("governor") != "ForgeMasterGovernor"
-                    or rejected_preflight.get("required_governor", {}).get("status") != "planned"
-                    or rejected_preflight.get("required_governor", {}).get("port") != 7103
-                    or "image_generation" not in rejected_preflight.get("required_governor", {}).get("task_kinds", [])
-                    or rejected_preflight.get("actions", {}).get("can_create_task")
-                    or rejected_preflight.get("actions", {}).get("next_action", {}).get("kind") != "inspect_capabilities"
-                    or rejected_preflight.get("client_action", {}).get("path") != "/capabilities"
-                    or rejected_preflight.get("phase") != "unsupported_task"
-                    or rejected_preflight.get("display", {}).get("headline") != "No active governor for this task"
-                ):
-                    raise AssertionError(f"bad unsupported preflight route response: {rejected_preflight}")
-            else:
-                raise AssertionError("unsupported image preflight should be rejected until an image governor exists")
-            try:
-                request_json(base + "/orchestrate", {"message": "сделай рисовалку stable diffusion", "task_id": "unsupported-image-orchestrate"})
-            except urllib.error.HTTPError as exc:
-                if exc.code not in {400, 409}:
-                    raise
-                rejected_orchestrate = json.loads(exc.read().decode("utf-8"))
-                if (
-                    rejected_orchestrate.get("phase") != "task_preflight"
-                    or rejected_orchestrate.get("next_action", {}).get("kind") != "inspect_capabilities"
-                    or rejected_orchestrate.get("client_action", {}).get("path") != "/capabilities"
-                ):
-                    raise AssertionError(f"bad unsupported orchestrate response: {rejected_orchestrate}")
-            else:
-                raise AssertionError("unsupported image orchestration should be rejected until an image governor exists")
+            image_preflight = request_json(base + "/task_preflight", {"message": "сделай рисовалку stable diffusion 512x512", "task_id": "supported-image"})
+            if (
+                not image_preflight.get("ok")
+                or image_preflight.get("governor") != "Moriana"
+                or image_preflight.get("contract_summary", {}).get("assigned_governor") != "Moriana"
+                or image_preflight.get("contract_summary", {}).get("step_count") != 5
+                or image_preflight.get("actions", {}).get("next_action", {}).get("kind") != "create_task"
+                or image_preflight.get("governor_plan_actions", {}).get("next_action", {}).get("kind") != "prepare_run"
+            ):
+                raise AssertionError(f"image route should preflight through Moriana: {image_preflight}")
             try:
                 request_json(
                     base + "/task",

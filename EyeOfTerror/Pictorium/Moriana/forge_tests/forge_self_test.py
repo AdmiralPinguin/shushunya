@@ -59,10 +59,19 @@ def py_compile() -> dict[str, Any]:
         "../EyeOfTerror/Pictorium/Moriana/moriana_core/project_planner.py",
         "../EyeOfTerror/Pictorium/Moriana/moriana_core/prompt_thinker.py",
         "../EyeOfTerror/Pictorium/Moriana/moriana_core/promptwright.py",
+        "../EyeOfTerror/Pictorium/Moriana/moriana_governor.py",
+        "../EyeOfTerror/Pictorium/Brigades/Image/worker_api.py",
+        "../EyeOfTerror/Pictorium/Brigades/Image/Workers/Promptwright/worker.py",
+        "../EyeOfTerror/Pictorium/Brigades/Image/Workers/ModelQuartermaster/worker.py",
+        "../EyeOfTerror/Pictorium/Brigades/Image/Workers/ForgeDispatcher/worker.py",
+        "../EyeOfTerror/Pictorium/Brigades/Image/Workers/ImageVerifier/worker.py",
+        "../EyeOfTerror/Pictorium/Brigades/Image/Workers/ArtifactFinalis/worker.py",
+        "../EyeOfTerror/Pictorium/Brigades/Image/self_test.py",
         "../EyeOfTerror/Pictorium/Moriana/benches/quality_bench.py",
         "../EyeOfTerror/Pictorium/Moriana/benches/project_bench.py",
         "../EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.py",
         "../EyeOfTerror/Pictorium/Moriana/forge_tests/smoke_forge_api.py",
+        "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_e2e_self_test.py",
     ]
     command = [str(ROOT / "DemonsForge/bin/python"), "-m", "py_compile", *files]
     completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=120)

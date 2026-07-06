@@ -1,6 +1,6 @@
 # Moriana
 
-Moriana is the planned Pictorium governor for image generation and visual forge
+Moriana is the active Pictorium governor for image generation and visual forge
 work. She coordinates specialist brigades and uses DemonsForge only as a
 low-level graphical engine package.
 
@@ -49,5 +49,4 @@ DemonsForge should not regain API, queue, schema, storage, planner, thinker,
 policy, report, or bench ownership. It should remain engine adapters and local
 model/demo assets only.
 
-The existing `Warmaster/InnerCircle/ForgeMasterGovernor` remains a planned
-legacy placeholder until Moriana replaces it through a tested registry change.
+Warmaster routes image-generation tasks to Moriana on port `7103`.

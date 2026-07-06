@@ -41,11 +41,11 @@ EyeOfTerror/Pictorium/
 - `Video`: future video backends, GPU scheduling, clips, and image-to-video or
   text-to-video workflows.
 
-## Activation Rule
+## Activation State
 
-Pictorium is scaffolded but not active. Do not switch the image governor to
-`active` until Moriana can prepare a valid Warmaster run package and the brigade
-can pass the common worker API contract.
+Pictorium is active for still-image tasks through Moriana and the Image
+Brigade. Comics and Video remain planned departments and must reuse the Image
+Brigade execution layer instead of duplicating Forge runtime ownership.
 
 ## DemonsForge Boundary
 

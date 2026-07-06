@@ -1,0 +1,14 @@
+{
+  "name": "ForgeDispatcher",
+  "port": 7024,
+  "role": "ForgeRuntime dry-run validator and job submitter",
+  "status": "prototype",
+  "capabilities": ["job_validation", "dry_run", "queued_submit", "structured_runtime_blockers"],
+  "model_brain": {
+    "required": true,
+    "role": "ForgeDispatcher",
+    "failure_policy": "block heuristic retry planning when model_brain is unavailable; deterministic validation and submission remain available"
+  },
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
+  "callable": "EyeOfTerror.Pictorium.Brigades.Image.Workers.ForgeDispatcher.worker:handle"
+}

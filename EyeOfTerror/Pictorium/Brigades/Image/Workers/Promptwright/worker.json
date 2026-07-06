@@ -1,0 +1,14 @@
+{
+  "name": "Promptwright",
+  "port": 7022,
+  "role": "image intent parser and Forge job/project planner",
+  "status": "prototype",
+  "capabilities": ["txt2img_plan", "project_plan", "prompt_normalization"],
+  "model_brain": {
+    "required": true,
+    "role": "Promptwright",
+    "failure_policy": "block thinker-assisted planning when model_brain is unavailable; deterministic planning remains available for dry-run validation"
+  },
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
+  "callable": "EyeOfTerror.Pictorium.Brigades.Image.Workers.Promptwright.worker:handle"
+}

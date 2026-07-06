@@ -24,6 +24,7 @@ from .gateway_util import post_json, valid_task_id, validate_service_host
 from .governors import governor_by_name
 from .inner_circle.ceraxia import plan_code_task
 from .inner_circle.iskandar import plan_research_writing as plan_lore_reconstruction
+from EyeOfTerror.Pictorium.Moriana.moriana_governor import plan_image_task
 from .ledger import TaskLedger
 from .oversight_guard import compact_oversight_summary
 from .pipeline import write_pipeline_run
@@ -323,6 +324,8 @@ def prepare_task(
         }
     if governor == "Ceraxia":
         plan = plan_code_task(message, task_id=task_id)
+    elif governor == "Moriana":
+        plan = plan_image_task(message, task_id=task_id)
     else:
         plan = plan_lore_reconstruction(message, task_id=task_id)
     run_dir = run_root / plan.contract.task_id
@@ -490,6 +493,8 @@ def preflight_task(
     else:
         if governor_ref.name == "Ceraxia":
             plan = plan_code_task(message, task_id=task_id)
+        elif governor_ref.name == "Moriana":
+            plan = plan_image_task(message, task_id=task_id)
         else:
             plan = plan_lore_reconstruction(message, task_id=task_id)
         plan_payload = plan.to_dict()

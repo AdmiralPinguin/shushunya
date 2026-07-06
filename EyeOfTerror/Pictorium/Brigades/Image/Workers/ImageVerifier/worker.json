@@ -1,0 +1,14 @@
+{
+  "name": "ImageVerifier",
+  "port": 7025,
+  "role": "generated artifact verifier and visual risk reporter",
+  "status": "prototype",
+  "capabilities": ["image_metadata_checks", "dimension_check", "edit_delta_check", "planned_artifact_manifest"],
+  "model_brain": {
+    "required": true,
+    "role": "ImageVerifier",
+    "failure_policy": "block semantic visual critique when model_brain is unavailable; deterministic pixel and metadata checks remain available"
+  },
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
+  "callable": "EyeOfTerror.Pictorium.Brigades.Image.Workers.ImageVerifier.worker:handle"
+}

@@ -7,6 +7,7 @@ from pathlib import Path
 from eye_of_terror.governors import governor_by_name, governor_refs
 from eye_of_terror.inner_circle.ceraxia_service import service_capabilities as ceraxia_capabilities
 from eye_of_terror.inner_circle.iskandar_service import service_capabilities
+from EyeOfTerror.Pictorium.Moriana.moriana_governor import service_capabilities as moriana_capabilities
 
 
 def main() -> int:
@@ -53,6 +54,12 @@ def main() -> int:
     ceraxia_payload = ceraxia_capabilities()
     if sorted(ceraxia_payload.get("task_kinds", [])) != sorted(ceraxia.task_kinds):
         raise AssertionError(f"Ceraxia task kinds disagree with registry: {ceraxia_payload}")
+    moriana = governor_by_name("Moriana")
+    if not moriana or not moriana.active() or moriana.port != 7103:
+        raise AssertionError(moriana)
+    moriana_payload = moriana_capabilities()
+    if sorted(moriana_payload.get("task_kinds", [])) != sorted(moriana.task_kinds):
+        raise AssertionError(f"Moriana task kinds disagree with registry: {moriana_payload}")
     print("[ok] governor registry")
     return 0
 

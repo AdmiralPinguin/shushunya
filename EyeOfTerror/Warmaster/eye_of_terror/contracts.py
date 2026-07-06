@@ -486,6 +486,91 @@ def code_required_artifacts(slug: str) -> list[str]:
     ]
 
 
+def image_required_artifacts(slug: str) -> list[str]:
+    base = f"/work/{slug}"
+    return [
+        f"{base}/image_plan.json",
+        f"{base}/resource_report.json",
+        f"{base}/forge_jobs.json",
+        f"{base}/image_verification.json",
+        f"{base}/final_manifest.json",
+    ]
+
+
+def image_worker_plan(slug: str) -> list[WorkerPlanStep]:
+    base = f"/work/{slug}"
+    return [
+        WorkerPlanStep(
+            step_id="image_planning",
+            worker="Promptwright",
+            purpose="Turn the user visual request into a normalized Forge job or visual project plan.",
+            expected_artifacts=[f"{base}/image_plan.json"],
+        ),
+        WorkerPlanStep(
+            step_id="resource_readiness",
+            worker="ModelQuartermaster",
+            purpose="Inspect local models, LoRAs, embeddings, and asset approvals required by the image plan.",
+            depends_on=["image_planning"],
+            expected_artifacts=[f"{base}/resource_report.json"],
+        ),
+        WorkerPlanStep(
+            step_id="forge_dispatch",
+            worker="ForgeDispatcher",
+            purpose="Validate the Forge job, surface runtime blockers, and submit a queued job when requested.",
+            depends_on=["image_planning", "resource_readiness"],
+            expected_artifacts=[f"{base}/forge_jobs.json"],
+        ),
+        WorkerPlanStep(
+            step_id="image_verification",
+            worker="ImageVerifier",
+            purpose="Verify generated artifacts with deterministic image, metadata, and dimension checks.",
+            depends_on=["forge_dispatch"],
+            expected_artifacts=[f"{base}/image_verification.json"],
+        ),
+        WorkerPlanStep(
+            step_id="finalize",
+            worker="ArtifactFinalis",
+            purpose="Package the final image manifest, blockers, generated artifacts, and delivery handoff.",
+            depends_on=["image_verification"],
+            expected_artifacts=[f"{base}/final_manifest.json"],
+        ),
+    ]
+
+
+def build_image_generation_contract(user_task: str, task_id: str | None = None) -> TaskContract:
+    slug = slugify(user_task, fallback="image")
+    resolved_task_id = task_id or f"moriana-{slug}-image"
+    plan = image_worker_plan(slug)
+    return TaskContract(
+        task_id=resolved_task_id,
+        kind="image_generation",
+        goal=user_task.strip(),
+        assigned_governor="Moriana",
+        non_goals=[
+            "Do not call DemonsForge directly from Warmaster; route through Moriana and Image Brigade.",
+            "Do not treat a queued job as a delivered artifact before verification and final manifest.",
+            "Do not auto-download external assets without explicit approval and source validation.",
+            "Do not hide model, LoRA, VRAM, runtime, or artifact blockers.",
+        ],
+        required_artifacts=artifacts_from_plan(plan),
+        completion_criteria=[
+            "Promptwright produced a normalized image plan.",
+            "ModelQuartermaster reported resource readiness or explicit blockers.",
+            "ForgeDispatcher validated the job and recorded dry-run or queued submission evidence.",
+            "ImageVerifier checked generated artifacts or recorded that generation is still pending.",
+            "ArtifactFinalis produced a final manifest with artifacts, blockers, and handoff status.",
+        ],
+        quality_gates=[
+            "image_plan_created",
+            "resource_readiness_checked",
+            "forge_validation_or_structured_blocker",
+            "artifact_verification_or_pending_generation_recorded",
+            "final_manifest_created",
+        ],
+        worker_plan=plan,
+    )
+
+
 def code_worker_plan(slug: str) -> list[WorkerPlanStep]:
     base = f"/work/{slug}"
     return [

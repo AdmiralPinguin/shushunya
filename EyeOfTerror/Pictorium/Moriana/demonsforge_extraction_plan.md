@@ -61,4 +61,5 @@ engine area:
 - Worker API services for the Image brigade roles.
 - Comics brigade implementation.
 - Video backend selection and scheduling.
-- Warmaster registry switch from legacy ForgeMasterGovernor to Moriana.
+- Warmaster registry switch from the legacy image governor to Moriana. Done:
+  Warmaster now routes image-generation tasks to Moriana on port 7103.

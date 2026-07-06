@@ -1,0 +1,14 @@
+{
+  "name": "ModelQuartermaster",
+  "port": 7023,
+  "role": "model, LoRA, embedding, and asset readiness inspector",
+  "status": "prototype",
+  "capabilities": ["capability_report", "model_readiness", "asset_profile_report", "structured_blockers"],
+  "model_brain": {
+    "required": true,
+    "role": "ModelQuartermaster",
+    "failure_policy": "block advisory model selection when model_brain is unavailable; deterministic local inventory checks remain available"
+  },
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
+  "callable": "EyeOfTerror.Pictorium.Brigades.Image.Workers.ModelQuartermaster.worker:handle"
+}

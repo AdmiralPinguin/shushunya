@@ -15,7 +15,7 @@ def main() -> int:
     if not code_with_research_word.ok or code_with_research_word.kind != "code" or code_with_research_word.governor != "Ceraxia":
         raise AssertionError(code_with_research_word)
     image = route_message("сделай рисовалку stable diffusion")
-    if image.ok or image.kind != "image_generation" or image.governor != "ForgeMasterGovernor":
+    if not image.ok or image.kind != "image_generation" or image.governor != "Moriana":
         raise AssertionError(image)
     unknown = route_message("сделай что-нибудь")
     if unknown.ok or unknown.kind != "general":
@@ -29,11 +29,10 @@ def main() -> int:
     # Word-initial stems must still match (Russian morphology).
     if not route_message("кодовая задача").ok:
         raise AssertionError("word-initial stem 'код' should match 'кодовая'")
-    # A stronger match on an inactive governor must fall back to an active one
-    # rather than dead-ending: this hits image (planned) and code (active) terms.
+    # A mixed active-governor request should not be collapsed into one brigade.
     mixed = route_message("нарисуй картинку и почини python код в репозитории")
-    if not mixed.ok or mixed.governor != "Ceraxia" or mixed.requires_decomposition:
-        raise AssertionError(f"inactive-governor tie should fall back to active: {mixed}")
+    if not mixed.ok or mixed.governor not in {"Moriana", "Ceraxia"} or not mixed.requires_decomposition:
+        raise AssertionError(f"active image+code task should require decomposition: {mixed}")
     code_investigation = route_message("исследуй источник ошибки и почини python код в приложении")
     if not code_investigation.ok or code_investigation.governor != "Ceraxia" or code_investigation.requires_decomposition:
         raise AssertionError(f"code investigation should stay with Ceraxia: {code_investigation}")

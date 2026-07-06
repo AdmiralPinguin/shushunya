@@ -20,11 +20,11 @@
     "route_terms": ["код", "repo", "repository", "python", "bug", "ошибк", "приложени", "app", "test", "pytest", "фикс", "почини"],
     "service": "eye_of_terror.inner_circle.ceraxia_service"
   },
-  "ForgeMasterGovernor": {
-    "status": "planned",
+  "Moriana": {
+    "status": "active",
     "port": 7103,
     "task_kinds": ["image_generation"],
-    "route_terms": ["картин", "image", "stable diffusion", "рисовал", "forge"],
-    "service": ""
+    "route_terms": ["картин", "image", "stable diffusion", "рисовал", "forge", "flux", "sdxl", "lora"],
+    "service": "EyeOfTerror.Pictorium.Moriana.moriana_governor"
   }
 }

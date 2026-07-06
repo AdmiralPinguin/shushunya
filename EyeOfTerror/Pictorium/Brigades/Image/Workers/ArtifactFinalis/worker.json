@@ -1,0 +1,14 @@
+{
+  "name": "ArtifactFinalis",
+  "port": 7026,
+  "role": "final manifest and delivery package builder",
+  "status": "prototype",
+  "capabilities": ["final_manifest", "blocker_rollup", "artifact_inventory", "handoff_summary"],
+  "model_brain": {
+    "required": true,
+    "role": "ArtifactFinalis",
+    "failure_policy": "block prose delivery review when model_brain is unavailable; deterministic manifest packaging remains available"
+  },
+  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
+  "callable": "EyeOfTerror.Pictorium.Brigades.Image.Workers.ArtifactFinalis.worker:handle"
+}

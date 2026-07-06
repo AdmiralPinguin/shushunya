@@ -17,9 +17,9 @@
       "path": "EyeOfTerror/Warmaster/InnerCircle/CogitatorCodewright"
     },
     "7103": {
-      "name": "ForgeMasterGovernor",
-      "role": "image generation governor",
-      "path": "EyeOfTerror/Warmaster/InnerCircle/ForgeMasterGovernor"
+      "name": "Moriana",
+      "role": "Pictorium image generation governor",
+      "path": "EyeOfTerror/Pictorium/Moriana"
     },
     "7104": {
       "name": "Ceraxia",
@@ -129,6 +129,31 @@
       "name": "ScriptoriumArchitect",
       "role": "research synthesis planner",
       "path": "EyeOfTerror/Scriptorium/Brigade/ScriptoriumArchitect"
+    },
+    "7022": {
+      "name": "Promptwright",
+      "role": "image intent parser and Forge job/project planner",
+      "path": "EyeOfTerror/Pictorium/Brigades/Image/Workers/Promptwright"
+    },
+    "7023": {
+      "name": "ModelQuartermaster",
+      "role": "model, LoRA, embedding, and asset readiness inspector",
+      "path": "EyeOfTerror/Pictorium/Brigades/Image/Workers/ModelQuartermaster"
+    },
+    "7024": {
+      "name": "ForgeDispatcher",
+      "role": "ForgeRuntime dry-run validator and job submitter",
+      "path": "EyeOfTerror/Pictorium/Brigades/Image/Workers/ForgeDispatcher"
+    },
+    "7025": {
+      "name": "ImageVerifier",
+      "role": "generated artifact verifier and visual risk reporter",
+      "path": "EyeOfTerror/Pictorium/Brigades/Image/Workers/ImageVerifier"
+    },
+    "7026": {
+      "name": "ArtifactFinalis",
+      "role": "final manifest and delivery package builder",
+      "path": "EyeOfTerror/Pictorium/Brigades/Image/Workers/ArtifactFinalis"
     }
   }
 }
