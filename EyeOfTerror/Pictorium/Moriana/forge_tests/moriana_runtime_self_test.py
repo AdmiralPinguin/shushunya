@@ -238,6 +238,40 @@ def main() -> int:
         if series_decision.get("action") != "accept_final":
             raise AssertionError(f"series revision decision should accept final: {series_decision}")
 
+        failed_series = create_or_execute_run(
+            run_root,
+            {
+                "task": "сделай серию 2 изображения для проверки ревизии 512x512",
+                "task_id": "image-series-revision",
+                "execute": True,
+            },
+        )
+        failed_series_dir = Path(str(failed_series["run_dir"]))
+        if failed_series.get("ok") or load_json(failed_series_dir / "final" / "revision_decision.json").get("action") != "wait_or_resubmit_forge_job":
+            raise AssertionError(f"failed image series should request Forge revision: {failed_series}")
+        applied_series = execute_revision_run(MorianaRunStore(run_root), "image-series-revision", test_artifact_mode="series_good")
+        applied_series_registry = load_json(failed_series_dir / "artifact_registry.json")
+        applied_series_artifacts = [item for item in applied_series_registry.get("artifacts", []) if isinstance(item, dict)]
+        accepted_series_attempts = {
+            int(item.get("attempt") or 0)
+            for item in applied_series_artifacts
+            if item.get("type") == "image" and item.get("status") == "accepted"
+        }
+        rejected_series_attempts = {
+            int(item.get("attempt") or 0)
+            for item in applied_series_artifacts
+            if item.get("type") == "verification" and item.get("status") == "rejected"
+        }
+        if (
+            not applied_series.get("ok")
+            or applied_series.get("final", {}).get("attempt") != 2
+            or load_json(failed_series_dir / "final" / "revision_decision.json").get("action") != "accept_final"
+            or accepted_series_attempts != {2}
+            or 1 not in rejected_series_attempts
+            or "revision_execution" not in {str(item.get("type") or "") for item in applied_series_artifacts}
+        ):
+            raise AssertionError(f"image series apply_revision did not preserve attempts and recover: {applied_series}")
+
         comic = create_or_execute_run(
             run_root,
             {

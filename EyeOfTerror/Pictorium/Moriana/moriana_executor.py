@@ -244,7 +244,9 @@ def execute_revision_run(
             "revision_applied": False,
         }
     if task_kind == "image_series":
-        return execute_image_series_run(
+        attempt = next_attempt(store, run_id)
+        store.set_status(run_id, "revising", "Moriana is applying image-series revision decision", attempt_count=attempt)
+        result = execute_image_series_run(
             store,
             run_id,
             task,
@@ -254,9 +256,57 @@ def execute_revision_run(
             max_wait_sec=max_wait_sec,
             poll_interval_sec=poll_interval_sec,
             run_inline_once=run_inline_once,
+            attempt=attempt,
+            revision_decision=decision,
         )
+        execution_summary = {
+            "kind": "pictorium_revision_execution",
+            "run_id": run_id,
+            "attempt": attempt,
+            "decision": decision,
+            "ok": result.get("ok"),
+            "final_status": result.get("final", {}).get("status") if isinstance(result.get("final"), dict) else "",
+            "next_decision": result.get("revision_decision"),
+        }
+        execution_path = store.write_step(run_id, f"revision_execution_attempt_{attempt:02d}", execution_summary, subdir="revisions")
+        store.register_artifact(
+            run_id,
+            artifact_type="revision_execution",
+            path=execution_path,
+            created_by="Moriana",
+            step="revision_execution",
+            attempt=attempt,
+            status="accepted" if result.get("ok") else "rejected",
+            metadata={"action": decision.get("action"), "task_kind": task_kind},
+        )
+        result["revision_execution"] = execution_summary
+        return result
     if task_kind == "comic":
-        return execute_comic_run(store, run_id, task, submit=submit)
+        attempt = next_attempt(store, run_id)
+        store.set_status(run_id, "revising", "Moriana is applying comic revision decision", attempt_count=attempt)
+        result = execute_comic_run(store, run_id, task, submit=submit, attempt=attempt, revision_decision=decision)
+        execution_summary = {
+            "kind": "pictorium_revision_execution",
+            "run_id": run_id,
+            "attempt": attempt,
+            "decision": decision,
+            "ok": result.get("ok"),
+            "final_status": result.get("final", {}).get("status") if isinstance(result.get("final"), dict) else "",
+            "next_decision": result.get("revision_decision"),
+        }
+        execution_path = store.write_step(run_id, f"revision_execution_attempt_{attempt:02d}", execution_summary, subdir="revisions")
+        store.register_artifact(
+            run_id,
+            artifact_type="revision_execution",
+            path=execution_path,
+            created_by="Moriana",
+            step="revision_execution",
+            attempt=attempt,
+            status="accepted" if result.get("ok") else "rejected",
+            metadata={"action": decision.get("action"), "task_kind": task_kind},
+        )
+        result["revision_execution"] = execution_summary
+        return result
     if task_kind != "image":
         raise ValueError(f"apply_revision supports image, image_series, and comic runs; got {task_kind!r}")
 
@@ -473,10 +523,12 @@ def execute_image_series_run(
     max_wait_sec: float = 0.0,
     poll_interval_sec: float = 0.5,
     run_inline_once: bool = False,
+    attempt: int = 1,
+    revision_decision: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     run_dir = store.run_dir(run_id)
     count = requested_image_count(task)
-    store.set_status(run_id, "planning", f"Image Brigade is preparing {count} linked image packages", attempt_count=1)
+    store.set_status(run_id, "planning", f"Image Brigade is preparing {count} linked image packages", attempt_count=attempt)
     items = []
     all_blockers: list[dict[str, Any]] = []
     accepted_artifact_ids = []
@@ -484,14 +536,14 @@ def execute_image_series_run(
         step_prefix = f"series_{index:02d}"
         image_task = f"{task}. Image {index} of {count}. Keep style and subject continuity across the series."
         plan = prepare_image_plan({"request": image_task, "use_memory": False, "use_thinker": False})
-        register_json_artifact(store, run_id, step=f"{step_prefix}_image_plan", payload=plan, artifact_type="prompt", created_by="Promptwright", attempt=1, subdir="prompts")
+        register_json_artifact(store, run_id, step=f"{step_prefix}_image_plan", payload=plan, artifact_type="prompt", created_by="Promptwright", attempt=attempt, subdir="prompts")
         job_spec = plan.get("job_spec") if isinstance(plan.get("job_spec"), dict) else {}
         resources = inspect_resources({"job_spec": job_spec})
-        register_json_artifact(store, run_id, step=f"{step_prefix}_resource_report", payload=resources, artifact_type="resource_report", created_by="ModelQuartermaster", attempt=1, subdir="parameters")
+        register_json_artifact(store, run_id, step=f"{step_prefix}_resource_report", payload=resources, artifact_type="resource_report", created_by="ModelQuartermaster", attempt=attempt, subdir="parameters")
         forge_db_path = run_dir / "forge.sqlite3"
         dispatch = prepare_dispatch({"job_spec": job_spec, "submit": submit, "db_path": str(forge_db_path)})
-        register_json_artifact(store, run_id, step=f"{step_prefix}_forge_dispatch", payload=dispatch, artifact_type="dispatch", created_by="ForgeDispatcher", attempt=1)
-        store.set_status(run_id, "generating", f"Series image {index}/{count} dispatch package prepared", attempt_count=1)
+        register_json_artifact(store, run_id, step=f"{step_prefix}_forge_dispatch", payload=dispatch, artifact_type="dispatch", created_by="ForgeDispatcher", attempt=attempt)
+        store.set_status(run_id, "generating", f"Series image {index}/{count} dispatch package prepared", attempt_count=attempt)
         artifact_path = ""
         forge_monitor = {}
         if submit and (wait_for_result or run_inline_once):
@@ -509,7 +561,7 @@ def execute_image_series_run(
                 payload=forge_monitor,
                 artifact_type="result",
                 created_by="Moriana",
-                attempt=1,
+                attempt=attempt,
                 status="accepted" if forge_monitor.get("ok") else "rejected",
                 subdir="results",
                 rejection_reason="; ".join(str(item.get("code") or "") for item in forge_monitor.get("blockers", []) if isinstance(item, dict)),
@@ -518,10 +570,10 @@ def execute_image_series_run(
             artifact_path = str(paths[0]) if paths else ""
         if test_artifact_mode in {"good", "series_good"}:
             width, height = job_spec_dimensions(job_spec)
-            synthetic_path = run_dir / "artifacts" / f"series_image_{index:02d}.png"
+            synthetic_path = run_dir / "artifacts" / f"series_image_{index:02d}_attempt_{attempt:02d}.png"
             make_synthetic_image(synthetic_path, width, height, (60 + index * 12, 70 + index * 8, 90 + index * 5))
             artifact_path = str(synthetic_path)
-        store.set_status(run_id, "checking", f"ImageVerifier is checking series image {index}/{count}", attempt_count=1)
+        store.set_status(run_id, "checking", f"ImageVerifier is checking series image {index}/{count}", attempt_count=attempt)
         verification = verify_image({"artifact_path": artifact_path, "job_spec": job_spec, "job_record": dispatch.get("job_record")})
         blockers = [*blockers_from(resources), *blockers_from(dispatch), *blockers_from(forge_monitor), *blockers_from(verification)]
         all_blockers.extend({"series_index": index, **blocker} for blocker in blockers)
@@ -532,7 +584,7 @@ def execute_image_series_run(
             payload=verification,
             artifact_type="verification",
             created_by="ImageVerifier",
-            attempt=1,
+            attempt=attempt,
             status="accepted" if not blockers else "rejected",
             rejection_reason="; ".join(str(item.get("code") or "") for item in blockers),
         )
@@ -544,10 +596,10 @@ def execute_image_series_run(
                 path=Path(artifact_path),
                 created_by="ForgeDispatcher",
                 step=f"{step_prefix}_image_generation",
-                attempt=1,
+                attempt=attempt,
                 status="accepted" if not blockers else "rejected",
                 rejection_reason="; ".join(str(item.get("message") or item.get("code") or "") for item in blockers),
-                metadata={"job_spec": job_spec, "series_index": index, "series_count": count},
+                metadata={"job_spec": job_spec, "series_index": index, "series_count": count, "revision_decision": revision_decision or {}},
             )
             image_artifact_id = str(image_record["artifact_id"])
             if not blockers:
@@ -572,16 +624,17 @@ def execute_image_series_run(
         "items": items,
         "blockers": all_blockers,
         "artifact_registry": str(run_dir / "artifact_registry.json"),
+        "revision_decision": revision_decision or {},
         "handoff": {
             "ready_for_delivery": not all_blockers and len(accepted_artifact_ids) == count,
             "requires_generation": len(accepted_artifact_ids) < count,
             "requires_revision": bool(all_blockers),
         },
-        "attempt": 1,
+        "attempt": attempt,
     }
     if all_blockers:
-        store.set_status(run_id, "revising", "one or more series images need revision", attempt_count=1)
-        store.write_revision(run_id, 1, all_blockers, "revise blocked series images and rerun final packaging")
+        store.set_status(run_id, "revising", "one or more series images need revision", attempt_count=attempt)
+        store.write_revision(run_id, attempt, all_blockers, "revise blocked series images and rerun final packaging")
     store.write_final(run_id, final_payload, final_artifact_id=accepted_artifact_ids[0] if accepted_artifact_ids else "")
     quality_report = write_quality_report(store, run_id)
     revision_decision = write_revision_decision(store, run_id, quality_report)
@@ -604,16 +657,18 @@ def execute_comic_run(
     task: str,
     *,
     submit: bool = False,
+    attempt: int = 1,
+    revision_decision: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     run_dir = store.run_dir(run_id)
-    store.set_status(run_id, "planning", "Comics Brigade is preparing scenario and storyboard", attempt_count=1)
+    store.set_status(run_id, "planning", "Comics Brigade is preparing scenario and storyboard", attempt_count=attempt)
     scenario = build_scenario({"request": task})
-    register_json_artifact(store, run_id, step="scenario", payload=scenario, artifact_type="plan", created_by="ScenarioScribe", attempt=1)
+    register_json_artifact(store, run_id, step="scenario", payload=scenario, artifact_type="plan", created_by="ScenarioScribe", attempt=attempt)
     storyboard = build_storyboard({"scenario": scenario.get("scenario", {})})
-    register_json_artifact(store, run_id, step="storyboard", payload=storyboard, artifact_type="plan", created_by="StoryboardArchitect", attempt=1)
+    register_json_artifact(store, run_id, step="storyboard", payload=storyboard, artifact_type="plan", created_by="StoryboardArchitect", attempt=attempt)
     character_sheet = build_character_sheet({"scenario": scenario.get("scenario", {})})
-    register_json_artifact(store, run_id, step="character_sheet", payload=character_sheet, artifact_type="character_sheet", created_by="CharacterSheetwright", attempt=1)
-    store.set_status(run_id, "generating", "Panelwright is building panel generation packages", attempt_count=1)
+    register_json_artifact(store, run_id, step="character_sheet", payload=character_sheet, artifact_type="character_sheet", created_by="CharacterSheetwright", attempt=attempt)
+    store.set_status(run_id, "generating", "Panelwright is building panel generation packages", attempt_count=attempt)
     panels = build_panel_packages(
         {
             "storyboard": storyboard.get("storyboard", {}),
@@ -622,8 +677,8 @@ def execute_comic_run(
             "db_path": str(run_dir / "forge.sqlite3"),
         }
     )
-    register_json_artifact(store, run_id, step="panel_generation", payload=panels, artifact_type="comic_panel", created_by="Panelwright", attempt=1)
-    store.set_status(run_id, "checking", "LayoutFinalis is checking layout and blockers", attempt_count=1)
+    register_json_artifact(store, run_id, step="panel_generation", payload=panels, artifact_type="comic_panel", created_by="Panelwright", attempt=attempt)
+    store.set_status(run_id, "checking", "LayoutFinalis is checking layout and blockers", attempt_count=attempt)
     layout = build_layout_manifest(
         {
             "scenario": scenario.get("scenario", {}),
@@ -633,15 +688,16 @@ def execute_comic_run(
         }
     )
     blockers = blockers_from(layout)
-    register_json_artifact(store, run_id, step="layout", payload=layout, artifact_type="layout", created_by="LayoutFinalis", attempt=1, status="accepted" if not blockers else "rejected")
+    register_json_artifact(store, run_id, step="layout", payload=layout, artifact_type="layout", created_by="LayoutFinalis", attempt=attempt, status="accepted" if not blockers else "rejected")
     final_payload = dict(layout.get("final_manifest") if isinstance(layout.get("final_manifest"), dict) else {})
     final_payload.setdefault("kind", "pictorium_comic_final_manifest")
     final_payload["run_id"] = run_id
-    final_payload["attempt"] = 1
+    final_payload["attempt"] = attempt
     final_payload["artifact_registry"] = str(run_dir / "artifact_registry.json")
+    final_payload["revision_decision"] = revision_decision or {}
     if blockers:
-        store.set_status(run_id, "revising", "comic layout has unresolved blockers", attempt_count=1)
-        store.write_revision(run_id, 1, blockers, "revise_panel_generation_or_layout")
+        store.set_status(run_id, "revising", "comic layout has unresolved blockers", attempt_count=attempt)
+        store.write_revision(run_id, attempt, blockers, "revise_panel_generation_or_layout")
     store.write_final(run_id, final_payload)
     quality_report = write_quality_report(store, run_id)
     revision_decision = write_revision_decision(store, run_id, quality_report)
