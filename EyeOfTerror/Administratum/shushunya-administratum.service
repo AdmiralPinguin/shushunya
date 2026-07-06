@@ -1,0 +1,14 @@
+[Unit]
+Description=Shushunya Administratum AshurKai heartbeat
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/media/shushunya/SHUSHUNYA/shushunya
+Environment=PYTHONPATH=/media/shushunya/SHUSHUNYA/shushunya
+ExecStart=/media/shushunya/SHUSHUNYA/shushunya/DemonsForge/DemonsForge/bin/python -m EyeOfTerror.Administratum.run_administratum
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

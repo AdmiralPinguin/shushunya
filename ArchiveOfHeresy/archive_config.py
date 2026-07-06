@@ -16,6 +16,7 @@ DEFAULT_MODEL = os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_
 TRANSLATOR_BASE_URL = os.environ.get("ARCHIVE_TRANSLATOR_BASE_URL", "http://127.0.0.1:8091").rstrip("/")
 STT_BASE_URL = os.environ.get("ARCHIVE_STT_BASE_URL", "http://127.0.0.1:8093").rstrip("/")
 WARMASTER_BASE_URL = os.environ.get("ARCHIVE_WARMASTER_BASE_URL", "http://127.0.0.1:7000").rstrip("/")
+ADMINISTRATUM_BASE_URL = os.environ.get("ARCHIVE_ADMINISTRATUM_BASE_URL", "http://127.0.0.1:7300").rstrip("/")
 JSONL_ROOT = Path(os.environ.get("ARCHIVE_JSONL_ROOT", ROOT / "archive" / "jsonl"))
 MEMORY_EVENTS_ROOT = Path(os.environ.get("ARCHIVE_MEMORY_EVENTS_ROOT", ROOT / "archive" / "memory_events"))
 SQLITE_PATH = Path(os.environ.get("ARCHIVE_SQLITE_PATH", ROOT / "archive" / "sqlite" / "archive.sqlite3"))

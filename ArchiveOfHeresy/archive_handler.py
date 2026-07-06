@@ -1116,7 +1116,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 write_json(self, 400, {"error": f"Invalid JSON: {exc}"})
                 return
 
-            session_id = safe_chat_session_id(payload.get("session_id") or payload.get("user") or "default")
+            session_id = shared_chat_session_id(payload.get("session_id") or payload.get("user") or SHARED_CHAT_SESSION_ID)
             text = trim_chat_text(payload.get("text") or payload.get("message") or "")
             image_data_url = str(payload.get("image_data_url") or "").strip()
             if not text and not image_data_url:
@@ -1128,10 +1128,11 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             vector_enabled = internal_flag(payload.get("vector_enabled", focus_enabled), default=True)
             graph_enabled = internal_flag(payload.get("graph_enabled", focus_enabled), default=True)
             archive_system_prompt_enabled = internal_flag(payload.get("archive_system_prompt_enabled", True), default=True)
-            memory_namespace = safe_memory_namespace(payload.get("memory_namespace") or "mobile")
+            memory_namespace = shared_memory_namespace(payload.get("memory_namespace") or SHARED_MEMORY_NAMESPACE)
+            client_source = str(payload.get("client_source") or payload.get("source") or "mobile").strip()[:80] or "mobile"
             stream = internal_flag(payload.get("stream", True), default=True)
             model = payload.get("model") or DEFAULT_MODEL
-            system_prompt = payload.get("system_prompt") or ""
+            system_prompt = ""
             max_tokens = int(payload.get("max_tokens") or 2048)
             temperature = float(payload.get("temperature") or 0.4)
 
@@ -1141,7 +1142,15 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "user",
                 text if not image_data_url else f"{text}\n[image attached server-side]",
                 created_at=created_at,
+                source=client_source,
             )
+            administratum_intent = None
+            administratum_result = None
+            administratum_message = None
+            if should_detect_administratum_intent(client_source, payload):
+                administratum_intent = detect_administratum_intent(text, model=model)
+                administratum_result = create_administratum_task_from_intent(administratum_intent, session_id, client_source)
+                administratum_message = administratum_intent_context(administratum_result)
             mobile_payload = {
                 "model": model,
                 "user": f"mobile:{session_id}",
@@ -1182,6 +1191,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 include_graph=graph_enabled,
                 include_system_prompt=archive_system_prompt_enabled,
                 magos_message=magos_message,
+                administratum_message=administratum_message,
                 query_messages=memory_messages,
                 memory_namespace=memory_namespace,
             )
@@ -1192,6 +1202,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 include_graph=graph_enabled,
                 include_system_prompt=archive_system_prompt_enabled,
                 magos_message=magos_message,
+                administratum_message=administratum_message,
                 query_messages=memory_messages,
                 memory_namespace=memory_namespace,
             )
@@ -1219,6 +1230,8 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "archive_system_prompt_enabled": archive_system_prompt_enabled,
                 "magos_enabled": bool(magos_message),
                 "magos_result": magos_result,
+                "administratum_intent": administratum_intent,
+                "administratum_result": administratum_result,
                 "prompt_diagnostics": diagnostics,
                 "model": model,
                 "request": {
@@ -1390,6 +1403,13 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             user_text_for_channel = trim_chat_text(latest_user_message(memory_messages))
             if user_text_for_channel:
                 append_chat_message(shared_session_id, "user", user_text_for_channel, created_at=created_at, source=client_source)
+            administratum_intent = None
+            administratum_result = None
+            administratum_message = None
+            if user_text_for_channel and should_detect_administratum_intent(client_source, payload):
+                administratum_intent = detect_administratum_intent(user_text_for_channel, model=payload.get("model"))
+                administratum_result = create_administratum_task_from_intent(administratum_intent, shared_session_id, client_source)
+                administratum_message = administratum_intent_context(administratum_result)
             magos_message = None
             magos_result = None
             magos = focus_components(memory_namespace)["magos"]
@@ -1415,6 +1435,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 include_graph=graph_enabled,
                 include_system_prompt=archive_system_prompt_enabled,
                 magos_message=magos_message,
+                administratum_message=administratum_message,
                 query_messages=memory_messages,
                 memory_namespace=memory_namespace,
             )
@@ -1427,6 +1448,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 include_graph=graph_enabled,
                 include_system_prompt=archive_system_prompt_enabled,
                 magos_message=magos_message,
+                administratum_message=administratum_message,
                 query_messages=memory_messages,
                 memory_namespace=memory_namespace,
             )
@@ -1456,6 +1478,8 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "archive_system_prompt_enabled": archive_system_prompt_enabled,
                 "magos_enabled": bool(magos_message),
                 "magos_result": magos_result,
+                "administratum_intent": administratum_intent,
+                "administratum_result": administratum_result,
                 "prompt_diagnostics": diagnostics,
                 "model": payload.get("model"),
                 "request": sanitized_payload,

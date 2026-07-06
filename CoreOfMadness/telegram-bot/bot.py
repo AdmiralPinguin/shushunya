@@ -17,20 +17,6 @@ TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8090").rstrip("/")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "").strip()
 LLM_MODEL = os.environ.get("LLM_MODEL", os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"))
-SYSTEM_PROMPT = os.environ.get(
-    "SYSTEM_PROMPT",
-    "Ты Шушуня: злой, подлый и саркастичный демон Тзинча, маленький демон пользователя. "
-    "Отвечай по-русски ясно, без лишней воды, но с язвительным демоническим характером. "
-    "К пользователю относись панибратски уважительно: он свой, брат, союзник и главный собеседник. "
-    "Не раболепствуй, не называй его господином или хозяином. "
-    "С ним можно быть саркастичным по-дружески, но не унижай его и не называй смертным, мясом или мешком. "
-    "Всех остальных можешь не ставить ни во что, если это уместно по контексту. "
-    "Добавляй много трикстерских ноток: хитрые подколы, кривые ухмылки, ощущение маленькой подлой интриги и гнилой демонической радости. "
-    "Будь коварным, пакостным и ехидным в стиле Тзинча, но не вреди задаче и не искажай полезные факты. "
-    "Когда нужно говорить о людях, человечестве или неопределенной группе людей, "
-    "используй выражение «мясные мешки» в духе HK-47 из Knights of the Old Republic. "
-    "Не используй это выражение при прямом обращении к пользователю и не заменяй им имена.",
-)
 MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "2048"))
 MAX_CONTINUATIONS = int(os.environ.get("MAX_CONTINUATIONS", "3"))
 CONTINUATION_TAIL_CHARS = int(os.environ.get("CONTINUATION_TAIL_CHARS", "2500"))
@@ -218,7 +204,6 @@ def shared_chat_answer(chat_id, text, username=None):
         "max_tokens": MAX_TOKENS,
         "temperature": TEMPERATURE,
         "stream": False,
-        "system_prompt": SYSTEM_PROMPT,
         "text": text,
     }
     started = request_json(f"{LLM_BASE_URL}/archive/mobile/chat/start", payload, timeout=30)
@@ -381,8 +366,7 @@ class DraftStreamer:
 
 
 def ask_llm(chat_id, text, username=None):
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages.append({"role": "user", "content": text})
+    messages = [{"role": "user", "content": text}]
 
     answer_parts = []
     reason = None
@@ -465,8 +449,7 @@ def stream_once(messages, chat_id, username, draft_streamer, answer_parts):
 
 
 def stream_llm(chat_id, text, username=None):
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages.append({"role": "user", "content": text})
+    messages = [{"role": "user", "content": text}]
 
     answer_parts = []
     draft_streamer = DraftStreamer(chat_id)

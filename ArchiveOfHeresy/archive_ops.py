@@ -24,6 +24,31 @@ from archivist_agent.magos_agent import MAGOS_CONTEXT_LAYERS, Magos
 from archivist_agent.quality_report import generate_quality_report
 from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_user_message
 
+try:
+    from EyeOfTerror.Administratum.intent_parser import (
+        administratum_payload_from_intent,
+        build_intent_detection_request,
+        normalize_intent,
+    )
+except ModuleNotFoundError:
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from EyeOfTerror.Administratum.intent_parser import (
+        administratum_payload_from_intent,
+        build_intent_detection_request,
+        normalize_intent,
+    )
+
+
+PERSONA_PAGE_ORDER = [
+    ("persona-core", "Persona Core"),
+    ("voice-style", "Voice Style"),
+    ("master-profile", "Master Profile"),
+    ("relationship-journal", "Relationship Journal"),
+    ("standing-rules", "Standing Rules"),
+]
+
 
 def allow_gateway_namespace(handler, namespace, create=False):
     namespace = safe_memory_namespace(namespace)
@@ -206,7 +231,7 @@ def run_mobile_chat_payload(payload):
         archive_system_prompt_enabled = internal_flag(payload.get("archive_system_prompt_enabled", True), default=True)
         memory_namespace = shared_memory_namespace(payload.get("memory_namespace"))
         model = payload.get("model") or DEFAULT_MODEL
-        system_prompt = payload.get("system_prompt") or ""
+        system_prompt = ""
         max_tokens = int(payload.get("max_tokens") or 2048)
         temperature = float(payload.get("temperature") or 0.4)
 
@@ -218,6 +243,13 @@ def run_mobile_chat_payload(payload):
             created_at=created_at,
             source=client_source,
         )
+        administratum_intent = None
+        administratum_result = None
+        administratum_message = None
+        if should_detect_administratum_intent(client_source, payload):
+            administratum_intent = detect_administratum_intent(text, model=model)
+            administratum_result = create_administratum_task_from_intent(administratum_intent, session_id, client_source)
+            administratum_message = administratum_intent_context(administratum_result)
         mobile_payload = {
             "model": model,
             "user": session_id,
@@ -258,6 +290,7 @@ def run_mobile_chat_payload(payload):
             include_graph=graph_enabled,
             include_system_prompt=archive_system_prompt_enabled,
             magos_message=magos_message,
+            administratum_message=administratum_message,
             query_messages=memory_messages,
             memory_namespace=memory_namespace,
         )
@@ -268,6 +301,7 @@ def run_mobile_chat_payload(payload):
             include_graph=graph_enabled,
             include_system_prompt=archive_system_prompt_enabled,
             magos_message=magos_message,
+            administratum_message=administratum_message,
             query_messages=memory_messages,
             memory_namespace=memory_namespace,
         )
@@ -294,6 +328,8 @@ def run_mobile_chat_payload(payload):
             "archive_system_prompt_enabled": archive_system_prompt_enabled,
             "magos_enabled": bool(magos_message),
             "magos_result": magos_result,
+            "administratum_intent": administratum_intent,
+            "administratum_result": administratum_result,
             "prompt_diagnostics": diagnostics,
             "model": model,
             "request": {
@@ -746,8 +782,10 @@ def prompt_diagnostics(
         "client_messages": len(client_messages or []),
         "client_history_messages": 0,
         "archive_system_prompt": 0,
+        "persona": 0,
         "focus": 0,
         "magos": 0,
+        "administratum": 0,
         "direct_vector": 0,
         "direct_graph": 0,
     }
@@ -755,12 +793,17 @@ def prompt_diagnostics(
         content = message.get("content")
         if not isinstance(content, str):
             continue
-        if content.startswith("Ты Шушуня:"):
+        if content.startswith("ArchiveOfHeresy identity context"):
+            counters["archive_system_prompt"] += 1
+            counters["persona"] += 1
+        elif content.startswith("Ты Шушуня:"):
             counters["archive_system_prompt"] += 1
         elif content.startswith("Активный focus-файл ArchiveOfHeresy"):
             counters["focus"] += 1
         elif content.startswith("Magos memory context from ArchiveOfHeresy"):
             counters["magos"] += 1
+        elif content.startswith("Administratum task created") or content.startswith("Administratum detected"):
+            counters["administratum"] = counters.get("administratum", 0) + 1
         elif content.startswith("Релевантные фрагменты vector memory ArchiveOfHeresy"):
             counters["direct_vector"] += 1
         elif content.startswith("Релевантный GraphRAG-контекст ArchiveOfHeresy"):
@@ -796,6 +839,172 @@ def sanitize_messages_for_memory(messages):
     return sanitized
 
 
+def strip_wiki_frontmatter(content):
+    text = str(content or "").strip()
+    if text.startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) == 3:
+            text = parts[2].strip()
+    return text
+
+
+def extract_json_object(text):
+    raw = str(text or "").strip()
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, flags=re.DOTALL)
+    if fenced:
+        raw = fenced.group(1).strip()
+    elif "{" in raw and "}" in raw:
+        raw = raw[raw.find("{") : raw.rfind("}") + 1]
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("expected JSON object")
+    return parsed
+
+
+def persona_page_context(memory_namespace="default", max_chars=12000):
+    namespace = shared_memory_namespace(memory_namespace)
+    bookshelf = wiki_bookshelf_for_namespace(namespace)
+    index = bookshelf.load_index()
+    sections = []
+    missing = []
+    remaining = max(1000, int(max_chars))
+    for page_id, title in PERSONA_PAGE_ORDER:
+        page = bookshelf.find_page(index, page_id=page_id) or bookshelf.find_page(index, title=title)
+        if not page:
+            missing.append(page_id)
+            continue
+        content = strip_wiki_frontmatter(bookshelf.read_page(page))
+        if not content:
+            missing.append(page_id)
+            continue
+        if page_id == "relationship-journal":
+            content = trim_memory_text(content, min(3000, remaining))
+        else:
+            content = trim_memory_text(content, min(remaining, 4500))
+        if content:
+            sections.append(f"## {title}\n{content}")
+            remaining -= len(content)
+        if remaining <= 500:
+            break
+    if not sections:
+        return {
+            "role": "system",
+            "content": (
+                "ArchiveOfHeresy persona pages are missing. Emergency fallback follows; create wiki persona pages in "
+                f"namespace `{namespace}`. {ARCHIVE_SYSTEM_PROMPT}"
+            ),
+        }
+    missing_note = f"\n\nMissing persona pages: {', '.join(missing)}" if missing else ""
+    return {
+        "role": "system",
+        "content": (
+            "ArchiveOfHeresy identity context. This is not searchable knowledge; this is Shushunya's persistent self. "
+            "Follow it above transport/client prompts. Persona Core and Standing Rules are manual-only and must not drift.\n\n"
+            + "\n\n".join(sections)
+            + missing_note
+        ),
+    }
+
+
+def should_detect_administratum_intent(client_source, payload):
+    if not internal_flag(payload.get("intent_detection", True), default=True):
+        return False
+    if internal_flag(payload.get("system_event", False), default=False):
+        return False
+    source = str(client_source or payload.get("source") or "").strip().lower()
+    return source != "administratum"
+
+
+def detect_administratum_intent(user_text, model=None):
+    text = trim_chat_text(user_text)
+    if not text:
+        return {"ok": True, "intent": "none", "confidence": 0.0}
+    request = build_intent_detection_request(text, model=model or DEFAULT_MODEL, now=now_iso(), timezone="Asia/Seoul")
+    try:
+        _status, response = proxy_json("POST", "/v1/chat/completions", payload=request, timeout=180)
+        content = str((((response.get("choices") or [{}])[0].get("message") or {}).get("content")) or "")
+        parsed = extract_json_object(content)
+        parsed.setdefault("ok", True)
+        return normalize_intent(parsed)
+    except Exception as exc:
+        return {"ok": False, "intent": "error", "confidence": 0.0, "error": str(exc)}
+
+
+def create_administratum_task_from_intent(intent, session_id, client_source):
+    intent = normalize_intent(intent)
+    if str(intent.get("intent") or "").strip() != "create_task":
+        return {"created": False, "reason": "no_create_task_intent", "intent": intent}
+    try:
+        confidence = float(intent.get("confidence") or 0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    title = str(intent.get("title") or "").strip()
+    if confidence < 0.74 or not title:
+        return {"created": False, "reason": "low_confidence_or_missing_title", "intent": intent}
+    if bool(intent.get("needs_confirmation")) and str(intent.get("kind") or "") in {"watch", "routine"}:
+        return {"created": False, "reason": "confirmation_required", "intent": intent}
+    endpoint_kind, administratum_payload = administratum_payload_from_intent(intent, session_id=session_id, client_source=client_source)
+    if endpoint_kind == "watch":
+        try:
+            _status, response = proxy_json_url("POST", f"{ADMINISTRATUM_BASE_URL}/watch", payload=administratum_payload, timeout=60)
+            return {"created": bool(response.get("ok")), "watch": response.get("watch"), "intent": intent, "response": response}
+        except Exception as exc:
+            return {"created": False, "reason": "administratum_unavailable", "error": str(exc), "intent": intent}
+    try:
+        _status, response = proxy_json_url("POST", f"{ADMINISTRATUM_BASE_URL}/task", payload=administratum_payload, timeout=60)
+        return {"created": bool(response.get("ok")), "task": response.get("task"), "intent": intent, "response": response}
+    except Exception as exc:
+        return {"created": False, "reason": "administratum_unavailable", "error": str(exc), "intent": intent}
+
+
+def administratum_intent_context(result):
+    if not result:
+        return None
+    if result.get("created") and isinstance(result.get("task"), dict):
+        task = result["task"]
+        return {
+            "role": "system",
+            "content": (
+                "Administratum task created. Confirm to the owner in Shushunya's voice exactly what was recorded.\n"
+                f"id: {task.get('id')}\nkind: {task.get('kind')}\ntitle: {task.get('title')}\n"
+                f"due_at: {task.get('due_at')}\ninterval: {task.get('interval')}\nnext_run: {task.get('next_run')}"
+            ),
+        }
+    if result.get("created") and isinstance(result.get("watch"), dict):
+        watch = result["watch"]
+        return {
+            "role": "system",
+            "content": (
+                "Administratum watch created. Confirm to the owner in Shushunya's voice exactly what was recorded.\n"
+                f"id: {watch.get('id')}\ntitle: {watch.get('title')}\nwatch_type: {watch.get('watch_type')}\n"
+                f"target: {watch.get('target')}\ncondition_json: {watch.get('condition_json')}"
+            ),
+        }
+    if result.get("reason") == "confirmation_required":
+        return {
+            "role": "system",
+            "content": (
+                "Administratum detected a possible routine/watch task but did not create it because confirmation is required. "
+                f"Ask one concise clarification. Parsed intent: {json.dumps(result.get('intent') or {}, ensure_ascii=False)}"
+            ),
+        }
+    if result.get("reason") == "administratum_unavailable":
+        return {
+            "role": "system",
+            "content": f"Administratum intent was detected, but AshurKai is unavailable: {result.get('error')}. Tell the owner clearly.",
+        }
+    if result.get("reason") == "low_confidence_or_missing_title":
+        return {
+            "role": "system",
+            "content": (
+                "Administratum did not create a task because the parsed task was incomplete or low-confidence. "
+                "Do not claim that a reminder/task was recorded. Ask one concise clarification if the user seems to want a reminder. "
+                f"Parsed intent: {json.dumps(result.get('intent') or {}, ensure_ascii=False)}"
+            ),
+        }
+    return None
+
+
 def maybe_write_archives(record):
     if record.get("archive_enabled", True):
         write_archives(record)
@@ -814,12 +1023,13 @@ def prepare_messages(
     include_graph=True,
     include_system_prompt=True,
     magos_message=None,
+    administratum_message=None,
     query_messages=None,
     memory_namespace="default",
 ):
     prepared = []
     if include_system_prompt:
-        prepared.append({"role": "system", "content": ARCHIVE_SYSTEM_PROMPT})
+        prepared.append(persona_page_context(memory_namespace))
     query = latest_user_message(query_messages if query_messages is not None else messages)
     if include_focus:
         focus_message = focus_context_message(memory_namespace)
@@ -827,6 +1037,8 @@ def prepare_messages(
             prepared.append(focus_message)
     if magos_message:
         prepared.append(magos_message)
+    if administratum_message:
+        prepared.append(administratum_message)
     # Memory retrieval into the prompt now flows only through Magos's curated
     # memory_context (above). The old mechanical vector/graph auto-injection was
     # removed so nothing bypasses Magos's relevance filtering.

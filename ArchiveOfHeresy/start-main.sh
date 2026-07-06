@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$ROOT/.." && pwd)"
 
 # Ensure the CPU embedding server is up (vector memory depends on it).
 systemctl --user start shushunya-embedder.service 2>/dev/null || true
@@ -41,6 +42,7 @@ export ARCHIVE_VECTOR_BACKFILL_ON_START="${ARCHIVE_VECTOR_BACKFILL_ON_START:-0}"
 export ARCHIVE_GRAPH_BACKFILL_ON_START="${ARCHIVE_GRAPH_BACKFILL_ON_START:-0}"
 export ARCHIVE_MEMORY_QUALITY_REPORT_ENABLED="${ARCHIVE_MEMORY_QUALITY_REPORT_ENABLED:-1}"
 export ARCHIVE_MEMORY_QUALITY_REPORT_HOUR="${ARCHIVE_MEMORY_QUALITY_REPORT_HOUR:-4}"
+export PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 case "${ARCHIVE_LLM_PROVIDER:-llamacpp}" in
   litert|litert-lm)
