@@ -44,13 +44,13 @@ TRIALS = [
     {
         "id": "comic_4_panels",
         "task": "сделай комикс 4 панели про техножреца который запускает древнюю кузню",
-        "payload": {"execute": True},
+        "payload": {"execute": True, "test_artifact_mode": "comic_panels_good"},
         "expected_kind": "comic",
     },
     {
         "id": "comic_8_panels",
         "task": "сделай комикс 8 панелей про один отряд сервиторов в мрачном цехе, сохрани персонажей и стиль",
-        "payload": {"execute": True},
+        "payload": {"execute": True, "test_artifact_mode": "comic_panels_good"},
         "expected_kind": "comic",
     },
     {
@@ -109,13 +109,25 @@ def trial_record(run_root: Path, trial: dict[str, Any], asset_root: Path) -> dic
         "delivery_ready": quality.get("delivery_ready"),
         "blocker_count": quality.get("blocker_count"),
         "accepted_image_count": quality.get("accepted_image_count"),
+        "accepted_visual_artifact_count": quality.get("accepted_visual_artifact_count"),
         "revision_target_count": len(quality.get("revision_targets") if isinstance(quality.get("revision_targets"), list) else []),
         "artifact_count": len(artifacts),
         "artifact_status_counts": quality.get("artifact_counts", {}).get("by_status", {}),
         "artifact_type_counts": quality.get("artifact_counts", {}).get("by_type", {}),
         "limitations": quality.get("audit_limits", []),
-        "coverage_mode": "existing_live_artifact" if payload.get("artifact_path") else ("synthetic_image" if trial["payload"].get("test_artifact_mode") else "manifest_orchestration"),
+        "coverage_mode": coverage_mode(payload, trial),
     }
+
+
+def coverage_mode(payload: dict[str, Any], trial: dict[str, Any]) -> str:
+    if payload.get("artifact_path"):
+        return "existing_live_artifact"
+    mode = trial["payload"].get("test_artifact_mode") if isinstance(trial.get("payload"), dict) else ""
+    if mode == "comic_panels_good":
+        return "synthetic_comic_panel_art"
+    if mode:
+        return "synthetic_image"
+    return "manifest_orchestration"
 
 
 def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -136,9 +148,17 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
                     "impact": "orchestration and deterministic verification are covered, live model visual quality is not",
                 }
             )
+        if item.get("coverage_mode") == "synthetic_comic_panel_art":
+            coverage_gaps.append(
+                {
+                    "id": item["id"],
+                    "gap": "synthetic_comic_panel_art",
+                    "impact": "comic panel artifact wiring is covered, live generated panel semantics are not",
+                }
+            )
         if item.get("coverage_mode") == "existing_live_artifact":
             continue
-        if item.get("task_kind") == "comic" and int(item.get("accepted_image_count") or 0) == 0:
+        if item.get("task_kind") == "comic" and int(item.get("accepted_visual_artifact_count") or 0) == 0:
             coverage_gaps.append(
                 {
                     "id": item["id"],
@@ -148,6 +168,8 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
             )
     min_score = min((int(item.get("quality_score") or 0) for item in records), default=0)
     avg_score = round(sum(int(item.get("quality_score") or 0) for item in records) / max(1, len(records)), 2)
+    coverage_penalty = min(40, len(coverage_gaps) * 5)
+    evidence_adjusted_score = max(0, round(avg_score - coverage_penalty, 2))
     return {
         "kind": "pictorium_quality_trial_report",
         "trial_count": len(records),
@@ -155,6 +177,9 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
         "final_statuses": dict(sorted(final_statuses.items())),
         "min_quality_score": min_score,
         "avg_quality_score": avg_score,
+        "evidence_adjusted_score": evidence_adjusted_score,
+        "coverage_penalty": coverage_penalty,
+        "readiness_verdict": "needs_live_visual_trials" if coverage_gaps else "ready_for_live_acceptance_review",
         "weak_case_count": len(weak_cases),
         "coverage_gap_count": len(coverage_gaps),
         "coverage_gaps": coverage_gaps,
@@ -211,6 +236,8 @@ def _main() -> int:
                 "weak_case_count": report["weak_case_count"],
                 "coverage_gap_count": report["coverage_gap_count"],
                 "avg_quality_score": report["avg_quality_score"],
+                "evidence_adjusted_score": report["evidence_adjusted_score"],
+                "readiness_verdict": report["readiness_verdict"],
             },
             ensure_ascii=False,
         )

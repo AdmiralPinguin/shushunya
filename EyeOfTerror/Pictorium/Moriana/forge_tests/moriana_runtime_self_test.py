@@ -292,6 +292,7 @@ def _main() -> int:
                 "task": "сделай комикс 4 панели про техножреца у древней кузни",
                 "task_id": "comic-success",
                 "execute": True,
+                "test_artifact_mode": "comic_panels_good",
             },
         )
         comic_dir = Path(str(comic["run_dir"]))
@@ -299,6 +300,21 @@ def _main() -> int:
         for required_type in ("plan", "character_sheet", "comic_panel", "layout", "final"):
             if required_type not in comic_types:
                 raise AssertionError(f"comic registry missing {required_type}: {comic_types}")
+        comic_registry = load_json(comic_dir / "artifact_registry.json")
+        accepted_panel_artifacts = [
+            item
+            for item in comic_registry.get("artifacts", [])
+            if isinstance(item, dict)
+            and item.get("type") == "comic_panel"
+            and item.get("step") == "panel_art_generation"
+            and item.get("status") == "accepted"
+        ]
+        if (
+            len(accepted_panel_artifacts) != 4
+            or comic.get("final", {}).get("panel_artifact_count") != 4
+            or comic.get("quality_report", {}).get("accepted_visual_artifact_count") != 4
+        ):
+            raise AssertionError(f"comic run did not preserve accepted panel art artifacts: {comic}")
         if comic.get("status", {}).get("task_kind") != "comic":
             raise AssertionError(f"comic run did not preserve task_kind: {comic}")
 

@@ -128,6 +128,11 @@ def build_quality_report(store: MorianaRunStore, run_id: str) -> dict[str, Any]:
         for item in artifacts
         if item.get("type") == "image" and item.get("status") == "accepted"
     ]
+    accepted_visual_artifacts = [
+        item
+        for item in artifacts
+        if item.get("type") in {"image", "comic_panel"} and item.get("status") == "accepted"
+    ]
     report = {
         "kind": "pictorium_quality_report",
         "run_id": run_id,
@@ -141,6 +146,7 @@ def build_quality_report(store: MorianaRunStore, run_id: str) -> dict[str, Any]:
             "total": len(artifacts),
         },
         "accepted_image_count": len(accepted_images),
+        "accepted_visual_artifact_count": len(accepted_visual_artifacts),
         "blocker_count": len(blockers),
         "blockers": blockers,
         "weak_steps": weak_steps,

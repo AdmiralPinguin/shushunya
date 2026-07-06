@@ -46,6 +46,26 @@ The artifact registry records every prompt, dispatch package, verification
 report, image, comic panel package, layout, error, revision plan, and final
 manifest with creator, step, attempt, status, and rejection reason.
 
+## Quality Trials
+
+`forge_tests/moriana_quality_trials.py` runs the current visual acceptance
+scenarios: simple image, complex character/environment image, linked image
+series, four-panel comic, eight-panel comic, hard style/character image, and an
+existing artifact audit.
+
+The report separates two scores:
+
+- `avg_quality_score`: technical pipeline score from manifests, verifiers,
+  blockers, registry states, and revision decisions.
+- `evidence_adjusted_score`: the same score penalized for coverage gaps such as
+  synthetic image fixtures or synthetic comic panel art.
+
+Synthetic fixtures prove orchestration, artifact registration, revision
+behavior, and manifest packaging. They do not prove live visual quality. A report
+with `readiness_verdict=needs_live_visual_trials` still requires live generated
+images or accepted external artifacts before treating Moriana as production
+quality.
+
 Application-facing endpoints:
 
 - `POST /runs`

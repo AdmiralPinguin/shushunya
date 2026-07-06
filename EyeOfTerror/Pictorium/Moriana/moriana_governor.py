@@ -418,7 +418,13 @@ def create_or_execute_run(run_root: Path, payload: dict[str, Any]) -> dict[str, 
             created_by=str(payload.get("artifact_source") or "external_live_artifact"),
         )
     if task_kind == "comic":
-        return execute_comic_run(store, plan.contract.task_id, task, submit=bool(payload.get("submit", False)))
+        return execute_comic_run(
+            store,
+            plan.contract.task_id,
+            task,
+            submit=bool(payload.get("submit", False)),
+            test_artifact_mode=str(payload.get("test_artifact_mode") or ""),
+        )
     if task_kind == "image_series":
         return execute_image_series_run(
             store,

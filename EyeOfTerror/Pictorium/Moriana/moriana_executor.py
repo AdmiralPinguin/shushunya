@@ -290,7 +290,15 @@ def execute_revision_run(
     if task_kind == "comic":
         attempt = next_attempt(store, run_id)
         store.set_status(run_id, "revising", "Moriana is applying comic revision decision", attempt_count=attempt)
-        result = execute_comic_run(store, run_id, task, submit=submit, attempt=attempt, revision_decision=decision)
+        result = execute_comic_run(
+            store,
+            run_id,
+            task,
+            submit=submit,
+            test_artifact_mode=test_artifact_mode,
+            attempt=attempt,
+            revision_decision=decision,
+        )
         execution_summary = {
             "kind": "pictorium_revision_execution",
             "run_id": run_id,
@@ -663,6 +671,7 @@ def execute_comic_run(
     task: str,
     *,
     submit: bool = False,
+    test_artifact_mode: str = "",
     attempt: int = 1,
     revision_decision: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -684,6 +693,29 @@ def execute_comic_run(
         }
     )
     register_json_artifact(store, run_id, step="panel_generation", payload=panels, artifact_type="comic_panel", created_by="Panelwright", attempt=attempt)
+    panel_artifacts: list[dict[str, Any]] = []
+    panel_packages = panels.get("panels") if isinstance(panels.get("panels"), list) else []
+    if test_artifact_mode in {"comic_panels_good", "good"}:
+        for index, panel in enumerate(panel_packages, start=1):
+            panel_id = str(panel.get("panel_id") or f"panel_{index:02d}") if isinstance(panel, dict) else f"panel_{index:02d}"
+            synthetic_path = run_dir / "artifacts" / f"comic_panel_{index:02d}_attempt_{attempt:02d}.png"
+            make_synthetic_image(synthetic_path, 512, 512, (50 + index * 12, 48 + index * 10, 64 + index * 8))
+            record = store.register_artifact(
+                run_id,
+                artifact_type="comic_panel",
+                path=synthetic_path,
+                created_by="ForgeDispatcher",
+                step="panel_art_generation",
+                attempt=attempt,
+                status="accepted",
+                metadata={
+                    "panel_id": panel_id,
+                    "panel_order": panel.get("order") if isinstance(panel, dict) else index,
+                    "synthetic_quality_fixture": True,
+                    "revision_decision": revision_decision or {},
+                },
+            )
+            panel_artifacts.append(record)
     store.set_status(run_id, "checking", "LayoutFinalis is checking layout and blockers", attempt_count=attempt)
     layout = build_layout_manifest(
         {
@@ -701,6 +733,19 @@ def execute_comic_run(
     final_payload["attempt"] = attempt
     final_payload["artifact_registry"] = str(run_dir / "artifact_registry.json")
     final_payload["revision_decision"] = revision_decision or {}
+    final_payload["panel_artifacts"] = [
+        {
+            "artifact_id": item.get("artifact_id"),
+            "path": item.get("path"),
+            "panel_id": item.get("metadata", {}).get("panel_id") if isinstance(item.get("metadata"), dict) else "",
+        }
+        for item in panel_artifacts
+    ]
+    final_payload["panel_artifact_count"] = len(panel_artifacts)
+    if panel_packages and len(panel_artifacts) < len(panel_packages):
+        final_payload.setdefault("audit_limits", [])
+        if isinstance(final_payload["audit_limits"], list):
+            final_payload["audit_limits"].append("panel art artifacts are not generated for every planned comic panel")
     if blockers:
         store.set_status(run_id, "revising", "comic layout has unresolved blockers", attempt_count=attempt)
         store.write_revision(run_id, attempt, blockers, "revise_panel_generation_or_layout")
