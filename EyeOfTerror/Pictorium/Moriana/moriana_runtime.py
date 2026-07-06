@@ -305,6 +305,12 @@ class MorianaRunStore:
         registry = self.registry(run_id)
         return [item for item in registry.get("artifacts", []) if isinstance(item, dict)]
 
+    def artifact_by_id(self, run_id: str, artifact_id: str) -> dict[str, Any]:
+        for artifact in self.artifacts(run_id):
+            if str(artifact.get("artifact_id") or "") == artifact_id:
+                return artifact
+        raise FileNotFoundError(f"artifact not found: {artifact_id}")
+
     def artifact_summary(self, run_id: str) -> dict[str, Any]:
         artifacts = self.artifacts(run_id)
         by_status = Counter(str(item.get("status") or "unknown") for item in artifacts)

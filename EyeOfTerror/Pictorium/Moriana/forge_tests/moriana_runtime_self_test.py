@@ -49,6 +49,14 @@ def request_json(base: str, method: str, path: str, payload: dict[str, object] |
     return result
 
 
+def request_bytes(base: str, path: str) -> bytes:
+    with urllib.request.urlopen(base + path, timeout=15) as response:
+        data = response.read()
+    if not data:
+        raise AssertionError(f"endpoint returned an empty file: {path}")
+    return data
+
+
 def assert_run_workspace(run_dir: Path) -> None:
     expected_dirs = ["input", "plan", "brigade", "prompts", "parameters", "results", "artifacts", "errors", "revisions", "final"]
     for dirname in expected_dirs:
@@ -359,6 +367,10 @@ def _main() -> int:
                 or filtered_artifacts.get("artifacts", [{}])[0].get("status") != "accepted"
             ):
                 raise AssertionError(f"HTTP filtered artifacts failed: {filtered_artifacts}")
+            artifact_id = str(filtered_artifacts.get("artifacts", [{}])[0].get("artifact_id") or "")
+            artifact_bytes = request_bytes(base, f"/runs/http-image/artifacts/{artifact_id}/file")
+            if not artifact_bytes.startswith(b"\x89PNG"):
+                raise AssertionError("HTTP artifact file endpoint did not return a PNG")
             final = request_json(base, "GET", "/runs/http-image/final")
             if final.get("final", {}).get("status") != "ready":
                 raise AssertionError(f"HTTP final failed: {final}")

@@ -87,6 +87,8 @@ Application-facing endpoints:
 - `GET /runs/{run_id}/status`
 - `GET /runs/{run_id}/artifacts` with optional `type`, `status`, `step`, and
   `created_by` filters.
+- `GET /runs/{run_id}/artifacts/{artifact_id}/file` for the registered artifact
+  bytes.
 - `GET /runs/{run_id}/final`
 - `GET /runs/{run_id}/quality`
 - `GET /runs/{run_id}/revision-decision`

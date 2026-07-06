@@ -35,6 +35,14 @@ def request_json(base: str, method: str, path: str, payload: dict[str, object] |
     return result
 
 
+def request_bytes(base: str, path: str) -> bytes:
+    with urllib.request.urlopen(base + path, timeout=10) as response:
+        data = response.read()
+    if not data:
+        raise AssertionError(f"endpoint returned an empty file: {path}")
+    return data
+
+
 def _main() -> int:
     with tempfile.TemporaryDirectory(prefix="moriana-service-self-test-") as tmp:
         run_root = Path(tmp) / "runs"
@@ -113,6 +121,10 @@ def _main() -> int:
                 or len(filtered_artifacts.get("artifacts", [])) != 1
             ):
                 raise AssertionError(f"bad filtered /runs/{{id}}/artifacts payload: {filtered_artifacts}")
+            artifact_id = str(filtered_artifacts.get("artifacts", [{}])[0].get("artifact_id") or "")
+            artifact_bytes = request_bytes(base, f"/runs/moriana-http-exec-image/artifacts/{artifact_id}/file")
+            if not artifact_bytes.startswith(b"\x89PNG"):
+                raise AssertionError("artifact file endpoint did not return a PNG")
             final = request_json(base, "GET", "/runs/moriana-http-exec-image/final")
             if final.get("final", {}).get("status") != "ready":
                 raise AssertionError(f"bad /runs/{{id}}/final payload: {final}")

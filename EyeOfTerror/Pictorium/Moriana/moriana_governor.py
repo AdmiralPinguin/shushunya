@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import mimetypes
 import sys
 import re
 from dataclasses import dataclass
@@ -358,6 +359,7 @@ def service_capabilities() -> dict[str, Any]:
             "GET /runs/{run_id}",
             "GET /runs/{run_id}/status",
             "GET /runs/{run_id}/artifacts?type=image&status=accepted",
+            "GET /runs/{run_id}/artifacts/{artifact_id}/file",
             "GET /runs/{run_id}/final",
             "GET /runs/{run_id}/quality",
             "GET /runs/{run_id}/revision-decision",
@@ -468,6 +470,20 @@ def response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, An
     handler.wfile.write(data)
 
 
+def file_response(handler: BaseHTTPRequestHandler, path: Path) -> None:
+    if not path.exists() or not path.is_file():
+        response(handler, 404, {"ok": False, "governor": GOVERNOR, "error": "artifact file not found"})
+        return
+    content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+    data = path.read_bytes()
+    handler.send_response(200)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers()
+    handler.wfile.write(data)
+
+
 def payload_from(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     length = int(handler.headers.get("Content-Length", "0"))
     payload = json.loads(handler.rfile.read(length).decode("utf-8") or "{}")
@@ -561,6 +577,16 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                         return
                 except FileNotFoundError:
                     response(self, 404, {"ok": False, "governor": GOVERNOR, "error": "run not found", "run_id": run_id})
+                    return
+            if len(parts) == 5 and parts[0] == "runs" and parts[2] == "artifacts" and parts[4] == "file":
+                run_id = parts[1]
+                artifact_id = parts[3]
+                try:
+                    artifact = store.artifact_by_id(run_id, artifact_id)
+                    file_response(self, Path(str(artifact.get("path") or "")))
+                    return
+                except FileNotFoundError as exc:
+                    response(self, 404, {"ok": False, "governor": GOVERNOR, "error": str(exc), "run_id": run_id, "artifact_id": artifact_id})
                     return
             response(self, 404, {"ok": False, "governor": GOVERNOR, "error": "not found"})
 
