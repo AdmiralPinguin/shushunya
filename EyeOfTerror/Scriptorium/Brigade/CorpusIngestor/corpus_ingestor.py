@@ -17,18 +17,17 @@ MAX_SCAN_BYTES = 25_000_000
 MAX_TEXT_CHARS = 250_000
 METADATA_SUFFIXES = (".metadata.json", ".meta.json")
 
-REPO_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "EyeOfTerror" / "Warmaster" / "MobileGateway" / "ShushunyaAgent").exists())
+REPO_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "EyeOfTerror" / "Warmaster").exists())
 DEFAULT_CORPUS_ROOT = REPO_ROOT / "Corpus"
 LEXMECHANIC_PLAYBOOK_DIR = REPO_ROOT / "EyeOfTerror" / "Scriptorium" / "Brigade" / "Lexmechanic" / "playbooks"
 BRIGADE_ROOT = REPO_ROOT / "EyeOfTerror" / "Scriptorium" / "Brigade"
-SHUSHUNYA_AGENT_DIR = REPO_ROOT / "EyeOfTerror" / "Warmaster" / "MobileGateway" / "ShushunyaAgent"
-if str(SHUSHUNYA_AGENT_DIR) not in sys.path:
-    sys.path.insert(0, str(SHUSHUNYA_AGENT_DIR))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(BRIGADE_ROOT) not in sys.path:
     sys.path.insert(0, str(BRIGADE_ROOT))
 
 try:
-    from shushunya_agent.web_tools import extract_epub_text  # type: ignore
+    from EyeOfTerror.Services.Search.web_tools import extract_epub_text  # type: ignore
 except Exception:  # pragma: no cover - fallback is only for unusual import failures.
     extract_epub_text = None
 

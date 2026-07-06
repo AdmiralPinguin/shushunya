@@ -34,7 +34,7 @@ def create_archive_db(path: Path) -> None:
             """
         )
         rows = [
-            ("agent-turn", "shushunya-agent", "agent", "2026-06-21T00:00:00+09:00", "agent memory check"),
+            ("warmaster-turn", "warmaster", "warmaster", "2026-06-21T00:00:00+09:00", "warmaster memory check"),
             ("default-turn", "chat-user", "default", "2026-06-21T00:01:00+09:00", "default chat check"),
         ]
         for turn_id, conversation_id, namespace, created_at, user_text in rows:
@@ -70,17 +70,18 @@ def main() -> int:
         indexed = vector.backfill_from_archive(archive_db)
         if indexed != 2:
             raise AssertionError(f"expected 2 indexed turns, got {indexed}")
-        if not vector.search("agent memory", memory_namespace="agent"):
-            raise AssertionError("agent vector search returned no matches")
-        if vector.search("agent memory", memory_namespace="default"):
-            raise AssertionError("default vector search leaked agent matches")
+        if not vector.search("warmaster memory", memory_namespace="warmaster"):
+            raise AssertionError("warmaster vector search returned no matches")
+        default_matches = vector.search("warmaster memory", memory_namespace="default")
+        if any(match.get("memory_namespace") == "warmaster" for match in default_matches):
+            raise AssertionError("default vector search leaked warmaster namespace matches")
 
-        graph_agent = GraphMemory(tmp_path / "graph-agent", lambda *_args, **_kwargs: None, archive_db, memory_namespace="agent")
+        graph_warmaster = GraphMemory(tmp_path / "graph-warmaster", lambda *_args, **_kwargs: None, archive_db, memory_namespace="warmaster")
         graph_default = GraphMemory(tmp_path / "graph-default", lambda *_args, **_kwargs: None, archive_db, memory_namespace="default")
-        agent_turns = graph_agent.recent_turns(None)
+        warmaster_turns = graph_warmaster.recent_turns(None)
         default_turns = graph_default.recent_turns(None)
-        if [turn["turn_id"] for turn in agent_turns] != ["agent-turn"]:
-            raise AssertionError(f"unexpected agent graph turns: {agent_turns}")
+        if [turn["turn_id"] for turn in warmaster_turns] != ["warmaster-turn"]:
+            raise AssertionError(f"unexpected warmaster graph turns: {warmaster_turns}")
         if [turn["turn_id"] for turn in default_turns] != ["default-turn"]:
             raise AssertionError(f"unexpected default graph turns: {default_turns}")
 

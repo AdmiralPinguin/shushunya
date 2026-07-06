@@ -227,8 +227,8 @@ class VectorMemory:
             db.execute(
                 """
                 UPDATE vector_chunks
-                SET memory_namespace = 'agent'
-                WHERE conversation_id = 'shushunya-agent' AND memory_namespace = 'default'
+                SET memory_namespace = 'warmaster'
+                WHERE conversation_id = 'warmaster' AND memory_namespace = 'default'
                 """
             )
             db.execute("CREATE INDEX IF NOT EXISTS idx_vector_chunks_created ON vector_chunks(created_at)")

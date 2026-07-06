@@ -23,9 +23,9 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs"
 REPORTS = ROOT / "reports"
 WORKSPACES = ROOT / "workspaces"
-SANDBOX_ROOT = Path(os.environ.get("SHUSHUNYA_SANDBOX_ROOT", "/media/shushunya/ARCHIVE/shushunya-agent-sandbox"))
-SANDBOX_RUNNER = Path(os.environ.get("SHUSHUNYA_AGENT_SANDBOX_RUNNER", str(SANDBOX_ROOT / "profile" / "run-in-sandbox.sh")))
-SANDBOX_GROUP = os.environ.get("SHUSHUNYA_AGENT_SANDBOX_GROUP", "shushunya-agent")
+SANDBOX_ROOT = Path(os.environ.get("AGENT_ARENA_SANDBOX_ROOT", "/media/shushunya/ARCHIVE/agent-arena-sandbox"))
+SANDBOX_RUNNER = Path(os.environ.get("AGENT_ARENA_SANDBOX_RUNNER", str(SANDBOX_ROOT / "profile" / "run-in-sandbox.sh")))
+SANDBOX_GROUP = os.environ.get("AGENT_ARENA_SANDBOX_GROUP", "agent-arena")
 
 
 @dataclass

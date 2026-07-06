@@ -8,7 +8,7 @@ Project code, runtime tools, virtual environments, generated assets, Android too
 - `CoreOfMadness/` stores local model runtime pieces and the Telegram bot bridge.
 - `ArchiveOfHeresy/` is the server gateway, memory/archive layer, OpenAI-compatible LLM proxy, and mobile backend facade.
 - `Shushunya_M/` is the Android client.
-- `EyeOfTerror/Warmaster/MobileGateway/ShushunyaAgent/` is the server-side agent API used by the mobile app and console.
+- `EyeOfTerror/Warmaster/` is the user-facing orchestration gateway for chat tasks and agent brigades.
 - `LegacyMechanicum/_temporary/RoxDub/` contains the parked dubbing/voice workflow.
 - `PalatineConsole/` is the local service control GUI.
 - `WarpWails/`, `DemonsForge/`, and `ShushunyaSite/` contain additional local tools and web surfaces.
@@ -26,7 +26,7 @@ The phone calls `ArchiveOfHeresy` through `https://chat.shushunya.com` with the 
 - `/archive/mobile/translate` for translation.
 - `/archive/mobile/translate/start` and `/archive/mobile/job` for server-owned translation jobs.
 - `/archive/mobile/stt-live` and `/archive/mobile/stt-pcm` for speech recognition.
-- `/archive/mobile/agent/start`, `/archive/mobile/agent/task`, `/archive/mobile/agent/cancel`, and `/archive/mobile/agent/state` for server-owned agent tasks.
+- Warmaster gateway routes for server-owned agent tasks.
 
 `ARCHIVE_MOBILE_API_KEY` is accepted only by the mobile facade routes. Full archive and memory routes continue to require `ARCHIVE_API_KEY`.
 

@@ -63,11 +63,10 @@ def main() -> int:
 
     workers = worker_refs()
     ports = [worker.port for worker in workers]
-    if ports != sorted(ports) or min(ports) != 7001:
+    if ports != sorted(ports) or any(port < 7001 for port in ports):
         raise AssertionError(f"worker ports are not stable 7001+ order: {ports}")
     names = {worker.name for worker in workers}
     required = {
-        "ShushunyaAgent",
         "Lexmechanic",
         "AuspexBrowser",
         "NoosphericExtractor",

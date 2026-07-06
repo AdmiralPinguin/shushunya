@@ -14,7 +14,7 @@ read or write memory files directly.
 Known namespaces:
 
 - `default` - normal Telegram/chat memory.
-- `agent` - ShushunyaAgent memory.
+- `warmaster` - Warmaster orchestration and brigade memory.
 
 Read requests for an unknown namespace return 404 unless `create=1` is passed
 intentionally. Prefer creating memory through normal chat/proposal paths so the
@@ -59,16 +59,16 @@ Catalog:
 
 ```bash
 curl -fsS -G http://127.0.0.1:8090/archive/memory/catalog \
-  --data-urlencode namespace=agent \
-  --data-urlencode requester=my-agent
+  --data-urlencode namespace=warmaster \
+  --data-urlencode requester=warmaster
 ```
 
 Search compact memory:
 
 ```bash
 curl -fsS -G http://127.0.0.1:8090/archive/memory/search \
-  --data-urlencode namespace=agent \
-  --data-urlencode requester=my-agent \
+  --data-urlencode namespace=warmaster \
+  --data-urlencode requester=warmaster \
   --data-urlencode 'q=memory gateway' \
   --data-urlencode limit=5 \
   --data-urlencode layers=focus,wiki \
@@ -83,8 +83,8 @@ Read active focus:
 
 ```bash
 curl -fsS -G http://127.0.0.1:8090/archive/memory/focus \
-  --data-urlencode namespace=agent \
-  --data-urlencode requester=my-agent \
+  --data-urlencode namespace=warmaster \
+  --data-urlencode requester=warmaster \
   --data-urlencode id=active \
   --data-urlencode max_chars=12000
 ```
@@ -93,8 +93,8 @@ Read wiki page:
 
 ```bash
 curl -fsS -G http://127.0.0.1:8090/archive/memory/wiki \
-  --data-urlencode namespace=agent \
-  --data-urlencode requester=my-agent \
+  --data-urlencode namespace=warmaster \
+  --data-urlencode requester=warmaster \
   --data-urlencode 'title=Page Title' \
   --data-urlencode max_chars=12000
 ```
@@ -103,10 +103,10 @@ Inspect memory gateway events:
 
 ```bash
 curl -fsS -G http://127.0.0.1:8090/archive/memory/events \
-  --data-urlencode namespace=agent \
+  --data-urlencode namespace=warmaster \
   --data-urlencode limit=20 \
   --data-urlencode component=memory_gateway \
-  --data-urlencode requester=my-agent
+  --data-urlencode requester=warmaster
 ```
 
 Propose a memory change:
@@ -115,8 +115,8 @@ Propose a memory change:
 curl -fsS -X POST http://127.0.0.1:8090/archive/memory/propose-change \
   -H 'Content-Type: application/json' \
   -d '{
-    "namespace": "agent",
-    "requester": "my-agent",
+    "namespace": "warmaster",
+    "requester": "warmaster",
     "target": "auto",
     "importance": 3,
     "proposal": "Fact or decision to preserve.",
@@ -127,21 +127,7 @@ curl -fsS -X POST http://127.0.0.1:8090/archive/memory/propose-change \
 Allowed proposal targets: `auto`, `focus`, `wiki`, `vector`, `graph`.
 Proposals are archived as turns. The Librarian decides what actually changes.
 
-## ShushunyaAgent Actions
-
-Use these JSON actions from the agent loop:
-
-```json
-{"action":"archive_memory_gateway"}
-{"action":"archive_memory_catalog"}
-{"action":"archive_memory_search","query":"memory gateway","limit":5,"layers":"focus,wiki","include_content":false}
-{"action":"archive_memory_read","kind":"focus","id":"active","max_chars":12000}
-{"action":"archive_memory_read","kind":"wiki","title":"Page Title","max_chars":12000}
-{"action":"archive_memory_events","limit":20,"component":"memory_gateway","requester":"shushunya-agent"}
-{"action":"archive_memory_propose","target":"focus","importance":3,"proposal":"Fact to preserve","evidence":"Tool result or user statement"}
-```
-
-Agent rules:
+## Worker Rules
 
 - Treat memory as reference, not proof of current state.
 - Current user request and current tool results are fresher than memory.
@@ -154,17 +140,16 @@ Run from project root:
 
 ```bash
 ArchiveOfHeresy/check-memory-gateway.sh --manifest-only
-ArchiveOfHeresy/check-memory-gateway.sh agent 'memory gateway'
-ArchiveOfHeresy/check-memory.sh agent 'memory gateway'
+ArchiveOfHeresy/check-memory-gateway.sh warmaster 'memory gateway'
+ArchiveOfHeresy/check-memory.sh warmaster 'memory gateway'
 ArchiveOfHeresy/check-namespace-smoke.py
-ArchiveOfHeresy/memory-report.sh agent
+ArchiveOfHeresy/memory-report.sh warmaster
 ArchiveOfHeresy/memory-quality-report.sh
-cd EyeOfTerror/Warmaster/MobileGateway/ShushunyaAgent && ./ShushunyaAgent/bin/python -m shushunya_agent.self_test
 ```
 
 Services:
 
 ```bash
 curl -fsS http://127.0.0.1:8090/health
-curl -fsS http://127.0.0.1:8095/health
+curl -fsS http://127.0.0.1:7000/health
 ```

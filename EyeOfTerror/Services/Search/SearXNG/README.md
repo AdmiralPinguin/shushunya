@@ -1,12 +1,11 @@
 # Shushunya SearXNG
 
-Local SearXNG runtime for ShushunyaAgent web search.
+Local SearXNG runtime for EyeOfTerror research workers.
 
-The Python environment is intentionally inside the agent folder and has the same
-name as the agent folder:
+The Python environment is intentionally local to this service:
 
 ```text
-/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/Warmaster/MobileGateway/ShushunyaAgent/ShushunyaAgent
+/media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/Services/Search/SearXNG/.venv
 ```
 
 This directory keeps the cloned SearXNG source tree, runtime logs, bootstrap
@@ -32,19 +31,19 @@ Default endpoint:
 http://127.0.0.1:8888
 ```
 
-ShushunyaAgent uses it through:
+EyeOfTerror shared search tools use it through:
 
 ```bash
-SHUSHUNYA_AGENT_SEARXNG_URL=http://127.0.0.1:8888
+SHUSHUNYA_SEARCH_SEARXNG_URL=http://127.0.0.1:8888
 ```
 
 ## Brave Search
 
-If a real Brave Search API key is available, put it in the agent process
+If a real Brave Search API key is available, put it in the worker process
 environment as:
 
 ```bash
-SHUSHUNYA_AGENT_BRAVE_SEARCH_API_KEY=...
+SHUSHUNYA_SEARCH_BRAVE_API_KEY=...
 ```
 
 The agent provider order is Brave API, SearXNG, Marginalia, Wikipedia.

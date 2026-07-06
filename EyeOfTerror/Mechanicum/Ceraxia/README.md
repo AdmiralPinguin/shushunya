@@ -3,8 +3,8 @@
 Ceraxia is the Inner Circle governor for code tasks.
 
 Current project focus: Ceraxia and her code brigade are the active development
-track. Treat standalone ShushunyaAgent work as parked unless the user
-explicitly reactivates it.
+track. User-facing work enters through Warmaster, not through a standalone
+mobile agent.
 
 Current evaluation status: Ceraxia has stronger planning, readiness, patch,
 verification, repair, and review artifacts than the original prototype, but a

@@ -8,15 +8,14 @@ from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
 
 
-REPO_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "EyeOfTerror" / "Warmaster" / "MobileGateway" / "ShushunyaAgent").exists())
+REPO_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "EyeOfTerror" / "Warmaster").exists())
 BRIGADE_ROOT = REPO_ROOT / "EyeOfTerror" / "Scriptorium" / "Brigade"
-SHUSHUNYA_AGENT_DIR = REPO_ROOT / "EyeOfTerror" / "Warmaster" / "MobileGateway" / "ShushunyaAgent"
-if str(SHUSHUNYA_AGENT_DIR) not in sys.path:
-    sys.path.insert(0, str(SHUSHUNYA_AGENT_DIR))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(BRIGADE_ROOT) not in sys.path:
     sys.path.insert(0, str(BRIGADE_ROOT))
 
-from shushunya_agent.web_tools import web_fetch  # noqa: E402
+from EyeOfTerror.Services.Search.web_tools import web_fetch  # noqa: E402
 from scriptorium_model import model_unavailable_payload, request_required_scriptorium_guidance  # noqa: E402
 
 CORPUS_INGESTOR_DIR = Path(__file__).resolve().parents[1] / "CorpusIngestor"

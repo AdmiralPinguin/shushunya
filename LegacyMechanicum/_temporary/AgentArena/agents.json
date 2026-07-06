@@ -6,14 +6,6 @@
     "context_tokens": 32768
   },
   "agents": {
-    "shushunya": {
-      "type": "shushunya",
-      "enabled": true,
-      "base_url": "http://127.0.0.1:8095",
-      "timeout_sec": 6000,
-      "max_steps": 600,
-      "max_runtime_sec": 5400
-    },
     "aider": {
       "type": "aider",
       "enabled": true,

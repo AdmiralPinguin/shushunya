@@ -4,9 +4,8 @@
 
 - Current focus: Ceraxia, the code-brigade governor, and her Mechanicum code
   worker pipeline.
-- Parked: standalone ShushunyaAgent stress testing and AgentArena tuning. Do
-  not switch back to ShushunyaAgent from old context unless the user gives a
-  fresh explicit ShushunyaAgent task.
+- Removed: standalone mobile agent. User-facing tasks now enter through
+  Warmaster and are routed to governors/workers from there.
 - Ceraxia exposes task profiling, risk flags, worker specialization briefs,
   dispatch-level worker briefs, and Warmaster-visible final execution reports
   for code tasks.
@@ -572,7 +571,7 @@
 EyeOfTerror/check-eye-mechanicum.sh
 ```
 
-This runs contract tests, worker self-tests, ShushunyaAgent offline self-test,
+This runs contract tests, worker self-tests,
 local executor tests, service tests, and the end-to-end HTTP worker pipeline.
 
 Optional live discovery smoke:

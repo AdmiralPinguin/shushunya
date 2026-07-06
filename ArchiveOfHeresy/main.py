@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -34,7 +34,7 @@ LLM_BASE_URL = os.environ.get("ARCHIVE_LLM_BASE_URL", "http://127.0.0.1:8080").r
 DEFAULT_MODEL = os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf")
 TRANSLATOR_BASE_URL = os.environ.get("ARCHIVE_TRANSLATOR_BASE_URL", "http://127.0.0.1:8091").rstrip("/")
 STT_BASE_URL = os.environ.get("ARCHIVE_STT_BASE_URL", "http://127.0.0.1:8093").rstrip("/")
-AGENT_BASE_URL = os.environ.get("ARCHIVE_AGENT_BASE_URL", "http://127.0.0.1:8095").rstrip("/")
+WARMASTER_BASE_URL = os.environ.get("ARCHIVE_WARMASTER_BASE_URL", "http://127.0.0.1:7000").rstrip("/")
 JSONL_ROOT = Path(os.environ.get("ARCHIVE_JSONL_ROOT", ROOT / "archive" / "jsonl"))
 MEMORY_EVENTS_ROOT = Path(os.environ.get("ARCHIVE_MEMORY_EVENTS_ROOT", ROOT / "archive" / "memory_events"))
 SQLITE_PATH = Path(os.environ.get("ARCHIVE_SQLITE_PATH", ROOT / "archive" / "sqlite" / "archive.sqlite3"))
@@ -780,7 +780,7 @@ def memory_gateway_manifest():
         },
         "namespace_policy": {
             "default": "normal Telegram/chat memory",
-            "agent": "ShushunyaAgent memory",
+            "warmaster": "Warmaster orchestration and brigade memory",
             "telegram": "Telegram bot memory",
             "mobile": "mobile client memory",
             "demonsforge": "DemonsForge forge memory; runtime SQLite stays outside long-term memory",
@@ -793,11 +793,11 @@ def memory_gateway_manifest():
             "graph": GRAPH_INJECTION_ENABLED,
         },
         "read_endpoints": {
-            "catalog": "GET /archive/memory/catalog?namespace=agent&requester=name",
-            "search": "GET /archive/memory/search?namespace=agent&q=query&limit=5&layers=focus,wiki,vector,graph&include_content=0&requester=name",
-            "focus": "GET /archive/memory/focus?namespace=agent&id=active&max_chars=12000&requester=name",
-            "wiki": "GET /archive/memory/wiki?namespace=agent&id=page-id&max_chars=12000&requester=name",
-            "events": "GET /archive/memory/events?namespace=agent&limit=20&component=memory_gateway&event_action=search&requester=shushunya-agent",
+            "catalog": "GET /archive/memory/catalog?namespace=warmaster&requester=name",
+            "search": "GET /archive/memory/search?namespace=warmaster&q=query&limit=5&layers=focus,wiki,vector,graph&include_content=0&requester=name",
+            "focus": "GET /archive/memory/focus?namespace=warmaster&id=active&max_chars=12000&requester=name",
+            "wiki": "GET /archive/memory/wiki?namespace=warmaster&id=page-id&max_chars=12000&requester=name",
+            "events": "GET /archive/memory/events?namespace=warmaster&limit=20&component=memory_gateway&event_action=search&requester=warmaster",
         },
         "search_layers": sorted(GATEWAY_SEARCH_LAYERS),
         "write_endpoints": {
@@ -812,7 +812,7 @@ def memory_gateway_manifest():
                 "evidence": "optional string",
             },
         },
-        "agent_actions": [
+        "worker_actions": [
             "archive_memory_gateway",
             "archive_memory_catalog",
             "archive_memory_search",
@@ -1322,8 +1322,8 @@ def init_storage():
         db.execute(
             """
             UPDATE turns
-            SET memory_namespace = 'agent'
-            WHERE conversation_id = 'shushunya-agent' AND memory_namespace = 'default'
+            SET memory_namespace = 'warmaster'
+            WHERE conversation_id = 'warmaster' AND memory_namespace = 'default'
             """
         )
         db.execute(
@@ -1737,13 +1737,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         if self.path == "/archive/mobile/agent/state":
             if not require_auth(self, allow_mobile=True):
                 return
-            try:
-                status, response = proxy_json_url("GET", f"{AGENT_BASE_URL}/state", timeout=30)
-                write_json(self, status, response)
-            except HTTPError as exc:
-                self.write_proxy_error(exc)
-            except Exception as exc:
-                write_json(self, 502, {"error": f"agent unavailable: {exc}"})
+            self.mobile_agent_state()
             return
 
         if self.path.startswith("/archive/mobile/job"):
@@ -1757,43 +1751,19 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/archive/mobile/agent/tasks"):
             if not require_auth(self, allow_mobile=True):
                 return
-            query = urlsplit(self.path).query
-            suffix = f"?{query}" if query else ""
-            try:
-                status, response = proxy_json_url_raw("GET", f"{AGENT_BASE_URL}/tasks{suffix}", timeout=30)
-                write_json(self, status, response)
-            except HTTPError as exc:
-                self.write_proxy_error(exc)
-            except Exception as exc:
-                write_json(self, 502, {"error": f"agent unavailable: {exc}"})
+            self.mobile_agent_tasks()
             return
 
         if self.path.startswith("/archive/mobile/agent/task"):
             if not require_auth(self, allow_mobile=True):
                 return
-            query = urlsplit(self.path).query
-            suffix = f"?{query}" if query else ""
-            try:
-                status, response = proxy_json_url_raw("GET", f"{AGENT_BASE_URL}/task{suffix}", timeout=30)
-                write_json(self, status, response)
-            except HTTPError as exc:
-                self.write_proxy_error(exc)
-            except Exception as exc:
-                write_json(self, 502, {"error": f"agent unavailable: {exc}"})
+            self.mobile_agent_task()
             return
 
         if self.path.startswith("/archive/mobile/agent/last-task"):
             if not require_auth(self, allow_mobile=True):
                 return
-            query = urlsplit(self.path).query
-            suffix = f"?{query}" if query else ""
-            try:
-                status, response = proxy_json_url_raw("GET", f"{AGENT_BASE_URL}/last-task{suffix}", timeout=30)
-                write_json(self, status, response)
-            except HTTPError as exc:
-                self.write_proxy_error(exc)
-            except Exception as exc:
-                write_json(self, 502, {"error": f"agent unavailable: {exc}"})
+            self.mobile_agent_last_task()
             return
 
         if not require_auth(self):
@@ -2093,25 +2063,25 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         if self.path == "/archive/mobile/agent/run":
             if not require_auth(self, allow_mobile=True):
                 return
-            self.mobile_proxy_json(f"{AGENT_BASE_URL}/run", timeout=240)
+            self.mobile_agent_run()
             return
 
         if self.path == "/archive/mobile/agent/start":
             if not require_auth(self, allow_mobile=True):
                 return
-            self.mobile_proxy_json(f"{AGENT_BASE_URL}/start", timeout=30)
+            self.mobile_agent_start()
             return
 
         if self.path == "/archive/mobile/agent/cancel":
             if not require_auth(self, allow_mobile=True):
                 return
-            self.mobile_proxy_json(f"{AGENT_BASE_URL}/cancel", timeout=30)
+            self.mobile_agent_cancel()
             return
 
         if self.path == "/archive/mobile/agent/run-stream":
             if not require_auth(self, allow_mobile=True):
                 return
-            self.mobile_proxy_agent_stream()
+            self.mobile_agent_stream_unsupported()
             return
 
         if self.path == "/v1/chat/completions":
@@ -2173,28 +2143,241 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             write_json(self, 502, {"error": f"stt backend unavailable: {exc}"})
 
-    def mobile_proxy_agent_stream(self):
+    def warmaster_event_as_agent_event(self, event, index, total):
+        display = event.get("display") if isinstance(event, dict) else {}
+        payload = event.get("payload") if isinstance(event, dict) else {}
+        headline = str(display.get("headline") or event.get("type") or "Warmaster event").strip()
+        detail = str(display.get("detail") or payload.get("summary") or "").strip()
+        message = headline if not detail else f"{headline}: {detail}"
+        return {
+            "type": "step",
+            "step": index + 1,
+            "max_steps": max(total, 1),
+            "message": message,
+            "warmaster_event_type": str(event.get("type") or ""),
+            "at": str(event.get("at") or ""),
+        }
+
+    def warmaster_final_message(self, orchestration):
+        final_payload = orchestration.get("final") if isinstance(orchestration.get("final"), dict) else {}
+        files = final_payload.get("files") if isinstance(final_payload.get("files"), list) else []
+        previews = []
+        for item in files:
+            if not isinstance(item, dict):
+                continue
+            preview = item.get("preview") if isinstance(item.get("preview"), dict) else {}
+            text = str(preview.get("text") or "").strip()
+            if text:
+                previews.append(text)
+        if previews:
+            return "\n\n".join(previews)
+        summary = orchestration.get("summary") if isinstance(orchestration.get("summary"), dict) else {}
+        display = orchestration.get("display") if isinstance(orchestration.get("display"), dict) else {}
+        return str(
+            final_payload.get("deliverable")
+            or display.get("detail")
+            or display.get("headline")
+            or summary.get("status")
+            or ""
+        ).strip()
+
+    def warmaster_run_as_agent_task(self, run, active=False, final_text=""):
+        status = str(run.get("status") or "").lower()
+        task_id = str(run.get("task_id") or "").strip()
+        running = bool(active) or status in {"running", "queued", "cancelling"}
+        cancelled = status == "cancelled"
+        success = status == "completed"
+        return {
+            "backend": "warmaster",
+            "task_id": task_id,
+            "task": str(run.get("goal") or "").strip(),
+            "running": running,
+            "cancelled": cancelled,
+            "success": success,
+            "status": status,
+            "governor": str(run.get("governor") or ""),
+            "final": final_text,
+            "updated_at": str(run.get("updated_at") or ""),
+            "created_at": str(run.get("created_at") or ""),
+        }
+
+    def mobile_agent_state(self):
+        try:
+            status, response = proxy_json_url("GET", f"{WARMASTER_BASE_URL}/state", timeout=30)
+            runs = response.get("runs") if isinstance(response.get("runs"), list) else []
+            active = response.get("process_active_runs") if isinstance(response.get("process_active_runs"), list) else []
+            current_task_id = str(active[0]) if active else ""
+            last_task_id = str(runs[0].get("task_id") or "") if runs and isinstance(runs[0], dict) else ""
+            response["state"] = {
+                "backend": "warmaster",
+                "busy": bool(active),
+                "current_task_id": current_task_id,
+                "last_task_id": last_task_id,
+                "revision": "warmaster",
+            }
+            write_json(self, status, response)
+        except HTTPError as exc:
+            self.write_proxy_error(exc)
+        except Exception as exc:
+            write_json(self, 502, {"ok": False, "error": f"warmaster unavailable: {exc}"})
+
+    def mobile_agent_tasks(self):
+        params = parse_qs(urlsplit(self.path).query)
+        raw_limit = (params.get("limit") or ["20"])[0]
+        try:
+            limit = max(1, min(int(raw_limit), 100))
+        except (TypeError, ValueError):
+            limit = 20
+        try:
+            status, response = proxy_json_url("GET", f"{WARMASTER_BASE_URL}/runs?limit={limit}", timeout=30)
+            active = set(response.get("process_active_runs") if isinstance(response.get("process_active_runs"), list) else [])
+            runs = response.get("runs") if isinstance(response.get("runs"), list) else []
+            tasks = [
+                self.warmaster_run_as_agent_task(run, active=str(run.get("task_id") or "") in active)
+                for run in runs
+                if isinstance(run, dict)
+            ]
+            write_json(self, status, {"ok": True, "backend": "warmaster", "tasks": tasks, "warmaster": response})
+        except HTTPError as exc:
+            self.write_proxy_error(exc)
+        except Exception as exc:
+            write_json(self, 502, {"ok": False, "error": f"warmaster unavailable: {exc}"})
+
+    def mobile_agent_task(self):
+        params = parse_qs(urlsplit(self.path).query)
+        task_id = str((params.get("task_id") or [""])[0]).strip()
+        raw_limit = (params.get("limit") or ["160"])[0]
+        try:
+            limit = max(1, min(int(raw_limit), 500))
+        except (TypeError, ValueError):
+            limit = 160
+        if not task_id:
+            write_json(self, 400, {"ok": False, "error": "missing task_id"})
+            return
+        try:
+            path = f"/runs/{quote(task_id, safe='')}/orchestration?event_limit={limit}&events_after=0&max_bytes=20000"
+            status, orchestration = proxy_json_url("GET", f"{WARMASTER_BASE_URL}{path}", timeout=30)
+            snapshot = orchestration.get("snapshot") if isinstance(orchestration.get("snapshot"), dict) else {}
+            summary = snapshot.get("summary") if isinstance(snapshot.get("summary"), dict) else {}
+            display_events = orchestration.get("display_events") if isinstance(orchestration.get("display_events"), list) else []
+            raw_events = snapshot.get("events") if isinstance(snapshot.get("events"), list) else []
+            event_source = raw_events or display_events
+            events = [
+                self.warmaster_event_as_agent_event(event, index, len(event_source))
+                for index, event in enumerate(event_source)
+                if isinstance(event, dict)
+            ]
+            final_message = self.warmaster_final_message(orchestration)
+            active = bool(orchestration.get("active"))
+            task = self.warmaster_run_as_agent_task(summary, active=active, final_text=final_message)
+            terminal = not active and str(summary.get("status") or "").lower() not in {"running", "queued", "cancelling", ""}
+            final_event = None
+            if terminal:
+                final_event = {
+                    "type": "final",
+                    "ok": str(summary.get("status") or "").lower() == "completed",
+                    "cancelled": str(summary.get("status") or "").lower() == "cancelled",
+                    "message": final_message,
+                }
+            payload = {
+                "ok": True,
+                "backend": "warmaster",
+                "task_id": task_id,
+                "running": active,
+                "events": events,
+                "final": final_event,
+                **task,
+                "warmaster": orchestration,
+            }
+            write_json(self, status, payload)
+        except HTTPError as exc:
+            self.write_proxy_error(exc)
+        except Exception as exc:
+            write_json(self, 502, {"ok": False, "error": f"warmaster unavailable: {exc}"})
+
+    def mobile_agent_last_task(self):
+        try:
+            status, response = proxy_json_url("GET", f"{WARMASTER_BASE_URL}/runs?limit=1", timeout=30)
+            runs = response.get("runs") if isinstance(response.get("runs"), list) else []
+            if not runs:
+                write_json(self, 404, {"ok": False, "error": "no warmaster runs found"})
+                return
+            task_id = str(runs[0].get("task_id") or "")
+            write_json(self, status, {"ok": True, "backend": "warmaster", "task_id": task_id, "task": self.warmaster_run_as_agent_task(runs[0])})
+        except HTTPError as exc:
+            self.write_proxy_error(exc)
+        except Exception as exc:
+            write_json(self, 502, {"ok": False, "error": f"warmaster unavailable: {exc}"})
+
+    def mobile_agent_start(self):
         try:
             payload = read_json(self)
         except json.JSONDecodeError as exc:
             write_json(self, 400, {"error": f"Invalid JSON: {exc}"})
             return
+        task = str(payload.get("task") or payload.get("message") or "").strip()
+        if not task:
+            write_json(self, 400, {"ok": False, "error": "task is required"})
+            return
+        task_id = str(payload.get("task_id") or "").strip()
+        warmaster_payload = {
+            "message": task,
+            "task_id": task_id,
+            "auto_start": True,
+            "reuse_existing": True,
+            "run_mode": str(payload.get("run_mode") or "http"),
+            "governor_transport": str(payload.get("governor_transport") or "http"),
+        }
         try:
-            with open_json_stream_url("POST", f"{AGENT_BASE_URL}/run-stream", payload=payload, timeout=300) as upstream:
-                self.send_response(upstream.status)
-                self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("X-Accel-Buffering", "no")
-                self.end_headers()
-                for raw_line in upstream:
-                    self.wfile.write(raw_line)
-                    self.wfile.flush()
+            status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=60)
+            response_status = response.get("status") if isinstance(response.get("status"), dict) else {}
+            resolved_task_id = str(response.get("task_id") or response_status.get("task_id") or task_id)
+            response["backend"] = "warmaster"
+            response["task_id"] = resolved_task_id
+            write_json(self, status if 200 <= status < 300 else 409, response)
         except HTTPError as exc:
             self.write_proxy_error(exc)
-        except (BrokenPipeError, ConnectionResetError):
-            return
         except Exception as exc:
-            write_json(self, 502, {"error": f"agent stream unavailable: {exc}"})
+            write_json(self, 502, {"ok": False, "error": f"warmaster unavailable: {exc}"})
+
+    def mobile_agent_run(self):
+        self.mobile_agent_start()
+
+    def mobile_agent_cancel(self):
+        try:
+            payload = read_json(self)
+        except json.JSONDecodeError as exc:
+            write_json(self, 400, {"error": f"Invalid JSON: {exc}"})
+            return
+        task_id = str(payload.get("task_id") or "").strip()
+        if not task_id:
+            write_json(self, 400, {"ok": False, "error": "task_id is required"})
+            return
+        try:
+            status, response = proxy_json_url(
+                "POST",
+                f"{WARMASTER_BASE_URL}/runs/{quote(task_id, safe='')}/cancel",
+                payload={"reason": str(payload.get("reason") or "mobile user requested cancel")},
+                timeout=30,
+            )
+            response["backend"] = "warmaster"
+            response["message"] = "Отмена отправлена в Warmaster."
+            write_json(self, status, response)
+        except HTTPError as exc:
+            self.write_proxy_error(exc)
+        except Exception as exc:
+            write_json(self, 502, {"ok": False, "error": f"warmaster unavailable: {exc}"})
+
+    def mobile_agent_stream_unsupported(self):
+        write_json(
+            self,
+            410,
+            {
+                "ok": False,
+                "backend": "warmaster",
+                "error": "streaming mobile agent endpoint was removed with standalone agent; use /archive/mobile/agent/start and poll /archive/mobile/agent/task",
+            },
+        )
 
     def mobile_chat_start(self):
         try:

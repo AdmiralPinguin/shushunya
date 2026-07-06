@@ -12,22 +12,26 @@ from typing import Any, Callable, Protocol
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from .utils import truncate
-
-
 class WebConfig(Protocol):
     max_tool_output_chars: int
 
 
-MAX_WEB_BYTES = int(os.environ.get("SHUSHUNYA_AGENT_MAX_WEB_BYTES", "200000"))
-BRAVE_SEARCH_API_KEY = os.environ.get("SHUSHUNYA_AGENT_BRAVE_SEARCH_API_KEY", "").strip()
-SEARXNG_URL = os.environ.get("SHUSHUNYA_AGENT_SEARXNG_URL", "").strip().rstrip("/")
-SEARCH_PROVIDERS = os.environ.get("SHUSHUNYA_AGENT_SEARCH_PROVIDERS", "searxng,marginalia,duckduckgo,wikipedia,brave")
+MAX_WEB_BYTES = int(os.environ.get("SHUSHUNYA_SEARCH_MAX_WEB_BYTES", "200000"))
+BRAVE_SEARCH_API_KEY = os.environ.get("SHUSHUNYA_SEARCH_BRAVE_API_KEY", "").strip()
+SEARXNG_URL = os.environ.get("SHUSHUNYA_SEARCH_SEARXNG_URL", "").strip().rstrip("/")
+SEARCH_PROVIDERS = os.environ.get("SHUSHUNYA_SEARCH_PROVIDERS", "searxng,marginalia,duckduckgo,wikipedia,brave")
 WEB_USER_AGENT = os.environ.get(
-    "SHUSHUNYA_AGENT_WEB_USER_AGENT",
+    "SHUSHUNYA_SEARCH_WEB_USER_AGENT",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
 )
-WEB_ACCEPT_LANGUAGE = os.environ.get("SHUSHUNYA_AGENT_WEB_ACCEPT_LANGUAGE", "ru,en;q=0.9")
+WEB_ACCEPT_LANGUAGE = os.environ.get("SHUSHUNYA_SEARCH_WEB_ACCEPT_LANGUAGE", "ru,en;q=0.9")
+
+
+def truncate(value: str, max_chars: int) -> str:
+    text = str(value)
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars - 3)].rstrip() + "..."
 
 
 def duckduckgo_result_url(raw_url: str) -> str:

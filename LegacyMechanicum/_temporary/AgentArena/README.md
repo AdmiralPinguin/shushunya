@@ -1,6 +1,6 @@
 # AgentArena
 
-Comparative stress bench for ShushunyaAgent and external agent scaffolds.
+Historical comparative stress bench for external agent scaffolds.
 
 The arena keeps all downloaded tools, virtual environments, workspaces, runs,
 and reports under this directory. It uses the same local OpenAI-compatible
@@ -11,7 +11,6 @@ llama.cpp endpoint by default:
 
 ## Candidates
 
-- `shushunya`: current local ShushunyaAgent API at `http://127.0.0.1:8095`.
 - `aider`: terminal coding assistant. Official docs describe OpenAI-compatible
   setup with `OPENAI_API_BASE`, `OPENAI_API_KEY`, and `--model openai/<model>`.
 - `mini-swe-agent`: compact bash-based SWE agent using LiteLLM/OpenAI-compatible
@@ -44,7 +43,7 @@ failed check type/symptom counters.
 Per-agent rows also expose `unavailable`, `runnable_total`, and
 `runnable_pass_rate`, so missing runtimes do not get confused with poor task
 quality.
-For Shushunya task journals the summary also includes
+For historical task journals the summary also includes
 `orchestration_quality`: whether code-repair runs showed a failing diagnostic,
 performed an edit, verified after the last edit, followed CLI verification
 prompts, and recovered from supervisor rejections. `analyze_reports.py`

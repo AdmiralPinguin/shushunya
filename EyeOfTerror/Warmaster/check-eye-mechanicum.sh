@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-python3 EyeOfTerror/Warmaster/doctor.py --quiet
+PYTHONPATH=.:EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/doctor.py --quiet
 PYTHONPATH=EyeOfTerror/Mechanicum python3 EyeOfTerror/Mechanicum/boundary_self_test.py
 PYTHONPATH=EyeOfTerror/Mechanicum python3 EyeOfTerror/Mechanicum/mechanicum_status_self_test.py
 PYTHONPATH=EyeOfTerror/Mechanicum/CodeBrigade python3 EyeOfTerror/Mechanicum/CodeBrigade/self_test.py
@@ -39,7 +39,6 @@ PYTHONPATH=LegacyMechanicum python3 LegacyMechanicum/worker_runtime_self_test.py
 PYTHONPATH=LegacyMechanicum python3 LegacyMechanicum/worker_api_contract_self_test.py
 PYTHONPATH=LegacyMechanicum python3 LegacyMechanicum/worker_services_self_test.py
 PYTHONPATH=LegacyMechanicum python3 LegacyMechanicum/start_all_workers_self_test.py
-EyeOfTerror/Warmaster/MobileGateway/ShushunyaAgent/scripts/check-agent-offline.sh
 PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/iskandar_service_self_test.py
 PYTHONPATH=EyeOfTerror/Warmaster python3 EyeOfTerror/Warmaster/warmaster_gateway_governor_http_self_test.py
 if [[ "${RUN_MONOLITHIC_GATEWAY_SELF_TEST:-0}" == "1" ]]; then

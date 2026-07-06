@@ -8,14 +8,9 @@ Work for this project must stay inside this directory unless the user explicitly
 
 ## Active Work Focus
 
-Current active architecture work is Ceraxia, the code-brigade governor under
-`EyeOfTerror/Mechanicum/Ceraxia`, plus her Mechanicum code workers.
-
-`EyeOfTerror/Warmaster/MobileGateway/ShushunyaAgent` is parked. Do not resume ShushunyaAgent arena
-stress tests, supervisor tuning, or standalone agent changes from old context
-unless the user explicitly asks to work on ShushunyaAgent again in the current
-conversation. Old AgentArena logs and previous ShushunyaAgent failures are not
-the active task.
+Current active architecture work routes through `EyeOfTerror/Warmaster`.
+User-facing chat/task entry must go through Warmaster and its governors/workers;
+do not recreate or route work through the removed standalone mobile agent.
 
 ## File Permissions
 

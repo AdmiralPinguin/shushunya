@@ -3,8 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_ROOT="/media/shushunya/SHUSHUNYA/shushunya"
-AGENT_ROOT="$PROJECT_ROOT/EyeOfTerror/Warmaster/MobileGateway/ShushunyaAgent"
-AGENT_VENV="$AGENT_ROOT/ShushunyaAgent"
+SEARCH_VENV="$ROOT/.venv"
 SRC="$ROOT/searxng-src"
 BOOTSTRAP="$ROOT/bootstrap/get-pip.py"
 SETTINGS="$ROOT/config/settings.yml"
@@ -20,14 +19,14 @@ if [[ ! -f "$BOOTSTRAP" ]]; then
   curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$BOOTSTRAP"
 fi
 
-if [[ ! -x "$AGENT_VENV/bin/python" ]]; then
-  python3 -m venv --without-pip "$AGENT_VENV"
-  "$AGENT_VENV/bin/python" "$BOOTSTRAP"
+if [[ ! -x "$SEARCH_VENV/bin/python" ]]; then
+  python3 -m venv --without-pip "$SEARCH_VENV"
+  "$SEARCH_VENV/bin/python" "$BOOTSTRAP"
 fi
 
-"$AGENT_VENV/bin/python" -m pip install -U pip setuptools wheel
-"$AGENT_VENV/bin/python" -m pip install -r "$SRC/requirements.txt"
-"$AGENT_VENV/bin/python" -m pip install --no-build-isolation -e "$SRC"
+"$SEARCH_VENV/bin/python" -m pip install -U pip setuptools wheel
+"$SEARCH_VENV/bin/python" -m pip install -r "$SRC/requirements.txt"
+"$SEARCH_VENV/bin/python" -m pip install --no-build-isolation -e "$SRC"
 
 if [[ ! -f "$LIMITER" ]]; then
   cp "$SRC/searx/limiter.toml" "$LIMITER"
@@ -35,7 +34,7 @@ if [[ ! -f "$LIMITER" ]]; then
 fi
 
 if [[ ! -f "$SETTINGS" ]]; then
-  secret="$("$AGENT_VENV/bin/python" -c 'import secrets; print(secrets.token_urlsafe(48))')"
+  secret="$("$SEARCH_VENV/bin/python" -c 'import secrets; print(secrets.token_urlsafe(48))')"
   cat > "$SETTINGS" <<EOF
 use_default_settings:
   engines:
@@ -93,5 +92,5 @@ EOF
 fi
 
 echo "SearXNG environment ready:"
-echo "  Python: $AGENT_VENV/bin/python"
+echo "  Python: $SEARCH_VENV/bin/python"
 echo "  Settings: $SETTINGS"

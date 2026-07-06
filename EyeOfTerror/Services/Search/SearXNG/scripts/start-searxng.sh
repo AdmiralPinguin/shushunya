@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_ROOT="/media/shushunya/SHUSHUNYA/shushunya"
-AGENT_VENV="$PROJECT_ROOT/EyeOfTerror/Warmaster/MobileGateway/ShushunyaAgent/ShushunyaAgent"
+SEARCH_VENV="$ROOT/.venv"
 SETTINGS="$ROOT/config/settings.yml"
 RUNTIME_DIR="$ROOT/runtime"
 PID_FILE="$RUNTIME_DIR/searxng.pid"
@@ -25,11 +25,11 @@ if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
 fi
 
 cd "$PROJECT_ROOT"
-PATH="$AGENT_VENV/bin:$PATH" \
 SEARXNG_SETTINGS_PATH="$SETTINGS" \
 SEARXNG_BIND_ADDRESS="$HOST" \
 SEARXNG_PORT="$PORT" \
-setsid "$AGENT_VENV/bin/searxng-run" >"$LOG_FILE" 2>&1 </dev/null &
+PATH="$SEARCH_VENV/bin:$PATH" \
+setsid "$SEARCH_VENV/bin/searxng-run" >"$LOG_FILE" 2>&1 </dev/null &
 echo "$!" > "$PID_FILE"
 
 BASE_URL="http://$HOST:$PORT"

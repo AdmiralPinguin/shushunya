@@ -1,8 +1,0 @@
-{
-  "name": "ShushunyaAgent",
-  "port": 7001,
-  "role": "general legacy worker",
-  "status": "active",
-  "capabilities": ["general_agent", "tool_execution", "file_operations", "web_research", "task_recovery"],
-  "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md"
-}

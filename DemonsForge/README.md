@@ -315,7 +315,7 @@ Older notes about the Pictorium-owned runtime:
   request mentions Shushunya. Forge records `safety.character_profile` metadata
   and does not assume a local LoRA/IP-Adapter exists.
 - `../EyeOfTerror/Pictorium/Moriana/forge_runtime/client.py`: thin client
-  intended for later ShushunyaAgent tool integration.
+  used by Warmaster/Moriana orchestration.
 
 Runtime logs are appended as JSONL to `runtime/logs/jobs.jsonl`. Loaded
 diffusers pipelines are automatically unloaded after

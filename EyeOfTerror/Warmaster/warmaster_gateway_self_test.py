@@ -685,9 +685,6 @@ def main() -> int:
             lexmechanic = next(item for item in workers["workers"] if item.get("name") == "Lexmechanic")
             if not lexmechanic.get("metadata_available") or "web_search" not in lexmechanic.get("capabilities", []):
                 raise AssertionError(f"workers response did not expose worker metadata: {workers}")
-            shushunya = next(item for item in workers["workers"] if item.get("name") == "ShushunyaAgent")
-            if not shushunya.get("metadata_available") or shushunya.get("status") != "active":
-                raise AssertionError(f"general worker metadata is missing: {shushunya}")
             worker_health = request_json(base + "/workers?health=1")
             if (
                 not worker_health.get("health_checked")

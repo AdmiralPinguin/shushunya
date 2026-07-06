@@ -33,5 +33,5 @@ continues the model request.
 ## Namespaces
 
 Memory can be scoped by `memory_namespace`. The default chat uses `default`;
-ShushunyaAgent uses `agent`. Focus, wiki, vector retrieval, and graph memory are
-kept namespace-aware so agent tool loops do not leak into normal chat context.
+Warmaster uses `warmaster`. Focus, wiki, vector retrieval, and graph memory are
+kept namespace-aware so worker tool loops do not leak into normal chat context.

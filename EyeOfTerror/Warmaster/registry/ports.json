@@ -28,11 +28,6 @@
     }
   },
   "mechanicum": {
-    "7001": {
-      "name": "ShushunyaAgent",
-      "role": "mobile and console API gateway",
-      "path": "EyeOfTerror/Warmaster/MobileGateway/ShushunyaAgent"
-    },
     "7002": {
       "name": "Lexmechanic",
       "role": "source researcher",
