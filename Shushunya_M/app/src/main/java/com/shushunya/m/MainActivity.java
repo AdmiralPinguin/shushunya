@@ -139,6 +139,7 @@ public class MainActivity extends Activity {
     private Button translateButton;
     private TextView agentStatus;
     private ImageButton agentRunButton;
+    private String agentBrigadeFilter = "";
     private volatile boolean recording;
     private volatile boolean streamingAnswer;
     private volatile boolean agentCancelRequested;
@@ -533,7 +534,7 @@ public class MainActivity extends Activity {
         view.setPadding(0, dp(6), 0, 0);
 
         agentStatus = new TextView(this);
-        agentStatus.setText("Shell выключен для запросов из телефона. Ход выполнения идет в чате.");
+        agentStatus.setText("Warmaster подключен. Здесь монитор бригад.");
         agentStatus.setTextColor(Color.rgb(132, 219, 212));
         agentStatus.setTextSize(13);
         agentStatus.setSingleLine(true);
@@ -566,7 +567,7 @@ public class MainActivity extends Activity {
         agentScrollView.addView(agentMessageList, new ScrollView.LayoutParams(-1, -2));
         view.addView(agentScrollView, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        addAgentMessage(false, "Агент готов. Пиши задачу, я покажу ход выполнения и итог здесь.", false);
+        addAgentMessage(false, "Монитор бригад готов. Задачи отправляй из основного чата через /task, /w, /warmaster или вармастер:.", false);
 
         agentInputPanel = new LinearLayout(this);
         agentInputPanel.setOrientation(LinearLayout.VERTICAL);
@@ -580,34 +581,34 @@ public class MainActivity extends Activity {
         agentInputPanel.addView(quickRow, quickLp);
 
         Button statusButton = new Button(this);
-        statusButton.setText("STATUS");
+        statusButton.setText("ИСКАНДАР");
         styleAgentQuickButton(statusButton);
         quickRow.addView(statusButton, new LinearLayout.LayoutParams(0, dp(42), 1));
-        statusButton.setOnClickListener(v -> runAgentTask("Проверь sandbox_status и archive_status. Ответь коротко технически."));
+        statusButton.setOnClickListener(v -> setAgentBrigadeFilter("IskandarKhayon"));
 
         Button workButton = new Button(this);
-        workButton.setText("WORK");
+        workButton.setText("ЦЕРАКСИЯ");
         styleAgentQuickButton(workButton);
         LinearLayout.LayoutParams workLp = new LinearLayout.LayoutParams(0, dp(42), 1);
         workLp.leftMargin = dp(8);
         quickRow.addView(workButton, workLp);
-        workButton.setOnClickListener(v -> runAgentTask("Покажи список /work через list_files. Ответь кратко, что там лежит."));
+        workButton.setOnClickListener(v -> setAgentBrigadeFilter("Ceraxia"));
 
         Button focusButton = new Button(this);
-        focusButton.setText("ФОКУС");
+        focusButton.setText("МОРИАНА");
         styleAgentQuickButton(focusButton);
         LinearLayout.LayoutParams focusLp = new LinearLayout.LayoutParams(0, dp(42), 1);
         focusLp.leftMargin = dp(8);
         quickRow.addView(focusButton, focusLp);
-        focusButton.setOnClickListener(v -> runAgentTask("Через archive_search kind=focus query=active кратко скажи текущий фокус."));
+        focusButton.setOnClickListener(v -> setAgentBrigadeFilter("Moriana"));
 
         Button stateButton = new Button(this);
-        stateButton.setText("STATE");
+        stateButton.setText("ВСЕ");
         styleAgentQuickButton(stateButton);
         LinearLayout.LayoutParams stateLp = new LinearLayout.LayoutParams(0, dp(42), 1);
         stateLp.leftMargin = dp(8);
         quickRow.addView(stateButton, stateLp);
-        stateButton.setOnClickListener(v -> refreshAgentState());
+        stateButton.setOnClickListener(v -> setAgentBrigadeFilter(""));
 
         agentComposer = new LinearLayout(this);
         agentComposer.setOrientation(LinearLayout.HORIZONTAL);
@@ -621,7 +622,7 @@ public class MainActivity extends Activity {
         agentInput.setMaxHeight(dp(178));
         agentInput.setTextColor(Color.rgb(240, 246, 255));
         agentInput.setHintTextColor(Color.rgb(116, 143, 164));
-        agentInput.setHint("Задача агенту");
+        agentInput.setHint("Задача Warmaster");
         agentInput.setTextSize(16);
         agentInput.setGravity(Gravity.TOP | Gravity.START);
         agentInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
@@ -1214,16 +1215,42 @@ public class MainActivity extends Activity {
         runAgentTask(text);
     }
 
+    private void setAgentBrigadeFilter(String filter) {
+        agentBrigadeFilter = filter == null ? "" : filter.trim();
+        String label = agentBrigadeLabel(agentBrigadeFilter);
+        if (agentStatus != null) {
+            agentStatus.setText(label.isEmpty() ? "Показываю все бригады..." : "Показываю: " + label);
+        }
+        refreshBrigadeMonitor();
+    }
+
+    private void refreshBrigadeMonitor() {
+        new Thread(() -> {
+            try {
+                JSONObject payload = requestAgentTaskList();
+                JSONArray tasks = payload.optJSONArray("tasks");
+                main.post(() -> renderAgentTaskHistory(tasks));
+            } catch (Exception exc) {
+                main.post(() -> {
+                    if (agentStatus != null) {
+                        agentStatus.setText("Ошибка монитора: " + exc.getMessage());
+                    }
+                    addAgentMessage(false, "! Ошибка монитора бригад: " + exc.getMessage(), true);
+                });
+            }
+        }).start();
+    }
+
     private void refreshAgentState() {
         if (agentStatus != null) {
-            agentStatus.setText("Проверяю состояние агента...");
+            agentStatus.setText("Проверяю состояние Warmaster...");
         }
         new Thread(() -> {
             try {
                 String state = requestAgentState();
                 main.post(() -> {
                     if (agentStatus != null) {
-                        agentStatus.setText("Состояние агента получено.");
+                        agentStatus.setText("Состояние Warmaster получено.");
                     }
                     addAgentMessage(false, state, true);
                 });
@@ -1331,7 +1358,7 @@ public class MainActivity extends Activity {
         payload.put("task_id", taskId);
         payload.put("technical", true);
         payload.put("max_steps", 200);
-        payload.put("memory_namespace", "agent");
+        payload.put("memory_namespace", "warmaster");
         payload.put("archive_task", true);
         payload.put("task_memory", true);
         payload.put("include_stderr", false);
@@ -1357,7 +1384,7 @@ public class MainActivity extends Activity {
         if (code < 200 || code >= 300) {
             String response = readAll(stream);
             if (code == 409) {
-                throw new IllegalStateException("агент занят, нажми STATE и повтори позже");
+                throw new IllegalStateException("Warmaster занят, открой Бригады и повтори позже");
             }
             throw new IllegalStateException("HTTP " + code + ": " + response);
         }
@@ -1400,7 +1427,7 @@ public class MainActivity extends Activity {
         payload.put("task_id", taskId);
         payload.put("technical", true);
         payload.put("max_steps", 200);
-        payload.put("memory_namespace", "agent");
+        payload.put("memory_namespace", "warmaster");
         payload.put("archive_task", true);
         payload.put("task_memory", true);
         payload.put("include_stderr", false);
@@ -1426,7 +1453,7 @@ public class MainActivity extends Activity {
         String response = readAll(stream);
         if (code < 200 || code >= 300) {
             if (code == 409) {
-                throw new IllegalStateException("агент занят, нажми STATE и повтори позже");
+                throw new IllegalStateException("Warmaster занят, открой Бригады и повтори позже");
             }
             throw new IllegalStateException("HTTP " + code + ": " + response);
         }
@@ -1474,31 +1501,48 @@ public class MainActivity extends Activity {
     }
 
     private void renderAgentTaskHistory(JSONArray tasks) {
-        if (tasks == null || tasks.length() == 0 || agentMessageList == null) {
+        if (agentMessageList == null) {
             return;
         }
         agentMessageList.removeAllViews();
         agentLiveBubble = null;
+        if (tasks == null || tasks.length() == 0) {
+            addAgentMessage(false, "История Warmaster пока пустая.", false);
+            return;
+        }
+        int shown = 0;
         for (int i = tasks.length() - 1; i >= 0; i--) {
             JSONObject task = tasks.optJSONObject(i);
             if (task == null) {
                 continue;
             }
+            if (!agentTaskMatchesBrigade(task)) {
+                continue;
+            }
+            shown++;
             String prompt = task.optString("task", "").trim();
             String taskId = task.optString("task_id", "").trim();
             boolean running = task.optBoolean("running", false);
             boolean cancelled = task.optBoolean("cancelled", false);
             boolean success = task.optBoolean("success", false);
             String finalText = task.optString("final", "").trim();
+            String governor = task.optString("governor", "").trim();
+            String currentStep = task.optString("current_step", "").trim();
             if (!prompt.isEmpty()) {
                 addAgentMessage(true, prompt, false);
             }
             StringBuilder summary = new StringBuilder();
+            String brigade = agentBrigadeLabel(governor);
+            if (!brigade.isEmpty()) {
+                summary.append("Бригада: ").append(brigade).append("\n");
+            }
             if (!taskId.isEmpty()) {
                 summary.append("task_id=").append(taskId).append("\n");
             }
             if (running) {
-                summary.append("Задача еще выполняется. Восстанавливаю live-лог...");
+                summary.append(currentStep.isEmpty()
+                        ? "Сейчас делает: выполняет задачу."
+                        : "Сейчас делает: " + currentStep);
             } else if (cancelled) {
                 summary.append("Остановлено.");
             } else if (success) {
@@ -1511,7 +1555,34 @@ public class MainActivity extends Activity {
             }
             addAgentMessage(false, summary.toString(), false);
         }
+        if (shown == 0) {
+            String label = agentBrigadeLabel(agentBrigadeFilter);
+            addAgentMessage(false, label.isEmpty() ? "Задач по бригадам нет." : "У бригады " + label + " пока нет задач.", false);
+        }
         maybeScrollAgentToBottom(true);
+    }
+
+    private boolean agentTaskMatchesBrigade(JSONObject task) {
+        String filter = agentBrigadeFilter == null ? "" : agentBrigadeFilter.trim();
+        if (filter.isEmpty()) {
+            return true;
+        }
+        String governor = task.optString("governor", "").trim();
+        return governor.equalsIgnoreCase(filter) || agentBrigadeLabel(governor).equalsIgnoreCase(agentBrigadeLabel(filter));
+    }
+
+    private String agentBrigadeLabel(String governor) {
+        String clean = governor == null ? "" : governor.trim();
+        if (clean.equalsIgnoreCase("IskandarKhayon") || clean.equalsIgnoreCase("Iskandar") || clean.equalsIgnoreCase("Khayon")) {
+            return "Искандар Хайон";
+        }
+        if (clean.equalsIgnoreCase("Ceraxia") || clean.equalsIgnoreCase("CeraxiaTheRed") || clean.equalsIgnoreCase("Mechanicum")) {
+            return "Цераксия";
+        }
+        if (clean.equalsIgnoreCase("Moriana") || clean.equalsIgnoreCase("Pictorium")) {
+            return "Мориана";
+        }
+        return clean;
     }
 
     private String pollAgentTaskUntilDone(String taskId) throws Exception {
@@ -1580,7 +1651,7 @@ public class MainActivity extends Activity {
         payload.put("task", task);
         payload.put("technical", true);
         payload.put("max_steps", 200);
-        payload.put("memory_namespace", "agent");
+        payload.put("memory_namespace", "warmaster");
         payload.put("archive_task", true);
         payload.put("task_memory", true);
         payload.put("include_steps", false);
@@ -1607,7 +1678,7 @@ public class MainActivity extends Activity {
         String response = readAll(stream);
         if (code < 200 || code >= 300) {
             if (code == 409) {
-                throw new IllegalStateException("агент занят, нажми STATE и повтори позже");
+                throw new IllegalStateException("Warmaster занят, открой Бригады и повтори позже");
             }
             throw new IllegalStateException("HTTP " + code + ": " + response);
         }
@@ -1875,7 +1946,7 @@ public class MainActivity extends Activity {
 
         drawerChat = drawerItem("Шушуня");
         drawerTranslator = drawerItem("Переводчик");
-        drawerAgent = drawerItem("Агент");
+        drawerAgent = drawerItem("Бригады");
         drawer.addView(drawerChat);
         drawer.addView(drawerTranslator);
         drawer.addView(drawerAgent);
@@ -1913,7 +1984,7 @@ public class MainActivity extends Activity {
         boolean chat = TAB_CHAT.equals(tab);
         boolean translator = TAB_TRANSLATOR.equals(tab);
         boolean agent = TAB_AGENT.equals(tab);
-        title.setText(chat ? "Шушуня" : agent ? "Агент" : "Переводчик");
+        title.setText(chat ? "Шушуня" : agent ? "Бригады" : "Переводчик");
         endpoint.setText(baseUrl);
         endpoint.setVisibility((chat || agent) ? View.VISIBLE : View.INVISIBLE);
         chatView.setVisibility(chat ? View.VISIBLE : View.GONE);
@@ -2189,6 +2260,12 @@ public class MainActivity extends Activity {
         if ((text.isEmpty() && !hasImage) || waiting) {
             return;
         }
+        String warmasterTask = hasImage ? "" : warmasterTaskFromChatCommand(text);
+        if (!warmasterTask.isEmpty()) {
+            input.setText("");
+            runWarmasterTaskFromChat(text, warmasterTask);
+            return;
+        }
 
         input.setText("");
         pendingImageDataUrl = null;
@@ -2230,6 +2307,179 @@ public class MainActivity extends Activity {
                 }
             }
         }).start();
+    }
+
+    private String warmasterTaskFromChatCommand(String text) {
+        String clean = text == null ? "" : text.trim();
+        if (clean.isEmpty()) {
+            return "";
+        }
+        String lower = clean.toLowerCase();
+        String[] prefixes = {"/task ", "/w ", "/warmaster ", "!task ", "!вармастер "};
+        for (String prefix : prefixes) {
+            if (lower.startsWith(prefix)) {
+                return clean.substring(prefix.length()).trim();
+            }
+        }
+        String[] colonPrefixes = {"вармастер:", "warmaster:"};
+        for (String prefix : colonPrefixes) {
+            if (lower.startsWith(prefix)) {
+                return clean.substring(prefix.length()).trim();
+            }
+        }
+        return "";
+    }
+
+    private void runWarmasterTaskFromChat(String originalText, String task) {
+        String clean = task == null ? "" : task.trim();
+        if (clean.isEmpty()) {
+            addMessage(false, "После команды Warmaster нужна сама задача.");
+            return;
+        }
+        if (agentRunning) {
+            addMessage(false, "Warmaster уже выполняет задачу. Открой вкладку Бригады и дождись завершения или отмени текущую.");
+            return;
+        }
+
+        addMessage(true, originalText == null || originalText.trim().isEmpty() ? clean : originalText.trim());
+        TextView answerBubble = addMessage(false, "Warmaster принимает задачу...", false);
+        StringBuilder warmasterTranscript = new StringBuilder("Warmaster принимает задачу...");
+        setWaiting(true);
+        String taskId = "mobile-" + System.currentTimeMillis();
+        currentAgentTaskId = taskId;
+        agentDisplayedEventCount = 0;
+        agentCancelRequested = false;
+        agentRunning = true;
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit()
+                .putString("current_agent_task_id", taskId)
+                .apply();
+        if (agentStatus != null) {
+            agentStatus.setText("Warmaster выполняет задачу из основного чата...");
+        }
+        setAgentRunButtonRunning(true);
+
+        new Thread(() -> {
+            PowerManager.WakeLock wakeLock = acquireAnswerWakeLock();
+            int displayed = 0;
+            String acceptedTaskId = taskId;
+            try {
+                acceptedTaskId = requestAgentStart(clean, taskId);
+                currentAgentTaskId = acceptedTaskId;
+                getSharedPreferences(PREFS, MODE_PRIVATE)
+                        .edit()
+                        .putString("current_agent_task_id", acceptedTaskId)
+                        .apply();
+                warmasterTranscript.append("\nПринято: task_id=").append(acceptedTaskId);
+                appendChatWarmasterLog(answerBubble, "\nПринято: task_id=" + acceptedTaskId);
+                while (true) {
+                    JSONObject snapshot = requestAgentTaskSnapshot(acceptedTaskId);
+                    JSONArray events = snapshot.optJSONArray("events");
+                    if (events != null) {
+                        int start = Math.max(0, Math.min(displayed, events.length()));
+                        for (int i = start; i < events.length(); i++) {
+                            JSONObject event = events.optJSONObject(i);
+                            String line = warmasterChatEventLine(event);
+                            if (!line.isEmpty()) {
+                                warmasterTranscript.append("\n").append(line);
+                                appendChatWarmasterLog(answerBubble, "\n" + line);
+                            }
+                        }
+                        displayed = events.length();
+                    }
+                    JSONObject finalEvent = snapshot.optJSONObject("final");
+                    if (finalEvent != null) {
+                        String finalText = finalEvent.optString("message", "").trim();
+                        boolean cancelled = finalEvent.optBoolean("cancelled", false);
+                        String result = finalText.isEmpty()
+                                ? (cancelled ? "Warmaster остановлен." : "Warmaster завершил задачу без финального текста.")
+                                : finalText;
+                        String finalBlock = "\n\n" + (cancelled ? "Остановлено:\n" : "Готово:\n") + result;
+                        warmasterTranscript.append(finalBlock);
+                        appendChatWarmasterLog(answerBubble, finalBlock);
+                        saveChatMessage(false, warmasterTranscript.toString());
+                        showAnswerNotification(result);
+                        break;
+                    }
+                    if (!snapshot.optBoolean("running", false)) {
+                        String finalBlock = "\n\nWarmaster завершил задачу без финального события.";
+                        warmasterTranscript.append(finalBlock);
+                        appendChatWarmasterLog(answerBubble, finalBlock);
+                        saveChatMessage(false, warmasterTranscript.toString());
+                        break;
+                    }
+                    Thread.sleep(2000);
+                }
+                String finishedTaskId = acceptedTaskId;
+                main.post(() -> {
+                    agentRunning = false;
+                    agentCancelRequested = false;
+                    currentAgentTaskId = "";
+                    getSharedPreferences(PREFS, MODE_PRIVATE)
+                            .edit()
+                            .remove("current_agent_task_id")
+                            .apply();
+                    setWaiting(false);
+                    setAgentRunButtonRunning(false);
+                    if (agentStatus != null) {
+                        agentStatus.setText("Warmaster завершил задачу " + finishedTaskId);
+                    }
+                    refreshBrigadeMonitor();
+                });
+            } catch (Exception exc) {
+                main.post(() -> {
+                    agentRunning = false;
+                    agentCancelRequested = false;
+                    currentAgentTaskId = "";
+                    getSharedPreferences(PREFS, MODE_PRIVATE)
+                            .edit()
+                            .remove("current_agent_task_id")
+                            .apply();
+                    setWaiting(false);
+                    setAgentRunButtonRunning(false);
+                    String error = "Warmaster сорвался: " + exc.getMessage();
+                    answerBubble.setText(error);
+                    saveChatMessage(false, error);
+                    showAnswerNotification(error);
+                    if (agentStatus != null) {
+                        agentStatus.setText(error);
+                    }
+                    maybeScrollToBottom(false);
+                });
+            } finally {
+                if (wakeLock != null && wakeLock.isHeld()) {
+                    wakeLock.release();
+                }
+            }
+        }).start();
+    }
+
+    private String warmasterChatEventLine(JSONObject event) {
+        if (event == null) {
+            return "";
+        }
+        String type = event.optString("type", "");
+        if ("heartbeat".equals(type)) {
+            return "";
+        }
+        String message = event.optString("message", "").trim();
+        if (message.isEmpty()) {
+            return "";
+        }
+        if ("step".equals(type)) {
+            return "Сейчас делаю: " + message;
+        }
+        return message;
+    }
+
+    private void appendChatWarmasterLog(TextView bubble, String line) {
+        if (bubble == null || line == null || line.isEmpty()) {
+            return;
+        }
+        main.post(() -> {
+            bubble.append(line);
+            maybeScrollToBottom(false);
+        });
     }
 
     private void resetAttachImageButton() {

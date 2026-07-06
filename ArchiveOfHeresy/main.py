@@ -2187,6 +2187,15 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         running = bool(active) or status in {"running", "queued", "cancelling"}
         cancelled = status == "cancelled"
         success = status == "completed"
+        progress = run.get("progress") if isinstance(run.get("progress"), dict) else {}
+        current_step = str(
+            progress.get("current_step")
+            or progress.get("current_step_id")
+            or progress.get("next_step")
+            or progress.get("next_step_id")
+            or progress.get("next_ready_step_id")
+            or ""
+        ).strip()
         return {
             "backend": "warmaster",
             "task_id": task_id,
@@ -2196,6 +2205,8 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             "success": success,
             "status": status,
             "governor": str(run.get("governor") or ""),
+            "current_step": current_step,
+            "progress": progress,
             "final": final_text,
             "updated_at": str(run.get("updated_at") or ""),
             "created_at": str(run.get("created_at") or ""),
