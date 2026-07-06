@@ -150,7 +150,24 @@ def moriana_quality_trials() -> dict[str, Any]:
     )
     if completed.returncode != 0:
         raise RuntimeError((completed.stderr or completed.stdout).strip())
-    return {"script": "EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_quality_trials.py", "stdout": completed.stdout.strip()}
+    stdout = completed.stdout.strip()
+    parsed: dict[str, Any] = {}
+    if stdout:
+        try:
+            loaded = json.loads(stdout.splitlines()[-1])
+        except json.JSONDecodeError:
+            loaded = {}
+        if isinstance(loaded, dict):
+            parsed = loaded
+    return {
+        "script": "EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_quality_trials.py",
+        "stdout": stdout,
+        "trial_count": parsed.get("trial_count"),
+        "coverage_gap_count": parsed.get("coverage_gap_count"),
+        "avg_quality_score": parsed.get("avg_quality_score"),
+        "evidence_adjusted_score": parsed.get("evidence_adjusted_score"),
+        "readiness_verdict": parsed.get("readiness_verdict"),
+    }
 
 
 def moriana_e2e_self_test() -> dict[str, Any]:
@@ -208,8 +225,16 @@ def write_summary(report: dict[str, Any], path: Path) -> str:
         notes = step.get("error") or ""
         if not notes and isinstance(step.get("result"), dict):
             details = step["result"]
-            if details.get("stdout"):
-                notes = "; ".join(str(item) for item in details["stdout"][-2:])
+            if details.get("readiness_verdict"):
+                notes = (
+                    f"verdict={details.get('readiness_verdict')}; "
+                    f"evidence_score={details.get('evidence_adjusted_score')}; "
+                    f"coverage_gaps={details.get('coverage_gap_count')}"
+                )
+            elif details.get("stdout"):
+                stdout = details["stdout"]
+                lines = stdout.splitlines() if isinstance(stdout, str) else [str(item) for item in stdout]
+                notes = "; ".join(lines[-2:])
             elif details.get("script"):
                 notes = str(details["script"])
             elif details.get("files"):
