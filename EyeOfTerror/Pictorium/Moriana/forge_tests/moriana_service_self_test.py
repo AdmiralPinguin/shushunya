@@ -51,6 +51,7 @@ def main() -> int:
                 or capabilities.get("governor") != "Moriana"
                 or "ScenarioScribe" not in capabilities.get("required_workers", [])
                 or "Promptwright" not in capabilities.get("required_workers", [])
+                or "GET /runs/{run_id}/revision-decision" not in capabilities.get("endpoints", [])
             ):
                 raise AssertionError(f"bad capabilities payload: {capabilities}")
             image_plan = request_json(base, "POST", "/plan", {"task": "нарисуй картинку 512x512", "task_id": "moriana-http-image"})
@@ -102,9 +103,15 @@ def main() -> int:
             quality = request_json(base, "GET", "/runs/moriana-http-exec-image/quality")
             if quality.get("quality_report", {}).get("next_action") != "accept_final":
                 raise AssertionError(f"bad /runs/{{id}}/quality payload: {quality}")
+            decision = request_json(base, "GET", "/runs/moriana-http-exec-image/revision-decision")
+            if decision.get("revision_decision", {}).get("action") != "accept_final":
+                raise AssertionError(f"bad /runs/{{id}}/revision-decision payload: {decision}")
             audit = request_json(base, "POST", "/runs/moriana-http-exec-image/audit", {})
-            if audit.get("quality_report", {}).get("kind") != "pictorium_quality_report":
+            if audit.get("quality_report", {}).get("kind") != "pictorium_quality_report" or audit.get("revision_decision", {}).get("kind") != "pictorium_revision_decision":
                 raise AssertionError(f"bad /runs/{{id}}/audit payload: {audit}")
+            decided = request_json(base, "POST", "/runs/moriana-http-exec-image/decide_revision", {})
+            if decided.get("revision_decision", {}).get("action") != "accept_final":
+                raise AssertionError(f"bad /runs/{{id}}/decide_revision payload: {decided}")
         finally:
             server.shutdown()
             thread.join(timeout=5)

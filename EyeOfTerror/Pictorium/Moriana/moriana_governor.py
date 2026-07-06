@@ -36,6 +36,7 @@ from EyeOfTerror.Pictorium.Brigades.Comics.Workers.StoryboardArchitect.worker im
 from EyeOfTerror.Pictorium.Moriana.moriana_executor import execute_comic_run, execute_existing_image_artifact_run, execute_image_run, execute_image_series_run
 from EyeOfTerror.Pictorium.Moriana.moriana_core.asset_catalog import capabilities as forge_capabilities
 from EyeOfTerror.Pictorium.Moriana.moriana_quality import read_quality_report, write_quality_report
+from EyeOfTerror.Pictorium.Moriana.moriana_revision import read_revision_decision, write_revision_decision
 from EyeOfTerror.Pictorium.Moriana.moriana_runtime import MorianaRunStore, write_json_atomic
 
 
@@ -358,7 +359,9 @@ def service_capabilities() -> dict[str, Any]:
             "GET /runs/{run_id}/artifacts",
             "GET /runs/{run_id}/final",
             "GET /runs/{run_id}/quality",
+            "GET /runs/{run_id}/revision-decision",
             "POST /runs/{run_id}/audit",
+            "POST /runs/{run_id}/decide_revision",
             "POST /runs/{run_id}/revise",
             "POST /runs/{run_id}/accept",
         ],
@@ -502,6 +505,10 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                         report = read_quality_report(store.run_dir(run_id))
                         response(self, 200 if not report.get("error") else 404, {"ok": not bool(report.get("error")), "governor": GOVERNOR, "run_id": run_id, "quality_report": report})
                         return
+                    if parts[2] == "revision-decision":
+                        decision = read_revision_decision(store.run_dir(run_id))
+                        response(self, 200 if not decision.get("error") else 404, {"ok": not bool(decision.get("error")), "governor": GOVERNOR, "run_id": run_id, "revision_decision": decision})
+                        return
                 except FileNotFoundError:
                     response(self, 404, {"ok": False, "governor": GOVERNOR, "error": "run not found", "run_id": run_id})
                     return
@@ -536,7 +543,12 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                         response(self, 200, {"ok": True, "governor": GOVERNOR, "run_id": run_id, "revision": store.request_revision(run_id, reason), "status": store.status(run_id)})
                         return
                     if parts[2] == "audit":
-                        response(self, 200, {"ok": True, "governor": GOVERNOR, "run_id": run_id, "quality_report": write_quality_report(store, run_id), "status": store.status(run_id)})
+                        report = write_quality_report(store, run_id)
+                        response(self, 200, {"ok": True, "governor": GOVERNOR, "run_id": run_id, "quality_report": report, "revision_decision": write_revision_decision(store, run_id, report), "status": store.status(run_id)})
+                        return
+                    if parts[2] == "decide_revision":
+                        report = write_quality_report(store, run_id)
+                        response(self, 200, {"ok": True, "governor": GOVERNOR, "run_id": run_id, "revision_decision": write_revision_decision(store, run_id, report), "status": store.status(run_id)})
                         return
                     if parts[2] == "accept":
                         response(self, 200, {"ok": True, "governor": GOVERNOR, "run_id": run_id, "final": store.accept_final(run_id), "status": store.status(run_id)})

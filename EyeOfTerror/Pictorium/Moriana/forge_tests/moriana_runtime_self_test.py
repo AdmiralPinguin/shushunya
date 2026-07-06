@@ -112,12 +112,15 @@ def main() -> int:
         success_dir = Path(str(success["run_dir"]))
         assert_run_workspace(success_dir)
         success_types = artifact_types(success_dir)
-        for required_type in ("prompt", "resource_report", "dispatch", "verification", "image", "final", "quality_report"):
+        for required_type in ("prompt", "resource_report", "dispatch", "verification", "image", "final", "quality_report", "revision_decision"):
             if required_type not in success_types:
                 raise AssertionError(f"image success registry missing {required_type}: {success_types}")
         success_quality = load_json(success_dir / "final" / "quality_report.json")
         if success_quality.get("next_action") != "accept_final" or not success_quality.get("delivery_ready"):
             raise AssertionError(f"image success quality report should be ready: {success_quality}")
+        success_decision = load_json(success_dir / "final" / "revision_decision.json")
+        if success_decision.get("action") != "accept_final" or success_decision.get("revision_required"):
+            raise AssertionError(f"image success revision decision should accept final: {success_decision}")
 
         revision = create_or_execute_run(
             run_root,
@@ -160,6 +163,13 @@ def main() -> int:
         failure_quality = load_json(failure_dir / "final" / "quality_report.json")
         if failure_quality.get("next_action") != "revise" or not failure_quality.get("revision_targets"):
             raise AssertionError(f"failed image run quality report should request revision: {failure_quality}")
+        failure_decision = load_json(failure_dir / "final" / "revision_decision.json")
+        if (
+            failure_decision.get("action") != "wait_or_resubmit_forge_job"
+            or not failure_decision.get("revision_required")
+            or not any(item.get("target_worker") == "ForgeDispatcher" for item in failure_decision.get("targets", []) if isinstance(item, dict))
+        ):
+            raise AssertionError(f"failed image run revision decision should target ForgeDispatcher: {failure_decision}")
 
         pending = create_or_execute_run(
             run_root,
@@ -181,6 +191,9 @@ def main() -> int:
         ]
         if pending.get("ok") or not rejected_results or pending.get("forge_monitor", {}).get("status") != "queued":
             raise AssertionError(f"pending Forge job was not tracked as a rejected runtime result: {pending}")
+        pending_decision = load_json(pending_dir / "final" / "revision_decision.json")
+        if pending_decision.get("action") != "wait_or_resubmit_forge_job" or "forge_job_not_finished" not in pending_decision.get("blocker_codes", []):
+            raise AssertionError(f"pending Forge job revision decision should wait/resubmit: {pending_decision}")
 
         series = create_or_execute_run(
             run_root,
@@ -209,6 +222,9 @@ def main() -> int:
         series_quality = load_json(series_dir / "final" / "quality_report.json")
         if series_quality.get("accepted_image_count") != 3 or series_quality.get("next_action") != "accept_final":
             raise AssertionError(f"series quality report did not see all accepted images: {series_quality}")
+        series_decision = load_json(series_dir / "final" / "revision_decision.json")
+        if series_decision.get("action") != "accept_final":
+            raise AssertionError(f"series revision decision should accept final: {series_decision}")
 
         comic = create_or_execute_run(
             run_root,
@@ -259,9 +275,15 @@ def main() -> int:
             quality = request_json(base, "GET", "/runs/http-image/quality")
             if quality.get("quality_report", {}).get("next_action") != "accept_final":
                 raise AssertionError(f"HTTP quality failed: {quality}")
+            decision = request_json(base, "GET", "/runs/http-image/revision-decision")
+            if decision.get("revision_decision", {}).get("action") != "accept_final":
+                raise AssertionError(f"HTTP revision-decision failed: {decision}")
             audit = request_json(base, "POST", "/runs/http-image/audit", {})
-            if audit.get("quality_report", {}).get("kind") != "pictorium_quality_report":
+            if audit.get("quality_report", {}).get("kind") != "pictorium_quality_report" or audit.get("revision_decision", {}).get("kind") != "pictorium_revision_decision":
                 raise AssertionError(f"HTTP audit failed: {audit}")
+            decided = request_json(base, "POST", "/runs/http-image/decide_revision", {})
+            if decided.get("revision_decision", {}).get("action") != "accept_final":
+                raise AssertionError(f"HTTP decide_revision failed: {decided}")
             revised = request_json(base, "POST", "/runs/http-image/revise", {"reason": "test revision request"})
             if revised.get("status", {}).get("status") != "revising":
                 raise AssertionError(f"HTTP revise failed: {revised}")

@@ -16,6 +16,7 @@ from EyeOfTerror.Pictorium.Brigades.Image.Workers.ModelQuartermaster.worker impo
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.Promptwright.worker import prepare_image_plan
 from EyeOfTerror.Pictorium.Moriana.moriana_forge_monitor import monitor_forge_job
 from EyeOfTerror.Pictorium.Moriana.moriana_quality import write_quality_report
+from EyeOfTerror.Pictorium.Moriana.moriana_revision import write_revision_decision
 from EyeOfTerror.Pictorium.Moriana.moriana_runtime import MorianaRunStore
 
 try:
@@ -192,6 +193,7 @@ def execute_image_run(
         store.write_revision(run_id, final_payload["attempt"], blockers, "manual_or_runtime_regeneration_required")
     store.write_final(run_id, final_payload, final_artifact_id=accepted_artifact_id)
     quality_report = write_quality_report(store, run_id)
+    revision_decision = write_revision_decision(store, run_id, quality_report)
     return {
         "ok": final_payload.get("status") == "ready",
         "governor": "Moriana",
@@ -202,6 +204,7 @@ def execute_image_run(
         "artifacts": store.artifacts(run_id),
         "forge_monitor": forge_monitor,
         "quality_report": quality_report,
+        "revision_decision": revision_decision,
     }
 
 
@@ -264,6 +267,7 @@ def execute_existing_image_artifact_run(
         store.write_revision(run_id, 1, blockers, "revise supplied artifact or regenerate image")
     store.write_final(run_id, final_payload, final_artifact_id=accepted_artifact_id)
     quality_report = write_quality_report(store, run_id)
+    revision_decision = write_revision_decision(store, run_id, quality_report)
     return {
         "ok": final_payload.get("status") == "ready",
         "governor": "Moriana",
@@ -273,6 +277,7 @@ def execute_existing_image_artifact_run(
         "final": final_payload,
         "artifacts": store.artifacts(run_id),
         "quality_report": quality_report,
+        "revision_decision": revision_decision,
     }
 
 
@@ -398,6 +403,7 @@ def execute_image_series_run(
         store.write_revision(run_id, 1, all_blockers, "revise blocked series images and rerun final packaging")
     store.write_final(run_id, final_payload, final_artifact_id=accepted_artifact_ids[0] if accepted_artifact_ids else "")
     quality_report = write_quality_report(store, run_id)
+    revision_decision = write_revision_decision(store, run_id, quality_report)
     return {
         "ok": final_payload["status"] == "ready",
         "governor": "Moriana",
@@ -407,6 +413,7 @@ def execute_image_series_run(
         "final": final_payload,
         "artifacts": store.artifacts(run_id),
         "quality_report": quality_report,
+        "revision_decision": revision_decision,
     }
 
 
@@ -456,6 +463,7 @@ def execute_comic_run(
         store.write_revision(run_id, 1, blockers, "revise_panel_generation_or_layout")
     store.write_final(run_id, final_payload)
     quality_report = write_quality_report(store, run_id)
+    revision_decision = write_revision_decision(store, run_id, quality_report)
     return {
         "ok": final_payload.get("status") == "ready",
         "governor": "Moriana",
@@ -465,4 +473,5 @@ def execute_comic_run(
         "final": final_payload,
         "artifacts": store.artifacts(run_id),
         "quality_report": quality_report,
+        "revision_decision": revision_decision,
     }
