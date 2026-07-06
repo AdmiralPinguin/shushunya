@@ -3,7 +3,7 @@ from __future__ import annotations
 from math import ceil
 from typing import Any
 
-from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import require_payload, response
+from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import execution_packet, require_payload, response, revision_packet
 from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import worker_contract as base_contract
 
 
@@ -80,6 +80,21 @@ def build_layout_manifest(payload: dict[str, Any] | None) -> dict[str, Any]:
             "layout": layout,
             "final_manifest": manifest,
             "blockers": blockers,
+            "execution_packet": execution_packet(
+                worker=WORKER,
+                step="layout_manifest",
+                produced_artifacts=["/work/pictorium/layout.json", "/work/pictorium/final_manifest.json"],
+                blockers=blockers,
+                handoff=manifest["handoff"],
+            ),
+            "revision_packet": revision_packet(
+                worker=WORKER,
+                source_step="layout_manifest",
+                blockers=blockers,
+                default_target_worker="Panelwright",
+                default_target_step="panel_generation",
+                action="clear panel, character-sheet, or layout blockers and rebuild the manifest",
+            ),
         },
         ok=not blockers,
     )

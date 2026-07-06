@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from EyeOfTerror.Pictorium.Brigades.Image.worker_api import require_payload, response
+from EyeOfTerror.Pictorium.Brigades.Image.worker_api import execution_packet, require_payload, response, revision_packet
 from EyeOfTerror.Pictorium.Brigades.Image.worker_api import worker_contract as base_contract
 from EyeOfTerror.Pictorium.Moriana.moriana_core.image_evaluator import evaluate_artifact
 
@@ -54,6 +54,21 @@ def verify_image(payload: dict[str, Any] | None) -> dict[str, Any]:
                     "metadata_preview": metadata,
                 },
                 "blockers": [{"code": "artifact_not_generated", "message": "no artifact_path supplied yet"}],
+                "execution_packet": execution_packet(
+                    worker=WORKER,
+                    step="image_verification",
+                    produced_artifacts=["/work/pictorium/image_verification.json"],
+                    blockers=[{"code": "artifact_not_generated", "message": "no artifact_path supplied yet", "target_worker": "ForgeDispatcher", "target_step": "forge_dispatch"}],
+                    handoff={"artifact_present": False},
+                ),
+                "revision_packet": revision_packet(
+                    worker=WORKER,
+                    source_step="image_verification",
+                    blockers=[{"code": "artifact_not_generated", "message": "no artifact_path supplied yet", "target_worker": "ForgeDispatcher", "target_step": "forge_dispatch"}],
+                    default_target_worker="ForgeDispatcher",
+                    default_target_step="forge_dispatch",
+                    action="wait for generated artifact or resubmit the Forge job",
+                ),
             },
             ok=False,
         )
@@ -65,6 +80,21 @@ def verify_image(payload: dict[str, Any] | None) -> dict[str, Any]:
                 "artifact": "/work/pictorium/image_verification.json",
                 "verification": {"status": "missing", "artifact_path": artifact_path, "metadata_preview": metadata},
                 "blockers": [{"code": "artifact_missing", "message": f"artifact does not exist: {artifact_path}"}],
+                "execution_packet": execution_packet(
+                    worker=WORKER,
+                    step="image_verification",
+                    produced_artifacts=["/work/pictorium/image_verification.json"],
+                    blockers=[{"code": "artifact_missing", "message": f"artifact does not exist: {artifact_path}", "target_worker": "ForgeDispatcher", "target_step": "forge_dispatch"}],
+                    handoff={"artifact_present": False, "artifact_path": artifact_path},
+                ),
+                "revision_packet": revision_packet(
+                    worker=WORKER,
+                    source_step="image_verification",
+                    blockers=[{"code": "artifact_missing", "message": f"artifact does not exist: {artifact_path}", "target_worker": "ForgeDispatcher", "target_step": "forge_dispatch"}],
+                    default_target_worker="ForgeDispatcher",
+                    default_target_step="forge_dispatch",
+                    action="locate generated artifact or resubmit the Forge job",
+                ),
             },
             ok=False,
         )
@@ -72,13 +102,38 @@ def verify_image(payload: dict[str, Any] | None) -> dict[str, Any]:
     blockers = []
     dimension_match = verification.get("dimension_match") if isinstance(verification.get("dimension_match"), dict) else {}
     if dimension_match and not dimension_match.get("ok"):
-        blockers.append({"code": "dimension_mismatch", "message": "artifact dimensions do not match requested dimensions", "details": dimension_match})
+        blockers.append(
+            {
+                "code": "dimension_mismatch",
+                "message": "artifact dimensions do not match requested dimensions",
+                "details": dimension_match,
+                "target_worker": "Promptwright",
+                "target_step": "image_planning",
+                "requested_change": "regenerate with dimensions matching the job_spec",
+            }
+        )
     return response(
         WORKER,
         {
             "artifact": "/work/pictorium/image_verification.json",
             "verification": verification,
             "blockers": blockers,
+            "execution_packet": execution_packet(
+                worker=WORKER,
+                step="image_verification",
+                produced_artifacts=["/work/pictorium/image_verification.json"],
+                next_steps=[] if blockers else ["finalize"],
+                blockers=blockers,
+                handoff={"artifact_present": True, "artifact_path": artifact_path},
+            ),
+            "revision_packet": revision_packet(
+                worker=WORKER,
+                source_step="image_verification",
+                blockers=blockers,
+                default_target_worker="Promptwright",
+                default_target_step="image_planning",
+                action="regenerate or adjust prompt/parameters until verification passes",
+            ),
         },
         ok=not blockers,
     )

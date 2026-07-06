@@ -4,6 +4,7 @@ from typing import Any
 
 from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import (
     compact_title,
+    execution_packet,
     require_payload,
     requested_panel_count,
     response,
@@ -58,7 +59,20 @@ def build_scenario(payload: dict[str, Any] | None) -> dict[str, Any]:
             for index, beat in enumerate(beats)
         ],
     }
-    return response(WORKER, {"artifact": "/work/pictorium/scenario.json", "scenario": scenario})
+    return response(
+        WORKER,
+        {
+            "artifact": "/work/pictorium/scenario.json",
+            "scenario": scenario,
+            "execution_packet": execution_packet(
+                worker=WORKER,
+                step="scenario",
+                produced_artifacts=["/work/pictorium/scenario.json"],
+                next_steps=["storyboard"],
+                handoff={"panel_count": panel_count, "beat_count": len(beats)},
+            ),
+        },
+    )
 
 
 def handle(payload: dict[str, Any] | None) -> dict[str, Any]:

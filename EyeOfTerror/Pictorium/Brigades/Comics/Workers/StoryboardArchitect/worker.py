@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import require_payload, response
+from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import execution_packet, require_payload, response
 from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import worker_contract as base_contract
 
 
@@ -52,7 +52,20 @@ def build_storyboard(payload: dict[str, Any] | None) -> dict[str, Any]:
             "lettering": "separate layout stage; generated art should not contain text",
         },
     }
-    return response(WORKER, {"artifact": "/work/pictorium/storyboard.json", "storyboard": storyboard})
+    return response(
+        WORKER,
+        {
+            "artifact": "/work/pictorium/storyboard.json",
+            "storyboard": storyboard,
+            "execution_packet": execution_packet(
+                worker=WORKER,
+                step="storyboard",
+                produced_artifacts=["/work/pictorium/storyboard.json"],
+                next_steps=["character_sheet", "panel_generation"],
+                handoff={"panel_count": len(panels), "reading_order": storyboard["layout_policy"]["reading_order"]},
+            ),
+        },
+    )
 
 
 def handle(payload: dict[str, Any] | None) -> dict[str, Any]:

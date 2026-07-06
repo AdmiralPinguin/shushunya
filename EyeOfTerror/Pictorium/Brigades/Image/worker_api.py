@@ -56,5 +56,62 @@ def worker_contract(
         "callable": "handle(payload: dict) -> dict",
         "capabilities": capabilities,
         "input_fields": inputs,
-        "output_fields": outputs,
+        "output_fields": [*outputs, "execution_packet", "revision_packet"],
+    }
+
+
+def execution_packet(
+    *,
+    worker: str,
+    step: str,
+    produced_artifacts: list[str],
+    next_steps: list[str] | None = None,
+    blockers: list[dict[str, Any]] | None = None,
+    handoff: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    active_blockers = blockers or []
+    return {
+        "kind": "pictorium_worker_execution_packet",
+        "api_version": API_VERSION,
+        "worker": worker,
+        "step": step,
+        "status": "blocked" if active_blockers else "ready",
+        "produced_artifacts": produced_artifacts,
+        "next_steps": next_steps or [],
+        "blockers": active_blockers,
+        "handoff": handoff or {},
+    }
+
+
+def revision_packet(
+    *,
+    worker: str,
+    source_step: str,
+    blockers: list[dict[str, Any]],
+    default_target_worker: str,
+    default_target_step: str,
+    action: str,
+) -> dict[str, Any]:
+    issues = []
+    for index, blocker in enumerate(blockers, start=1):
+        issues.append(
+            {
+                "id": f"{source_step}_issue_{index:02d}",
+                "severity": blocker.get("severity") or "blocking",
+                "code": blocker.get("code") or "unknown_blocker",
+                "message": blocker.get("message") or "",
+                "target_worker": blocker.get("target_worker") or default_target_worker,
+                "target_step": blocker.get("target_step") or default_target_step,
+                "requested_change": blocker.get("requested_change") or action,
+                "details": blocker.get("details") or {},
+            }
+        )
+    return {
+        "kind": "pictorium_revision_packet",
+        "api_version": API_VERSION,
+        "source_worker": worker,
+        "source_step": source_step,
+        "required": bool(issues),
+        "action": action,
+        "issues": issues,
     }

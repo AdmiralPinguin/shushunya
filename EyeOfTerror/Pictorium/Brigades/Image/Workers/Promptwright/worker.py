@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from EyeOfTerror.Pictorium.Brigades.Image.worker_api import model_dump, require_payload, response
+from EyeOfTerror.Pictorium.Brigades.Image.worker_api import execution_packet, model_dump, require_payload, response
 from EyeOfTerror.Pictorium.Brigades.Image.worker_api import task_text as payload_task_text
 from EyeOfTerror.Pictorium.Brigades.Image.worker_api import worker_contract as base_contract
 from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import PlanRequest, ProjectPlanRequest
@@ -54,6 +54,13 @@ def prepare_image_plan(payload: dict[str, Any] | None) -> dict[str, Any]:
                 "artifact": "/work/pictorium/image_plan.json",
                 "project_spec": model_dump(project),
                 "job_spec": model_dump(project.steps[0].spec) if project.steps else {},
+                "execution_packet": execution_packet(
+                    worker=WORKER,
+                    step="image_planning",
+                    produced_artifacts=["/work/pictorium/image_plan.json"],
+                    next_steps=["resource_readiness"],
+                    handoff={"plan_kind": "project", "project_step_count": len(project.steps)},
+                ),
             },
         )
     spec = plan_txt2img(
@@ -70,6 +77,13 @@ def prepare_image_plan(payload: dict[str, Any] | None) -> dict[str, Any]:
             "plan_kind": "job",
             "artifact": "/work/pictorium/image_plan.json",
             "job_spec": model_dump(spec),
+            "execution_packet": execution_packet(
+                worker=WORKER,
+                step="image_planning",
+                produced_artifacts=["/work/pictorium/image_plan.json"],
+                next_steps=["resource_readiness"],
+                handoff={"plan_kind": "job", "prompt_ready": bool(spec.prompt)},
+            ),
         },
     )
 

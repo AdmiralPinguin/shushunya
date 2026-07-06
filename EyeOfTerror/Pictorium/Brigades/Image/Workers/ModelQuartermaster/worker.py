@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from EyeOfTerror.Pictorium.Brigades.Image.worker_api import require_payload, response
+from EyeOfTerror.Pictorium.Brigades.Image.worker_api import execution_packet, require_payload, response, revision_packet
 from EyeOfTerror.Pictorium.Brigades.Image.worker_api import worker_contract as base_contract
 from EyeOfTerror.Pictorium.Moriana.moriana_core.asset_catalog import asset_profiles, capabilities
 
@@ -75,6 +75,22 @@ def inspect_resources(payload: dict[str, Any] | None = None) -> dict[str, Any]:
             "capabilities": caps,
             "resource_report": report,
             "blockers": engine_report["blockers"],
+            "execution_packet": execution_packet(
+                worker=WORKER,
+                step="resource_readiness",
+                produced_artifacts=["/work/pictorium/resource_report.json"],
+                next_steps=[] if engine_report["blockers"] else ["forge_dispatch"],
+                blockers=engine_report["blockers"],
+                handoff={"engine": engine_report["engine"], "model": engine_report["model"]},
+            ),
+            "revision_packet": revision_packet(
+                worker=WORKER,
+                source_step="resource_readiness",
+                blockers=engine_report["blockers"],
+                default_target_worker="ModelQuartermaster",
+                default_target_step="resource_readiness",
+                action="choose available model, remove unsupported LoRA/negative prompt, or request asset approval",
+            ),
         },
         ok=not engine_report["blockers"],
     )

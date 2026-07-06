@@ -5,9 +5,11 @@ from typing import Any
 
 from EyeOfTerror.Pictorium.Brigades.Image.worker_api import (
     API_VERSION,
+    execution_packet,
     model_dump,
     require_payload,
     response,
+    revision_packet,
     task_text,
     worker_contract,
 )
@@ -54,10 +56,12 @@ def split_beats(text: str, count: int) -> list[str]:
 __all__ = [
     "API_VERSION",
     "compact_title",
+    "execution_packet",
     "model_dump",
     "requested_panel_count",
     "require_payload",
     "response",
+    "revision_packet",
     "split_beats",
     "task_text",
     "worker_contract",
