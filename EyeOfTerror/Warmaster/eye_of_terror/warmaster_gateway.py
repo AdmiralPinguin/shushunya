@@ -19,7 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from EyeOfTerror.model_brain import attach_model_brain, request_model_decision, skipped_model_decision
+from EyeOfTerror.model_brain import attach_model_brain, request_model_decision
 
 from .contracts import validate_task_contract_payload
 from .inner_circle.ceraxia import plan_code_task
@@ -191,13 +191,6 @@ from .runtime_state import (
 
 
 def gateway_model_decision(operation: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if bool(payload.get("skip_model_decision")):
-        return skipped_model_decision(
-            "WarmasterGateway",
-            "top-level orchestration gateway",
-            layer="gateway_service",
-            reason="Skipped by caller; task is already explicitly routed to Warmaster.",
-        )
     request = dict(payload)
     request["operation"] = operation
     return request_model_decision(
@@ -206,6 +199,18 @@ def gateway_model_decision(operation: str, payload: dict[str, Any]) -> dict[str,
         request,
         layer="gateway_service",
         instructions="Route and supervise the task at gateway level. Identify the governor, execution path, and immediate orchestration risk without doing worker-specific work.",
+    )
+
+
+def gateway_model_required_payload(model_decision: dict[str, Any]) -> dict[str, Any]:
+    return attach_model_brain(
+        {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "error": "gateway model brain did not answer",
+            "error_code": "model_brain_unavailable",
+        },
+        model_decision,
     )
 
 
@@ -597,6 +602,9 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                 payload = read_payload(self)
                 if self.path == "/orchestrate":
                     model_decision = gateway_model_decision("orchestrate", payload)
+                    if not model_decision.get("ok"):
+                        response(self, 503, gateway_model_required_payload(model_decision))
+                        return
                     message = str(payload.get("message") or payload.get("task") or "").strip()
                     if not message:
                         response(self, 400, {"ok": False, "error": "message is required"})
@@ -618,13 +626,15 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         host=host,
                         timeout_sec=timeout_sec,
                         include_brigade_health=include_brigade_health,
-                        skip_governor_model_decision=bool(payload.get("skip_model_decision")),
                     )
                     prepared = attach_model_brain(prepared, model_decision)
                     response(self, 200 if prepared.get("ok") else 409, prepared)
                     return
                 if self.path == "/orchestrate_start":
                     model_decision = gateway_model_decision("orchestrate_start", payload)
+                    if not model_decision.get("ok"):
+                        response(self, 503, gateway_model_required_payload(model_decision))
+                        return
                     task_id = str(payload.get("task_id") or "").strip()
                     if not task_id:
                         response(self, 400, {"ok": False, "error": "task_id is required"})
@@ -648,6 +658,9 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     return
                 if self.path == "/orchestrate_run":
                     model_decision = gateway_model_decision("orchestrate_run", payload)
+                    if not model_decision.get("ok"):
+                        response(self, 503, gateway_model_required_payload(model_decision))
+                        return
                     message = str(payload.get("message") or payload.get("task") or "").strip()
                     if not message:
                         response(self, 400, {"ok": False, "error": "message is required"})
@@ -673,7 +686,6 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         auto_start=auto_start,
                         force=bool(payload.get("force")),
                         reuse_existing=bool(payload.get("reuse_existing", True)),
-                        skip_governor_model_decision=bool(payload.get("skip_model_decision")),
                     )
                     submitted = attach_model_brain(submitted, model_decision)
                     if submitted.get("ok") and submitted.get("phase") == "started":
@@ -683,6 +695,9 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     return
                 if self.path == "/task":
                     model_decision = gateway_model_decision("task", payload)
+                    if not model_decision.get("ok"):
+                        response(self, 503, gateway_model_required_payload(model_decision))
+                        return
                     message = str(payload.get("message") or payload.get("task") or "").strip()
                     if not message:
                         response(self, 400, {"ok": False, "error": "message is required"})
@@ -697,6 +712,9 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     return
                 if self.path == "/task_preflight":
                     model_decision = gateway_model_decision("task_preflight", payload)
+                    if not model_decision.get("ok"):
+                        response(self, 503, gateway_model_required_payload(model_decision))
+                        return
                     message = str(payload.get("message") or payload.get("task") or "").strip()
                     if not message:
                         response(self, 400, {"ok": False, "error": "message is required"})
@@ -719,6 +737,9 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     return
                 if self.path == "/campaign_preflight":
                     model_decision = gateway_model_decision("campaign_preflight", payload)
+                    if not model_decision.get("ok"):
+                        response(self, 503, gateway_model_required_payload(model_decision))
+                        return
                     message = str(payload.get("message") or payload.get("task") or "").strip()
                     if not message:
                         response(self, 400, {"ok": False, "error": "message is required"})
@@ -730,6 +751,9 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     return
                 if self.path == "/campaign":
                     model_decision = gateway_model_decision("campaign", payload)
+                    if not model_decision.get("ok"):
+                        response(self, 503, gateway_model_required_payload(model_decision))
+                        return
                     message = str(payload.get("message") or payload.get("task") or "").strip()
                     if not message:
                         response(self, 400, {"ok": False, "error": "message is required"})

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
+
+from EyeOfTerror.model_brain import request_model_decision
 
 from .governors import governor_refs
 
@@ -17,6 +20,9 @@ class RouteDecision:
     supporting_governors: list[dict[str, Any]] = field(default_factory=list)
     inactive_matches: list[dict[str, Any]] = field(default_factory=list)
     requires_decomposition: bool = False
+    error_code: str = ""
+    model_brain: dict[str, Any] = field(default_factory=dict)
+    llm_route: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -28,6 +34,9 @@ class RouteDecision:
             "supporting_governors": self.supporting_governors,
             "inactive_matches": self.inactive_matches,
             "requires_decomposition": self.requires_decomposition,
+            "error_code": self.error_code,
+            "model_brain": self.model_brain,
+            "llm_route": self.llm_route,
         }
 
 
@@ -78,7 +87,7 @@ def route_kind_for(governor: Any, lowered_message: str) -> str:
     return kinds[0] if kinds else "general"
 
 
-def route_message(message: str) -> RouteDecision:
+def route_candidates(message: str) -> dict[str, Any]:
     lowered = message.lower()
     candidates = []
     for governor in governor_refs():
@@ -86,8 +95,6 @@ def route_message(message: str) -> RouteDecision:
         if not matched_terms:
             continue
         candidates.append((len(matched_terms), governor, matched_terms))
-    if not candidates:
-        return RouteDecision(False, "", "general", "no supported governor matched")
     matched_governors = [
         {
             "name": governor.name,
@@ -99,47 +106,170 @@ def route_message(message: str) -> RouteDecision:
         }
         for score, governor, matched_terms in sorted(candidates, key=lambda item: item[0], reverse=True)
     ]
-    # Prefer the best-scoring active governor so a stronger match on an inactive
-    # (planned) governor never blocks a task an active governor could handle.
-    active_candidates = [item for item in candidates if item[1].active()]
-    if active_candidates:
-        active_ranked = sorted(active_candidates, key=lambda item: item[0], reverse=True)
-        _, governor, matched_terms = active_ranked[0]
-        kind = route_kind_for(governor, lowered)
-        supporting = [
-            {
-                "name": candidate.name,
-                "kind": route_kind_for(candidate, lowered),
-                "score": score,
-                "matched_terms": terms,
+    return {
+        "matched_governors": matched_governors,
+        "inactive_matches": [item for item in matched_governors if not item["active"]],
+        "active_matches": [item for item in matched_governors if item["active"]],
+    }
+
+
+def _extract_json_object(text: str) -> dict[str, Any]:
+    stripped = text.strip()
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, flags=re.DOTALL)
+    if fenced:
+        stripped = fenced.group(1).strip()
+    elif "{" in stripped and "}" in stripped:
+        stripped = stripped[stripped.find("{") : stripped.rfind("}") + 1]
+    parsed = json.loads(stripped)
+    if not isinstance(parsed, dict):
+        raise ValueError("router response is not a JSON object")
+    return parsed
+
+
+def _governor_payload(governor_name: str) -> dict[str, Any]:
+    for governor in governor_refs():
+        if governor.name == governor_name:
+            return {
+                "name": governor.name,
+                "status": governor.status,
+                "active": governor.active(),
+                "service": governor.service,
+                "port": governor.port,
+                "task_kinds": list(governor.task_kinds),
+                "kind": list(governor.task_kinds)[0] if governor.task_kinds else "general",
             }
-            for score, candidate, terms in active_ranked[1:]
-            if candidate.name != governor.name
-            and has_strategic_support_signal(terms)
-        ]
-        requires_decomposition = bool(supporting)
-        reason = f"route terms matched for {governor.name}: {', '.join(matched_terms[:5])}"
-        if requires_decomposition:
-            reason = f"multi-governor task: primary {governor.name}; supporting governors: {', '.join(item['name'] for item in supporting)}"
-        inactive = [item for item in matched_governors if not item["active"]]
+    return {}
+
+
+def _known_governors() -> list[dict[str, Any]]:
+    return [
+        {
+            "name": governor.name,
+            "status": governor.status,
+            "active": governor.active(),
+            "service": governor.service,
+            "port": governor.port,
+            "task_kinds": list(governor.task_kinds),
+        }
+        for governor in governor_refs()
+    ]
+
+
+def _supporting_payload(names: Any) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    if not isinstance(names, list):
+        return result
+    for item in names:
+        name = item.get("name") if isinstance(item, dict) else item
+        if not isinstance(name, str) or not name.strip():
+            continue
+        payload = _governor_payload(name.strip())
+        if payload:
+            result.append(payload)
+    return result
+
+
+def route_message(message: str) -> RouteDecision:
+    candidates = route_candidates(message)
+    model_decision = request_model_decision(
+        "WarmasterRouter",
+        "LLM-first task routing governor selector",
+        {
+            "message": message,
+            "candidate_hints": candidates,
+            "known_governors": _known_governors(),
+            "required_json_schema": {
+                "ok": "boolean",
+                "governor": "IskandarKhayon | Ceraxia | Moriana | empty string",
+                "kind": "research | code | image_generation | image_series_generation | comic_generation | general",
+                "requires_decomposition": "boolean",
+                "supporting_governors": ["governor names if the task must be split"],
+                "reason": "short concrete reason",
+            },
+        },
+        layer="routing_service",
+        instructions=(
+            "You are the only authority for routing this task. The candidate_hints are advisory, not binding. "
+            "Return one strict JSON object and nothing else. Route lore, research, source reconstruction, translation, "
+            "and writing synthesis to IskandarKhayon. Route software creation, repair, architecture, tests, and repo work "
+            "to Ceraxia. Route image generation, drawing tools, Stable Diffusion, comics, panels, and image series to Moriana. "
+            "If the user asks for multiple active departments, set requires_decomposition=true with a primary governor and "
+            "supporting_governors. If no department should accept it, return ok=false."
+        ),
+    )
+    if not model_decision.get("ok"):
         return RouteDecision(
-            True,
-            governor.name,
-            kind,
-            reason,
-            matched_governors=matched_governors,
-            supporting_governors=supporting,
-            inactive_matches=inactive,
-            requires_decomposition=requires_decomposition,
+            False,
+            "",
+            "general",
+            "model router unavailable; deterministic routing fallback is forbidden",
+            matched_governors=candidates["matched_governors"],
+            inactive_matches=candidates["inactive_matches"],
+            error_code="model_router_unavailable",
+            model_brain=model_decision,
         )
-    # Only inactive governors matched: report the strongest one for a useful hint.
-    _, governor, matched_terms = max(candidates, key=lambda item: item[0])
-    kind = route_kind_for(governor, lowered)
+    try:
+        llm_route = _extract_json_object(str(model_decision.get("content") or ""))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        return RouteDecision(
+            False,
+            "",
+            "general",
+            f"model router returned invalid route JSON: {exc}",
+            matched_governors=candidates["matched_governors"],
+            inactive_matches=candidates["inactive_matches"],
+            error_code="invalid_model_route",
+            model_brain=model_decision,
+        )
+    reason = str(llm_route.get("reason") or "model router declined route").strip()
+    if not bool(llm_route.get("ok")):
+        return RouteDecision(
+            False,
+            str(llm_route.get("governor") or ""),
+            str(llm_route.get("kind") or "general"),
+            reason,
+            matched_governors=candidates["matched_governors"],
+            inactive_matches=candidates["inactive_matches"],
+            error_code="model_declined_route",
+            model_brain=model_decision,
+            llm_route=llm_route,
+        )
+    governor_name = str(llm_route.get("governor") or "").strip()
+    governor_payload = _governor_payload(governor_name)
+    if not governor_payload:
+        return RouteDecision(
+            False,
+            governor_name,
+            str(llm_route.get("kind") or "general"),
+            f"model router selected unknown governor: {governor_name}",
+            matched_governors=candidates["matched_governors"],
+            inactive_matches=candidates["inactive_matches"],
+            error_code="unknown_model_governor",
+            model_brain=model_decision,
+            llm_route=llm_route,
+        )
+    if not governor_payload.get("active"):
+        return RouteDecision(
+            False,
+            governor_name,
+            str(llm_route.get("kind") or governor_payload.get("kind") or "general"),
+            f"model router selected inactive governor: {governor_name}",
+            matched_governors=candidates["matched_governors"],
+            inactive_matches=candidates["inactive_matches"] or [governor_payload],
+            error_code="governor_inactive",
+            model_brain=model_decision,
+            llm_route=llm_route,
+        )
+    supporting = _supporting_payload(llm_route.get("supporting_governors"))
     return RouteDecision(
-        False,
-        governor.name,
-        kind,
-        f"governor is not active: {governor.name}",
-        matched_governors=matched_governors,
-        inactive_matches=matched_governors,
+        True,
+        governor_name,
+        str(llm_route.get("kind") or governor_payload.get("kind") or "general"),
+        reason,
+        matched_governors=candidates["matched_governors"],
+        supporting_governors=supporting,
+        inactive_matches=candidates["inactive_matches"],
+        requires_decomposition=bool(llm_route.get("requires_decomposition")) and bool(supporting),
+        model_brain=model_decision,
+        llm_route=llm_route,
     )

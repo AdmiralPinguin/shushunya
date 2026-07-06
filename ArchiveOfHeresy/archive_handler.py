@@ -718,12 +718,11 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             "task_id": task_id,
             "auto_start": True,
             "reuse_existing": True,
-            "skip_model_decision": True,
             "run_mode": str(payload.get("run_mode") or "http"),
             "governor_transport": str(payload.get("governor_transport") or "http"),
         }
         try:
-            status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=60)
+            status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=240)
             response_status = response.get("status") if isinstance(response.get("status"), dict) else {}
             resolved_task_id = str(response.get("task_id") or response_status.get("task_id") or task_id)
             append_chat_message(
@@ -911,11 +910,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             "task_id": task_id,
             "auto_start": True,
             "reuse_existing": True,
-            "skip_model_decision": True,
             "run_mode": str(payload.get("run_mode") or "http"),
             "governor_transport": str(payload.get("governor_transport") or "http"),
         }
-        status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=60)
+        status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=240)
         response_status = response.get("status") if isinstance(response.get("status"), dict) else {}
         resolved_task_id = str(response.get("task_id") or response_status.get("task_id") or task_id).strip()
 

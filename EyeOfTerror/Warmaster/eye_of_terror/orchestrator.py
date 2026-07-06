@@ -186,7 +186,6 @@ def orchestrate_prepare_task(
     host: str = "127.0.0.1",
     timeout_sec: int = 30,
     include_brigade_health: bool = False,
-    skip_governor_model_decision: bool = False,
 ) -> dict[str, Any]:
     if run_mode not in {"local", "http"}:
         raise ValueError("run_mode must be local or http")
@@ -218,7 +217,6 @@ def orchestrate_prepare_task(
         run_root,
         governor_transport=governor_transport,
         governor_host=governor_host,
-        skip_governor_model_decision=skip_governor_model_decision,
     )
     task_actions = task.get("actions") if isinstance(task.get("actions"), dict) else {}
     trace.append({"stage": "task", "ok": bool(task.get("ok")), "task_id": str(task.get("task_id") or ""), "next_action": task_actions.get("next_action", {})})
@@ -296,7 +294,6 @@ def orchestrate_run_task(
     auto_start: bool = True,
     force: bool = False,
     reuse_existing: bool = True,
-    skip_governor_model_decision: bool = False,
 ) -> dict[str, Any]:
     prepare_timeout_sec = max(1, min(int(timeout_sec), 7200))
     prepared = orchestrate_prepare_task(
@@ -309,7 +306,6 @@ def orchestrate_run_task(
         host=host,
         timeout_sec=min(prepare_timeout_sec, 300),
         include_brigade_health=include_brigade_health,
-        skip_governor_model_decision=skip_governor_model_decision,
     )
     trace = list(prepared.get("trace") if isinstance(prepared.get("trace"), list) else [])
     run_task_id = str(prepared.get("task_id") or task_id or "")

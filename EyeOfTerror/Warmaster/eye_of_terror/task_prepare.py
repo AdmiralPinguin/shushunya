@@ -40,12 +40,11 @@ def prepare_task_via_governor_service(
     governor: Any,
     host: str = "127.0.0.1",
     port: int | None = None,
-    skip_model_decision: bool = False,
 ) -> dict[str, Any]:
     host = validate_service_host(host)
     service_port = int(port or governor.port)
     base = f"http://{host}:{service_port}"
-    governor_payload = {"task": message, "task_id": task_id or "", "skip_model_decision": bool(skip_model_decision)}
+    governor_payload = {"task": message, "task_id": task_id or ""}
     try:
         plan = post_json(base + "/plan", governor_payload)
     except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
@@ -163,7 +162,7 @@ def prepare_task_via_governor_service(
     try:
         prepared = post_json(
             base + "/prepare_run",
-            {"task": message, "task_id": service_task_id, "run_dir": str(run_dir), "skip_model_decision": bool(skip_model_decision)},
+            {"task": message, "task_id": service_task_id, "run_dir": str(run_dir)},
         )
     except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
         return {
@@ -217,7 +216,7 @@ def prepare_task_via_governor_service(
 
 
 def route_failure_payload(route: Any) -> dict[str, Any]:
-    error_code = "governor_inactive" if route.governor else "no_supported_governor"
+    error_code = str(getattr(route, "error_code", "") or ("governor_inactive" if route.governor else "no_supported_governor"))
     required_governor: dict[str, Any] = {}
     if route.governor:
         governor_ref = governor_by_name(str(route.governor))
@@ -276,7 +275,6 @@ def prepare_task(
     governor_transport: str = "local",
     governor_host: str = "127.0.0.1",
     forced_governor: str | None = None,
-    skip_governor_model_decision: bool = False,
 ) -> dict[str, Any]:
     if task_id is not None and not valid_task_id(task_id):
         return {
@@ -332,7 +330,6 @@ def prepare_task(
             run_root,
             governor_ref,
             host=governor_host,
-            skip_model_decision=skip_governor_model_decision,
         )
     if governor_transport != "local":
         return {

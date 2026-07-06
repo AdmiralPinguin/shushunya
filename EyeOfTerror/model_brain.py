@@ -67,18 +67,6 @@ def model_contract(owner: str, role: str, *, layer: str = "worker") -> dict[str,
     }
 
 
-def skipped_model_decision(owner: str, role: str, *, layer: str = "worker", reason: str = "Skipped by caller.") -> dict[str, Any]:
-    return {
-        **model_contract(owner, role, layer=layer),
-        "ok": True,
-        "status": "skipped",
-        "elapsed_ms": 0,
-        "content": reason,
-        "finish_reason": "skipped",
-        "error": "",
-    }
-
-
 def compact_json(value: Any, max_chars: int) -> str:
     try:
         text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
