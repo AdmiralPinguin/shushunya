@@ -83,6 +83,7 @@ def py_compile() -> dict[str, Any]:
         "../EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.py",
         "../EyeOfTerror/Pictorium/Moriana/forge_tests/smoke_forge_api.py",
         "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_e2e_self_test.py",
+        "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_quality_trials.py",
         "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_service_self_test.py",
         "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_runtime_self_test.py",
     ]
@@ -96,6 +97,22 @@ def py_compile() -> dict[str, Any]:
 def smoke_test() -> dict[str, Any]:
     runpy.run_path(str(TESTS_ROOT / "smoke_forge_api.py"), run_name="__main__")
     return {"script": "EyeOfTerror/Pictorium/Moriana/forge_tests/smoke_forge_api.py"}
+
+
+def moriana_quality_trials() -> dict[str, Any]:
+    completed = subprocess.run(
+        [
+            str(ROOT / "DemonsForge/bin/python"),
+            "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_quality_trials.py",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        timeout=120,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError((completed.stderr or completed.stdout).strip())
+    return {"script": "EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_quality_trials.py", "stdout": completed.stdout.strip()}
 
 
 def live_quality_dry_run(base_url: str) -> dict[str, Any]:
@@ -173,6 +190,7 @@ def _main() -> int:
     }
     report["steps"].append(run_step("py_compile", py_compile))
     report["steps"].append(run_step("smoke_test", smoke_test))
+    report["steps"].append(run_step("moriana_quality_trials", moriana_quality_trials))
     if not args.skip_live:
         live_step = run_step("live_quality_bench_dry_run", lambda: live_quality_dry_run(args.base_url.rstrip("/")))
         if args.require_live or live_step["ok"]:
