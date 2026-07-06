@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -28,6 +29,10 @@ from .timeutil import DEFAULT_TZ, next_run_after, now_iso, parse_datetime
 
 
 MORNING_SUMMARY_DEDUPE = "routine:administratum-morning-summary"
+
+ARCHIVE_HEALTH_URL = os.environ.get("ADMINISTRATUM_ARCHIVE_HEALTH_URL", "http://127.0.0.1:8090/health")
+WARMASTER_HEALTH_URL = os.environ.get("ADMINISTRATUM_WARMASTER_HEALTH_URL", "http://127.0.0.1:7000/health")
+LLM_HEALTH_URL = os.environ.get("ADMINISTRATUM_LLM_HEALTH_URL", "http://127.0.0.1:8080/health")
 
 
 def ensure_default_routines(db_path: Path) -> None:
@@ -63,6 +68,30 @@ def morning_summary_payload(db_path: Path) -> dict[str, Any]:
         "running_tasks": [task for task in tasks if task.get("status") == "running"][:20],
         "watches": watches[:20],
         "recent_journal": journal[:20],
+        "service_health": service_health_payload(),
+    }
+
+
+def check_http_health(name: str, url: str, timeout: float = 5.0) -> dict[str, Any]:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            data = response.read(8192).decode("utf-8", errors="replace")
+            payload = {}
+            try:
+                payload = json.loads(data) if data else {}
+            except json.JSONDecodeError:
+                payload = {"raw": data[:500]}
+            return {"name": name, "ok": 200 <= int(response.status) < 300, "status": int(response.status), "url": url, "payload": payload}
+    except Exception as exc:  # noqa: BLE001
+        return {"name": name, "ok": False, "url": url, "error": str(exc)}
+
+
+def service_health_payload() -> dict[str, Any]:
+    return {
+        "archive": check_http_health("ArchiveOfHeresy", ARCHIVE_HEALTH_URL),
+        "warmaster": check_http_health("Warmaster", WARMASTER_HEALTH_URL),
+        "llm": check_http_health("LLM", LLM_HEALTH_URL),
+        "administratum": {"name": "Administratum", "ok": True, "service": "AshurKai heartbeat"},
     }
 
 
