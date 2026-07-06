@@ -81,9 +81,18 @@ Application-facing endpoints:
 
 - `POST /runs`
 - `GET /runs`
+- `GET /runs/{run_id}` for one application-friendly run card with status,
+  artifact summary, artifacts, final manifest, quality report, and revision
+  decision.
 - `GET /runs/{run_id}/status`
-- `GET /runs/{run_id}/artifacts`
+- `GET /runs/{run_id}/artifacts` with optional `type`, `status`, `step`, and
+  `created_by` filters.
 - `GET /runs/{run_id}/final`
+- `GET /runs/{run_id}/quality`
+- `GET /runs/{run_id}/revision-decision`
+- `POST /runs/{run_id}/audit`
+- `POST /runs/{run_id}/decide_revision`
+- `POST /runs/{run_id}/apply_revision`
 - `POST /runs/{run_id}/revise`
 - `POST /runs/{run_id}/accept`
 

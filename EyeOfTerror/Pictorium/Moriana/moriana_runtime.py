@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -304,6 +305,26 @@ class MorianaRunStore:
         registry = self.registry(run_id)
         return [item for item in registry.get("artifacts", []) if isinstance(item, dict)]
 
+    def artifact_summary(self, run_id: str) -> dict[str, Any]:
+        artifacts = self.artifacts(run_id)
+        by_status = Counter(str(item.get("status") or "unknown") for item in artifacts)
+        by_type = Counter(str(item.get("type") or "unknown") for item in artifacts)
+        accepted_visuals = [
+            item
+            for item in artifacts
+            if item.get("type") in {"image", "comic_panel"} and item.get("status") == "accepted"
+        ]
+        rejected = [item for item in artifacts if item.get("status") == "rejected"]
+        return {
+            "total": len(artifacts),
+            "by_status": dict(sorted(by_status.items())),
+            "by_type": dict(sorted(by_type.items())),
+            "accepted_visual_artifact_count": len(accepted_visuals),
+            "accepted_visual_artifact_ids": [str(item.get("artifact_id") or "") for item in accepted_visuals],
+            "rejected_artifact_count": len(rejected),
+            "latest_artifact_id": str(artifacts[-1].get("artifact_id") or "") if artifacts else "",
+        }
+
     def write_error(self, run_id: str, step: str, error: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
         status = self.status(run_id)
         error_count = int(status.get("error_count") or 0) + 1
@@ -387,9 +408,16 @@ class MorianaRunStore:
             status="final",
             metadata={"status": payload.get("status"), "final_artifact_id": final_artifact_id},
         )
+        handoff = payload.get("handoff") if isinstance(payload.get("handoff"), dict) else {}
+        if payload.get("status") == "ready":
+            run_status = "completed"
+        elif handoff.get("requires_revision") or payload.get("blockers"):
+            run_status = "revising"
+        else:
+            run_status = "failed"
         self.set_status(
             run_id,
-            "completed" if payload.get("status") == "ready" else "failed",
+            run_status,
             "final manifest written",
             final_artifact_id=final_artifact_id or artifact["artifact_id"],
         )
@@ -398,6 +426,20 @@ class MorianaRunStore:
     def final_result(self, run_id: str) -> dict[str, Any]:
         path = self.run_dir(run_id) / "final" / "final_manifest.json"
         return read_json(path, {"ok": False, "run_id": run_id, "error": "final result is not ready"})
+
+    def run_detail(self, run_id: str) -> dict[str, Any]:
+        status = self.status(run_id)
+        run_dir = self.run_dir(run_id)
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "status": status,
+            "artifact_summary": self.artifact_summary(run_id),
+            "artifacts": self.artifacts(run_id),
+            "final": self.final_result(run_id),
+            "quality_report": read_json(run_dir / "final" / "quality_report.json", {"ok": False, "run_id": run_id, "error": "quality report is not ready"}),
+            "revision_decision": read_json(run_dir / "final" / "revision_decision.json", {"ok": False, "run_id": run_id, "error": "revision decision is not ready"}),
+        }
 
     def request_revision(self, run_id: str, reason: str) -> dict[str, Any]:
         artifacts = self.artifacts(run_id)

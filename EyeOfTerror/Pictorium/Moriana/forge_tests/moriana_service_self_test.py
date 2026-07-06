@@ -52,6 +52,7 @@ def _main() -> int:
                 or capabilities.get("governor") != "Moriana"
                 or "ScenarioScribe" not in capabilities.get("required_workers", [])
                 or "Promptwright" not in capabilities.get("required_workers", [])
+                or "GET /runs/{run_id}" not in capabilities.get("endpoints", [])
                 or "GET /runs/{run_id}/revision-decision" not in capabilities.get("endpoints", [])
                 or "POST /runs/{run_id}/apply_revision" not in capabilities.get("endpoints", [])
             ):
@@ -99,6 +100,19 @@ def _main() -> int:
             artifacts = request_json(base, "GET", "/runs/moriana-http-exec-image/artifacts")
             if not artifacts.get("artifacts"):
                 raise AssertionError(f"bad /runs/{{id}}/artifacts payload: {artifacts}")
+            detail = request_json(base, "GET", "/runs/moriana-http-exec-image")
+            if (
+                detail.get("status", {}).get("status") != "completed"
+                or detail.get("artifact_summary", {}).get("accepted_visual_artifact_count") != 1
+                or detail.get("quality_report", {}).get("next_action") != "accept_final"
+            ):
+                raise AssertionError(f"bad /runs/{{id}} detail payload: {detail}")
+            filtered_artifacts = request_json(base, "GET", "/runs/moriana-http-exec-image/artifacts?type=image&status=accepted")
+            if (
+                filtered_artifacts.get("filters", {}).get("status") != "accepted"
+                or len(filtered_artifacts.get("artifacts", [])) != 1
+            ):
+                raise AssertionError(f"bad filtered /runs/{{id}}/artifacts payload: {filtered_artifacts}")
             final = request_json(base, "GET", "/runs/moriana-http-exec-image/final")
             if final.get("final", {}).get("status") != "ready":
                 raise AssertionError(f"bad /runs/{{id}}/final payload: {final}")

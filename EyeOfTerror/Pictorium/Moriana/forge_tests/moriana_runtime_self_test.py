@@ -172,8 +172,8 @@ def _main() -> int:
             },
         )
         failure_dir = Path(str(failure["run_dir"]))
-        if failure.get("ok") or load_json(failure_dir / "status.json").get("status") != "failed":
-            raise AssertionError(f"missing-artifact run should be explicit failed/pending blocker: {failure}")
+        if failure.get("ok") or load_json(failure_dir / "status.json").get("status") != "revising":
+            raise AssertionError(f"missing-artifact run should stay in revising state with an explicit pending blocker: {failure}")
         if not (failure_dir / "revisions" / "revision_01.json").exists():
             raise AssertionError("failed image run did not write revision plan")
         failure_quality = load_json(failure_dir / "final" / "quality_report.json")
@@ -345,6 +345,20 @@ def _main() -> int:
             artifacts = request_json(base, "GET", "/runs/http-image/artifacts")
             if not artifacts.get("artifacts"):
                 raise AssertionError(f"HTTP artifacts failed: {artifacts}")
+            detail = request_json(base, "GET", "/runs/http-image")
+            if (
+                detail.get("status", {}).get("status") != "completed"
+                or detail.get("artifact_summary", {}).get("accepted_visual_artifact_count") != 1
+                or detail.get("quality_report", {}).get("next_action") != "accept_final"
+            ):
+                raise AssertionError(f"HTTP run detail failed: {detail}")
+            filtered_artifacts = request_json(base, "GET", "/runs/http-image/artifacts?type=image&status=accepted")
+            if (
+                filtered_artifacts.get("filters", {}).get("type") != "image"
+                or len(filtered_artifacts.get("artifacts", [])) != 1
+                or filtered_artifacts.get("artifacts", [{}])[0].get("status") != "accepted"
+            ):
+                raise AssertionError(f"HTTP filtered artifacts failed: {filtered_artifacts}")
             final = request_json(base, "GET", "/runs/http-image/final")
             if final.get("final", {}).get("status") != "ready":
                 raise AssertionError(f"HTTP final failed: {final}")

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -355,8 +355,9 @@ def service_capabilities() -> dict[str, Any]:
             "POST /prepare_run",
             "POST /runs",
             "GET /runs",
+            "GET /runs/{run_id}",
             "GET /runs/{run_id}/status",
-            "GET /runs/{run_id}/artifacts",
+            "GET /runs/{run_id}/artifacts?type=image&status=accepted",
             "GET /runs/{run_id}/final",
             "GET /runs/{run_id}/quality",
             "GET /runs/{run_id}/revision-decision",
@@ -475,6 +476,23 @@ def payload_from(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     return payload
 
 
+def filter_artifacts(artifacts: list[dict[str, Any]], query: dict[str, list[str]]) -> list[dict[str, Any]]:
+    artifact_type = (query.get("type") or [""])[0]
+    status = (query.get("status") or [""])[0]
+    step = (query.get("step") or [""])[0]
+    created_by = (query.get("created_by") or [""])[0]
+    result = artifacts
+    if artifact_type:
+        result = [item for item in result if str(item.get("type") or "") == artifact_type]
+    if status:
+        result = [item for item in result if str(item.get("status") or "") == status]
+    if step:
+        result = [item for item in result if str(item.get("step") or "") == step]
+    if created_by:
+        result = [item for item in result if str(item.get("created_by") or "") == created_by]
+    return result
+
+
 def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
     class MorianaHandler(BaseHTTPRequestHandler):
         server_version = "Moriana/0.1"
@@ -499,6 +517,14 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                 response(self, 200, {"ok": True, "governor": GOVERNOR, "runs": store.list_runs()})
                 return
             parts = [part for part in path.split("/") if part]
+            if len(parts) == 2 and parts[0] == "runs":
+                try:
+                    detail = store.run_detail(parts[1])
+                    response(self, 200, {"ok": True, "governor": GOVERNOR, **detail})
+                    return
+                except FileNotFoundError:
+                    response(self, 404, {"ok": False, "governor": GOVERNOR, "error": "run not found", "run_id": parts[1]})
+                    return
             if len(parts) == 3 and parts[0] == "runs":
                 run_id = parts[1]
                 try:
@@ -506,7 +532,20 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                         response(self, 200, {"ok": True, "governor": GOVERNOR, "status": store.status(run_id)})
                         return
                     if parts[2] == "artifacts":
-                        response(self, 200, {"ok": True, "governor": GOVERNOR, "run_id": run_id, "artifacts": store.artifacts(run_id)})
+                        query = parse_qs(parsed.query)
+                        artifacts = filter_artifacts(store.artifacts(run_id), query)
+                        response(
+                            self,
+                            200,
+                            {
+                                "ok": True,
+                                "governor": GOVERNOR,
+                                "run_id": run_id,
+                                "filters": {key: values[0] for key, values in query.items() if values},
+                                "artifact_summary": store.artifact_summary(run_id),
+                                "artifacts": artifacts,
+                            },
+                        )
                         return
                     if parts[2] == "final":
                         final = store.final_result(run_id)
