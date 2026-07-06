@@ -44,6 +44,7 @@ SHARED_MEMORY_NAMESPACE = os.environ.get("ARCHIVE_SHARED_MEMORY_NAMESPACE", "shu
 TELEGRAM_SHARED_CHAT_ENABLED = os.environ.get("TELEGRAM_SHARED_CHAT_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
 TELEGRAM_SHARED_DELIVERY_ENABLED = os.environ.get("TELEGRAM_SHARED_DELIVERY_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
 TELEGRAM_SHARED_DELIVERY_CHAT_ID = os.environ.get("TELEGRAM_SHARED_DELIVERY_CHAT_ID", "7791909246").strip()
+TELEGRAM_SHARED_DELIVERY_INTERVAL_SEC = max(1.0, float(os.environ.get("TELEGRAM_SHARED_DELIVERY_INTERVAL_SEC", "10")))
 ARCHIVE_ALLOWLIST = {
     item.strip().lower()
     for item in os.environ.get("TELEGRAM_ARCHIVE_ALLOWLIST", "7791909246,@Ebuchaya_psina").split(",")
@@ -55,6 +56,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SITE_BACKGROUND_PATH = Path(os.environ.get("SHUSHUNYA_SITE_BACKGROUND_PATH", PROJECT_ROOT / "ShushunyaSite" / "background.jpg"))
 RUNNING = True
 LAST_SHARED_DELIVERED_ID = 0
+NEXT_SHARED_DELIVERY_AT = 0.0
 
 
 def stop(_signum, _frame):
@@ -261,9 +263,13 @@ def initialize_shared_delivery_cursor():
 
 
 def deliver_shared_chat_updates():
-    global LAST_SHARED_DELIVERED_ID
+    global LAST_SHARED_DELIVERED_ID, NEXT_SHARED_DELIVERY_AT
     if not TELEGRAM_SHARED_DELIVERY_ENABLED or not TELEGRAM_SHARED_DELIVERY_CHAT_ID:
         return
+    now = time.monotonic()
+    if now < NEXT_SHARED_DELIVERY_AT:
+        return
+    NEXT_SHARED_DELIVERY_AT = now + TELEGRAM_SHARED_DELIVERY_INTERVAL_SEC
     try:
         payload = fetch_shared_chat_messages(after_id=LAST_SHARED_DELIVERED_ID, limit=50)
     except Exception as exc:
