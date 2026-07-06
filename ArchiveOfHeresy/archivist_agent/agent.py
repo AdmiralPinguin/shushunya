@@ -12,6 +12,7 @@ MAX_FOCUS_FILES = int(os.environ.get("ARCHIVE_FOCUS_MAX_FILES", "10"))
 MAX_AGENT_STEPS = int(os.environ.get("ARCHIVE_LIBRARIAN_MAX_AGENT_STEPS", "4"))
 WIKI_INTERVAL_MESSAGES = int(os.environ.get("ARCHIVE_WIKI_INTERVAL_MESSAGES", "20"))
 WIKI_MAX_RECENT_TURNS = int(os.environ.get("ARCHIVE_WIKI_MAX_RECENT_TURNS", "12"))
+MANUAL_ONLY_PERSONA_PAGES = {"persona-core", "standing-rules"}
 LIBRARIAN_MODEL = os.environ.get(
     "ARCHIVE_LIBRARIAN_MODEL",
     os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"),
@@ -672,8 +673,12 @@ class WikiMemory:
 
         decision = self.agent_cycle(record, index, recent_turns)
         updated_pages = []
+        skipped_pages = []
         for update in decision.get("page_updates", []):
             if str(update.get("operation") or "upsert").lower() == "upsert":
+                if self.is_manual_only_persona_update(index, update):
+                    skipped_pages.append({"id": update.get("id"), "title": update.get("title"), "reason": "manual_only_persona"})
+                    continue
                 page = self.bookshelf.upsert_page(index, update, record)
                 updated_pages.append({"id": page.get("id"), "title": page.get("title")})
 
@@ -682,7 +687,17 @@ class WikiMemory:
         state["last_sync_at"] = record.get("created_at")
         state["last_sync_turn_id"] = record.get("turn_id")
         self.bookshelf.save_state(state)
-        return {"status": "synced", "updated_pages": updated_pages, "recent_turns": len(recent_turns)}
+        return {"status": "synced", "updated_pages": updated_pages, "skipped_pages": skipped_pages, "recent_turns": len(recent_turns)}
+
+    def is_manual_only_persona_update(self, index, update):
+        if self.memory_namespace != "shushunya":
+            return False
+        page_id = str(update.get("id") or "").strip()
+        title = str(update.get("title") or "").strip()
+        page = self.bookshelf.find_page(index, page_id=page_id, title=title)
+        existing_id = str((page or {}).get("id") or "").strip()
+        update_id = page_id or existing_id
+        return update_id in MANUAL_ONLY_PERSONA_PAGES
 
     def recent_turns(self, last_sync_at):
         if not self.sqlite_path.exists():
@@ -813,6 +828,7 @@ class WikiMemory:
                 "Return exactly one JSON object.",
                 "To use a tool, return {\"tool\":\"read_wiki_page\",\"id\":\"...\"} or {\"tool\":\"read_wiki_page\",\"title\":\"...\"}.",
                 "To finish, return {\"tool\":\"finish\",\"page_updates\":[...]}",
+                "In namespace shushunya, never update persona-core or standing-rules; they are manual-only.",
                 "Read an existing page before overwriting it when the catalog suggests the topic already exists.",
                 "Each page body must represent the current integrated state, not a raw transcript.",
                 "Use explicit sections such as Current Facts, Active Decisions, Superseded, Open Questions, Next Steps when useful.",
