@@ -52,6 +52,7 @@ def main() -> int:
                 or "ScenarioScribe" not in capabilities.get("required_workers", [])
                 or "Promptwright" not in capabilities.get("required_workers", [])
                 or "GET /runs/{run_id}/revision-decision" not in capabilities.get("endpoints", [])
+                or "POST /runs/{run_id}/apply_revision" not in capabilities.get("endpoints", [])
             ):
                 raise AssertionError(f"bad capabilities payload: {capabilities}")
             image_plan = request_json(base, "POST", "/plan", {"task": "нарисуй картинку 512x512", "task_id": "moriana-http-image"})
@@ -112,6 +113,21 @@ def main() -> int:
             decided = request_json(base, "POST", "/runs/moriana-http-exec-image/decide_revision", {})
             if decided.get("revision_decision", {}).get("action") != "accept_final":
                 raise AssertionError(f"bad /runs/{{id}}/decide_revision payload: {decided}")
+            failed = request_json(
+                base,
+                "POST",
+                "/runs",
+                {
+                    "task": "нарисуй HTTP smoke картинку для apply revision 512x512",
+                    "task_id": "moriana-http-revision-image",
+                    "execute": True,
+                },
+            )
+            if failed.get("ok") or failed.get("revision_decision", {}).get("action") != "wait_or_resubmit_forge_job":
+                raise AssertionError(f"bad failed revision fixture payload: {failed}")
+            applied = request_json(base, "POST", "/runs/moriana-http-revision-image/apply_revision", {"test_artifact_mode": "revision_good"})
+            if not applied.get("ok") or applied.get("revision_decision", {}).get("action") != "accept_final":
+                raise AssertionError(f"bad /runs/{{id}}/apply_revision payload: {applied}")
         finally:
             server.shutdown()
             thread.join(timeout=5)

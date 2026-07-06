@@ -33,7 +33,7 @@ from EyeOfTerror.Pictorium.Brigades.Comics.Workers.LayoutFinalis.worker import w
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.Panelwright.worker import worker_contract as panelwright_contract
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.ScenarioScribe.worker import worker_contract as scenario_scribe_contract
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.StoryboardArchitect.worker import worker_contract as storyboard_architect_contract
-from EyeOfTerror.Pictorium.Moriana.moriana_executor import execute_comic_run, execute_existing_image_artifact_run, execute_image_run, execute_image_series_run
+from EyeOfTerror.Pictorium.Moriana.moriana_executor import execute_comic_run, execute_existing_image_artifact_run, execute_image_run, execute_image_series_run, execute_revision_run
 from EyeOfTerror.Pictorium.Moriana.moriana_core.asset_catalog import capabilities as forge_capabilities
 from EyeOfTerror.Pictorium.Moriana.moriana_quality import read_quality_report, write_quality_report
 from EyeOfTerror.Pictorium.Moriana.moriana_revision import read_revision_decision, write_revision_decision
@@ -362,6 +362,7 @@ def service_capabilities() -> dict[str, Any]:
             "GET /runs/{run_id}/revision-decision",
             "POST /runs/{run_id}/audit",
             "POST /runs/{run_id}/decide_revision",
+            "POST /runs/{run_id}/apply_revision",
             "POST /runs/{run_id}/revise",
             "POST /runs/{run_id}/accept",
         ],
@@ -549,6 +550,22 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                     if parts[2] == "decide_revision":
                         report = write_quality_report(store, run_id)
                         response(self, 200, {"ok": True, "governor": GOVERNOR, "run_id": run_id, "revision_decision": write_revision_decision(store, run_id, report), "status": store.status(run_id)})
+                        return
+                    if parts[2] == "apply_revision":
+                        response(
+                            self,
+                            200,
+                            execute_revision_run(
+                                store,
+                                run_id,
+                                submit=bool(payload.get("submit", False)),
+                                test_artifact_mode=str(payload.get("test_artifact_mode") or ""),
+                                wait_for_result=bool(payload.get("wait_for_result", False)),
+                                max_wait_sec=float(payload.get("max_wait_sec") or 0.0),
+                                poll_interval_sec=float(payload.get("poll_interval_sec") or 0.5),
+                                run_inline_once=bool(payload.get("run_inline_once", False)),
+                            ),
+                        )
                         return
                     if parts[2] == "accept":
                         response(self, 200, {"ok": True, "governor": GOVERNOR, "run_id": run_id, "final": store.accept_final(run_id), "status": store.status(run_id)})

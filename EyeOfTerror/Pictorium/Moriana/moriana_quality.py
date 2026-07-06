@@ -104,10 +104,14 @@ def build_quality_report(store: MorianaRunStore, run_id: str) -> dict[str, Any]:
     status = store.status(run_id)
     final = store.final_result(run_id)
     artifacts = store.artifacts(run_id)
+    final_ready = final.get("status") == "ready"
+    final_attempt = int(final.get("attempt") or 0)
     blockers = _blockers_from(final)
     for artifact in artifacts:
         metadata = artifact.get("metadata") if isinstance(artifact.get("metadata"), dict) else {}
-        if artifact.get("status") == "rejected" and artifact.get("rejection_reason"):
+        artifact_attempt = int(artifact.get("attempt") or 0)
+        rejected_current_attempt = not final_ready or artifact_attempt >= final_attempt
+        if rejected_current_attempt and artifact.get("status") == "rejected" and artifact.get("rejection_reason"):
             blockers.append(
                 {
                     "code": "artifact_rejected",
@@ -124,7 +128,6 @@ def build_quality_report(store: MorianaRunStore, run_id: str) -> dict[str, Any]:
         for item in artifacts
         if item.get("type") == "image" and item.get("status") == "accepted"
     ]
-    final_ready = final.get("status") == "ready"
     report = {
         "kind": "pictorium_quality_report",
         "run_id": run_id,

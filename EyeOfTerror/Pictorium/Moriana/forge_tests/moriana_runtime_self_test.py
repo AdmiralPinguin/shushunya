@@ -23,6 +23,8 @@ from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import ArtifactRecord, 
 from EyeOfTerror.Pictorium.Moriana.forge_runtime.storage import ForgeStore
 from EyeOfTerror.Pictorium.Moriana.moriana_forge_monitor import monitor_forge_job
 from EyeOfTerror.Pictorium.Moriana.moriana_governor import create_or_execute_run, make_handler, prepare_run
+from EyeOfTerror.Pictorium.Moriana.moriana_executor import execute_revision_run
+from EyeOfTerror.Pictorium.Moriana.moriana_runtime import MorianaRunStore
 
 
 def load_json(path: Path) -> dict[str, object]:
@@ -170,6 +172,16 @@ def main() -> int:
             or not any(item.get("target_worker") == "ForgeDispatcher" for item in failure_decision.get("targets", []) if isinstance(item, dict))
         ):
             raise AssertionError(f"failed image run revision decision should target ForgeDispatcher: {failure_decision}")
+        applied = execute_revision_run(MorianaRunStore(run_root), "image-pending-failure", test_artifact_mode="revision_good")
+        applied_registry = load_json(failure_dir / "artifact_registry.json")
+        if (
+            not applied.get("ok")
+            or applied.get("status", {}).get("status") != "completed"
+            or applied.get("revision_execution", {}).get("ok") is not True
+            or load_json(failure_dir / "final" / "revision_decision.json").get("action") != "accept_final"
+            or "revision_execution" not in {str(item.get("type") or "") for item in applied_registry.get("artifacts", []) if isinstance(item, dict)}
+        ):
+            raise AssertionError(f"failed image run did not recover through apply_revision: {applied}")
 
         pending = create_or_execute_run(
             run_root,
@@ -284,6 +296,26 @@ def main() -> int:
             decided = request_json(base, "POST", "/runs/http-image/decide_revision", {})
             if decided.get("revision_decision", {}).get("action") != "accept_final":
                 raise AssertionError(f"HTTP decide_revision failed: {decided}")
+            http_failed = request_json(
+                base,
+                "POST",
+                "/runs",
+                {
+                    "task": "нарисуй HTTP картинку для ревизии 512x512",
+                    "task_id": "http-image-revision",
+                    "execute": True,
+                },
+            )
+            if http_failed.get("ok") or http_failed.get("revision_decision", {}).get("action") != "wait_or_resubmit_forge_job":
+                raise AssertionError(f"HTTP failed revision fixture did not request revision: {http_failed}")
+            http_applied = request_json(base, "POST", "/runs/http-image-revision/apply_revision", {"test_artifact_mode": "revision_good"})
+            if (
+                not http_applied.get("ok")
+                or http_applied.get("status", {}).get("status") != "completed"
+                or http_applied.get("revision_decision", {}).get("action") != "accept_final"
+                or http_applied.get("revision_execution", {}).get("ok") is not True
+            ):
+                raise AssertionError(f"HTTP apply_revision failed: {http_applied}")
             revised = request_json(base, "POST", "/runs/http-image/revise", {"reason": "test revision request"})
             if revised.get("status", {}).get("status") != "revising":
                 raise AssertionError(f"HTTP revise failed: {revised}")

@@ -35,6 +35,7 @@ ARTIFACT_TYPES = {
     "result",
     "quality_report",
     "revision_decision",
+    "revision_execution",
 }
 
 

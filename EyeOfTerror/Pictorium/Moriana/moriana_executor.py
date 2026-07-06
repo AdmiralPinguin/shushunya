@@ -16,7 +16,7 @@ from EyeOfTerror.Pictorium.Brigades.Image.Workers.ModelQuartermaster.worker impo
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.Promptwright.worker import prepare_image_plan
 from EyeOfTerror.Pictorium.Moriana.moriana_forge_monitor import monitor_forge_job
 from EyeOfTerror.Pictorium.Moriana.moriana_quality import write_quality_report
-from EyeOfTerror.Pictorium.Moriana.moriana_revision import write_revision_decision
+from EyeOfTerror.Pictorium.Moriana.moriana_revision import read_revision_decision, write_revision_decision
 from EyeOfTerror.Pictorium.Moriana.moriana_runtime import MorianaRunStore
 
 try:
@@ -78,6 +78,13 @@ def requested_image_count(task: str, default: int = 3) -> int:
         if match:
             return max(2, min(8, int(match.group(1))))
     return default
+
+
+def next_attempt(store: MorianaRunStore, run_id: str) -> int:
+    attempts = [int(item.get("attempt") or 0) for item in store.artifacts(run_id) if isinstance(item.get("attempt"), int)]
+    status_attempt = int(store.status(run_id).get("attempt_count") or 0)
+    attempts.append(status_attempt)
+    return max(attempts or [0]) + 1
 
 
 def execute_image_run(
@@ -205,6 +212,180 @@ def execute_image_run(
         "forge_monitor": forge_monitor,
         "quality_report": quality_report,
         "revision_decision": revision_decision,
+    }
+
+
+def execute_revision_run(
+    store: MorianaRunStore,
+    run_id: str,
+    *,
+    submit: bool = False,
+    test_artifact_mode: str = "",
+    wait_for_result: bool = False,
+    max_wait_sec: float = 0.0,
+    poll_interval_sec: float = 0.5,
+    run_inline_once: bool = False,
+) -> dict[str, Any]:
+    status = store.status(run_id)
+    task_kind = str(status.get("task_kind") or "")
+    task = str(status.get("task") or "")
+    decision = read_revision_decision(store.run_dir(run_id))
+    if decision.get("error"):
+        quality_report = write_quality_report(store, run_id)
+        decision = write_revision_decision(store, run_id, quality_report)
+    if decision.get("action") == "accept_final" and not decision.get("revision_required"):
+        return {
+            "ok": True,
+            "governor": "Moriana",
+            "run_id": run_id,
+            "status": store.status(run_id),
+            "revision_decision": decision,
+            "final": store.final_result(run_id),
+            "revision_applied": False,
+        }
+    if task_kind == "image_series":
+        return execute_image_series_run(
+            store,
+            run_id,
+            task,
+            submit=submit,
+            test_artifact_mode=test_artifact_mode,
+            wait_for_result=wait_for_result,
+            max_wait_sec=max_wait_sec,
+            poll_interval_sec=poll_interval_sec,
+            run_inline_once=run_inline_once,
+        )
+    if task_kind == "comic":
+        return execute_comic_run(store, run_id, task, submit=submit)
+    if task_kind != "image":
+        raise ValueError(f"apply_revision supports image, image_series, and comic runs; got {task_kind!r}")
+
+    run_dir = store.run_dir(run_id)
+    attempt = next_attempt(store, run_id)
+    store.set_status(run_id, "revising", "Moriana is applying revision decision", attempt_count=attempt)
+    execution_summary = {
+        "kind": "pictorium_revision_execution",
+        "run_id": run_id,
+        "attempt": attempt,
+        "decision": decision,
+        "rerun_steps": decision.get("rerun_steps", []),
+        "downstream_steps": decision.get("downstream_steps", []),
+    }
+    plan = prepare_image_plan({"request": f"{task}\nRevision: {decision.get('reason')}", "use_memory": False, "use_thinker": False})
+    register_json_artifact(store, run_id, step="image_plan", payload=plan, artifact_type="prompt", created_by="Promptwright", attempt=attempt, subdir="prompts")
+    job_spec = plan.get("job_spec") if isinstance(plan.get("job_spec"), dict) else {}
+    resources = inspect_resources({"job_spec": job_spec})
+    register_json_artifact(store, run_id, step="resource_report", payload=resources, artifact_type="resource_report", created_by="ModelQuartermaster", attempt=attempt, subdir="parameters")
+    forge_db_path = run_dir / "forge.sqlite3"
+    dispatch = prepare_dispatch({"job_spec": job_spec, "submit": submit, "db_path": str(forge_db_path)})
+    register_json_artifact(store, run_id, step="forge_dispatch", payload=dispatch, artifact_type="dispatch", created_by="ForgeDispatcher", attempt=attempt)
+    store.set_status(run_id, "generating", "Revision generation package prepared", attempt_count=attempt)
+
+    artifact_path = ""
+    forge_monitor = {}
+    if submit and (wait_for_result or run_inline_once):
+        forge_monitor = monitor_forge_job(
+            db_path=forge_db_path,
+            job_record=dispatch.get("job_record") if isinstance(dispatch.get("job_record"), dict) else None,
+            max_wait_sec=max_wait_sec,
+            poll_interval_sec=poll_interval_sec,
+            run_inline_once=run_inline_once,
+        )
+        register_json_artifact(
+            store,
+            run_id,
+            step="forge_monitor",
+            payload=forge_monitor,
+            artifact_type="result",
+            created_by="Moriana",
+            attempt=attempt,
+            status="accepted" if forge_monitor.get("ok") else "rejected",
+            subdir="results",
+            rejection_reason="; ".join(str(item.get("code") or "") for item in forge_monitor.get("blockers", []) if isinstance(item, dict)),
+        )
+        paths = forge_monitor.get("artifact_paths") if isinstance(forge_monitor.get("artifact_paths"), list) else []
+        artifact_path = str(paths[0]) if paths else ""
+    if test_artifact_mode in {"good", "revision_good"}:
+        width, height = job_spec_dimensions(job_spec)
+        synthetic_path = run_dir / "artifacts" / f"image_attempt_{attempt:02d}.png"
+        make_synthetic_image(synthetic_path, width, height, (104, 94, 82))
+        artifact_path = str(synthetic_path)
+
+    store.set_status(run_id, "checking", "ImageVerifier is checking revised artifact", attempt_count=attempt)
+    verification = verify_image({"artifact_path": artifact_path, "job_spec": job_spec, "job_record": dispatch.get("job_record")})
+    blockers = [*blockers_from(resources), *blockers_from(dispatch), *blockers_from(forge_monitor), *blockers_from(verification)]
+    register_json_artifact(
+        store,
+        run_id,
+        step="image_verification",
+        payload=verification,
+        artifact_type="verification",
+        created_by="ImageVerifier",
+        attempt=attempt,
+        status="accepted" if not blockers else "rejected",
+        rejection_reason="; ".join(str(item.get("code") or "") for item in blockers),
+    )
+    accepted_artifact_id = ""
+    if artifact_path:
+        image_record = store.register_artifact(
+            run_id,
+            artifact_type="image",
+            path=Path(artifact_path),
+            created_by="ForgeDispatcher",
+            step="image_generation",
+            attempt=attempt,
+            status="accepted" if not blockers else "rejected",
+            rejection_reason="; ".join(str(item.get("message") or item.get("code") or "") for item in blockers),
+            metadata={"job_spec": job_spec, "revision_decision": decision},
+        )
+        if not blockers:
+            accepted_artifact_id = str(image_record["artifact_id"])
+    final = build_final_manifest({"plan": plan, "resources": resources, "dispatch": dispatch, "verification": verification, "artifacts": [artifact_path] if artifact_path else []})
+    register_json_artifact(store, run_id, step="finalize", payload=final, artifact_type="final", created_by="ArtifactFinalis", attempt=attempt, status="final" if final.get("final_manifest", {}).get("status") == "ready" else "rejected")
+    final_payload = dict(final.get("final_manifest") if isinstance(final.get("final_manifest"), dict) else {})
+    final_payload.setdefault("kind", "pictorium_image_final_manifest")
+    final_payload["run_id"] = run_id
+    final_payload["attempt"] = attempt
+    final_payload["artifact_registry"] = str(run_dir / "artifact_registry.json")
+    final_payload["accepted_artifact_id"] = accepted_artifact_id
+    final_payload["revision_decision"] = decision
+    if blockers and final_payload.get("status") != "ready":
+        store.write_revision(run_id, attempt, blockers, "revision_execution_needs_followup")
+    store.write_final(run_id, final_payload, final_artifact_id=accepted_artifact_id)
+    quality_report = write_quality_report(store, run_id)
+    next_decision = write_revision_decision(store, run_id, quality_report)
+    execution_summary.update(
+        {
+            "ok": final_payload.get("status") == "ready",
+            "artifact_path": artifact_path,
+            "accepted_artifact_id": accepted_artifact_id,
+            "blockers": blockers,
+            "next_decision": next_decision,
+        }
+    )
+    execution_path = store.write_step(run_id, f"revision_execution_attempt_{attempt:02d}", execution_summary, subdir="revisions")
+    store.register_artifact(
+        run_id,
+        artifact_type="revision_execution",
+        path=execution_path,
+        created_by="Moriana",
+        step="revision_execution",
+        attempt=attempt,
+        status="accepted" if execution_summary["ok"] else "rejected",
+        rejection_reason="; ".join(str(item.get("code") or "") for item in blockers),
+        metadata={"action": decision.get("action"), "next_action": next_decision.get("action")},
+    )
+    return {
+        "ok": final_payload.get("status") == "ready",
+        "governor": "Moriana",
+        "run_id": run_id,
+        "run_dir": str(run_dir),
+        "status": store.status(run_id),
+        "final": final_payload,
+        "artifacts": store.artifacts(run_id),
+        "quality_report": quality_report,
+        "revision_decision": next_decision,
+        "revision_execution": execution_summary,
     }
 
 
