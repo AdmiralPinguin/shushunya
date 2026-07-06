@@ -374,12 +374,14 @@ def service_capabilities() -> dict[str, Any]:
 
 def resolve_run_dir(default_run_root: Path, requested: str, task_id: str) -> Path:
     root = default_run_root.resolve()
+    warmaster_runtime = (REPO_ROOT / "EyeOfTerror" / "Warmaster" / "runtime").resolve()
     candidate = Path(requested) if requested else root / task_id
     if not candidate.is_absolute():
         candidate = root / candidate
     resolved = candidate.resolve()
-    if resolved != root and root not in resolved.parents:
-        raise ValueError("run_dir must stay inside the default run root")
+    allowed = any(resolved == allowed_root or allowed_root in resolved.parents for allowed_root in (root, warmaster_runtime))
+    if not allowed:
+        raise ValueError("run_dir must stay inside the default run root or Warmaster runtime")
     return resolved
 
 

@@ -44,6 +44,14 @@ def term_matches(term: str, lowered_message: str) -> bool:
     term = term.lower().strip()
     if not term:
         return False
+    if term == "код":
+        return (
+            re.search(
+                r"\bкод(?:\b|[ауеом]\b|ов(?:ая|ое|ые|ый|ого|ому|ым|ом|ую|ой|ыми|ых)?\b)",
+                lowered_message,
+            )
+            is not None
+        )
     if " " in term or re.search(r"[^\x00-\x7f]", term):
         return re.search(r"\b" + re.escape(term), lowered_message) is not None
     return re.search(r"\b" + re.escape(term) + r"\b", lowered_message) is not None

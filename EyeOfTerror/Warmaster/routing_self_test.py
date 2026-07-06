@@ -35,6 +35,9 @@ def main() -> int:
     # Word-initial stems must still match (Russian morphology).
     if not route_message("кодовая задача").ok:
         raise AssertionError("word-initial stem 'код' should match 'кодовая'")
+    lore_with_codexes = route_message("найди в интернете инфу из книг и кодексов по Скалатраксу")
+    if not lore_with_codexes.ok or lore_with_codexes.governor != "IskandarKhayon" or lore_with_codexes.requires_decomposition:
+        raise AssertionError(f"codex lore request should not route as code: {lore_with_codexes}")
     # A mixed active-governor request should not be collapsed into one brigade.
     mixed = route_message("нарисуй картинку и почини python код в репозитории")
     if not mixed.ok or mixed.governor not in {"Moriana", "Ceraxia"} or not mixed.requires_decomposition:

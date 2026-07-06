@@ -718,6 +718,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             "task_id": task_id,
             "auto_start": True,
             "reuse_existing": True,
+            "skip_model_decision": True,
             "run_mode": str(payload.get("run_mode") or "http"),
             "governor_transport": str(payload.get("governor_transport") or "http"),
         }
@@ -779,6 +780,166 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             },
         )
 
+    def mobile_chat_explicit_warmaster_task(self, text):
+        clean = str(text or "").strip()
+        if not clean:
+            return ""
+        lower = clean.lower()
+        prefixes = ("/task ", "/w ", "/warmaster ", "!task ", "!вармастер ")
+        for prefix in prefixes:
+            if lower.startswith(prefix):
+                return clean[len(prefix) :].strip()
+        colon_prefixes = ("вармастер:", "warmaster:")
+        for prefix in colon_prefixes:
+            if lower.startswith(prefix):
+                return clean[len(prefix) :].strip()
+        return ""
+
+    def mobile_chat_looks_like_task(self, text):
+        lower = str(text or "").strip().lower()
+        if len(lower) < 16:
+            return False
+        task_markers = (
+            "задача такая",
+            "задача:",
+            "задача ",
+            "собери ",
+            "собрать ",
+            "найди ",
+            "найти ",
+            "сделай ",
+            "сделать ",
+            "подготовь ",
+            "вытащи ",
+            "достань ",
+            "запусти ",
+            "проверь ",
+            "исследуй ",
+            "разберись ",
+        )
+        scope_markers = (
+            "в интернете",
+            "интернет",
+            "источник",
+            "источники",
+            "книг",
+            "кодекс",
+            "файл",
+            "проект",
+            "репо",
+            "отчет",
+            "fb2",
+            "в одну книгу",
+            "всю возможную инф",
+            "всю информацию",
+        )
+        if any(marker in lower for marker in task_markers) and any(marker in lower for marker in scope_markers):
+            return True
+        return "крч, задача" in lower or "короче, задача" in lower
+
+    def mobile_chat_is_task_confirmation(self, text):
+        lower = re.sub(r"[\s.!?,:;]+", " ", str(text or "").strip().lower()).strip()
+        if not lower or len(lower) > 80:
+            return False
+        confirmations = {
+            "давай",
+            "ну давай",
+            "ну давай работай",
+            "работай",
+            "начинай",
+            "начинай работать",
+            "приступай",
+            "погнали",
+            "погнали делать",
+            "запускай",
+            "делай",
+        }
+        return lower in confirmations
+
+    def mobile_chat_contextual_task(self, history, task_index, task_text):
+        context = []
+        for message in reversed(history[:task_index]):
+            if str(message.get("role") or "") != "user":
+                continue
+            content = trim_chat_text(message.get("content") or "")
+            if not content or content == task_text or self.mobile_chat_is_task_confirmation(content):
+                continue
+            context.append(content)
+            if len(context) >= 3:
+                break
+        context = list(reversed(context))
+        if not context:
+            return task_text
+        context_text = "\n".join(f"- {item}" for item in context)
+        return trim_chat_text(f"{task_text}\n\nКонтекст предыдущих сообщений:\n{context_text}")
+
+    def mobile_chat_last_task_request(self, session_id):
+        history = chat_history(session_id, limit=16)
+        for index in range(len(history) - 1, -1, -1):
+            message = history[index]
+            if str(message.get("role") or "") != "user":
+                continue
+            content = str(message.get("content") or "").strip()
+            explicit = self.mobile_chat_explicit_warmaster_task(content)
+            if explicit:
+                return self.mobile_chat_contextual_task(history, index, explicit)
+            if self.mobile_chat_looks_like_task(content):
+                return self.mobile_chat_contextual_task(history, index, content)
+        return ""
+
+    def mobile_chat_warmaster_task(self, session_id, text):
+        explicit = self.mobile_chat_explicit_warmaster_task(text)
+        if explicit:
+            return explicit
+        if self.mobile_chat_looks_like_task(text):
+            return str(text or "").strip()
+        if self.mobile_chat_is_task_confirmation(text):
+            return self.mobile_chat_last_task_request(session_id)
+        return ""
+
+    def run_mobile_warmaster_payload(self, payload):
+        session_id = shared_chat_session_id(payload.get("session_id") or SHARED_CHAT_SESSION_ID)
+        client_source = str(payload.get("client_source") or payload.get("source") or "mobile").strip()[:80] or "mobile"
+        original_text = trim_chat_text(payload.get("text") or payload.get("message") or "")
+        task = trim_chat_text(payload.get("warmaster_task") or "")
+        if not task:
+            raise ValueError("warmaster task is empty")
+
+        task_id = str(payload.get("task_id") or f"mobile-{uuid.uuid4().hex[:12]}").strip()
+        warmaster_payload = {
+            "message": task,
+            "task_id": task_id,
+            "auto_start": True,
+            "reuse_existing": True,
+            "skip_model_decision": True,
+            "run_mode": str(payload.get("run_mode") or "http"),
+            "governor_transport": str(payload.get("governor_transport") or "http"),
+        }
+        status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=60)
+        response_status = response.get("status") if isinstance(response.get("status"), dict) else {}
+        resolved_task_id = str(response.get("task_id") or response_status.get("task_id") or task_id).strip()
+
+        append_chat_message(
+            session_id,
+            "user",
+            original_text or task,
+            source=client_source,
+            dedupe_key=f"warmaster:{resolved_task_id}:user" if resolved_task_id else None,
+        )
+        accepted = f"Warmaster принял задачу: task_id={resolved_task_id or task_id}. Смотри ход во вкладке Бригады."
+        append_chat_message(
+            session_id,
+            "assistant",
+            accepted,
+            source="warmaster",
+            dedupe_key=f"warmaster:{resolved_task_id}:accepted" if resolved_task_id else None,
+        )
+        response["ok"] = 200 <= status < 300
+        response["backend"] = "warmaster"
+        response["task_id"] = resolved_task_id or task_id
+        response["message"] = accepted
+        return response
+
     def mobile_chat_start(self):
         try:
             payload = read_json(self)
@@ -795,6 +956,13 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         payload["session_id"] = session_id
         payload["memory_namespace"] = shared_memory_namespace(payload.get("memory_namespace"))
         payload["client_source"] = str(payload.get("client_source") or payload.get("source") or "mobile").strip()[:80] or "mobile"
+        warmaster_task = "" if image_data_url else self.mobile_chat_warmaster_task(session_id, text)
+        if warmaster_task:
+            payload["warmaster_task"] = warmaster_task
+            job_id = create_mobile_job("warmaster", payload)
+            run_mobile_job(job_id, lambda payload=payload: self.run_mobile_warmaster_payload(payload))
+            write_json(self, 202, {"ok": True, "job_id": job_id, "type": "warmaster", "session_id": session_id, "status": "queued"})
+            return
         job_id = create_mobile_job("chat", payload)
         run_mobile_job(job_id, lambda payload=payload: run_mobile_chat_payload(payload))
         write_json(self, 202, {"ok": True, "job_id": job_id, "type": "chat", "session_id": session_id, "status": "queued"})

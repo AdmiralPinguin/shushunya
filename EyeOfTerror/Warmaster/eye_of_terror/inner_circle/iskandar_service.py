@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from EyeOfTerror.model_brain import model_contract, request_model_decision
+from EyeOfTerror.model_brain import model_contract, request_model_decision, skipped_model_decision
 
 from ..contracts import build_research_writing_contract, research_writing_worker_plan
 from .iskandar import executable_client_action, oversight_plan, payload_with_plan_view, plan_research_writing
@@ -135,12 +135,14 @@ def service_capabilities() -> dict[str, Any]:
 
 def resolve_run_dir(default_run_root: Path, requested: str, task_id: str) -> Path:
     root = default_run_root.resolve()
+    warmaster_runtime = (REPO_ROOT / "EyeOfTerror" / "Warmaster" / "runtime").resolve()
     candidate = Path(requested) if requested else root / task_id
     if not candidate.is_absolute():
         candidate = root / candidate
     resolved = candidate.resolve()
-    if resolved != root and root not in resolved.parents:
-        raise ValueError("run_dir must stay inside the default run root")
+    allowed = any(resolved == allowed_root or allowed_root in resolved.parents for allowed_root in (root, warmaster_runtime))
+    if not allowed:
+        raise ValueError("run_dir must stay inside the default run root or Warmaster runtime")
     return resolved
 
 
@@ -172,13 +174,21 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                     return
                 task_id = str(payload.get("task_id") or "").strip() or None
                 plan = plan_research_writing(task, task_id=task_id)
-                model_decision = request_model_decision(
-                    "IskandarKhayon",
-                    "Inner Circle research and writing governor",
-                    payload,
-                    layer="governor_service",
-                    instructions="Plan a research/reconstruction brigade task, identify source coverage risks, and keep the answer scoped to governor oversight.",
-                )
+                if bool(payload.get("skip_model_decision")):
+                    model_decision = skipped_model_decision(
+                        "IskandarKhayon",
+                        "Inner Circle research and writing governor",
+                        layer="governor_service",
+                        reason="Skipped during fast Warmaster handoff; model-backed worker execution remains required inside the run.",
+                    )
+                else:
+                    model_decision = request_model_decision(
+                        "IskandarKhayon",
+                        "Inner Circle research and writing governor",
+                        payload,
+                        layer="governor_service",
+                        instructions="Plan a research/reconstruction brigade task, identify source coverage risks, and keep the answer scoped to governor oversight.",
+                    )
                 if self.path == "/plan":
                     plan_payload = payload_with_plan_view(plan.to_dict())
                     plan_payload["model_brain"] = model_decision

@@ -19,7 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from EyeOfTerror.model_brain import attach_model_brain, request_model_decision
+from EyeOfTerror.model_brain import attach_model_brain, request_model_decision, skipped_model_decision
 
 from .contracts import validate_task_contract_payload
 from .inner_circle.ceraxia import plan_code_task
@@ -191,6 +191,13 @@ from .runtime_state import (
 
 
 def gateway_model_decision(operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if bool(payload.get("skip_model_decision")):
+        return skipped_model_decision(
+            "WarmasterGateway",
+            "top-level orchestration gateway",
+            layer="gateway_service",
+            reason="Skipped by caller; task is already explicitly routed to Warmaster.",
+        )
     request = dict(payload)
     request["operation"] = operation
     return request_model_decision(
@@ -611,6 +618,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         host=host,
                         timeout_sec=timeout_sec,
                         include_brigade_health=include_brigade_health,
+                        skip_governor_model_decision=bool(payload.get("skip_model_decision")),
                     )
                     prepared = attach_model_brain(prepared, model_decision)
                     response(self, 200 if prepared.get("ok") else 409, prepared)
@@ -665,6 +673,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         auto_start=auto_start,
                         force=bool(payload.get("force")),
                         reuse_existing=bool(payload.get("reuse_existing", True)),
+                        skip_governor_model_decision=bool(payload.get("skip_model_decision")),
                     )
                     submitted = attach_model_brain(submitted, model_decision)
                     if submitted.get("ok") and submitted.get("phase") == "started":
