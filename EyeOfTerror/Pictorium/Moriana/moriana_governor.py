@@ -398,6 +398,10 @@ def create_or_execute_run(run_root: Path, payload: dict[str, Any]) -> dict[str, 
         submit=bool(payload.get("submit", False)),
         test_artifact_mode=str(payload.get("test_artifact_mode") or ""),
         max_revision_cycles=int(payload.get("max_revision_cycles") or 1),
+        wait_for_result=bool(payload.get("wait_for_result", False)),
+        max_wait_sec=float(payload.get("max_wait_sec") or 0.0),
+        poll_interval_sec=float(payload.get("poll_interval_sec") or 0.5),
+        run_inline_once=bool(payload.get("run_inline_once", False)),
     )
 
 

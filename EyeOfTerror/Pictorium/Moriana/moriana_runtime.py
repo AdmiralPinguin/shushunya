@@ -32,6 +32,7 @@ ARTIFACT_TYPES = {
     "dispatch",
     "verification",
     "error",
+    "result",
 }
 
 

@@ -13,6 +13,7 @@ from EyeOfTerror.Pictorium.Brigades.Image.Workers.ForgeDispatcher.worker import 
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ImageVerifier.worker import verify_image
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ModelQuartermaster.worker import inspect_resources
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.Promptwright.worker import prepare_image_plan
+from EyeOfTerror.Pictorium.Moriana.moriana_forge_monitor import monitor_forge_job
 from EyeOfTerror.Pictorium.Moriana.moriana_runtime import MorianaRunStore
 
 try:
@@ -72,6 +73,10 @@ def execute_image_run(
     submit: bool = False,
     test_artifact_mode: str = "",
     max_revision_cycles: int = 1,
+    wait_for_result: bool = False,
+    max_wait_sec: float = 0.0,
+    poll_interval_sec: float = 0.5,
+    run_inline_once: bool = False,
 ) -> dict[str, Any]:
     run_dir = store.run_dir(run_id)
     store.set_status(run_id, "planning", "Image Brigade is preparing executable package", attempt_count=1)
@@ -80,11 +85,35 @@ def execute_image_run(
     job_spec = plan.get("job_spec") if isinstance(plan.get("job_spec"), dict) else {}
     resources = inspect_resources({"job_spec": job_spec})
     register_json_artifact(store, run_id, step="resource_report", payload=resources, artifact_type="resource_report", created_by="ModelQuartermaster", attempt=1, subdir="parameters")
-    dispatch = prepare_dispatch({"job_spec": job_spec, "submit": submit, "db_path": str(run_dir / "forge.sqlite3")})
+    forge_db_path = run_dir / "forge.sqlite3"
+    dispatch = prepare_dispatch({"job_spec": job_spec, "submit": submit, "db_path": str(forge_db_path)})
     register_json_artifact(store, run_id, step="forge_dispatch", payload=dispatch, artifact_type="dispatch", created_by="ForgeDispatcher", attempt=1)
     store.set_status(run_id, "generating", "Forge dispatch package prepared", attempt_count=1)
 
     artifact_path = ""
+    forge_monitor = {}
+    if submit and (wait_for_result or run_inline_once):
+        forge_monitor = monitor_forge_job(
+            db_path=forge_db_path,
+            job_record=dispatch.get("job_record") if isinstance(dispatch.get("job_record"), dict) else None,
+            max_wait_sec=max_wait_sec,
+            poll_interval_sec=poll_interval_sec,
+            run_inline_once=run_inline_once,
+        )
+        register_json_artifact(
+            store,
+            run_id,
+            step="forge_monitor",
+            payload=forge_monitor,
+            artifact_type="result",
+            created_by="Moriana",
+            attempt=1,
+            status="accepted" if forge_monitor.get("ok") else "rejected",
+            subdir="results",
+            rejection_reason="; ".join(str(item.get("code") or "") for item in forge_monitor.get("blockers", []) if isinstance(item, dict)),
+        )
+        paths = forge_monitor.get("artifact_paths") if isinstance(forge_monitor.get("artifact_paths"), list) else []
+        artifact_path = str(paths[0]) if paths else ""
     if test_artifact_mode in {"good", "bad", "bad_then_good"}:
         width, height = job_spec_dimensions(job_spec)
         if test_artifact_mode in {"bad", "bad_then_good"}:
@@ -96,7 +125,7 @@ def execute_image_run(
 
     store.set_status(run_id, "checking", "ImageVerifier is checking generated artifact", attempt_count=1)
     verification = verify_image({"artifact_path": artifact_path, "job_spec": job_spec, "job_record": dispatch.get("job_record")})
-    blockers = blockers_from(verification)
+    blockers = [*blockers_from(forge_monitor), *blockers_from(verification)]
     register_json_artifact(store, run_id, step="image_verification", payload=verification, artifact_type="verification", created_by="ImageVerifier", attempt=1, status="accepted" if not blockers else "rejected", rejection_reason="; ".join(str(item.get("code") or "") for item in blockers))
     accepted_artifact_id = ""
     if artifact_path:
@@ -156,6 +185,7 @@ def execute_image_run(
         "status": store.status(run_id),
         "final": final_payload,
         "artifacts": store.artifacts(run_id),
+        "forge_monitor": forge_monitor,
     }
 
 

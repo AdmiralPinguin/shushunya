@@ -17,6 +17,11 @@ WARMMASTER_ROOT = PROJECT_ROOT / "EyeOfTerror" / "Warmaster"
 if str(WARMMASTER_ROOT) not in sys.path:
     sys.path.insert(0, str(WARMMASTER_ROOT))
 
+from PIL import Image
+
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import ArtifactRecord, JobRecord, JobSpec, JobStatus
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.storage import ForgeStore
+from EyeOfTerror.Pictorium.Moriana.moriana_forge_monitor import monitor_forge_job
 from EyeOfTerror.Pictorium.Moriana.moriana_governor import create_or_execute_run, make_handler, prepare_run
 
 
@@ -59,6 +64,32 @@ def artifact_types(run_dir: Path) -> set[str]:
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="moriana-runtime-self-test-") as tmp:
         run_root = Path(tmp) / "runtime" / "pictorium" / "runs"
+        forge_db_path = Path(tmp) / "forge-monitor.sqlite3"
+        forge_store = ForgeStore(forge_db_path)
+        completed_job = JobRecord(
+            id="forge-monitor-job",
+            spec=JobSpec(prompt="monitor test image", width=512, height=512),
+            status=JobStatus.succeeded,
+            progress=1.0,
+        )
+        forge_store.create_job(completed_job)
+        forge_artifact_path = Path(tmp) / "forge_artifact.png"
+        forge_metadata_path = Path(tmp) / "forge_artifact.json"
+        Image.new("RGB", (512, 512), (10, 20, 30)).save(forge_artifact_path)
+        forge_metadata_path.write_text('{"source":"moriana_runtime_self_test"}\n', encoding="utf-8")
+        forge_store.add_artifact(
+            ArtifactRecord(
+                id="forge-monitor-artifact",
+                job_id="forge-monitor-job",
+                kind="image",
+                path=str(forge_artifact_path),
+                metadata_path=str(forge_metadata_path),
+                metadata={"width": 512, "height": 512},
+            )
+        )
+        monitored = monitor_forge_job(db_path=forge_db_path, job_record=completed_job.model_dump(mode="json"))
+        if not monitored.get("ok") or monitored.get("artifact_paths") != [str(forge_artifact_path)]:
+            raise AssertionError(f"Forge monitor did not resolve completed job artifact: {monitored}")
 
         prepared = prepare_run("нарисуй картинку 512x512", "prepared-image", run_root / "prepared-image")
         run_dir = Path(str(prepared["run_dir"]))
@@ -123,6 +154,27 @@ def main() -> int:
             raise AssertionError(f"missing-artifact run should be explicit failed/pending blocker: {failure}")
         if not (failure_dir / "revisions" / "revision_01.json").exists():
             raise AssertionError("failed image run did not write revision plan")
+
+        pending = create_or_execute_run(
+            run_root,
+            {
+                "task": "нарисуй pending forge картинку 512x512",
+                "task_id": "image-pending-forge-job",
+                "execute": True,
+                "submit": True,
+                "wait_for_result": True,
+                "max_wait_sec": 0,
+            },
+        )
+        pending_dir = Path(str(pending["run_dir"]))
+        pending_registry = load_json(pending_dir / "artifact_registry.json")
+        rejected_results = [
+            item
+            for item in pending_registry.get("artifacts", [])
+            if isinstance(item, dict) and item.get("type") == "result" and item.get("status") == "rejected"
+        ]
+        if pending.get("ok") or not rejected_results or pending.get("forge_monitor", {}).get("status") != "queued":
+            raise AssertionError(f"pending Forge job was not tracked as a rejected runtime result: {pending}")
 
         comic = create_or_execute_run(
             run_root,

@@ -60,6 +60,7 @@ def py_compile() -> dict[str, Any]:
         "../EyeOfTerror/Pictorium/Moriana/moriana_core/prompt_thinker.py",
         "../EyeOfTerror/Pictorium/Moriana/moriana_core/promptwright.py",
         "../EyeOfTerror/Pictorium/Moriana/moriana_executor.py",
+        "../EyeOfTerror/Pictorium/Moriana/moriana_forge_monitor.py",
         "../EyeOfTerror/Pictorium/Moriana/moriana_governor.py",
         "../EyeOfTerror/Pictorium/Moriana/moriana_runtime.py",
         "../EyeOfTerror/Pictorium/Brigades/Image/worker_api.py",
