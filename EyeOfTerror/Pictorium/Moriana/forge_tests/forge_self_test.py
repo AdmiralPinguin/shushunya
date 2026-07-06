@@ -79,6 +79,7 @@ def py_compile() -> dict[str, Any]:
         "../EyeOfTerror/Pictorium/Moriana/benches/long_forge_api.py",
         "../EyeOfTerror/Pictorium/Moriana/forge_tests/smoke_forge_api.py",
         "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_e2e_self_test.py",
+        "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_service_self_test.py",
     ]
     command = [str(ROOT / "DemonsForge/bin/python"), "-m", "py_compile", *files]
     completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=120)
