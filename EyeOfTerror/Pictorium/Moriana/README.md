@@ -72,6 +72,10 @@ It routes tasks through Moriana itself with `submit`, `wait_for_result`, and
 accepted visual artifacts. This is different from the lower-level
 DemonsForge-only `quality_bench.py`: the live Moriana runner validates the full
 governor -> brigade -> Forge -> verifier -> registry path.
+The smoke profile runs one simple image. The full profile covers the goal-level
+quality set: simple image, character/environment image, 3-image series, 4-panel
+comic, 8-panel comic, and a constrained style/character stress image. Each trial
+declares the expected task kind and minimum accepted visual artifact count.
 
 `forge_tests/forge_self_test.py` keeps live checks opt-in. Use `--run-live` to
 include live visual checks and `--require-live` when missing or failed live

@@ -24,16 +24,37 @@ TRIALS = [
         "id": "live_simple_image",
         "task": "нарисуй простую картинку древнего механикум-алтаря 512x512",
         "expected_kind": "image",
+        "expected_min_visual_artifacts": 1,
     },
     {
         "id": "live_character_environment",
         "task": "нарисуй техножреца в огромной кузне, единый стиль, 512x512",
         "expected_kind": "image",
+        "expected_min_visual_artifacts": 1,
+    },
+    {
+        "id": "live_image_series_3",
+        "task": "сделай серию 3 изображения про один и тот же древний механикум-алтарь 512x512",
+        "expected_kind": "image_series",
+        "expected_min_visual_artifacts": 3,
     },
     {
         "id": "live_comic_4_panels",
         "task": "сделай комикс 4 панели про техножреца который запускает древнюю кузню",
         "expected_kind": "comic",
+        "expected_min_visual_artifacts": 4,
+    },
+    {
+        "id": "live_comic_8_panels",
+        "task": "сделай комикс 8 панелей про техножреца который нашел, запустил и остановил древнюю кузню",
+        "expected_kind": "comic",
+        "expected_min_visual_artifacts": 8,
+    },
+    {
+        "id": "live_style_character_stress",
+        "task": "нарисуй сложную картинку: один узнаваемый техножрец, холодный индустриальный свет, единая палитра, без текста, без лишних персонажей, 512x512",
+        "expected_kind": "image",
+        "expected_min_visual_artifacts": 1,
     },
 ]
 
@@ -82,6 +103,7 @@ def run_trial(run_root: Path, trial: dict[str, Any], *, max_wait_sec: float, pol
         "id": trial["id"],
         "task": trial["task"],
         "expected_kind": trial["expected_kind"],
+        "expected_min_visual_artifacts": int(trial.get("expected_min_visual_artifacts") or 1),
         "ok": bool(result.get("ok")),
         "run_dir": str(run_dir),
         "task_kind": status.get("task_kind"),
@@ -106,14 +128,23 @@ def run_trial(run_root: Path, trial: dict[str, Any], *, max_wait_sec: float, pol
     }
 
 
+def weak_reasons(record: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    if not record.get("delivery_ready"):
+        reasons.append("delivery_not_ready")
+    if record.get("quality_next_action") != "accept_final":
+        reasons.append("quality_did_not_accept_final")
+    if record.get("task_kind") != record.get("expected_kind"):
+        reasons.append("task_kind_mismatch")
+    accepted = int(record.get("accepted_visual_artifact_count") or 0)
+    expected = int(record.get("expected_min_visual_artifacts") or 1)
+    if accepted < expected:
+        reasons.append("accepted_visual_artifact_count_below_expected")
+    return reasons
+
+
 def build_report(records: list[dict[str, Any]], *, run_root: Path) -> dict[str, Any]:
-    weak_cases = [
-        item
-        for item in records
-        if not item.get("delivery_ready")
-        or item.get("quality_next_action") != "accept_final"
-        or int(item.get("accepted_visual_artifact_count") or 0) == 0
-    ]
+    weak_cases = [{**item, "weak_reasons": weak_reasons(item)} for item in records if weak_reasons(item)]
     avg_score = round(sum(int(item.get("quality_score") or 0) for item in records) / max(1, len(records)), 2)
     return {
         "kind": "pictorium_moriana_live_quality_trial_report",
@@ -126,11 +157,14 @@ def build_report(records: list[dict[str, Any]], *, run_root: Path) -> dict[str, 
             {
                 "id": item["id"],
                 "task_kind": item.get("task_kind"),
+                "expected_kind": item.get("expected_kind"),
                 "final_status": item.get("final_status"),
                 "quality_score": item.get("quality_score"),
                 "next_action": item.get("quality_next_action"),
                 "accepted_visual_artifact_count": item.get("accepted_visual_artifact_count"),
+                "expected_min_visual_artifacts": item.get("expected_min_visual_artifacts"),
                 "blocker_count": item.get("blocker_count"),
+                "weak_reasons": item.get("weak_reasons", []),
             }
             for item in weak_cases
         ],

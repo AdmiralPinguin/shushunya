@@ -21,6 +21,7 @@ from PIL import Image
 
 from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import ArtifactRecord, JobRecord, JobSpec, JobStatus
 from EyeOfTerror.Pictorium.Moriana.forge_runtime.storage import ForgeStore
+from EyeOfTerror.Pictorium.Moriana.forge_tests.moriana_live_quality_trials import build_report as build_live_trial_report
 from EyeOfTerror.Pictorium.Moriana.moriana_forge_monitor import monitor_forge_job
 from EyeOfTerror.Pictorium.Moriana.moriana_governor import create_or_execute_run, make_handler, prepare_run
 from EyeOfTerror.Pictorium.Moriana.moriana_executor import execute_revision_run
@@ -101,6 +102,24 @@ def _main() -> int:
         monitored = monitor_forge_job(db_path=forge_db_path, job_record=completed_job.model_dump(mode="json"))
         if not monitored.get("ok") or monitored.get("artifact_paths") != [str(forge_artifact_path)]:
             raise AssertionError(f"Forge monitor did not resolve completed job artifact: {monitored}")
+        live_report = build_live_trial_report(
+            [
+                {
+                    "id": "mock-comic",
+                    "task_kind": "comic",
+                    "expected_kind": "comic",
+                    "delivery_ready": True,
+                    "quality_next_action": "accept_final",
+                    "quality_score": 100,
+                    "accepted_visual_artifact_count": 3,
+                    "expected_min_visual_artifacts": 4,
+                    "blocker_count": 0,
+                }
+            ],
+            run_root=run_root,
+        )
+        if live_report.get("ok") or live_report.get("weak_cases", [{}])[0].get("weak_reasons") != ["accepted_visual_artifact_count_below_expected"]:
+            raise AssertionError(f"live quality report should reject under-produced comic panels: {live_report}")
 
         prepared = prepare_run("нарисуй картинку 512x512", "prepared-image", run_root / "prepared-image")
         run_dir = Path(str(prepared["run_dir"]))
