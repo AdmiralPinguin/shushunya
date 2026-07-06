@@ -33,7 +33,7 @@ from EyeOfTerror.Pictorium.Brigades.Comics.Workers.LayoutFinalis.worker import w
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.Panelwright.worker import worker_contract as panelwright_contract
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.ScenarioScribe.worker import worker_contract as scenario_scribe_contract
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.StoryboardArchitect.worker import worker_contract as storyboard_architect_contract
-from EyeOfTerror.Pictorium.Moriana.moriana_executor import execute_comic_run, execute_image_run, execute_image_series_run
+from EyeOfTerror.Pictorium.Moriana.moriana_executor import execute_comic_run, execute_existing_image_artifact_run, execute_image_run, execute_image_series_run
 from EyeOfTerror.Pictorium.Moriana.moriana_core.asset_catalog import capabilities as forge_capabilities
 from EyeOfTerror.Pictorium.Moriana.moriana_quality import read_quality_report, write_quality_report
 from EyeOfTerror.Pictorium.Moriana.moriana_runtime import MorianaRunStore, write_json_atomic
@@ -402,6 +402,17 @@ def create_or_execute_run(run_root: Path, payload: dict[str, Any]) -> dict[str, 
     status = store.create_run(plan.contract.task_id, task, task_kind, plan_payload)
     if not bool(payload.get("execute", False)):
         return {"ok": True, "governor": GOVERNOR, "run_id": plan.contract.task_id, "run_dir": status["run_dir"], "status": status}
+    artifact_path = str(payload.get("artifact_path") or "").strip()
+    if artifact_path:
+        job_spec = payload.get("job_spec") if isinstance(payload.get("job_spec"), dict) else None
+        return execute_existing_image_artifact_run(
+            store,
+            plan.contract.task_id,
+            task,
+            artifact_path=artifact_path,
+            job_spec=job_spec,
+            created_by=str(payload.get("artifact_source") or "external_live_artifact"),
+        )
     if task_kind == "comic":
         return execute_comic_run(store, plan.contract.task_id, task, submit=bool(payload.get("submit", False)))
     if task_kind == "image_series":

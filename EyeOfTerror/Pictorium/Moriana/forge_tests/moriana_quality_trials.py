@@ -9,6 +9,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -56,6 +58,12 @@ TRIALS = [
         "payload": {"execute": True, "test_artifact_mode": "good"},
         "expected_kind": "image",
     },
+    {
+        "id": "existing_live_artifact",
+        "task": "проверь уже готовую реальную картинку механикум-алтаря 512x512",
+        "payload": {"execute": True, "external_artifact": True},
+        "expected_kind": "image",
+    },
 ]
 
 
@@ -66,10 +74,16 @@ def load_json(path: Path) -> dict[str, Any]:
     return payload
 
 
-def trial_record(run_root: Path, trial: dict[str, Any]) -> dict[str, Any]:
+def trial_record(run_root: Path, trial: dict[str, Any], asset_root: Path) -> dict[str, Any]:
     payload = dict(trial["payload"])
     payload["task"] = trial["task"]
     payload["task_id"] = f"quality-{trial['id']}"
+    if payload.pop("external_artifact", False):
+        artifact_path = asset_root / f"{trial['id']}.png"
+        Image.new("RGB", (512, 512), (40, 50, 70)).save(artifact_path)
+        payload["artifact_path"] = str(artifact_path)
+        payload["artifact_source"] = "quality_trial_existing_artifact"
+        payload["job_spec"] = {"prompt": trial["task"], "width": 512, "height": 512}
     result = create_or_execute_run(run_root, payload)
     run_dir = Path(str(result["run_dir"]))
     quality = load_json(run_dir / "final" / "quality_report.json")
@@ -99,7 +113,7 @@ def trial_record(run_root: Path, trial: dict[str, Any]) -> dict[str, Any]:
         "artifact_status_counts": quality.get("artifact_counts", {}).get("by_status", {}),
         "artifact_type_counts": quality.get("artifact_counts", {}).get("by_type", {}),
         "limitations": quality.get("audit_limits", []),
-        "coverage_mode": "synthetic_image" if trial["payload"].get("test_artifact_mode") else "manifest_orchestration",
+        "coverage_mode": "existing_live_artifact" if payload.get("artifact_path") else ("synthetic_image" if trial["payload"].get("test_artifact_mode") else "manifest_orchestration"),
     }
 
 
@@ -121,6 +135,8 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
                     "impact": "orchestration and deterministic verification are covered, live model visual quality is not",
                 }
             )
+        if item.get("coverage_mode") == "existing_live_artifact":
+            continue
         if item.get("task_kind") == "comic" and int(item.get("accepted_image_count") or 0) == 0:
             coverage_gaps.append(
                 {
@@ -167,7 +183,9 @@ def main() -> int:
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="moriana-quality-trials-") as tmp:
         run_root = Path(tmp) / "runtime" / "pictorium" / "runs"
-        records = [trial_record(run_root, trial) for trial in TRIALS]
+        asset_root = Path(tmp) / "assets"
+        asset_root.mkdir(parents=True, exist_ok=True)
+        records = [trial_record(run_root, trial, asset_root) for trial in TRIALS]
         report = aggregate(records)
     if args.report_json:
         path = Path(args.report_json)

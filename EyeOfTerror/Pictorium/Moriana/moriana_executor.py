@@ -205,6 +205,77 @@ def execute_image_run(
     }
 
 
+def execute_existing_image_artifact_run(
+    store: MorianaRunStore,
+    run_id: str,
+    task: str,
+    *,
+    artifact_path: str,
+    job_spec: dict[str, Any] | None = None,
+    created_by: str = "external_live_artifact",
+) -> dict[str, Any]:
+    run_dir = store.run_dir(run_id)
+    store.set_status(run_id, "checking", "ImageVerifier is checking supplied live artifact", attempt_count=1)
+    spec = job_spec or prepare_image_plan({"request": task, "use_memory": False, "use_thinker": False}).get("job_spec", {})
+    plan = {
+        "ok": True,
+        "worker": "Promptwright",
+        "plan_kind": "external_artifact",
+        "artifact": "/work/pictorium/image_plan.json",
+        "job_spec": spec,
+    }
+    register_json_artifact(store, run_id, step="image_plan", payload=plan, artifact_type="prompt", created_by="Promptwright", attempt=1, subdir="prompts")
+    artifact = Path(artifact_path)
+    verification = verify_image({"artifact_path": str(artifact), "job_spec": spec, "job_record": {}})
+    blockers = blockers_from(verification)
+    register_json_artifact(
+        store,
+        run_id,
+        step="image_verification",
+        payload=verification,
+        artifact_type="verification",
+        created_by="ImageVerifier",
+        attempt=1,
+        status="accepted" if not blockers else "rejected",
+        rejection_reason="; ".join(str(item.get("code") or "") for item in blockers),
+    )
+    accepted_artifact_id = ""
+    if artifact.exists():
+        image_record = store.register_artifact(
+            run_id,
+            artifact_type="image",
+            path=artifact,
+            created_by=created_by,
+            step="live_artifact_ingest",
+            attempt=1,
+            status="accepted" if not blockers else "rejected",
+            rejection_reason="; ".join(str(item.get("message") or item.get("code") or "") for item in blockers),
+            metadata={"job_spec": spec, "live_artifact": True},
+        )
+        accepted_artifact_id = str(image_record["artifact_id"]) if not blockers else ""
+    final = build_final_manifest({"plan": plan, "resources": {}, "dispatch": {}, "verification": verification, "artifacts": [str(artifact)] if artifact.exists() else []})
+    final_payload = dict(final.get("final_manifest") if isinstance(final.get("final_manifest"), dict) else {})
+    final_payload.setdefault("kind", "pictorium_image_final_manifest")
+    final_payload["run_id"] = run_id
+    final_payload["attempt"] = 1
+    final_payload["artifact_registry"] = str(run_dir / "artifact_registry.json")
+    final_payload["accepted_artifact_id"] = accepted_artifact_id
+    if blockers and final_payload.get("status") != "ready":
+        store.write_revision(run_id, 1, blockers, "revise supplied artifact or regenerate image")
+    store.write_final(run_id, final_payload, final_artifact_id=accepted_artifact_id)
+    quality_report = write_quality_report(store, run_id)
+    return {
+        "ok": final_payload.get("status") == "ready",
+        "governor": "Moriana",
+        "run_id": run_id,
+        "run_dir": str(run_dir),
+        "status": store.status(run_id),
+        "final": final_payload,
+        "artifacts": store.artifacts(run_id),
+        "quality_report": quality_report,
+    }
+
+
 def execute_image_series_run(
     store: MorianaRunStore,
     run_id: str,
