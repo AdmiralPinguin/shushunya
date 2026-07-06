@@ -205,6 +205,46 @@ def _dedupe_targets(targets: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return deduped
 
 
+def _revision_strategy(action: str, targets: list[dict[str, Any]], rerun_steps: list[str], downstream_steps: list[str]) -> dict[str, Any]:
+    if action == "accept_final":
+        return {
+            "kind": "acceptance",
+            "mode": "accept_best_selected_final",
+            "worker_sequence": [],
+            "rerun_steps": [],
+            "acceptance_rule": "final manifest is ready, quality report has no blockers, and final_selection identifies accepted artifacts",
+            "stop_condition": "final_ready",
+        }
+    if action == "wait_or_resubmit_forge_job":
+        mode = "continue_or_resubmit_generation"
+        worker_sequence = ["ForgeDispatcher", "ImageVerifier", "ArtifactFinalis"]
+    elif action == "change_model_or_assets":
+        mode = "resource_reselection_then_regeneration"
+        worker_sequence = ["ModelQuartermaster", "ForgeDispatcher", "ImageVerifier", "ArtifactFinalis"]
+    elif action == "rerun_panel_generation_and_layout":
+        mode = "rerun_comic_panels_then_layout"
+        worker_sequence = ["Panelwright", "LayoutFinalis"]
+    elif action == "regenerate_with_verified_dimensions":
+        mode = "prompt_repair_then_regeneration"
+        worker_sequence = ["Promptwright", "ModelQuartermaster", "ForgeDispatcher", "ImageVerifier", "ArtifactFinalis"]
+    else:
+        mode = "targeted_repair_then_reaudit"
+        worker_sequence = [
+            str(target.get("target_worker") or "")
+            for target in targets
+            if str(target.get("target_worker") or "")
+        ]
+    return {
+        "kind": "revision",
+        "mode": mode,
+        "worker_sequence": list(dict.fromkeys(worker_sequence)),
+        "rerun_steps": rerun_steps,
+        "downstream_steps": downstream_steps,
+        "acceptance_rule": "rerun affected steps, write a new final manifest, then accept only if quality_report.next_action is accept_final",
+        "stop_condition": "new_accepted_final_or_repeated_blocker_fingerprint",
+    }
+
+
 def build_revision_decision(
     store: MorianaRunStore,
     run_id: str,
@@ -216,6 +256,7 @@ def build_revision_decision(
     task_kind = str(report.get("task_kind") or status.get("task_kind") or "")
     delivery_ready = bool(report.get("delivery_ready"))
     if delivery_ready and not blockers:
+        final_selection = store.final_selection(run_id, store.final_result(run_id))
         return {
             "kind": "pictorium_revision_decision",
             "run_id": run_id,
@@ -229,6 +270,8 @@ def build_revision_decision(
             "targets": [],
             "rerun_steps": [],
             "downstream_steps": [],
+            "final_selection": final_selection,
+            "revision_strategy": _revision_strategy("accept_final", [], [], []),
             "stop_condition": "final_ready",
         }
     targets = _dedupe_targets([_normalise_blocker(blocker, task_kind) for blocker in blockers])
@@ -245,6 +288,7 @@ def build_revision_decision(
             step = str(step)
             if step and step not in downstream_steps:
                 downstream_steps.append(step)
+    final_selection = store.final_selection(run_id, store.final_result(run_id))
     return {
         "kind": "pictorium_revision_decision",
         "run_id": run_id,
@@ -258,6 +302,8 @@ def build_revision_decision(
         "targets": targets,
         "rerun_steps": rerun_steps,
         "downstream_steps": downstream_steps,
+        "final_selection": final_selection,
+        "revision_strategy": _revision_strategy(action, targets, rerun_steps, downstream_steps),
         "stop_condition": "revision_required",
     }
 

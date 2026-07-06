@@ -77,7 +77,7 @@ def job_spec_dimensions(job_spec: dict[str, Any]) -> tuple[int, int]:
 def requested_image_count(task: str, default: int = 3) -> int:
     lowered = task.lower()
     for pattern in (
-        r"\b(\d{1,2})\s*(?:картин|изображен|images|pictures)\b",
+        r"\b(\d{1,2})\s*(?:картин\w*|изображен\w*|images|pictures)\b",
         r"(?:серия|series|batch)\s*(?:из|of)?\s*(\d{1,2})",
     ):
         match = re.search(pattern, lowered)

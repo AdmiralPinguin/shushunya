@@ -576,7 +576,7 @@ def is_image_series_request(user_task: str) -> bool:
     lowered = user_task.lower()
     if any(term in lowered for term in ("серия", "серию", "серии", "набор картинок", "несколько картинок", "image series", "series of images", "batch of images")):
         return True
-    return bool(re.search(r"\b\d{1,2}\s*(?:картин|изображен|images|pictures)\b", lowered))
+    return bool(re.search(r"\b\d{1,2}\s*(?:картин\w*|изображен\w*|images|pictures)\b", lowered))
 
 
 def comics_required_artifacts(slug: str) -> list[str]:

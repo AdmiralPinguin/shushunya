@@ -331,6 +331,70 @@ class MorianaRunStore:
             "latest_artifact_id": str(artifacts[-1].get("artifact_id") or "") if artifacts else "",
         }
 
+    def final_selection(self, run_id: str, payload: dict[str, Any] | None = None, final_artifact_id: str = "") -> dict[str, Any]:
+        final_payload = payload if isinstance(payload, dict) else self.final_result(run_id)
+        artifacts = self.artifacts(run_id)
+        visual_artifacts = [
+            item
+            for item in artifacts
+            if item.get("type") in {"image", "comic_panel"}
+        ]
+        accepted_visuals = [item for item in visual_artifacts if item.get("status") == "accepted"]
+        rejected_visuals = [item for item in visual_artifacts if item.get("status") == "rejected"]
+
+        selected_ids: list[str] = []
+        policy = "no_accepted_visual_artifact"
+        if isinstance(final_payload.get("accepted_artifact_ids"), list) and final_payload.get("accepted_artifact_ids"):
+            selected_ids = [str(item) for item in final_payload.get("accepted_artifact_ids", []) if str(item)]
+            policy = "manifest_accepted_artifact_ids"
+        elif isinstance(final_payload.get("panel_artifacts"), list) and final_payload.get("panel_artifacts"):
+            selected_ids = [
+                str(item.get("artifact_id") or "")
+                for item in final_payload.get("panel_artifacts", [])
+                if isinstance(item, dict) and str(item.get("artifact_id") or "")
+            ]
+            policy = "manifest_panel_artifacts"
+        elif final_payload.get("accepted_artifact_id"):
+            selected_ids = [str(final_payload.get("accepted_artifact_id") or "")]
+            policy = "manifest_accepted_artifact_id"
+        elif final_artifact_id:
+            selected_ids = [final_artifact_id]
+            policy = "explicit_final_artifact_id"
+        elif accepted_visuals:
+            selected_ids = [str(accepted_visuals[-1].get("artifact_id") or "")]
+            policy = "latest_accepted_visual_artifact"
+
+        selected_id_set = {item for item in selected_ids if item}
+        selected_artifacts = [
+            {
+                "artifact_id": str(item.get("artifact_id") or ""),
+                "type": str(item.get("type") or ""),
+                "path": str(item.get("path") or ""),
+                "created_by": str(item.get("created_by") or ""),
+                "step": str(item.get("step") or ""),
+                "attempt": int(item.get("attempt") or 0),
+                "status": str(item.get("status") or ""),
+            }
+            for item in artifacts
+            if str(item.get("artifact_id") or "") in selected_id_set
+        ]
+        selected_attempts = sorted({int(item.get("attempt") or 0) for item in selected_artifacts if int(item.get("attempt") or 0) > 0})
+        candidate_attempts = sorted({int(item.get("attempt") or 0) for item in visual_artifacts if int(item.get("attempt") or 0) > 0})
+        return {
+            "kind": "pictorium_final_selection",
+            "run_id": run_id,
+            "policy": policy,
+            "selected_artifact_ids": [item for item in selected_ids if item],
+            "selected_artifacts": selected_artifacts,
+            "selected_count": len(selected_artifacts),
+            "accepted_candidate_count": len(accepted_visuals),
+            "rejected_candidate_count": len(rejected_visuals),
+            "candidate_attempts": candidate_attempts,
+            "selected_attempts": selected_attempts,
+            "best_attempt": max(selected_attempts) if selected_attempts else 0,
+            "preserves_all_attempts": bool(candidate_attempts and len(candidate_attempts) >= 1),
+        }
+
     def write_error(self, run_id: str, step: str, error: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
         status = self.status(run_id)
         error_count = int(status.get("error_count") or 0) + 1
@@ -403,6 +467,7 @@ class MorianaRunStore:
 
     def write_final(self, run_id: str, payload: dict[str, Any], final_artifact_id: str = "") -> dict[str, Any]:
         path = self.run_dir(run_id) / "final" / "final_manifest.json"
+        payload["final_selection"] = self.final_selection(run_id, payload, final_artifact_id)
         write_json_atomic(path, payload)
         artifact = self.register_artifact(
             run_id,

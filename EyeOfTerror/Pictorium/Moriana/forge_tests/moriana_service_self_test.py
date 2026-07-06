@@ -113,6 +113,8 @@ def _main() -> int:
                 detail.get("status", {}).get("status") != "completed"
                 or detail.get("artifact_summary", {}).get("accepted_visual_artifact_count") != 1
                 or detail.get("quality_report", {}).get("next_action") != "accept_final"
+                or detail.get("final", {}).get("final_selection", {}).get("selected_count") != 1
+                or detail.get("revision_decision", {}).get("revision_strategy", {}).get("mode") != "accept_best_selected_final"
             ):
                 raise AssertionError(f"bad /runs/{{id}} detail payload: {detail}")
             filtered_artifacts = request_json(base, "GET", "/runs/moriana-http-exec-image/artifacts?type=image&status=accepted")

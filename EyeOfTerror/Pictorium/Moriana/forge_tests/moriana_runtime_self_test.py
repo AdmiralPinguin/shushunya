@@ -145,6 +145,15 @@ def _main() -> int:
         success_decision = load_json(success_dir / "final" / "revision_decision.json")
         if success_decision.get("action") != "accept_final" or success_decision.get("revision_required"):
             raise AssertionError(f"image success revision decision should accept final: {success_decision}")
+        success_final = load_json(success_dir / "final" / "final_manifest.json")
+        success_selection = success_final.get("final_selection", {})
+        if (
+            success_selection.get("selected_count") != 1
+            or success_selection.get("accepted_candidate_count") != 1
+            or success_decision.get("final_selection", {}).get("selected_count") != 1
+            or success_decision.get("revision_strategy", {}).get("mode") != "accept_best_selected_final"
+        ):
+            raise AssertionError(f"image success did not explain final selection: {success_final} / {success_decision}")
 
         revision = create_or_execute_run(
             run_root,
@@ -170,6 +179,15 @@ def _main() -> int:
         ]
         if not revision.get("ok") or not rejected_images or not accepted_images or not (revision_dir / "revisions" / "revision_01.json").exists():
             raise AssertionError(f"revision loop did not preserve rejected and accepted attempts: {revision}")
+        revision_final = load_json(revision_dir / "final" / "final_manifest.json")
+        revision_selection = revision_final.get("final_selection", {})
+        if (
+            revision_selection.get("selected_count") != 1
+            or revision_selection.get("best_attempt") != 2
+            or revision_selection.get("rejected_candidate_count") < 1
+            or revision_selection.get("selected_attempts") != [2]
+        ):
+            raise AssertionError(f"revision loop did not select the accepted revised artifact: {revision_selection}")
 
         failure = create_or_execute_run(
             run_root,
@@ -192,6 +210,7 @@ def _main() -> int:
             failure_decision.get("action") != "wait_or_resubmit_forge_job"
             or not failure_decision.get("revision_required")
             or not any(item.get("target_worker") == "ForgeDispatcher" for item in failure_decision.get("targets", []) if isinstance(item, dict))
+            or failure_decision.get("revision_strategy", {}).get("mode") != "continue_or_resubmit_generation"
         ):
             raise AssertionError(f"failed image run revision decision should target ForgeDispatcher: {failure_decision}")
         applied = execute_revision_run(MorianaRunStore(run_root), "image-pending-failure", test_artifact_mode="revision_good")
@@ -259,6 +278,9 @@ def _main() -> int:
         series_decision = load_json(series_dir / "final" / "revision_decision.json")
         if series_decision.get("action") != "accept_final":
             raise AssertionError(f"series revision decision should accept final: {series_decision}")
+        series_selection = load_json(series_dir / "final" / "final_manifest.json").get("final_selection", {})
+        if series_selection.get("selected_count") != 3 or series_selection.get("accepted_candidate_count") != 3:
+            raise AssertionError(f"series final selection should include all accepted images: {series_selection}")
 
         failed_series = create_or_execute_run(
             run_root,
@@ -293,6 +315,9 @@ def _main() -> int:
             or "revision_execution" not in {str(item.get("type") or "") for item in applied_series_artifacts}
         ):
             raise AssertionError(f"image series apply_revision did not preserve attempts and recover: {applied_series}")
+        applied_series_selection = load_json(failed_series_dir / "final" / "final_manifest.json").get("final_selection", {})
+        if applied_series_selection.get("selected_count") != 2 or applied_series_selection.get("selected_attempts") != [2]:
+            raise AssertionError(f"image series revision did not select attempt 2 artifacts: {applied_series_selection}")
 
         comic = create_or_execute_run(
             run_root,
@@ -325,6 +350,14 @@ def _main() -> int:
             raise AssertionError(f"comic run did not preserve accepted panel art artifacts: {comic}")
         if comic.get("status", {}).get("task_kind") != "comic":
             raise AssertionError(f"comic run did not preserve task_kind: {comic}")
+        comic_selection = load_json(comic_dir / "final" / "final_manifest.json").get("final_selection", {})
+        comic_decision = load_json(comic_dir / "final" / "revision_decision.json")
+        if (
+            comic_selection.get("policy") != "manifest_panel_artifacts"
+            or comic_selection.get("selected_count") != 4
+            or comic_decision.get("final_selection", {}).get("selected_count") != 4
+        ):
+            raise AssertionError(f"comic final selection should include all accepted panels: {comic_selection} / {comic_decision}")
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(run_root))
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -358,6 +391,8 @@ def _main() -> int:
                 detail.get("status", {}).get("status") != "completed"
                 or detail.get("artifact_summary", {}).get("accepted_visual_artifact_count") != 1
                 or detail.get("quality_report", {}).get("next_action") != "accept_final"
+                or detail.get("final", {}).get("final_selection", {}).get("selected_count") != 1
+                or detail.get("revision_decision", {}).get("revision_strategy", {}).get("mode") != "accept_best_selected_final"
             ):
                 raise AssertionError(f"HTTP run detail failed: {detail}")
             filtered_artifacts = request_json(base, "GET", "/runs/http-image/artifacts?type=image&status=accepted")

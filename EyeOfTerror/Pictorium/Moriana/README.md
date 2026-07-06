@@ -77,6 +77,13 @@ governor -> brigade -> Forge -> verifier -> registry path.
 include live visual checks and `--require-live` when missing or failed live
 dependencies should fail the whole run.
 
+Final manifests include `final_selection`, an auditable selection record with
+accepted/rejected visual candidate counts, selected artifact ids, selected
+attempts, and the policy used to pick the deliverable. Revision decisions include
+`revision_strategy`, which tells the application and Warmaster whether Moriana is
+accepting the selected final, waiting/resubmitting Forge work, changing
+resources, repairing prompts, or rerunning comic panels/layout.
+
 Application-facing endpoints:
 
 - `POST /runs`
