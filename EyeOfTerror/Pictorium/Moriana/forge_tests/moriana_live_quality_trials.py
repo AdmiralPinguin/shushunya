@@ -4,8 +4,9 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import re
 import sys
-import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,8 @@ if str(WARMMASTER_ROOT) not in sys.path:
 
 from EyeOfTerror.Pictorium.Moriana.moriana_governor import create_or_execute_run
 
+
+DEFAULT_RUN_ROOT = PROJECT_ROOT / "runtime" / "pictorium" / "runs"
 
 TRIALS = [
     {
@@ -63,6 +66,35 @@ def utc_now() -> str:
     return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def default_run_root() -> Path:
+    return DEFAULT_RUN_ROOT
+
+
+def default_run_prefix() -> str:
+    timestamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+    return f"live-{timestamp}-{uuid.uuid4().hex[:8]}"
+
+
+def safe_slug(value: str, *, fallback: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip())
+    slug = slug.strip(".-")
+    if not slug:
+        slug = fallback
+    if not re.match(r"^[A-Za-z0-9]", slug):
+        slug = f"{fallback}-{slug}"
+    return slug[:96]
+
+
+def trial_task_id(run_prefix: str, trial: dict[str, Any]) -> str:
+    prefix = safe_slug(run_prefix, fallback="live")
+    trial_id = safe_slug(str(trial.get("id") or ""), fallback="trial")
+    return f"{prefix}-{trial_id}"[:128]
+
+
+def selected_trials(profile: str) -> list[dict[str, Any]]:
+    return list(TRIALS if profile == "full" else TRIALS[:1])
+
+
 def read_json(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -81,10 +113,18 @@ def visual_artifacts(registry: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def run_trial(run_root: Path, trial: dict[str, Any], *, max_wait_sec: float, poll_interval_sec: float) -> dict[str, Any]:
+def run_trial(
+    run_root: Path,
+    trial: dict[str, Any],
+    *,
+    run_prefix: str,
+    max_wait_sec: float,
+    poll_interval_sec: float,
+) -> dict[str, Any]:
+    task_id = trial_task_id(run_prefix, trial)
     payload = {
         "task": trial["task"],
-        "task_id": trial["id"],
+        "task_id": task_id,
         "execute": True,
         "submit": True,
         "wait_for_result": True,
@@ -101,6 +141,7 @@ def run_trial(run_root: Path, trial: dict[str, Any], *, max_wait_sec: float, pol
     accepted_visuals = visual_artifacts(registry)
     return {
         "id": trial["id"],
+        "run_id": task_id,
         "task": trial["task"],
         "expected_kind": trial["expected_kind"],
         "expected_min_visual_artifacts": int(trial.get("expected_min_visual_artifacts") or 1),
@@ -143,12 +184,13 @@ def weak_reasons(record: dict[str, Any]) -> list[str]:
     return reasons
 
 
-def build_report(records: list[dict[str, Any]], *, run_root: Path) -> dict[str, Any]:
+def build_report(records: list[dict[str, Any]], *, run_root: Path, run_prefix: str = "") -> dict[str, Any]:
     weak_cases = [{**item, "weak_reasons": weak_reasons(item)} for item in records if weak_reasons(item)]
     avg_score = round(sum(int(item.get("quality_score") or 0) for item in records) / max(1, len(records)), 2)
     return {
         "kind": "pictorium_moriana_live_quality_trial_report",
         "run_root": str(run_root),
+        "run_prefix": run_prefix,
         "trial_count": len(records),
         "ok": not weak_cases,
         "avg_quality_score": avg_score,
@@ -176,33 +218,34 @@ def build_report(records: list[dict[str, Any]], *, run_root: Path) -> dict[str, 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run live Moriana visual quality trials through Moriana execution.")
     parser.add_argument("--report-json", default="")
-    parser.add_argument("--run-root", default="")
+    parser.add_argument("--run-root", default=str(default_run_root()))
+    parser.add_argument("--run-prefix", default="")
     parser.add_argument("--profile", choices=["smoke", "full"], default="smoke")
     parser.add_argument("--max-wait-sec", type=float, default=0.0)
     parser.add_argument("--poll-interval-sec", type=float, default=0.5)
     args = parser.parse_args()
 
     started_at = utc_now()
-    with tempfile.TemporaryDirectory(prefix="moriana-live-quality-") as tmp:
-        run_root = Path(args.run_root) if args.run_root else Path(tmp) / "runtime" / "pictorium" / "runs"
-        run_root.mkdir(parents=True, exist_ok=True)
-        selected_trials = TRIALS if args.profile == "full" else TRIALS[:1]
-        records = [
-            run_trial(
-                run_root,
-                trial,
-                max_wait_sec=args.max_wait_sec,
-                poll_interval_sec=args.poll_interval_sec,
-            )
-            for trial in selected_trials
-        ]
-        report = build_report(records, run_root=run_root)
-        report["started_at"] = started_at
-        report["finished_at"] = utc_now()
-        if args.report_json:
-            path = Path(args.report_json)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    run_root = Path(args.run_root)
+    run_prefix = args.run_prefix.strip() or default_run_prefix()
+    run_root.mkdir(parents=True, exist_ok=True)
+    records = [
+        run_trial(
+            run_root,
+            trial,
+            run_prefix=run_prefix,
+            max_wait_sec=args.max_wait_sec,
+            poll_interval_sec=args.poll_interval_sec,
+        )
+        for trial in selected_trials(args.profile)
+    ]
+    report = build_report(records, run_root=run_root, run_prefix=run_prefix)
+    report["started_at"] = started_at
+    report["finished_at"] = utc_now()
+    if args.report_json:
+        path = Path(args.report_json)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(
         json.dumps(
             {

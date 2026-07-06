@@ -72,6 +72,11 @@ It routes tasks through Moriana itself with `submit`, `wait_for_result`, and
 accepted visual artifacts. This is different from the lower-level
 DemonsForge-only `quality_bench.py`: the live Moriana runner validates the full
 governor -> brigade -> Forge -> verifier -> registry path.
+By default live runs are preserved under
+`runtime/pictorium/runs/<run_prefix>-<trial_id>/`, not a temporary directory, so
+the application and later audits can read the same run history. Use
+`--run-prefix` to group one smoke/full trial batch and `--run-root` only when an
+explicit alternate persistent runtime is needed.
 The smoke profile runs one simple image. The full profile covers the goal-level
 quality set: simple image, character/environment image, 3-image series, 4-panel
 comic, 8-panel comic, and a constrained style/character stress image. Each trial

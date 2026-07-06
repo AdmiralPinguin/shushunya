@@ -21,7 +21,12 @@ from PIL import Image
 
 from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import ArtifactRecord, JobRecord, JobSpec, JobStatus
 from EyeOfTerror.Pictorium.Moriana.forge_runtime.storage import ForgeStore
-from EyeOfTerror.Pictorium.Moriana.forge_tests.moriana_live_quality_trials import build_report as build_live_trial_report
+from EyeOfTerror.Pictorium.Moriana.forge_tests.moriana_live_quality_trials import (
+    build_report as build_live_trial_report,
+    default_run_root as default_live_trial_run_root,
+    selected_trials as selected_live_trials,
+    trial_task_id as live_trial_task_id,
+)
 from EyeOfTerror.Pictorium.Moriana.moriana_forge_monitor import monitor_forge_job
 from EyeOfTerror.Pictorium.Moriana.moriana_governor import create_or_execute_run, make_handler, prepare_run
 from EyeOfTerror.Pictorium.Moriana.moriana_executor import execute_revision_run
@@ -120,6 +125,13 @@ def _main() -> int:
         )
         if live_report.get("ok") or live_report.get("weak_cases", [{}])[0].get("weak_reasons") != ["accepted_visual_artifact_count_below_expected"]:
             raise AssertionError(f"live quality report should reject under-produced comic panels: {live_report}")
+        if default_live_trial_run_root() != PROJECT_ROOT / "runtime" / "pictorium" / "runs":
+            raise AssertionError(f"live quality runner must preserve runs by default: {default_live_trial_run_root()}")
+        if len(selected_live_trials("smoke")) != 1 or len(selected_live_trials("full")) <= 1:
+            raise AssertionError("live quality runner profile selection is broken")
+        generated_live_id = live_trial_task_id("live 20260706", {"id": "simple smoke"})
+        if generated_live_id != "live-20260706-simple-smoke":
+            raise AssertionError(f"live quality runner did not build a safe persistent run id: {generated_live_id}")
 
         prepared = prepare_run("нарисуй картинку 512x512", "prepared-image", run_root / "prepared-image")
         run_dir = Path(str(prepared["run_dir"]))
