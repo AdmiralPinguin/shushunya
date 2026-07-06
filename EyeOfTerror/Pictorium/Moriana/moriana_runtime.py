@@ -33,6 +33,7 @@ ARTIFACT_TYPES = {
     "verification",
     "error",
     "result",
+    "quality_report",
 }
 
 

@@ -112,9 +112,12 @@ def main() -> int:
         success_dir = Path(str(success["run_dir"]))
         assert_run_workspace(success_dir)
         success_types = artifact_types(success_dir)
-        for required_type in ("prompt", "resource_report", "dispatch", "verification", "image", "final"):
+        for required_type in ("prompt", "resource_report", "dispatch", "verification", "image", "final", "quality_report"):
             if required_type not in success_types:
                 raise AssertionError(f"image success registry missing {required_type}: {success_types}")
+        success_quality = load_json(success_dir / "final" / "quality_report.json")
+        if success_quality.get("next_action") != "accept_final" or not success_quality.get("delivery_ready"):
+            raise AssertionError(f"image success quality report should be ready: {success_quality}")
 
         revision = create_or_execute_run(
             run_root,
@@ -154,6 +157,9 @@ def main() -> int:
             raise AssertionError(f"missing-artifact run should be explicit failed/pending blocker: {failure}")
         if not (failure_dir / "revisions" / "revision_01.json").exists():
             raise AssertionError("failed image run did not write revision plan")
+        failure_quality = load_json(failure_dir / "final" / "quality_report.json")
+        if failure_quality.get("next_action") != "revise" or not failure_quality.get("revision_targets"):
+            raise AssertionError(f"failed image run quality report should request revision: {failure_quality}")
 
         pending = create_or_execute_run(
             run_root,
@@ -200,6 +206,9 @@ def main() -> int:
             or len(series_images) != 3
         ):
             raise AssertionError(f"image series run did not complete as a real series: {series}")
+        series_quality = load_json(series_dir / "final" / "quality_report.json")
+        if series_quality.get("accepted_image_count") != 3 or series_quality.get("next_action") != "accept_final":
+            raise AssertionError(f"series quality report did not see all accepted images: {series_quality}")
 
         comic = create_or_execute_run(
             run_root,
@@ -247,6 +256,12 @@ def main() -> int:
             final = request_json(base, "GET", "/runs/http-image/final")
             if final.get("final", {}).get("status") != "ready":
                 raise AssertionError(f"HTTP final failed: {final}")
+            quality = request_json(base, "GET", "/runs/http-image/quality")
+            if quality.get("quality_report", {}).get("next_action") != "accept_final":
+                raise AssertionError(f"HTTP quality failed: {quality}")
+            audit = request_json(base, "POST", "/runs/http-image/audit", {})
+            if audit.get("quality_report", {}).get("kind") != "pictorium_quality_report":
+                raise AssertionError(f"HTTP audit failed: {audit}")
             revised = request_json(base, "POST", "/runs/http-image/revise", {"reason": "test revision request"})
             if revised.get("status", {}).get("status") != "revising":
                 raise AssertionError(f"HTTP revise failed: {revised}")

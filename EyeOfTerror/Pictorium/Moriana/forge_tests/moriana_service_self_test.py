@@ -99,6 +99,12 @@ def main() -> int:
             final = request_json(base, "GET", "/runs/moriana-http-exec-image/final")
             if final.get("final", {}).get("status") != "ready":
                 raise AssertionError(f"bad /runs/{{id}}/final payload: {final}")
+            quality = request_json(base, "GET", "/runs/moriana-http-exec-image/quality")
+            if quality.get("quality_report", {}).get("next_action") != "accept_final":
+                raise AssertionError(f"bad /runs/{{id}}/quality payload: {quality}")
+            audit = request_json(base, "POST", "/runs/moriana-http-exec-image/audit", {})
+            if audit.get("quality_report", {}).get("kind") != "pictorium_quality_report":
+                raise AssertionError(f"bad /runs/{{id}}/audit payload: {audit}")
         finally:
             server.shutdown()
             thread.join(timeout=5)

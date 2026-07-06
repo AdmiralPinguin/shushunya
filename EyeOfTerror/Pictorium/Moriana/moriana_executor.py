@@ -15,6 +15,7 @@ from EyeOfTerror.Pictorium.Brigades.Image.Workers.ImageVerifier.worker import ve
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ModelQuartermaster.worker import inspect_resources
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.Promptwright.worker import prepare_image_plan
 from EyeOfTerror.Pictorium.Moriana.moriana_forge_monitor import monitor_forge_job
+from EyeOfTerror.Pictorium.Moriana.moriana_quality import write_quality_report
 from EyeOfTerror.Pictorium.Moriana.moriana_runtime import MorianaRunStore
 
 try:
@@ -190,6 +191,7 @@ def execute_image_run(
     if blockers and final_payload.get("status") != "ready":
         store.write_revision(run_id, final_payload["attempt"], blockers, "manual_or_runtime_regeneration_required")
     store.write_final(run_id, final_payload, final_artifact_id=accepted_artifact_id)
+    quality_report = write_quality_report(store, run_id)
     return {
         "ok": final_payload.get("status") == "ready",
         "governor": "Moriana",
@@ -199,6 +201,7 @@ def execute_image_run(
         "final": final_payload,
         "artifacts": store.artifacts(run_id),
         "forge_monitor": forge_monitor,
+        "quality_report": quality_report,
     }
 
 
@@ -323,6 +326,7 @@ def execute_image_series_run(
         store.set_status(run_id, "revising", "one or more series images need revision", attempt_count=1)
         store.write_revision(run_id, 1, all_blockers, "revise blocked series images and rerun final packaging")
     store.write_final(run_id, final_payload, final_artifact_id=accepted_artifact_ids[0] if accepted_artifact_ids else "")
+    quality_report = write_quality_report(store, run_id)
     return {
         "ok": final_payload["status"] == "ready",
         "governor": "Moriana",
@@ -331,6 +335,7 @@ def execute_image_series_run(
         "status": store.status(run_id),
         "final": final_payload,
         "artifacts": store.artifacts(run_id),
+        "quality_report": quality_report,
     }
 
 
@@ -379,6 +384,7 @@ def execute_comic_run(
         store.set_status(run_id, "revising", "comic layout has unresolved blockers", attempt_count=1)
         store.write_revision(run_id, 1, blockers, "revise_panel_generation_or_layout")
     store.write_final(run_id, final_payload)
+    quality_report = write_quality_report(store, run_id)
     return {
         "ok": final_payload.get("status") == "ready",
         "governor": "Moriana",
@@ -387,4 +393,5 @@ def execute_comic_run(
         "status": store.status(run_id),
         "final": final_payload,
         "artifacts": store.artifacts(run_id),
+        "quality_report": quality_report,
     }
