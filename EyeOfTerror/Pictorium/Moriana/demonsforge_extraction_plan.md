@@ -56,11 +56,21 @@ engine area:
 - smoke/self/cycle tests
 - quality/project/long benches
 
-## Still Not Active
+## Active Boundary State
 
-- Moriana governor service implementation.
-- Worker API services for the Image brigade roles.
-- Comics brigade implementation.
+- Moriana governor service is active on port 7103.
+- Image Brigade worker implementations are active under
+  `EyeOfTerror/Pictorium/Brigades/Image`.
+- Comics Brigade worker implementations are active under
+  `EyeOfTerror/Pictorium/Brigades/Comics`.
+- Warmaster routes `image_generation`, `image_series_generation`, and
+  `comic_generation` tasks to Moriana.
+- Moriana owns the application-facing visual run API, artifact registry,
+  revision decisions, final selection records, and live quality trial harness.
+
+## Still Planned
+
 - Video backend selection and scheduling.
-- Warmaster registry switch from the legacy image governor to Moriana. Done:
-  Warmaster now routes image-generation tasks to Moriana on port 7103.
+- Deeper semantic visual review with a vision model rather than only metadata,
+  deterministic checks, and worker-reported blockers.
+- Live full-profile quality trials against the real Forge/model backend.

@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 PICTORIUM = PROJECT_ROOT / "EyeOfTerror" / "Pictorium"
 CONTRACT = PICTORIUM / "Moriana" / "contracts" / "moriana_department.json"
+EXTRACTION_PLAN = PICTORIUM / "Moriana" / "demonsforge_extraction_plan.md"
 EXPECTED_IMAGE_WORKERS = {
     "Promptwright",
     "ModelQuartermaster",
@@ -47,6 +48,9 @@ else:
 def main() -> int:
     if not CONTRACT.exists():
         raise AssertionError(f"missing Moriana contract: {CONTRACT}")
+    extraction_text = EXTRACTION_PLAN.read_text(encoding="utf-8")
+    if "## Still Not Active" in extraction_text or "- Moriana governor service implementation." in extraction_text:
+        raise AssertionError(f"DemonsForge extraction plan still contains stale inactive-state claims: {EXTRACTION_PLAN}")
     payload = json.loads(CONTRACT.read_text(encoding="utf-8"))
     if payload.get("department") != "Pictorium":
         raise AssertionError(f"unexpected department: {payload}")
@@ -107,9 +111,17 @@ def main() -> int:
         if (
             not comic_plan.get("ok")
             or comic_plan.get("contract", {}).get("assigned_governor") != "Moriana"
+            or comic_plan.get("contract", {}).get("kind") != "comic_generation"
             or comic_plan.get("contract", {}).get("worker_plan", [])[0].get("worker") != "ScenarioScribe"
         ):
             raise AssertionError(f"Moriana failed to plan comic task: {comic_plan}")
+        series_plan = plan_image_task("сделай серию 3 изображения про кузню", task_id="moriana-self-test-series").to_dict()
+        if (
+            not series_plan.get("ok")
+            or series_plan.get("contract", {}).get("assigned_governor") != "Moriana"
+            or series_plan.get("contract", {}).get("kind") != "image_series_generation"
+        ):
+            raise AssertionError(f"Moriana failed to classify image series task: {series_plan}")
         capabilities_payload = service_capabilities()
         if (
             not capabilities_payload.get("ok")
