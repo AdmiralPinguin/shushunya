@@ -1,2 +1,2 @@
-elevenlabs==2.52.0
-python-dotenv==1.2.2
+TTS==0.22.0
+silero-stress==1.4

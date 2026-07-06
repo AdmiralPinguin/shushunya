@@ -2,10 +2,10 @@
 name = "warpwails"
 version = "0.1.0"
 description = "Emotional ElevenLabs TTS with local warp-demon echo processing."
-requires-python = ">=3.12"
+requires-python = ">=3.10,<3.11"
 dependencies = [
-  "elevenlabs==2.52.0",
-  "python-dotenv==1.2.2"
+  "TTS==0.22.0",
+  "silero-stress==1.4"
 ]
 
 [tool.uv]

@@ -4,109 +4,29 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import re
 import struct
+import subprocess
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
-import wave
+import time
 from pathlib import Path
-
-try:
-    from dotenv import load_dotenv as dotenv_load
-except ImportError:  # pragma: no cover - fallback for bare stdlib runs
-    dotenv_load = None
+from shutil import which
+from typing import Iterable
 
 
 ROOT = Path(__file__).resolve().parent
 PROFILE_PATH = ROOT / "voice_profile.json"
-ENV_PATH = ROOT / ".env"
-SAMPLE_RATE = 44100
+MODEL_NAME = "tts_models/multilingual/multi-dataset/xtts_v2"
 SAMPLE_WIDTH = 2
 CHANNELS = 1
 MAX_I16 = 32767
 MIN_I16 = -32768
-
-
-def load_dotenv(path: Path) -> None:
-    if dotenv_load is not None:
-        dotenv_load(path)
-        return
-    if not path.exists():
-        return
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+ACUTE = "\u0301"
+VOWELS = "аеёиоуыэюяАЕЁИОУЫЭЮЯ"
 
 
 def load_profile() -> dict:
     return json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
-
-
-def check_setup(profile: dict) -> int:
-    load_dotenv(ENV_PATH)
-    problems: list[str] = []
-    if not ENV_PATH.exists():
-        problems.append("Нет .env. Создай его из .env.example.")
-    if not os.environ.get("ELEVENLABS_API_KEY"):
-        problems.append("Нет ELEVENLABS_API_KEY.")
-    if not os.environ.get("ELEVENLABS_VOICE_ID"):
-        problems.append("Нет ELEVENLABS_VOICE_ID.")
-
-    print("WarpWails setup")
-    print(f"- project: {ROOT}")
-    print(f"- venv: {ROOT / 'WarpWails'}")
-    print(f"- provider: {profile.get('provider')}")
-    print(f"- model: {profile.get('model_id')}")
-    print(f"- language: {profile.get('language_code')}")
-    print(f"- emotions: {', '.join(profile.get('emotion_tags', {}).keys())}")
-
-    if problems:
-        print("\nНужно заполнить:")
-        for problem in problems:
-            print(f"- {problem}")
-        return 1
-
-    print("\nНастройка выглядит готовой.")
-    return 0
-
-
-def list_emotions(profile: dict) -> None:
-    for name, tag in profile.get("emotion_tags", {}).items():
-        print(f"{name}: {tag}")
-
-
-def list_elevenlabs_voices() -> None:
-    load_dotenv(ENV_PATH)
-    api_key = os.environ.get("ELEVENLABS_API_KEY")
-    if not api_key:
-        raise SystemExit("Нет ELEVENLABS_API_KEY. Заполни /media/shushunya/SHUSHUNYA/shushunya/WarpWails/.env")
-
-    request = urllib.request.Request(
-        "https://api.elevenlabs.io/v1/voices",
-        headers={"xi-api-key": api_key, "accept": "application/json"},
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        details = exc.read().decode("utf-8", errors="replace")
-        raise SystemExit(f"ElevenLabs вернул ошибку {exc.code}: {details}") from exc
-
-    for voice in payload.get("voices", []):
-        name = voice.get("name", "unknown")
-        voice_id = voice.get("voice_id", "")
-        category = voice.get("category", "")
-        labels = voice.get("labels", {})
-        label_text = ", ".join(f"{key}={value}" for key, value in labels.items())
-        suffix = f" ({category}; {label_text})" if category or label_text else ""
-        print(f"{name}: {voice_id}{suffix}")
 
 
 def read_text(args: argparse.Namespace) -> str:
@@ -120,63 +40,138 @@ def read_text(args: argparse.Namespace) -> str:
     raise SystemExit("Нужен текст: файл, --text или stdin.")
 
 
-def apply_emotion_tags(text: str, profile: dict) -> str:
-    tags = profile.get("emotion_tags", {})
-    default_direction = profile.get("default_direction", "")
-    out_lines: list[str] = []
+def parse_lines(text: str, profile: dict) -> list[tuple[str, str]]:
+    known = profile.get("emotion_profiles", {})
     pattern = re.compile(r"^\s*\[([^\]]+)\]\s*(.+?)\s*$")
-
+    lines: list[tuple[str, str]] = []
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
         match = pattern.match(stripped)
-        if not match:
-            out_lines.append(f"{default_direction} {stripped}".strip())
+        if match:
+            emotion, phrase = match.groups()
+            emotion = emotion.strip().lower()
+            lines.append((emotion if emotion in known else "default", phrase.strip()))
+        else:
+            lines.append(("default", stripped))
+    return lines
+
+
+def plus_stress_to_acute(text: str) -> str:
+    out: list[str] = []
+    mark_next_vowel = False
+    for char in text:
+        if char == "+":
+            mark_next_vowel = True
             continue
-
-        emotion, phrase = match.groups()
-        normalized = emotion.strip().lower()
-        direction = tags.get(normalized, f"[{emotion}]")
-        out_lines.append(f"{default_direction}{direction} {phrase}".strip())
-
-    return "\n".join(out_lines)
+        out.append(char)
+        if mark_next_vowel and char in VOWELS:
+            out.append(ACUTE)
+            mark_next_vowel = False
+    return "".join(out)
 
 
-def elevenlabs_tts_pcm(text: str, profile: dict) -> bytes:
-    api_key = os.environ.get("ELEVENLABS_API_KEY")
-    voice_id = os.environ.get("ELEVENLABS_VOICE_ID")
-    if not api_key:
-        raise SystemExit("Нет ELEVENLABS_API_KEY. Заполни /media/shushunya/SHUSHUNYA/shushunya/WarpWails/.env")
-    if not voice_id:
-        raise SystemExit("Нет ELEVENLABS_VOICE_ID. Заполни /media/shushunya/SHUSHUNYA/shushunya/WarpWails/.env")
-
-    query = urllib.parse.urlencode({"output_format": profile.get("output_format", "pcm_44100")})
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?{query}"
-    payload = {
-        "text": text,
-        "model_id": profile.get("model_id", "eleven_v3"),
-        "language_code": profile.get("language_code", "ru"),
-        "voice_settings": profile.get("voice_settings", {}),
-    }
-    body = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=body,
-        headers={
-            "xi-api-key": api_key,
-            "content-type": "application/json",
-            "accept": "audio/pcm",
-        },
-        method="POST",
-    )
-
+def add_russian_stress(text: str) -> str:
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            return response.read()
-    except urllib.error.HTTPError as exc:
-        details = exc.read().decode("utf-8", errors="replace")
-        raise SystemExit(f"ElevenLabs вернул ошибку {exc.code}: {details}") from exc
+        from silero_stress import load_accentor
+    except ImportError:
+        return text
+    accentor = add_russian_stress.__dict__.get("_accentor")
+    if accentor is None:
+        accentor = load_accentor("ru")
+        add_russian_stress.__dict__["_accentor"] = accentor
+    return plus_stress_to_acute(accentor(text))
+
+
+def prepare_phrase(text: str, emotion: str, profile: dict, auto_stress: bool) -> str:
+    phrase = add_russian_stress(text) if auto_stress and ACUTE not in text else text
+    phrase = apply_pronunciation_overrides(phrase, profile)
+    if not profile.get("speak_emotion_prompts", False):
+        return phrase
+    prompt = profile.get("emotion_profiles", {}).get(emotion, {}).get("prompt", "")
+    if prompt:
+        return f"{prompt}. {phrase}"
+    return phrase
+
+
+def apply_pronunciation_overrides(text: str, profile: dict) -> str:
+    overrides = profile.get("pronunciation_overrides", {})
+    for source, replacement in sorted(overrides.items(), key=lambda item: len(item[0]), reverse=True):
+        text = re.sub(rf"(?<![А-Яа-яЁё]){re.escape(source)}(?![А-Яа-яЁё])", replacement, text)
+    return text
+
+
+def has_real_pulse_sink() -> bool:
+    if not which("pactl"):
+        return False
+    try:
+        result = subprocess.run(["pactl", "list", "short", "sinks"], capture_output=True, text=True, timeout=2)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode != 0:
+        return False
+    return any(line.strip() and "auto_null" not in line for line in result.stdout.splitlines())
+
+
+def has_accessible_alsa_card() -> bool:
+    if not which("aplay"):
+        return False
+    try:
+        result = subprocess.run(["aplay", "-l"], capture_output=True, text=True, timeout=2)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and "card " in result.stdout
+
+
+def raw_silence(sample_rate: int, seconds: float = 0.05) -> bytes:
+    return b"\x00\x00" * max(1, int(sample_rate * seconds))
+
+
+def command_accepts_audio(command: list[str], sample_rate: int) -> bool:
+    try:
+        player = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        assert player.stdin is not None
+        player.stdin.write(raw_silence(sample_rate))
+        player.stdin.close()
+        deadline = time.time() + 2.0
+        while player.poll() is None and time.time() < deadline:
+            time.sleep(0.02)
+        if player.poll() is None:
+            player.terminate()
+            player.wait(timeout=1)
+        return player.returncode == 0
+    except (OSError, BrokenPipeError, subprocess.SubprocessError):
+        return False
+
+
+def detect_player(sample_rate: int) -> tuple[str | None, list[str], str | None]:
+    real_pulse = has_real_pulse_sink()
+    real_alsa = has_accessible_alsa_card()
+    candidates: list[tuple[str, list[str]]] = []
+    if real_pulse:
+        if which("pw-play"):
+            candidates.append(("pw-play", ["pw-play", "--raw", "--rate", str(sample_rate), "--channels", str(CHANNELS), "--format", "s16", "-"]))
+        if which("paplay"):
+            candidates.append(("paplay", ["paplay", "--raw", "--rate", str(sample_rate), "--channels", str(CHANNELS), "--format", "s16le"]))
+    if real_alsa:
+        candidates.append(("aplay", ["aplay", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(sample_rate), "-c", str(CHANNELS)]))
+
+    for name, command in candidates:
+        if command_accepts_audio(command, sample_rate):
+            return name, command, None
+
+    if which("pactl") and not real_pulse and not real_alsa:
+        return None, [], "Pulse/PipeWire видит только auto_null, а ALSA-карты недоступны для этой сессии."
+    return None, [], "Не удалось открыть ни один raw PCM аудиовывод из этой сессии."
+
+
+def float_to_pcm(samples) -> bytes:
+    pcm = bytearray()
+    for value in samples:
+        sample = int(max(-1.0, min(1.0, float(value))) * MAX_I16)
+        pcm.extend(struct.pack("<h", max(MIN_I16, min(MAX_I16, sample))))
+    return bytes(pcm)
 
 
 def pcm_to_samples(pcm: bytes) -> list[int]:
@@ -189,100 +184,192 @@ def samples_to_pcm(samples: list[int]) -> bytes:
     return struct.pack(f"<{len(clipped)}h", *clipped)
 
 
-def low_voice_layer(samples: list[int], mix: float) -> list[float]:
-    lowered: list[float] = []
-    for index in range(len(samples)):
-        source_index = index // 2
-        if source_index < len(samples):
-            lowered.append(samples[source_index] * mix)
-        else:
-            lowered.append(0.0)
-    return lowered
-
-
 def saturate(value: float, drive: float) -> float:
     return math.tanh((value / MAX_I16) * drive) * MAX_I16
 
 
-def apply_warp_effect(samples: list[int], profile: dict) -> list[int]:
-    effect = profile.get("warp_effect", {})
-    drive = float(effect.get("drive", 1.8))
-    wet = float(effect.get("wet", 0.8))
-    shimmer_depth = float(effect.get("shimmer_depth", 0.08))
-    shimmer_hz = float(effect.get("shimmer_hz", 5.5))
-    low_mix = float(effect.get("low_voice_mix", 0.3))
-    echoes = effect.get("echoes", [])
+class WarpEffectProcessor:
+    def __init__(self, profile: dict, sample_rate: int):
+        effect = profile.get("warp_effect", {})
+        self.sample_rate = sample_rate
+        self.drive = float(effect.get("drive", 1.8))
+        self.wet = float(effect.get("wet", 0.8))
+        self.shimmer_depth = float(effect.get("shimmer_depth", 0.08))
+        self.shimmer_hz = float(effect.get("shimmer_hz", 5.5))
+        self.low_mix = float(effect.get("low_voice_mix", 0.3))
+        self.echoes = [
+            (int(float(echo["delay_ms"]) * sample_rate / 1000), float(echo["decay"]))
+            for echo in effect.get("echoes", [])
+        ]
+        self.max_delay = max((delay for delay, _ in self.echoes), default=0)
+        self.index = 0
+        self.history: list[int] = []
+        self.echo_buffer: dict[int, float] = {}
 
-    low = low_voice_layer(samples, low_mix)
-    output = [0.0] * (len(samples) + max((int(e["delay_ms"] * SAMPLE_RATE / 1000) for e in echoes), default=0))
+    def process_samples(self, samples: list[int]) -> list[int]:
+        out: list[int] = []
+        dry = 1.0 - self.wet
+        for sample in samples:
+            source_index = self.index // 2
+            low = self.history[source_index] * self.low_mix if source_index < len(self.history) else 0.0
+            shimmer = 1.0 + self.shimmer_depth * math.sin(2.0 * math.pi * self.shimmer_hz * self.index / self.sample_rate)
+            base = saturate((sample + low) * shimmer, self.drive)
+            echo_value = self.echo_buffer.pop(self.index, 0.0)
+            mixed = sample * dry + (base + echo_value) * self.wet
+            out.append(int(mixed))
+            for delay, decay in self.echoes:
+                target = self.index + delay
+                self.echo_buffer[target] = self.echo_buffer.get(target, 0.0) + base * decay
+            self.history.append(sample)
+            self.index += 1
+        return out
 
-    for index, sample in enumerate(samples):
-        shimmer = 1.0 + shimmer_depth * math.sin(2.0 * math.pi * shimmer_hz * index / SAMPLE_RATE)
-        base = saturate((sample + low[index]) * shimmer, drive)
-        output[index] += base
-        for echo in echoes:
-            delay = int(float(echo["delay_ms"]) * SAMPLE_RATE / 1000)
-            decay = float(echo["decay"])
-            target = index + delay
-            if target < len(output):
-                output[target] += base * decay
+    def process_pcm(self, pcm: bytes) -> bytes:
+        return samples_to_pcm(self.process_samples(pcm_to_samples(pcm)))
 
-    dry = 1.0 - wet
-    final: list[int] = []
-    for index, value in enumerate(output):
-        original = samples[index] if index < len(samples) else 0
-        final.append(int(original * dry + value * wet))
-    return final
+    def flush(self) -> bytes:
+        if self.max_delay <= 0:
+            return b""
+        return samples_to_pcm(self.process_samples([0] * self.max_delay))
 
 
-def write_wav(path: Path, samples: list[int]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with wave.open(str(path), "wb") as wav:
-        wav.setnchannels(CHANNELS)
-        wav.setsampwidth(SAMPLE_WIDTH)
-        wav.setframerate(SAMPLE_RATE)
-        wav.writeframes(samples_to_pcm(samples))
+def stream_pcm_to_speakers(chunks: Iterable[bytes], sample_rate: int) -> None:
+    name, command, problem = detect_player(sample_rate)
+    if not command:
+        raise SystemExit(problem or "Не найден плеер для стриминга в колонки: нужен aplay, pw-play или paplay.")
+    with subprocess.Popen(command, stdin=subprocess.PIPE) as player:
+        assert player.stdin is not None
+        try:
+            for chunk in chunks:
+                if chunk:
+                    player.stdin.write(chunk)
+                    player.stdin.flush()
+        finally:
+            player.stdin.close()
+        rc = player.wait()
+    if rc != 0:
+        raise SystemExit(f"{name} завершился с ошибкой {rc}.")
+
+
+def cpu_test_chunks(profile: dict, sample_rate: int, seconds: float = 1.0) -> Iterable[bytes]:
+    processor = WarpEffectProcessor(profile, sample_rate)
+    chunk_size = 1024
+    total = int(sample_rate * seconds)
+    for start in range(0, total, chunk_size):
+        samples = [
+            int(9000 * math.sin(2.0 * math.pi * 155.0 * index / sample_rate))
+            for index in range(start, min(start + chunk_size, total))
+        ]
+        yield samples_to_pcm(processor.process_samples(samples))
+    yield processor.flush()
+
+
+def load_xtts():
+    import torch
+    from TTS.api import TTS
+
+    if torch.cuda.is_available():
+        print("CUDA найдена, но не используется: запуск строго на CPU.", file=sys.stderr)
+    torch.set_num_threads(max(1, min(4, torch.get_num_threads())))
+    return TTS(MODEL_NAME, gpu=False)
+
+
+def xtts_stream_chunks(tts, lines: list[tuple[str, str]], profile: dict, auto_stress: bool) -> Iterable[bytes]:
+    sample_rate = int(getattr(tts.synthesizer, "output_sample_rate", 24000) or 24000)
+    processor = WarpEffectProcessor(profile, sample_rate)
+    default_speaker = profile.get("speaker")
+    if not default_speaker and getattr(tts, "speakers", None):
+        default_speaker = tts.speakers[0]
+    for emotion, phrase in lines:
+        settings = profile.get("emotion_profiles", {}).get(emotion, {})
+        prepared = prepare_phrase(phrase, emotion, profile, auto_stress)
+        wav = tts.tts(
+            text=prepared,
+            language=profile.get("language", "ru"),
+            speaker=settings.get("speaker") or default_speaker,
+            speaker_wav=profile.get("speaker_wav") or None,
+            split_sentences=True,
+        )
+        pcm = processor.process_pcm(float_to_pcm(wav))
+        chunk_size = sample_rate // 5 * SAMPLE_WIDTH
+        for offset in range(0, len(pcm), chunk_size):
+            yield pcm[offset : offset + chunk_size]
+    yield processor.flush()
+
+
+def check_setup(profile: dict) -> int:
+    sample_rate = int(profile.get("sample_rate", 24000))
+    player, _, audio_problem = detect_player(sample_rate)
+    problems: list[str] = []
+    if not player:
+        problems.append(audio_problem or "Нет аудиоплеера для raw PCM: нужен aplay, pw-play или paplay.")
+    try:
+        import torch
+        from TTS.api import TTS  # noqa: F401
+        from silero_stress import load_accentor  # noqa: F401
+    except ImportError as exc:
+        problems.append(f"Не хватает Python-модуля: {exc.name}")
+        torch = None
+
+    print("WarpWails setup")
+    print(f"- project: {ROOT}")
+    print(f"- venv: {ROOT / 'WarpWails-XTTS'}")
+    print("- provider: local XTTS-v2")
+    print("- device: CPU")
+    if "torch" in locals() and torch is not None:
+        print(f"- torch: {torch.__version__}")
+        print(f"- cuda available: {torch.cuda.is_available()}")
+    print(f"- player: {player or 'not found'}")
+    print(f"- model: {MODEL_NAME}")
+    print(f"- language: {profile.get('language', 'ru')}")
+    print(f"- auto stress: {profile.get('auto_stress', True)}")
+    print(f"- emotions: {', '.join(profile.get('emotion_profiles', {}).keys())}")
+    if problems:
+        print("\nПроблемы:")
+        for problem in problems:
+            print(f"- {problem}")
+        return 1
+    print("\nЛокальная CPU-настройка готова. Модель XTTS скачивается при первом запуске после принятия CPML.")
+    return 0
+
+
+def list_emotions(profile: dict) -> None:
+    for name, data in profile.get("emotion_profiles", {}).items():
+        print(f"{name}: speed={data.get('speed', profile.get('speed', 1.0))}; {data.get('prompt', '')}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="ElevenLabs TTS + warp demon voice processing.")
+    parser = argparse.ArgumentParser(description="Local CPU XTTS-v2 + warp demon streaming to speakers.")
     parser.add_argument("input", nargs="?", help="UTF-8 text file with [emotion] phrase lines.")
     parser.add_argument("--text", help="Text to speak directly.")
-    parser.add_argument("--out", default="out/warp.wav", help="Output WAV path.")
-    parser.add_argument("--dry-out", help="Optional unprocessed ElevenLabs WAV path.")
-    parser.add_argument("--preview", action="store_true", help="Print the final tagged prompt and exit.")
-    parser.add_argument("--check", action="store_true", help="Check local setup and required .env values.")
+    parser.add_argument("--preview", action="store_true", help="Print prepared text and exit.")
+    parser.add_argument("--check", action="store_true", help="Check local CPU setup.")
+    parser.add_argument("--cpu-test", action="store_true", help="Stream a short CPU-only processed test tone to speakers.")
     parser.add_argument("--emotions", action="store_true", help="Print configured emotion aliases.")
-    parser.add_argument("--list-voices", action="store_true", help="Print available ElevenLabs voices for the API key.")
+    parser.add_argument("--no-auto-stress", action="store_true", help="Disable automatic Russian stress marks.")
     args = parser.parse_args()
 
-    load_dotenv(ENV_PATH)
     profile = load_profile()
+    auto_stress = bool(profile.get("auto_stress", True)) and not args.no_auto_stress
 
     if args.check:
         raise SystemExit(check_setup(profile))
     if args.emotions:
         list_emotions(profile)
         return
-    if args.list_voices:
-        list_elevenlabs_voices()
+    if args.cpu_test:
+        stream_pcm_to_speakers(cpu_test_chunks(profile, int(profile.get("sample_rate", 24000))), int(profile.get("sample_rate", 24000)))
         return
 
-    raw_text = read_text(args)
-    tagged_text = apply_emotion_tags(raw_text, profile)
-
+    lines = parse_lines(read_text(args), profile)
     if args.preview:
-        print(tagged_text)
+        for emotion, phrase in lines:
+            print(f"[{emotion}] {prepare_phrase(phrase, emotion, profile, auto_stress)}")
         return
 
-    pcm = elevenlabs_tts_pcm(tagged_text, profile)
-    dry_samples = pcm_to_samples(pcm)
-    if args.dry_out:
-        write_wav(Path(args.dry_out), dry_samples)
-
-    wet_samples = apply_warp_effect(dry_samples, profile)
-    write_wav(Path(args.out), wet_samples)
-    print(Path(args.out).resolve())
+    tts = load_xtts()
+    sample_rate = int(getattr(tts.synthesizer, "output_sample_rate", 24000) or 24000)
+    stream_pcm_to_speakers(xtts_stream_chunks(tts, lines, profile, auto_stress), sample_rate)
 
 
 if __name__ == "__main__":

@@ -1,37 +1,102 @@
 {
-  "provider": "elevenlabs",
-  "model_id": "eleven_v3",
-  "language_code": "ru",
-  "output_format": "pcm_44100",
-  "voice_settings": {
-    "stability": 0.32,
-    "similarity_boost": 0.82,
-    "style": 0.78,
-    "use_speaker_boost": true
+  "provider": "local_xtts_v2",
+  "model": "tts_models/multilingual/multi-dataset/xtts_v2",
+  "language": "ru",
+  "sample_rate": 24000,
+  "speed": 0.92,
+  "auto_stress": false,
+  "chatterbox_language": "ru",
+  "chatterbox_exaggeration": 0.85,
+  "chatterbox_cfg_weight": 0.5,
+  "chatterbox_temperature": 0.8,
+  "speak_emotion_prompts": false,
+  "pronunciation_overrides": {
+    "проверка": "провэрка",
+    "Проверка": "Провэрка",
+    "проверку": "провэрку",
+    "Проверку": "Провэрку",
+    "проверки": "провэрки",
+    "Проверки": "Провэрки"
   },
-  "default_direction": "[low, intimate, sardonic, predatory calm]",
-  "emotion_tags": {
-    "сарказм": "[sarcastic][smirks]",
-    "ехидно": "[mocking][amused]",
-    "шепот": "[whispers][close to the microphone]",
-    "ярость": "[angry][tense]",
-    "угроза": "[menacing][slowly]",
-    "смех": "[dark chuckle][amused]",
-    "устало": "[tired][dry]",
-    "драма": "[dramatic tone][ominous]",
-    "холодно": "[cold][emotionless]",
-    "безумие": "[unhinged][laughs softly]"
+  "speaker": "Damien Black",
+  "speaker_wav": null,
+  "emotion_profiles": {
+    "default": {
+      "speed": 0.92,
+      "xtts_emotion": "neutral",
+      "exaggeration": 0.65,
+      "prompt": "Низкий, хриплый, холодный, сверхъестественный голос"
+    },
+    "сарказм": {
+      "speed": 0.88,
+      "xtts_emotion": "happy",
+      "exaggeration": 0.95,
+      "prompt": "Саркастично, ехидно, с тихой насмешкой"
+    },
+    "ехидно": {
+      "speed": 0.86,
+      "xtts_emotion": "happy",
+      "exaggeration": 1.05,
+      "prompt": "Ехидно, ядовито, будто говорящий наслаждается чужой ошибкой"
+    },
+    "шепот": {
+      "speed": 0.78,
+      "xtts_emotion": "neutral",
+      "exaggeration": 0.8,
+      "prompt": "Очень тихо, почти шепотом, близко к микрофону"
+    },
+    "ярость": {
+      "speed": 1.04,
+      "xtts_emotion": "angry",
+      "exaggeration": 1.25,
+      "prompt": "Сдержанная ярость, низкое давление в голосе"
+    },
+    "угроза": {
+      "speed": 0.74,
+      "xtts_emotion": "angry",
+      "exaggeration": 1.1,
+      "prompt": "Медленно, угрожающе, с потусторонним спокойствием"
+    },
+    "смех": {
+      "speed": 0.9,
+      "xtts_emotion": "happy",
+      "exaggeration": 1.15,
+      "prompt": "Темная усмешка перед фразой, издевательски"
+    },
+    "устало": {
+      "speed": 0.84,
+      "xtts_emotion": "sad",
+      "exaggeration": 0.55,
+      "prompt": "Устало, сухо, презрительно"
+    },
+    "драма": {
+      "speed": 0.82,
+      "xtts_emotion": "neutral",
+      "exaggeration": 1.0,
+      "prompt": "Торжественно, мрачно, как пророчество"
+    },
+    "холодно": {
+      "speed": 0.9,
+      "xtts_emotion": "neutral",
+      "exaggeration": 0.45,
+      "prompt": "Холодно, почти безэмоционально, опасно спокойно"
+    },
+    "безумие": {
+      "speed": 1.08,
+      "xtts_emotion": "happy",
+      "exaggeration": 1.35,
+      "prompt": "Нестабильно, безумно, с подавленным смехом"
+    }
   },
   "warp_effect": {
-    "drive": 1.9,
-    "low_voice_mix": 0.34,
+    "drive": 1.25,
+    "low_voice_mix": 0.08,
     "echoes": [
-      { "delay_ms": 145, "decay": 0.38 },
-      { "delay_ms": 390, "decay": 0.24 },
-      { "delay_ms": 730, "decay": 0.13 }
+      { "delay_ms": 95, "decay": 0.16 },
+      { "delay_ms": 230, "decay": 0.08 }
     ],
-    "shimmer_depth": 0.09,
+    "shimmer_depth": 0.025,
     "shimmer_hz": 5.7,
-    "wet": 0.82
+    "wet": 0.28
   }
 }

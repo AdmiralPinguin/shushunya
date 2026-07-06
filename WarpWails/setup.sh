@@ -8,13 +8,10 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-uv venv WarpWails --allow-existing
-uv pip install --python WarpWails/bin/python -r requirements.txt
-
-if [ ! -f .env ]; then
-  cp .env.example .env
-fi
+uv venv WarpWails-XTTS --python 3.10 --allow-existing
+uv pip install --python WarpWails-XTTS/bin/python --index-url https://download.pytorch.org/whl/cpu "torch==2.1.2+cpu" "torchaudio==2.1.2+cpu"
+uv pip install --python WarpWails-XTTS/bin/python -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
 echo "Ready."
-echo "Activate: source /media/shushunya/SHUSHUNYA/shushunya/WarpWails/WarpWails/bin/activate"
-echo "Configure: /media/shushunya/SHUSHUNYA/shushunya/WarpWails/.env"
+echo "Activate: source /media/shushunya/SHUSHUNYA/shushunya/WarpWails/WarpWails-XTTS/bin/activate"
+echo "Run check: python /media/shushunya/SHUSHUNYA/shushunya/WarpWails/warpwails.py --check"
