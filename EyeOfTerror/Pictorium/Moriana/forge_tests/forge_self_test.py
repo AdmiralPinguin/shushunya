@@ -5,11 +5,13 @@ import argparse
 import datetime as dt
 import json
 import runpy
+import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -22,6 +24,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(TESTS_ROOT))
 
 from EyeOfTerror.Pictorium.Moriana.moriana_core.forge_reports import prune_reports
+from EyeOfTerror.model_brain import model_settings
 from forge_test_lock import forge_test_lock
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8110"
@@ -87,6 +90,7 @@ def py_compile() -> dict[str, Any]:
         "../EyeOfTerror/Pictorium/Moriana/forge_tests/smoke_forge_api.py",
         "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_e2e_self_test.py",
         "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_quality_trials.py",
+        "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_live_quality_trials.py",
         "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_service_self_test.py",
         "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_runtime_self_test.py",
     ]
@@ -206,6 +210,59 @@ def live_quality_dry_run(base_url: str) -> dict[str, Any]:
     return {"health": health.json(), "stdout": completed.stdout.strip().splitlines()[-3:]}
 
 
+def model_endpoint_reachable(timeout_sec: float = 2.0) -> dict[str, Any]:
+    settings = model_settings()
+    parsed = urlparse(str(settings.get("base_url") or ""))
+    host = parsed.hostname or ""
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    if not host:
+        return {"ok": False, "base_url": settings.get("base_url"), "error": "model base_url has no host"}
+    try:
+        with socket.create_connection((host, port), timeout=timeout_sec):
+            return {"ok": True, "base_url": settings.get("base_url"), "model": settings.get("model")}
+    except OSError as exc:
+        return {"ok": False, "base_url": settings.get("base_url"), "model": settings.get("model"), "error": str(exc)}
+
+
+def moriana_live_quality_trials() -> dict[str, Any]:
+    model_preflight = model_endpoint_reachable()
+    if not model_preflight.get("ok"):
+        raise RuntimeError(f"model endpoint is not reachable for Moriana live trials: {model_preflight}")
+    completed = subprocess.run(
+        [
+            str(ROOT / "DemonsForge/bin/python"),
+            "../EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_live_quality_trials.py",
+            "--profile",
+            "smoke",
+            "--max-wait-sec",
+            "1800",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        timeout=2400,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError((completed.stderr or completed.stdout).strip())
+    stdout = completed.stdout.strip()
+    parsed: dict[str, Any] = {}
+    if stdout:
+        try:
+            loaded = json.loads(stdout.splitlines()[-1])
+        except json.JSONDecodeError:
+            loaded = {}
+        if isinstance(loaded, dict):
+            parsed = loaded
+    return {
+        "script": "EyeOfTerror/Pictorium/Moriana/forge_tests/moriana_live_quality_trials.py",
+        "stdout": stdout,
+        "trial_count": parsed.get("trial_count"),
+        "weak_case_count": parsed.get("weak_case_count"),
+        "avg_quality_score": parsed.get("avg_quality_score"),
+        "readiness_verdict": parsed.get("readiness_verdict"),
+    }
+
+
 def write_summary(report: dict[str, Any], path: Path) -> str:
     lines = [
         "# Forge Self Test Report",
@@ -228,8 +285,9 @@ def write_summary(report: dict[str, Any], path: Path) -> str:
             if details.get("readiness_verdict"):
                 notes = (
                     f"verdict={details.get('readiness_verdict')}; "
-                    f"evidence_score={details.get('evidence_adjusted_score')}; "
-                    f"coverage_gaps={details.get('coverage_gap_count')}"
+                    f"evidence_score={details.get('evidence_adjusted_score', details.get('avg_quality_score'))}; "
+                    f"coverage_gaps={details.get('coverage_gap_count', 'n/a')}; "
+                    f"weak_cases={details.get('weak_case_count', 'n/a')}"
                 )
             elif details.get("stdout"):
                 stdout = details["stdout"]
@@ -253,7 +311,8 @@ def main() -> int:
 def _main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--skip-live", action="store_true")
+    parser.add_argument("--skip-live", action="store_true", help="Compatibility flag; live checks are skipped unless --run-live or --require-live is set.")
+    parser.add_argument("--run-live", action="store_true", help="Run optional live visual checks.")
     parser.add_argument("--require-live", action="store_true")
     parser.add_argument("--report-json", default="")
     args = parser.parse_args()
@@ -272,13 +331,20 @@ def _main() -> int:
     report["steps"].append(run_step("demonsforge_boundary_test", demonsforge_boundary_test))
     report["steps"].append(run_step("moriana_e2e_self_test", moriana_e2e_self_test))
     report["steps"].append(run_step("moriana_quality_trials", moriana_quality_trials))
-    if not args.skip_live:
+    run_live = (args.run_live or args.require_live) and not args.skip_live
+    if run_live:
         live_step = run_step("live_quality_bench_dry_run", lambda: live_quality_dry_run(args.base_url.rstrip("/")))
         if args.require_live or live_step["ok"]:
             report["steps"].append(live_step)
         else:
             live_step["skipped"] = True
             report["steps"].append(live_step)
+        moriana_live_step = run_step("moriana_live_quality_trials", moriana_live_quality_trials)
+        if args.require_live or moriana_live_step["ok"]:
+            report["steps"].append(moriana_live_step)
+        else:
+            moriana_live_step["skipped"] = True
+            report["steps"].append(moriana_live_step)
     report["finished_at"] = utc_now()
     report["duration_sec"] = round(time.monotonic() - started, 3)
     report["ok"] = all(step.get("ok") or step.get("skipped") for step in report["steps"])

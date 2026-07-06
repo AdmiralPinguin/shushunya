@@ -66,6 +66,17 @@ with `readiness_verdict=needs_live_visual_trials` still requires live generated
 images or accepted external artifacts before treating Moriana as production
 quality.
 
+`forge_tests/moriana_live_quality_trials.py` is the live governor-level runner.
+It routes tasks through Moriana itself with `submit`, `wait_for_result`, and
+`run_inline_once`, then checks the Moriana final manifest, quality report, and
+accepted visual artifacts. This is different from the lower-level
+DemonsForge-only `quality_bench.py`: the live Moriana runner validates the full
+governor -> brigade -> Forge -> verifier -> registry path.
+
+`forge_tests/forge_self_test.py` keeps live checks opt-in. Use `--run-live` to
+include live visual checks and `--require-live` when missing or failed live
+dependencies should fail the whole run.
+
 Application-facing endpoints:
 
 - `POST /runs`

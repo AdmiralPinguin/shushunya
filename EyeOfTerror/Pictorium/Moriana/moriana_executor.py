@@ -296,6 +296,10 @@ def execute_revision_run(
             task,
             submit=submit,
             test_artifact_mode=test_artifact_mode,
+            wait_for_result=wait_for_result,
+            max_wait_sec=max_wait_sec,
+            poll_interval_sec=poll_interval_sec,
+            run_inline_once=run_inline_once,
             attempt=attempt,
             revision_decision=decision,
         )
@@ -672,6 +676,10 @@ def execute_comic_run(
     *,
     submit: bool = False,
     test_artifact_mode: str = "",
+    wait_for_result: bool = False,
+    max_wait_sec: float = 0.0,
+    poll_interval_sec: float = 0.5,
+    run_inline_once: bool = False,
     attempt: int = 1,
     revision_decision: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -694,8 +702,79 @@ def execute_comic_run(
     )
     register_json_artifact(store, run_id, step="panel_generation", payload=panels, artifact_type="comic_panel", created_by="Panelwright", attempt=attempt)
     panel_artifacts: list[dict[str, Any]] = []
+    panel_art_blockers: list[dict[str, Any]] = []
     panel_packages = panels.get("panels") if isinstance(panels.get("panels"), list) else []
-    if test_artifact_mode in {"comic_panels_good", "good"}:
+    if submit and (wait_for_result or run_inline_once):
+        forge_db_path = run_dir / "forge.sqlite3"
+        for index, panel in enumerate(panel_packages, start=1):
+            if not isinstance(panel, dict):
+                continue
+            panel_id = str(panel.get("panel_id") or f"panel_{index:02d}")
+            dispatch = panel.get("dispatch") if isinstance(panel.get("dispatch"), dict) else {}
+            job_record = dispatch.get("job_record") if isinstance(dispatch.get("job_record"), dict) else None
+            monitor = monitor_forge_job(
+                db_path=forge_db_path,
+                job_record=job_record,
+                max_wait_sec=max_wait_sec,
+                poll_interval_sec=poll_interval_sec,
+                run_inline_once=run_inline_once,
+            )
+            register_json_artifact(
+                store,
+                run_id,
+                step=f"panel_{index:02d}_forge_monitor",
+                payload=monitor,
+                artifact_type="result",
+                created_by="Moriana",
+                attempt=attempt,
+                status="accepted" if monitor.get("ok") else "rejected",
+                subdir="results",
+                rejection_reason="; ".join(str(item.get("code") or "") for item in monitor.get("blockers", []) if isinstance(item, dict)),
+            )
+            paths = monitor.get("artifact_paths") if isinstance(monitor.get("artifact_paths"), list) else []
+            job_spec = (
+                panel.get("image_plan", {}).get("job_spec", {})
+                if isinstance(panel.get("image_plan"), dict)
+                else {}
+            )
+            monitor_blockers = blockers_from(monitor)
+            if not paths:
+                panel_art_blockers.extend({"panel_id": panel_id, **blocker} for blocker in monitor_blockers)
+                continue
+            for artifact_index, artifact_path in enumerate(paths, start=1):
+                verification = verify_image({"artifact_path": str(artifact_path), "job_spec": job_spec, "job_record": job_record or {}})
+                verification_blockers = [*monitor_blockers, *blockers_from(verification)]
+                register_json_artifact(
+                    store,
+                    run_id,
+                    step=f"panel_{index:02d}_image_verification",
+                    payload=verification,
+                    artifact_type="verification",
+                    created_by="ImageVerifier",
+                    attempt=attempt,
+                    status="accepted" if not verification_blockers else "rejected",
+                    rejection_reason="; ".join(str(item.get("code") or "") for item in verification_blockers),
+                )
+                record = store.register_artifact(
+                    run_id,
+                    artifact_type="comic_panel",
+                    path=Path(str(artifact_path)),
+                    created_by="ForgeDispatcher",
+                    step="panel_art_generation",
+                    attempt=attempt,
+                    status="accepted" if not verification_blockers else "rejected",
+                    rejection_reason="; ".join(str(item.get("message") or item.get("code") or "") for item in verification_blockers),
+                    metadata={
+                        "panel_id": panel_id,
+                        "panel_order": panel.get("order") or index,
+                        "artifact_index": artifact_index,
+                        "job_spec": job_spec,
+                        "revision_decision": revision_decision or {},
+                    },
+                )
+                panel_artifacts.append(record)
+                panel_art_blockers.extend({"panel_id": panel_id, **blocker} for blocker in verification_blockers)
+    if not panel_artifacts and test_artifact_mode in {"comic_panels_good", "good"}:
         for index, panel in enumerate(panel_packages, start=1):
             panel_id = str(panel.get("panel_id") or f"panel_{index:02d}") if isinstance(panel, dict) else f"panel_{index:02d}"
             synthetic_path = run_dir / "artifacts" / f"comic_panel_{index:02d}_attempt_{attempt:02d}.png"
@@ -725,7 +804,7 @@ def execute_comic_run(
             "panels": panels,
         }
     )
-    blockers = blockers_from(layout)
+    blockers = [*blockers_from(layout), *panel_art_blockers]
     register_json_artifact(store, run_id, step="layout", payload=layout, artifact_type="layout", created_by="LayoutFinalis", attempt=attempt, status="accepted" if not blockers else "rejected")
     final_payload = dict(layout.get("final_manifest") if isinstance(layout.get("final_manifest"), dict) else {})
     final_payload.setdefault("kind", "pictorium_comic_final_manifest")
@@ -733,6 +812,13 @@ def execute_comic_run(
     final_payload["attempt"] = attempt
     final_payload["artifact_registry"] = str(run_dir / "artifact_registry.json")
     final_payload["revision_decision"] = revision_decision or {}
+    final_payload["blockers"] = [*final_payload.get("blockers", []), *panel_art_blockers] if isinstance(final_payload.get("blockers"), list) else panel_art_blockers
+    if blockers:
+        final_payload["status"] = "blocked"
+        handoff = final_payload.get("handoff") if isinstance(final_payload.get("handoff"), dict) else {}
+        handoff["ready_for_delivery"] = False
+        handoff["requires_revision"] = True
+        final_payload["handoff"] = handoff
     final_payload["panel_artifacts"] = [
         {
             "artifact_id": item.get("artifact_id"),
