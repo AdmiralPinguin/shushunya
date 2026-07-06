@@ -7,7 +7,7 @@
   "model_brain": {
     "required": true,
     "role": "ArtifactFinalis",
-    "failure_policy": "block prose delivery review when model_brain is unavailable; deterministic manifest packaging remains available"
+    "failure_policy": "block autonomous worker execution when model_brain is unavailable; deterministic manifest packaging is a subordinate check after a structured model decision"
   },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
   "callable": "EyeOfTerror.Pictorium.Brigades.Image.Workers.ArtifactFinalis.worker:handle"

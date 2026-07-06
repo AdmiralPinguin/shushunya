@@ -7,7 +7,7 @@
   "model_brain": {
     "required": true,
     "role": "ScenarioScribe",
-    "failure_policy": "block autonomous scenario expansion when model_brain is unavailable; deterministic scenario scaffolding remains available for dry-run validation"
+    "failure_policy": "block autonomous worker execution when model_brain is unavailable; deterministic scenario scaffolding is a subordinate check after a structured model decision"
   },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
   "callable": "EyeOfTerror.Pictorium.Brigades.Comics.Workers.ScenarioScribe.worker:handle"

@@ -7,7 +7,7 @@
   "model_brain": {
     "required": true,
     "role": "StoryboardArchitect",
-    "failure_policy": "block semantic storyboard revision when model_brain is unavailable; deterministic storyboard mapping remains available"
+    "failure_policy": "block autonomous worker execution when model_brain is unavailable; deterministic storyboard mapping is a subordinate check after a structured model decision"
   },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
   "callable": "EyeOfTerror.Pictorium.Brigades.Comics.Workers.StoryboardArchitect.worker:handle"

@@ -7,7 +7,7 @@
   "model_brain": {
     "required": true,
     "role": "ImageVerifier",
-    "failure_policy": "block semantic visual critique when model_brain is unavailable; deterministic pixel and metadata checks remain available"
+    "failure_policy": "block autonomous worker execution when model_brain is unavailable; deterministic pixel and metadata checks are subordinate evidence after a structured model decision"
   },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
   "callable": "EyeOfTerror.Pictorium.Brigades.Image.Workers.ImageVerifier.worker:handle"

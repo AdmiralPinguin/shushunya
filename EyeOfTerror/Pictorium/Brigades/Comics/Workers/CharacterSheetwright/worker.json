@@ -7,7 +7,7 @@
   "model_brain": {
     "required": true,
     "role": "CharacterSheetwright",
-    "failure_policy": "block semantic continuity critique when model_brain is unavailable; deterministic Image Brigade character-sheet planning remains available"
+    "failure_policy": "block autonomous worker execution when model_brain is unavailable; deterministic Image Brigade character-sheet planning is subordinate evidence after a structured model decision"
   },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
   "callable": "EyeOfTerror.Pictorium.Brigades.Comics.Workers.CharacterSheetwright.worker:handle"

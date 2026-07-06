@@ -7,7 +7,7 @@
   "model_brain": {
     "required": true,
     "role": "ModelQuartermaster",
-    "failure_policy": "block advisory model selection when model_brain is unavailable; deterministic local inventory checks remain available"
+    "failure_policy": "block autonomous worker execution when model_brain is unavailable; deterministic inventory checks are subordinate evidence after a structured model decision"
   },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
   "callable": "EyeOfTerror.Pictorium.Brigades.Image.Workers.ModelQuartermaster.worker:handle"

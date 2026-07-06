@@ -7,7 +7,7 @@
   "model_brain": {
     "required": true,
     "role": "Panelwright",
-    "failure_policy": "block semantic panel repair when model_brain is unavailable; deterministic Image Brigade panel packages remain available"
+    "failure_policy": "block autonomous worker execution when model_brain is unavailable; deterministic Image Brigade panel packages are subordinate evidence after a structured model decision"
   },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
   "callable": "EyeOfTerror.Pictorium.Brigades.Comics.Workers.Panelwright.worker:handle"

@@ -77,6 +77,11 @@ def main() -> int:
             worker_json = PICTORIUM / "Brigades" / brigade_name / "Workers" / name / "worker.json"
             if not worker_py.exists() or not worker_json.exists():
                 raise AssertionError(f"worker must expose callable module and metadata: {brigade_name}/{name}")
+            worker_metadata = json.loads(worker_json.read_text(encoding="utf-8"))
+            model_brain = worker_metadata.get("model_brain") if isinstance(worker_metadata, dict) else {}
+            failure_policy = str(model_brain.get("failure_policy") or "") if isinstance(model_brain, dict) else ""
+            if model_brain.get("required") is not True or "remains available" in failure_policy:
+                raise AssertionError(f"worker metadata must require model_brain without no-LLM fallback wording: {worker_json}")
     for worker in workers:
         for raw_path in worker.get("source_modules", []) if isinstance(worker, dict) else []:
             source = PROJECT_ROOT / str(raw_path)

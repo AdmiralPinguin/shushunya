@@ -7,7 +7,7 @@
   "model_brain": {
     "required": true,
     "role": "Promptwright",
-    "failure_policy": "block thinker-assisted planning when model_brain is unavailable; deterministic planning remains available for dry-run validation"
+    "failure_policy": "block autonomous worker execution when model_brain is unavailable; deterministic validators are subordinate checks after a structured model decision"
   },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
   "callable": "EyeOfTerror.Pictorium.Brigades.Image.Workers.Promptwright.worker:handle"

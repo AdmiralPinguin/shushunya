@@ -7,7 +7,7 @@
   "model_brain": {
     "required": true,
     "role": "ForgeDispatcher",
-    "failure_policy": "block heuristic retry planning when model_brain is unavailable; deterministic validation and submission remain available"
+    "failure_policy": "block autonomous worker execution when model_brain is unavailable; deterministic validation and submission are subordinate runtime checks after a structured model decision"
   },
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",
   "callable": "EyeOfTerror.Pictorium.Brigades.Image.Workers.ForgeDispatcher.worker:handle"
