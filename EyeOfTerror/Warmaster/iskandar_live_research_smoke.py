@@ -8,9 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from eye_of_terror.orchestrator import research_loop_run
+from eye_of_terror.orchestrator import orchestrate_run_task, research_loop_run
 from eye_of_terror.run_state import run_summary
-from eye_of_terror.task_prepare import prepare_task
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -85,7 +84,17 @@ def main() -> int:
     previous_live_discovery = os.environ.get("LEXMECHANIC_LIVE_DISCOVERY")
     if not args.disable_live_discovery:
         os.environ["LEXMECHANIC_LIVE_DISCOVERY"] = "1"
-    prepared = prepare_task(args.task, task_id, run_root, governor_transport="local", governor_host=args.host)
+    prepared = orchestrate_run_task(
+        args.task,
+        task_id,
+        run_root,
+        governor_transport="local",
+        governor_host=args.host,
+        run_mode=args.run_mode,
+        host=args.host,
+        timeout_sec=args.timeout_sec,
+        auto_start=False,
+    )
     loop_result: dict[str, Any] | None = None
     summary: dict[str, Any] | None = None
     if prepared.get("ok"):

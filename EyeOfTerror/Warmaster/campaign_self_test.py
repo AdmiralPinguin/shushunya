@@ -132,6 +132,14 @@ def main() -> int:
         prepared = prepare_campaign(run_root, message, campaign_id="campaign-self-test")
         if not prepared.get("ok") or prepared.get("state", {}).get("status") != "planned":
             raise AssertionError(f"bad prepared campaign: {prepared}")
+        campaign_ref = json.loads((run_root / "_campaigns" / "campaign-self-test" / "mission_ref.json").read_text(encoding="utf-8"))
+        if (
+            not campaign_ref.get("mission_id")
+            or campaign_ref.get("mission_id") != prepared.get("mission", {}).get("mission_id")
+            or campaign_ref.get("mission_id") != prepared.get("state", {}).get("mission_id")
+            or not Path(str(campaign_ref.get("mission_dir") or "")).joinpath("commander_order.json").exists()
+        ):
+            raise AssertionError(f"campaign mission_ref missing: {prepared}")
         campaigns = list_campaigns(run_root)
         if len(campaigns) != 1 or campaigns[0].get("campaign_id") != "campaign-self-test":
             raise AssertionError(f"campaign list failed: {campaigns}")

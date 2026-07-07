@@ -235,6 +235,10 @@
 - Warmaster Gateway exposes one-shot `POST /orchestrate_run` for chat clients
   that should prepare a task and safely start it in the background through the
   same orchestration gates.
+- `POST /task` is now legacy diagnostic only and requires
+  `allow_legacy_direct_task=true`; normal chat/client work must use
+  `POST /orchestrate_run` so every run has a Warmaster `commander_order` and
+  mission workspace.
 - One-shot orchestration reuses existing runs for repeated stable `task_id`
   submissions by default, so reconnects can restore state without creating
   duplicate history or surfacing task-id conflicts as user-facing failures.
@@ -272,8 +276,8 @@
 - Task preflight responses expose `actions.can_create_task` and
   `actions.next_action` so chat clients can continue without hardcoded flow
   rules.
-- HTTP task preflight and task creation responses expose top-level executable
-  `client_action` fields for the recommended next step.
+- HTTP task preflight and legacy task creation responses expose top-level
+  executable `client_action` fields for the recommended next step.
 - HTTP execution preserves compact worker runtime `display`, `decision`,
   `next_action`, and `client_action` state in ledger step details and step
   events under `worker_view`.
@@ -282,14 +286,15 @@
 - Planned-governor routing failures expose `required_governor` registry
   metadata so clients can identify the missing coordinator without hardcoded
   task-class rules.
-- Successful task creation responses expose action hints that recommend run
-  preflight before execution.
-- Rejected task creation responses expose action hints for existing-run,
-  brigade, governor, capability, or preflight diagnostics.
+- Successful legacy task creation responses expose action hints that recommend
+  run preflight before execution, but only after explicit diagnostic opt-in.
+- Rejected task creation responses expose action hints for command-protocol
+  submission, existing-run, brigade, governor, capability, or preflight
+  diagnostics.
 - Task preflight action bodies preserve governor transport fields so clients
   following `next_action` keep the intended local or HTTP planning boundary.
-- Task preflight `create_task` hints include the original message, making the
-  recommended `POST /task` body directly executable by simple chat clients.
+- Task preflight action hints include the original message and now direct normal
+  clients to Warmaster orchestration instead of direct legacy task creation.
 - Retry-style rejected task creation hints preserve the same executable message
   and governor transport body shape.
 - Governor API contract checks document the active Iskandar required worker

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ceraxia_evidence_contract import NEXT_STAGE_PACKAGE_KIND
-from eye_of_terror.warmaster_gateway import prepare_task, research_loop_run
+from eye_of_terror.warmaster_gateway import orchestrate_run_task, research_loop_run
 
 
 WARMASTER_ROOT = Path(__file__).resolve().parent
@@ -2508,7 +2508,15 @@ def run_trial(trial_id: str, root: Path, keep: bool, ledger_draft: bool) -> dict
     repo = trial_root / "fixture" / "repo"
     task = FIXTURES[trial_id](repo)
     run_root = trial_root / "warmaster_runs"
-    prepared = prepare_task(task, run_id, run_root, governor_transport="local")
+    prepared = orchestrate_run_task(
+        task,
+        run_id,
+        run_root,
+        governor_transport="local",
+        run_mode="local",
+        timeout_sec=300,
+        auto_start=False,
+    )
     result = research_loop_run(run_root, run_id, run_mode="local", timeout_sec=300, max_revision_cycles=1)
     manifest_path = next((run_root / run_id / "work").rglob("final_manifest.json"), None)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path else {}

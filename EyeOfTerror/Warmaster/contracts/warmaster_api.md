@@ -104,7 +104,8 @@ includes `orchestration_cards`, a compact chat/mobile list with each recent
 run's phase, decision, display status, and next action for restoring task
 history after a client reconnect. `state.actions` and
 `capabilities.actions` expose client-facing gateway action hints, including the
-preferred task flow: preflight, create, then start. `can_check_brigade_readiness`
+preferred command-protocol flow: `POST /orchestrate_run`, then poll the run
+orchestration/snapshot endpoints. `can_check_brigade_readiness`
 means clients can use `GET /brigade_health` summary fields to decide whether
 the service-separated brigade is runnable. `GET /capabilities` also includes a
 compact registry `summary`, `display`, and executable `client_action` pointing

@@ -47,7 +47,10 @@ Gateway endpoints:
 - `GET /workers`
 - `GET /workers?health=1`
 - `POST /task_preflight`
-- `POST /task`
+- `POST /orchestrate`
+- `POST /orchestrate_start`
+- `POST /orchestrate_run`
+- `POST /task` diagnostic legacy only, requires `allow_legacy_direct_task=true`
 - `GET /runs`
 - `GET /runs/<task_id>`
 - `GET /runs/<task_id>/summary`
@@ -101,7 +104,8 @@ when reachable, governor `/capabilities` payloads such as `required_workers`.
 `GET /state` is the preferred client bootstrap endpoint after an app restart.
 It returns gateway capabilities, governors, workers, recent runs, and run status
 counts in one response. Gateway action hints identify the preferred task flow:
-preflight, create, then start.
+`POST /orchestrate_run`, then poll `GET /runs/<task_id>/orchestration` or
+`GET /runs/<task_id>/snapshot`.
 
 `GET /runs/<task_id>/snapshot` is the preferred per-run polling endpoint for
 clients. It returns summary, process-local active state, cursor event updates,
@@ -125,18 +129,22 @@ On startup, Warmaster Gateway marks stale `running` or `cancelling` ledgers as
 calling a maintenance endpoint. Pass `--no-recover-stale-on-start` to disable
 that behavior for diagnostics.
 
-`POST /task` defaults to in-process governor planning. Passing
-`governor_transport: "http"` makes Warmaster call the selected active governor
-service on its registry port, keeping the planning boundary compatible with
-future Inner Circle services.
+Normal user tasks must enter through `POST /orchestrate_run`, which creates a
+Warmaster `commander_order`, assigns a governor, prepares the run, and starts or
+returns the next gated action. `POST /task` is retained only as a diagnostic
+legacy endpoint and rejects calls unless `allow_legacy_direct_task=true` is
+present.
+Passing `governor_transport: "http"` makes Warmaster call the selected active
+governor service on its registry port, keeping the planning boundary compatible
+with future Inner Circle services.
 Before preparing an HTTP-governor run, Warmaster checks reachable governor
 `required_workers` against the Mechanicum registry.
 Warmaster also rejects any produced task contract whose `worker_plan` references
 workers absent from the Mechanicum registry.
 
 Warmaster Gateway can also be started with `--governor-transport http` and
-`--governor-host 127.0.0.1` so ordinary client task submissions use governor
-services by default.
+`--governor-host 127.0.0.1` so ordinary `POST /orchestrate_run` submissions use
+governor services by default.
 
 `GET /brigade_plan` and `GET /state` expose the expected service-separated
 brigade topology, including Warmaster, Iskandar, and registered Mechanicum

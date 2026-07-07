@@ -15,6 +15,7 @@ if str(WARMMASTER_ROOT) not in sys.path:
 
 from PIL import Image
 
+from EyeOfTerror.common_protocol import commander_order, validate_protocol_payload
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ArtifactFinalis.worker import build_final_manifest
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ForgeDispatcher.worker import prepare_dispatch
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ImageVerifier.worker import verify_image
@@ -22,6 +23,25 @@ from EyeOfTerror.Pictorium.Brigades.Image.Workers.ModelQuartermaster.worker impo
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.Promptwright.worker import prepare_image_plan
 from EyeOfTerror.Pictorium.testing.fake_model_server import fake_pictorium_model
 from EyeOfTerror.Warmaster.eye_of_terror.task_prepare import prepare_task, preflight_task
+
+
+def moriana_command(task: str, task_id: str) -> dict[str, object]:
+    order = commander_order(
+        f"mission-{task_id}",
+        to="Moriana",
+        user_request=task,
+        commander_intent="Проверить визуальный пайплайн через бригадира Мориану.",
+        primary_goal=task,
+        success_conditions=[
+            "Moriana produces a valid image/comic governor plan",
+            "worker_order packets are generated from the shared mission protocol",
+            "final artifacts pass the local forge verification checks",
+        ],
+        constraints=["Do not answer the user directly from the governor layer."],
+        escalate_to_user_if=["the requested visual task cannot be represented by the active image brigade"],
+    )
+    validate_protocol_payload(order, expected_type="commander_order")
+    return order
 
 
 def load_json(path: Path) -> dict[str, object]:
@@ -34,7 +54,8 @@ def _main() -> int:
         root = Path(tmp)
         run_root = root / "runs"
         task_id = "moriana-e2e-image"
-        preflight = preflight_task(task, task_id, run_root)
+        command = moriana_command(task, task_id)
+        preflight = preflight_task(task, task_id, run_root, forced_governor="Moriana", commander_order=command, require_commander_order=True)
         if (
             not preflight.get("ok")
             or preflight.get("governor") != "Moriana"
@@ -42,7 +63,7 @@ def _main() -> int:
         ):
             raise AssertionError(f"Warmaster preflight did not route through Moriana: {preflight}")
 
-        prepared = prepare_task(task, task_id, run_root)
+        prepared = prepare_task(task, task_id, run_root, forced_governor="Moriana", commander_order=command, require_commander_order=True)
         if not prepared.get("ok") or prepared.get("governor") != "Moriana":
             raise AssertionError(f"Warmaster prepare did not create Moriana run: {prepared}")
         run_dir = Path(str(prepared["run_dir"]))
@@ -76,14 +97,15 @@ def _main() -> int:
 
         comic_task = "сделай комикс 3 панели про техножреца у древней кузни"
         comic_id = "moriana-e2e-comic"
-        comic_preflight = preflight_task(comic_task, comic_id, run_root)
+        comic_command = moriana_command(comic_task, comic_id)
+        comic_preflight = preflight_task(comic_task, comic_id, run_root, forced_governor="Moriana", commander_order=comic_command, require_commander_order=True)
         if (
             not comic_preflight.get("ok")
             or comic_preflight.get("governor") != "Moriana"
             or comic_preflight.get("contract_summary", {}).get("steps", [])[0].get("worker") != "ScenarioScribe"
         ):
             raise AssertionError(f"Warmaster preflight did not route comic through Moriana: {comic_preflight}")
-        comic_prepared = prepare_task(comic_task, comic_id, run_root)
+        comic_prepared = prepare_task(comic_task, comic_id, run_root, forced_governor="Moriana", commander_order=comic_command, require_commander_order=True)
         if not comic_prepared.get("ok") or comic_prepared.get("governor") != "Moriana":
             raise AssertionError(f"Warmaster prepare did not create Moriana comic run: {comic_prepared}")
         comic_status = load_json(Path(str(comic_prepared["run_dir"])) / "status.json")

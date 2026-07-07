@@ -378,9 +378,32 @@ def prepare_campaign(run_root: Path, message: str, campaign_id: str | None = Non
             "next_action": next_action,
             "client_action": next_action.get("client_action", {}),
         }
+    warmaster_root = Path(__file__).resolve().parents[1]
+    mission = open_mission(warmaster_root, message, resolved_id, source_channel="campaign")
+    if not mission.get("ok"):
+        return {
+            "ok": False,
+            "phase": "campaign_commander_intake_failed",
+            "campaign_id": resolved_id,
+            "mission": mission,
+            "error_code": str(mission.get("error_code") or "commander_intake_failed"),
+            "error": str(mission.get("error") or "Warmaster commander intake failed"),
+        }
     target_dir.mkdir(parents=True, exist_ok=True)
     plan = preflight["plan"]
+    plan["mission_id"] = str(mission.get("mission_id") or "")
+    plan["commander_order"] = mission.get("commander_order") if isinstance(mission.get("commander_order"), dict) else {}
     state = initial_campaign_state(plan)
+    state["mission_id"] = str(mission.get("mission_id") or "")
+    state["mission_dir"] = str(mission.get("mission_dir") or "")
+    write_json(
+        target_dir / "mission_ref.json",
+        {
+            "mission_id": str(mission.get("mission_id") or ""),
+            "mission_dir": str(mission.get("mission_dir") or ""),
+            "assigned_governor": str((mission.get("commander_order") or {}).get("to") or ""),
+        },
+    )
     write_json(target_dir / PLAN_FILE, plan)
     write_json(target_dir / STATE_FILE, state)
     next_action = campaign_action(
@@ -396,6 +419,11 @@ def prepare_campaign(run_root: Path, message: str, campaign_id: str | None = Non
         "phase": "campaign_prepared",
         "campaign_id": resolved_id,
         "campaign_dir": str(target_dir),
+        "mission": {
+            "mission_id": str(mission.get("mission_id") or ""),
+            "assigned_governor": str((mission.get("commander_order") or {}).get("to") or ""),
+            "mission_dir": str(mission.get("mission_dir") or ""),
+        },
         "plan": plan,
         "state": state,
         "next_action": next_action,
@@ -650,6 +678,7 @@ def list_campaigns(run_root: Path) -> list[dict[str, Any]]:
             {
                 "campaign_id": path.name,
                 "campaign_dir": str(path),
+                "mission_id": str(state.get("mission_id") or ""),
                 "status": state.get("status", "unknown"),
                 "phase": state.get("phase", ""),
                 "original_task": state.get("original_task", ""),
