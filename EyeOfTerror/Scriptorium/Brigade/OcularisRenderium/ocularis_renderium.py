@@ -189,7 +189,12 @@ def main() -> int:
     parser.add_argument("--workspace-root", default="runtime/ocularis-work")
     args = parser.parse_args()
     payload = json.loads(Path(args.request_json).read_text(encoding="utf-8"))
-    request = payload.get("request") if isinstance(payload, dict) and isinstance(payload.get("request"), dict) else payload
+    _brigade_root = Path(__file__).resolve().parents[1]
+    if str(_brigade_root) not in sys.path:
+        sys.path.insert(0, str(_brigade_root))
+    from worker_protocol import strict_worker_request_from_payload  # noqa: PLC0415
+
+    request = strict_worker_request_from_payload(payload, "OcularisRenderium")
     result = run(request, Path(args.workspace_root))
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("ok") else 1
