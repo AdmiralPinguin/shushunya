@@ -5,9 +5,11 @@ import json
 import threading
 import unittest
 import urllib.request
+from urllib.error import HTTPError
 from http.server import ThreadingHTTPServer
 from typing import Any
 
+from EyeOfTerror.common_protocol import validate_protocol_payload, worker_order
 import planning_brigade
 from planning_packet_contract import REQUIRED_PACKET_OBJECTS, ROLE_ORDER
 from role_service import make_handler, role_capabilities, run_role_plan
@@ -30,6 +32,18 @@ def post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 class PlanningRoleServiceTests(unittest.TestCase):
+    def planning_order(self, role: str = "TaskTriage", step_id: str = "task_triage") -> dict[str, Any]:
+        return worker_order(
+            mission_id="mission-planning-role-worker-order-self-test",
+            step_id=step_id,
+            sender="Ceraxia",
+            to=role,
+            task="почини security API pytest в `app.py`",
+            expected_output=f"{role} planning artifacts",
+            revision_context={"repo_path": "/repo"},
+            quality_requirements=["return a shared worker_report"],
+        )
+
     def test_role_services_can_build_required_packet_objects_in_order(self) -> None:
         payload = {
             "task": "почини security API pytest в `app.py`",
@@ -42,6 +56,7 @@ class PlanningRoleServiceTests(unittest.TestCase):
             result = run_role_plan(role_name, {"payload": payload, "context": context})
             self.assertEqual(result["status"], "completed", result)
             self.assertTrue(result["read_only"], result)
+            self.assertEqual(result["protocol_mode"], "legacy_plan", result)
             outputs = result["outputs"]
             context.update(outputs)
             trace.append({"role": role_name, "outputs": result["output_artifacts"]})
@@ -69,13 +84,43 @@ class PlanningRoleServiceTests(unittest.TestCase):
             thread.join(timeout=5)
         self.assertEqual(response["status"], "completed", response)
         self.assertEqual(response["role"], "TaskTriage")
+        self.assertEqual(response["protocol_mode"], "legacy_plan")
         self.assertIn("task_triage", response["outputs"])
         self.assertIn("problem_statement", response["outputs"])
+
+    def test_task_triage_work_endpoint_requires_worker_order_and_returns_worker_report(self) -> None:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler("TaskTriage"))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            host, port = server.server_address
+            with self.assertRaises(HTTPError) as raised:
+                post_json(f"http://{host}:{port}/work", {"payload": {"task": "raw bypass"}})
+            self.assertEqual(raised.exception.code, 400)
+            response = post_json(
+                f"http://{host}:{port}/work",
+                {"worker_order": self.planning_order(), "payload": {"repo_path": "/repo"}},
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+        self.assertEqual(response["status"], "completed", response)
+        self.assertEqual(response["protocol_mode"], "worker_order", response)
+        validate_protocol_payload(response["worker_order"], expected_type="worker_order")
+        validate_protocol_payload(response["worker_report"], expected_type="worker_report")
+        self.assertEqual(response["worker_report"]["mission_id"], "mission-planning-role-worker-order-self-test")
+        self.assertEqual(response["worker_report"]["step_id"], "task_triage")
+        self.assertEqual(response["worker_report"]["worker"], "TaskTriage")
+        self.assertIn("task_triage", response["outputs"])
+        self.assertIn("security", response["outputs"]["task_triage"]["task_kinds"])
 
     def test_capabilities_match_service_contract(self) -> None:
         capabilities = role_capabilities("RiskScribe")
         self.assertEqual(capabilities["role"], "RiskScribe")
+        self.assertIn("POST /work", capabilities["endpoints"])
         self.assertIn("POST /plan", capabilities["endpoints"])
+        self.assertEqual(capabilities["protocol"]["strict_endpoint"], "POST /work")
         self.assertEqual(capabilities["service_contract"]["port"], 7115)
         self.assertFalse(capabilities["service_contract"]["may_mutate_source"])
 
