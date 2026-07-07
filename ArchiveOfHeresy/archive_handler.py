@@ -111,6 +111,30 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if self.path == "/archive/mobile/warmaster/state":
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_agent_state()
+            return
+
+        if self.path.startswith("/archive/mobile/warmaster/tasks"):
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_agent_tasks()
+            return
+
+        if self.path.startswith("/archive/mobile/warmaster/task"):
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_agent_task()
+            return
+
+        if self.path.startswith("/archive/mobile/warmaster/last-task"):
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_agent_last_task()
+            return
+
         if self.path == "/archive/mobile/agent/state":
             if not require_auth(self, allow_mobile=True):
                 return
@@ -438,6 +462,24 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             if not require_auth(self, allow_mobile=True):
                 return
             self.mobile_proxy_stt("/stt-live" if self.path.endswith("stt-live") else "/stt-pcm")
+            return
+
+        if self.path == "/archive/mobile/warmaster/run":
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_agent_run()
+            return
+
+        if self.path == "/archive/mobile/warmaster/start":
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_agent_start()
+            return
+
+        if self.path == "/archive/mobile/warmaster/cancel":
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_agent_cancel()
             return
 
         if self.path == "/archive/mobile/agent/run":
@@ -908,7 +950,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             {
                 "ok": False,
                 "backend": "warmaster",
-                "error": "streaming client agent endpoint was removed with standalone agent; use /archive/client/agent/start and poll /archive/client/agent/task",
+                "error": "streaming client agent endpoint was removed with standalone agent; use /archive/client/warmaster/start and poll /archive/client/warmaster/task",
             },
         )
 

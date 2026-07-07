@@ -123,10 +123,7 @@ public class MainActivity extends Activity {
     private LinearLayout translatorView;
     private LinearLayout agentView;
     private LinearLayout agentMessageList;
-    private LinearLayout agentInputPanel;
-    private LinearLayout agentComposer;
     private ScrollView agentScrollView;
-    private EditText agentInput;
     private TextView agentLiveBubble;
     private EditText translatorSourceText;
     private EditText translatorResultText;
@@ -578,16 +575,11 @@ public class MainActivity extends Activity {
 
         addAgentMessage(false, "Монитор бригад готов. Задачи отправляй из основного чата через /task, /w, /warmaster или вармастер:.", false);
 
-        agentInputPanel = new LinearLayout(this);
-        agentInputPanel.setOrientation(LinearLayout.VERTICAL);
-        agentInputPanel.setPadding(0, dp(6), 0, 0);
-        view.addView(agentInputPanel, new LinearLayout.LayoutParams(-1, -2));
-
         LinearLayout quickRow = new LinearLayout(this);
         quickRow.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams quickLp = new LinearLayout.LayoutParams(-1, dp(44));
         quickLp.bottomMargin = dp(6);
-        agentInputPanel.addView(quickRow, quickLp);
+        view.addView(quickRow, quickLp);
 
         Button statusButton = new Button(this);
         statusButton.setText("ИСКАНДАР");
@@ -618,56 +610,6 @@ public class MainActivity extends Activity {
         stateLp.leftMargin = dp(8);
         quickRow.addView(stateButton, stateLp);
         stateButton.setOnClickListener(v -> setAgentBrigadeFilter(""));
-
-        agentComposer = new LinearLayout(this);
-        agentComposer.setOrientation(LinearLayout.HORIZONTAL);
-        agentComposer.setGravity(Gravity.BOTTOM);
-        agentInputPanel.addView(agentComposer, new LinearLayout.LayoutParams(-1, -2));
-
-        agentInput = new EditText(this);
-        agentInput.setMinLines(1);
-        agentInput.setMaxLines(7);
-        agentInput.setMinHeight(dp(54));
-        agentInput.setMaxHeight(dp(178));
-        agentInput.setTextColor(Color.rgb(240, 246, 255));
-        agentInput.setHintTextColor(Color.rgb(116, 143, 164));
-        agentInput.setHint("Задача Warmaster");
-        agentInput.setTextSize(16);
-        agentInput.setGravity(Gravity.TOP | Gravity.START);
-        agentInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        agentInput.setSingleLine(false);
-        agentInput.setVerticalScrollBarEnabled(true);
-        agentInput.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
-        agentInput.setScroller(new Scroller(this));
-        agentInput.setBackground(pill(Color.rgb(8, 17, 43), Color.rgb(40, 171, 165), dp(16)));
-        agentInput.setPadding(dp(14), dp(10), dp(14), dp(10));
-        agentInput.setOnTouchListener((v, event) -> {
-            if (agentInput.canScrollVertically(1) || agentInput.canScrollVertically(-1)) {
-                v.getParent().requestDisallowInterceptTouchEvent(true);
-                if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
-                    v.getParent().requestDisallowInterceptTouchEvent(false);
-                }
-            }
-            return false;
-        });
-        agentComposer.addView(agentInput, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-
-        agentRunButton = new ImageButton(this);
-        agentRunButton.setImageResource(android.R.drawable.ic_menu_upload);
-        agentRunButton.setColorFilter(Color.rgb(5, 13, 31));
-        agentRunButton.setScaleType(ImageView.ScaleType.CENTER);
-        agentRunButton.setPadding(dp(9), dp(9), dp(9), dp(9));
-        agentRunButton.setBackground(pill(Color.rgb(201, 156, 58), Color.rgb(29, 191, 183), dp(16)));
-        LinearLayout.LayoutParams runLp = new LinearLayout.LayoutParams(dp(48), dp(50));
-        runLp.leftMargin = dp(6);
-        agentComposer.addView(agentRunButton, runLp);
-        agentRunButton.setOnClickListener(v -> {
-            if (agentRunning) {
-                cancelAgentTask();
-            } else {
-                submitAgentTask();
-            }
-        });
 
         return view;
     }
@@ -1017,84 +959,6 @@ public class MainActivity extends Activity {
                 : "Экран не смог обновить ход работы. Задача " + cleanTaskId + " не остановлена и продолжает жить на ПК.";
     }
 
-    private void runAgentTask(String task) {
-        String clean = task == null ? "" : task.trim();
-        if (clean.isEmpty() || agentRunning) {
-            return;
-        }
-        String taskId = "client-" + System.currentTimeMillis();
-        currentAgentTaskId = taskId;
-        agentDisplayedEventCount = 0;
-        agentCancelRequested = false;
-        agentRunning = true;
-        setAgentRunButtonRunning(true);
-        agentStatus.setText("Агент выполняет задачу в песочнице...");
-        addAgentMessage(true, clean, true);
-        agentLiveBubble = addAgentMessage(false, "", true);
-        appendAgentLog("Запускаю агента...");
-        progress.setVisibility(View.VISIBLE);
-        new Thread(() -> {
-            PowerManager.WakeLock wakeLock = acquireAnswerWakeLock();
-            final String[] acceptedTaskIdRef = {""};
-            try {
-                String acceptedTaskId = requestAgentStart(clean, taskId);
-                acceptedTaskIdRef[0] = acceptedTaskId;
-                currentAgentTaskId = acceptedTaskId;
-                getSharedPreferences(PREFS, MODE_PRIVATE)
-                        .edit()
-                        .putString("current_agent_task_id", acceptedTaskId)
-                        .apply();
-                String result = pollAgentTaskUntilDone(acceptedTaskId);
-                main.post(() -> {
-                    agentRunning = false;
-                    agentCancelRequested = false;
-                    currentAgentTaskId = "";
-                    getSharedPreferences(PREFS, MODE_PRIVATE)
-                            .edit()
-                            .remove("current_agent_task_id")
-                            .apply();
-                    setAgentRunButtonRunning(false);
-                    progress.setVisibility(waiting ? View.VISIBLE : View.GONE);
-                    agentStatus.setText(result.toLowerCase().contains("остановлен") ? "Отменено." : "Готово.");
-                    agentLiveBubble = null;
-                    showAnswerNotification(result);
-                });
-            } catch (Exception exc) {
-                String acceptedTaskId = acceptedTaskIdRef[0];
-                boolean accepted = !acceptedTaskId.isEmpty();
-                String message = accepted
-                        ? warmasterMonitorDetachedMessage(acceptedTaskId)
-                        : warmasterSubmitFailedMessage();
-                main.post(() -> {
-                    agentRunning = false;
-                    agentCancelRequested = false;
-                    if (accepted) {
-                        currentAgentTaskId = acceptedTaskId;
-                        getSharedPreferences(PREFS, MODE_PRIVATE)
-                                .edit()
-                                .putString("current_agent_task_id", acceptedTaskId)
-                                .apply();
-                    } else {
-                        currentAgentTaskId = "";
-                        getSharedPreferences(PREFS, MODE_PRIVATE)
-                                .edit()
-                                .remove("current_agent_task_id")
-                                .apply();
-                    }
-                    setAgentRunButtonRunning(false);
-                    progress.setVisibility(waiting ? View.VISIBLE : View.GONE);
-                    agentStatus.setText(message);
-                    appendAgentLog("! " + message);
-                    agentLiveBubble = null;
-                });
-            } finally {
-                if (wakeLock != null && wakeLock.isHeld()) {
-                    wakeLock.release();
-                }
-            }
-        }).start();
-    }
-
     private void loadAgentHistoryAndRestore() {
         new Thread(() -> {
             String storedTaskId = getSharedPreferences(PREFS, MODE_PRIVATE).getString("current_agent_task_id", "");
@@ -1153,7 +1017,7 @@ public class MainActivity extends Activity {
         agentCancelRequested = false;
         setAgentRunButtonRunning(true);
         if (agentStatus != null) {
-            agentStatus.setText("Восстанавливаю состояние агента...");
+            agentStatus.setText("Восстанавливаю состояние Warmaster...");
         }
         if (agentLiveBubble == null) {
             agentLiveBubble = addAgentMessage(false, "", false);
@@ -1238,18 +1102,6 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void submitAgentTask() {
-        if (agentInput == null) {
-            return;
-        }
-        String text = agentInput.getText().toString().trim();
-        if (text.isEmpty() || agentRunning) {
-            return;
-        }
-        agentInput.setText("");
-        runAgentTask(text);
-    }
-
     private void setAgentBrigadeFilter(String filter) {
         agentBrigadeFilter = filter == null ? "" : filter.trim();
         String label = agentBrigadeLabel(agentBrigadeFilter);
@@ -1312,7 +1164,7 @@ public class MainActivity extends Activity {
     private void handleAgentEvent(JSONObject event) {
         String type = event.optString("type", "");
         if ("start".equals(type)) {
-            agentStatus.setText(event.optString("message", "Агент стартует..."));
+            agentStatus.setText(event.optString("message", "Warmaster стартует..."));
             appendAgentLog("• " + event.optString("message", "старт"));
             return;
         }
@@ -1322,7 +1174,7 @@ public class MainActivity extends Activity {
             if (!taskId.isEmpty()) {
                 currentAgentTaskId = taskId;
             }
-            agentStatus.setText(taskId.isEmpty() ? "Агент получил задачу." : "Задача " + taskId);
+            agentStatus.setText(taskId.isEmpty() ? "Warmaster получил задачу." : "Задача " + taskId);
             appendAgentLog("• Память: " + namespace + (taskId.isEmpty() ? "" : ", task_id=" + taskId));
             return;
         }
@@ -1358,7 +1210,7 @@ public class MainActivity extends Activity {
         if ("heartbeat".equals(type)) {
             double duration = event.optDouble("current_task_duration_sec", -1.0);
             if (duration >= 0.0) {
-                agentStatus.setText("Агент думает... " + duration + "s");
+                agentStatus.setText("Warmaster думает... " + duration + "s");
             }
             return;
         }
@@ -1370,7 +1222,7 @@ public class MainActivity extends Activity {
             appendAgentLog(cancelled
                     ? (duration >= 0.0 ? "Остановлено (" + duration + "s):" : "Остановлено:")
                     : (duration >= 0.0 ? "Результат (" + duration + "s):" : "Результат:"));
-            appendAgentLog(message.isEmpty() ? "Агент вернул пустой ответ." : message);
+            appendAgentLog(message.isEmpty() ? "Warmaster вернул пустой ответ." : message);
             if (cancelled) {
                 agentStatus.setText("Отменено.");
             }
@@ -1383,26 +1235,19 @@ public class MainActivity extends Activity {
         if ("done".equals(type)) {
             JSONObject result = event.optJSONObject("result");
             boolean cancelled = result != null && result.optBoolean("cancelled", false);
-            agentStatus.setText(cancelled ? "Отменено." : event.optBoolean("ok", false) ? "Готово." : "Агент завершился с ошибкой.");
+            agentStatus.setText(cancelled ? "Отменено." : event.optBoolean("ok", false) ? "Готово." : "Warmaster завершился с ошибкой.");
         }
     }
 
     private String requestAgentStart(String task, String taskId) throws Exception {
         JSONObject payload = new JSONObject();
-        payload.put("task", task);
+        payload.put("message", task);
         payload.put("task_id", taskId);
-        payload.put("technical", true);
-        payload.put("max_steps", 200);
-        payload.put("memory_namespace", SERVER_MEMORY_NAMESPACE);
+        payload.put("session_id", SERVER_CHAT_SESSION_ID);
         payload.put("client_source", "app");
-        payload.put("archive_task", true);
-        payload.put("task_memory", true);
-        payload.put("include_stderr", false);
-        payload.put("shell_enabled", false);
-        payload.put("wait_for_slot", false);
 
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(trimSlash(baseUrl) + "/archive/client/agent/start");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/warmaster/start");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -1432,7 +1277,7 @@ public class MainActivity extends Activity {
     }
 
     private JSONObject requestAgentTaskSnapshot(String taskId) throws Exception {
-        URL url = new URL(trimSlash(baseUrl) + "/archive/client/agent/task?task_id=" + taskId + "&limit=160");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/warmaster/task?task_id=" + taskId + "&limit=160");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
         conn.setConnectTimeout(12000);
@@ -1450,7 +1295,7 @@ public class MainActivity extends Activity {
     }
 
     private JSONObject requestAgentTaskList() throws Exception {
-        URL url = new URL(trimSlash(baseUrl) + "/archive/client/agent/tasks?prefix=client&limit=" + AGENT_HISTORY_LIMIT);
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/warmaster/tasks?prefix=client&limit=" + AGENT_HISTORY_LIMIT);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
         conn.setConnectTimeout(12000);
@@ -1815,12 +1660,12 @@ public class MainActivity extends Activity {
                 finalMessage = finalEvent.optString("message", "").trim();
                 boolean cancelled = finalEvent.optBoolean("cancelled", false);
                 if (cancelled && finalMessage.isEmpty()) {
-                    return "Агент остановлен: задача отменена.";
+                    return "Warmaster остановлен: задача отменена.";
                 }
-                return finalMessage.isEmpty() ? "Агент вернул пустой ответ." : finalMessage;
+                return finalMessage.isEmpty() ? "Warmaster вернул пустой ответ." : finalMessage;
             }
             if (!snapshot.optBoolean("running", false)) {
-                return finalMessage.isEmpty() ? "Агент завершился без финального сообщения." : finalMessage;
+                return finalMessage.isEmpty() ? "Warmaster завершился без финального сообщения." : finalMessage;
             }
             Thread.sleep(2000);
         }
@@ -1830,7 +1675,7 @@ public class MainActivity extends Activity {
         JSONObject payload = new JSONObject();
         payload.put("task_id", taskId);
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(trimSlash(baseUrl) + "/archive/client/agent/cancel");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/warmaster/cancel");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -1856,53 +1701,8 @@ public class MainActivity extends Activity {
         return json.optString("message", "Отмена отправлена.");
     }
 
-    private String requestAgentRun(String task) throws Exception {
-        JSONObject payload = new JSONObject();
-        payload.put("task", task);
-        payload.put("technical", true);
-        payload.put("max_steps", 200);
-        payload.put("memory_namespace", SERVER_MEMORY_NAMESPACE);
-        payload.put("client_source", "app");
-        payload.put("archive_task", true);
-        payload.put("task_memory", true);
-        payload.put("include_steps", false);
-        payload.put("include_stderr", false);
-        payload.put("shell_enabled", false);
-        payload.put("wait_for_slot", false);
-
-        byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(trimSlash(baseUrl) + "/archive/client/agent/run");
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("POST");
-        conn.setConnectTimeout(12000);
-        conn.setReadTimeout(240000);
-        conn.setDoOutput(true);
-        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-        conn.setRequestProperty("Accept", "application/json");
-        applyMobileAuth(conn);
-        try (OutputStream out = conn.getOutputStream()) {
-            out.write(body);
-        }
-
-        int code = conn.getResponseCode();
-        InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
-        String response = readAll(stream);
-        if (code < 200 || code >= 300) {
-            if (code == 409) {
-                throw new IllegalStateException("Warmaster занят, открой Бригады и повтори позже");
-            }
-            throw new IllegalStateException("HTTP " + code + ": " + response);
-        }
-        JSONObject json = new JSONObject(response);
-        String message = json.optString("message", "").trim();
-        if (!json.optBoolean("ok", false)) {
-            throw new IllegalStateException(message.isEmpty() ? response : message);
-        }
-        return message.isEmpty() ? "Агент вернул пустой ответ." : message;
-    }
-
     private String requestAgentState() throws Exception {
-        URL url = new URL(trimSlash(baseUrl) + "/archive/client/agent/state");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/warmaster/state");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
         conn.setConnectTimeout(12000);
@@ -2228,18 +2028,11 @@ public class MainActivity extends Activity {
     }
 
     private void updateAgentKeyboardLift() {
-        if (agentInputPanel == null || agentScrollView == null) {
+        if (agentScrollView == null) {
             return;
         }
-        agentInputPanel.post(() -> {
-            float lift = lastKeyboardHeight > 0 ? -lastKeyboardHeight + dp(10) : 0f;
-            int bottomPadding = lastKeyboardHeight > 0 ? lastKeyboardHeight + agentInputPanel.getHeight() + dp(14) : 0;
-            agentScrollView.setPadding(0, 0, 0, bottomPadding);
-            agentInputPanel.animate()
-                    .translationY(lift)
-                    .setDuration(120)
-                    .setInterpolator(new DecelerateInterpolator())
-                    .start();
+        agentScrollView.post(() -> {
+            agentScrollView.setPadding(0, 0, 0, 0);
             maybeScrollAgentToBottom(false);
         });
     }
