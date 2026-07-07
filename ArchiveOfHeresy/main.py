@@ -41,6 +41,9 @@ from archive_state import (  # noqa: F401 - shared locks & chat-queue primitives
 
 
 from archive_handler import ArchiveHandler  # noqa: F401
+from task_journal import start_task_journal_thread
+
+
 def main():
     init_storage()
     FOCUS_COMPONENTS.clear()  # shared cache lives in archive_config; mutate in place
@@ -68,6 +71,8 @@ def main():
     if MEMORY_QUALITY_REPORT_ENABLED:
         threading.Thread(target=memory_quality_report_loop, daemon=True, name="memory-quality-report").start()
         print(f"Memory quality report: enabled at {MEMORY_QUALITY_REPORT_HOUR:02d}:00", flush=True)
+    if start_task_journal_thread():
+        print("Brigade task journal: enabled", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

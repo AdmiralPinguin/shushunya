@@ -20,7 +20,7 @@ from archive_state import (ARCHIVE_LOCK, CHAT_QUEUE_LOCK, CHAT_QUEUE_WAIT_TIMEOU
 from archivist_agent import Librarian
 from archivist_agent.agent import FocusBookshelf, WikiBookshelf
 from archivist_agent.graph_memory import GRAPH_TOP_K, GraphMemory
-from archivist_agent.magos_agent import MAGOS_CONTEXT_LAYERS, Magos
+from archivist_agent.magos_agent import MAGOS_CONTEXT_LAYERS, MAGOS_EXTRA_NAMESPACES, Magos
 from archivist_agent.quality_report import generate_quality_report
 from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_user_message
 
@@ -505,6 +505,11 @@ def focus_components(namespace):
         proxy_json,
         vector_memory=archive_state.VECTOR_MEMORY,
         graph_memory=graph_memory_for_namespace(namespace),
+        extra_wiki_roots={
+            extra: wiki_root_for_namespace(extra)
+            for extra in MAGOS_EXTRA_NAMESPACES
+            if extra != namespace
+        },
     )
     cached = {"bookshelf": bookshelf, "librarian": librarian, "magos": magos, "root": root}
     FOCUS_COMPONENTS[namespace] = cached

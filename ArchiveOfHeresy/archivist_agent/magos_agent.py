@@ -29,6 +29,13 @@ MAGOS_CONTEXT_LAYERS = {
     if layer.strip()
 }
 MAGOS_CONTEXT_LAYERS &= {"wiki", "vector", "graph"}
+# Namespaces searched in ADDITION to the chat's own: brigade/agent work must be
+# visible to the persona, otherwise finished department tasks stay siloed.
+MAGOS_EXTRA_NAMESPACES = {
+    ns.strip().lower()
+    for ns in os.environ.get("ARCHIVE_MAGOS_EXTRA_NAMESPACES", "agent").split(",")
+    if ns.strip()
+}
 MAGOS_SYSTEM_PROMPT = os.environ.get(
     "ARCHIVE_MAGOS_SYSTEM_PROMPT",
     "Ты Магос ArchiveOfHeresy: изолированный агент извлечения памяти перед ответом модели. "
@@ -48,6 +55,8 @@ MAGOS_TASK_PROMPT = os.environ.get(
     "[ошибка] цитируй только вместе с исправлением, само утверждение неверно; "
     "[болтовня] почти никогда не несёт фактов — пропускай; [задача] — поручение, а не факт о мире; "
     "[без ярлыка] — старая запись, оценивай по содержимому сам. "
+    "Фрагменты с пометкой namespace=agent — это работа отделов/бригад Шушуни: выполненные исследования, "
+    "созданные файлы и журналы задач; используй их, когда владелец спрашивает о задачах, исследованиях или их результатах. "
     "memory_context разрешено собирать ТОЛЬКО из содержимого полей wiki_context, vector_context, graph_context и focus_candidates. "
     "Запрещено пересказывать или переформулировать сам query, запрещены мета-описания вида 'пользователь спрашивает о...'. "
     "Не добавляй ничего из собственных знаний: если про сущность из query в этих полях ничего нет, значит в памяти про неё пусто. "
@@ -87,12 +96,14 @@ def chargrams(tokens, size=3):
 
 
 class Magos:
-    def __init__(self, focus_root, wiki_root, proxy_json, vector_memory=None, graph_memory=None):
+    def __init__(self, focus_root, wiki_root, proxy_json, vector_memory=None, graph_memory=None, extra_wiki_roots=None):
         self.focus = FocusBookshelf(focus_root)
         self.wiki_root = Path(wiki_root)
         self.proxy_json = proxy_json
         self.vector_memory = vector_memory
         self.graph_memory = graph_memory
+        # {namespace: wiki_root} for brigade/agent namespaces searched in addition to our own
+        self.extra_wiki_roots = {str(ns): Path(root) for ns, root in (extra_wiki_roots or {}).items()}
         self.last_result = None
 
     def prepare_request(self, messages, model=None, conversation_id=None, turn_id=None, memory_namespace="default"):
@@ -221,61 +232,72 @@ class Magos:
         return candidates
 
     def wiki_context(self, query, limit=4):
-        index_path = self.wiki_root / "index.json"
-        if not index_path.exists():
-            return ""
-        try:
-            index = json.loads(index_path.read_text(encoding="utf-8"))
-        except Exception:
-            return ""
         candidates = []
-        for page in index.get("pages", []):
-            if str(page.get("kind") or "").strip().lower() == "persona":
-                continue  # identity pages are always injected separately, not knowledge
-            path = self.wiki_root / page.get("path", "")
-            if not path.exists():
+        for ns_label, root in [("", self.wiki_root)] + sorted(self.extra_wiki_roots.items()):
+            index_path = root / "index.json"
+            if not index_path.exists():
                 continue
-            content = path.read_text(encoding="utf-8")
-            text = " ".join([page.get("title", ""), page.get("kind", ""), content])
-            candidates.append((page, content, text))
+            try:
+                index = json.loads(index_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            for page in index.get("pages", []):
+                if str(page.get("kind") or "").strip().lower() == "persona":
+                    continue  # identity pages are always injected separately, not knowledge
+                path = root / page.get("path", "")
+                if not path.exists():
+                    continue
+                content = path.read_text(encoding="utf-8")
+                text = " ".join([page.get("title", ""), page.get("kind", ""), content])
+                candidates.append((ns_label, page, content, text))
         # Semantic gather: high recall including cross-language and paraphrase
         # (lexical token overlap misses e.g. a Russian query vs an English page).
         # Noise is fine here — the Magos LLM curates only relevant facts downstream.
         # Falls back to lexical when the embedder is unavailable.
-        semantic = semantic_scores(query, [(str(i), text[:600]) for i, (_p, _c, text) in enumerate(candidates)])
+        semantic = semantic_scores(query, [(str(i), text[:600]) for i, (_ns, _p, _c, text) in enumerate(candidates)])
         scored = []
         if semantic is not None:
-            for i, (page, content, _text) in enumerate(candidates):
+            for i, (ns_label, page, content, _text) in enumerate(candidates):
                 score = semantic.get(str(i), 0.0)
                 if score >= SEMANTIC_MIN_SCORE:
-                    scored.append((score, page, content))
+                    scored.append((score, ns_label, page, content))
         else:
-            for page, content, text in candidates:
+            for ns_label, page, content, text in candidates:
                 score = token_overlap(query, text)
                 if score >= MAGOS_MIN_WIKI_SCORE:
-                    scored.append((score, page, content))
-        scored.sort(key=lambda item: (-item[0], item[1].get("updated_at") or ""))
+                    scored.append((score, ns_label, page, content))
+        scored.sort(key=lambda item: (-item[0], item[2].get("updated_at") or ""))
         lines = []
-        for score, page, content in scored[:limit]:
-            lines.append(f"## {page.get('title')} score={score:.3f}\n{trim_text(content, 1200)}")
+        for score, ns_label, page, content in scored[:limit]:
+            source = f" [namespace={ns_label}]" if ns_label else ""
+            lines.append(f"## {page.get('title')}{source} score={score:.3f}\n{trim_text(content, 1200)}")
         return "\n\n".join(lines)
 
     def vector_context(self, query, memory_namespace="default"):
         if self.vector_memory is None:
             return ""
-        matches = self.vector_memory.search(
-            query,
-            limit=VECTOR_TOP_K,
-            min_score=MAGOS_MIN_VECTOR_SCORE,
-            memory_namespace=memory_namespace,
-        )
+        namespaces = [memory_namespace] + sorted(ns for ns in MAGOS_EXTRA_NAMESPACES if ns != memory_namespace)
+        matches = []
+        for namespace in namespaces:
+            matches.extend(
+                self.vector_memory.search(
+                    query,
+                    limit=VECTOR_TOP_K,
+                    min_score=MAGOS_MIN_VECTOR_SCORE,
+                    memory_namespace=namespace,
+                )
+            )
+        matches.sort(key=lambda item: (-item["score"], item["created_at"]))
+        matches = matches[:VECTOR_TOP_K]
         if not matches:
             return ""
         lines = ["# Vector Memory Matches", ""]
         for index, match in enumerate(matches, 1):
             label = str(match.get("label") or "").strip() or "без ярлыка"
+            source = str(match.get("memory_namespace") or "")
+            source_note = f"; namespace={source}" if source and source != memory_namespace else ""
             lines.append(
-                f"{index}. [{label}] score={match['score']:.3f}; role={match['role']}; created_at={match['created_at']}\n"
+                f"{index}. [{label}] score={match['score']:.3f}; role={match['role']}; created_at={match['created_at']}{source_note}\n"
                 f"   {trim_text(match['content'], 700).replace(chr(10), chr(10) + '   ')}"
             )
         return "\n\n".join(lines)
