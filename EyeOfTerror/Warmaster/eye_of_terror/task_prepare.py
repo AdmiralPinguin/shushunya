@@ -527,7 +527,12 @@ def prepare_task(
             "actions": task_preflight_actions(False, "invalid_oversight", plan.contract.task_id, governor_transport=governor_transport, governor_host=governor_host, message=message),
         }
     oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else None
-    status = write_pipeline_run(plan.contract, run_dir, oversight=oversight)
+    status = write_pipeline_run(
+        plan.contract,
+        run_dir,
+        oversight=oversight,
+        mission_id=mission_id_from_commander(plan.contract.task_id, commander_order),
+    )
     TaskLedger.create(run_dir / "task_ledger.json", plan.contract.task_id, plan.contract.goal, governor)
     (run_dir / "governor_plan.json").write_text(json.dumps(plan_payload["governor_plan"], ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return {

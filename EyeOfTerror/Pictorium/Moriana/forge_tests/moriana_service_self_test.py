@@ -18,6 +18,7 @@ if str(WARMMASTER_ROOT) not in sys.path:
 
 from EyeOfTerror.Pictorium.Moriana.moriana_governor import make_handler
 from EyeOfTerror.Pictorium.testing.fake_model_server import fake_pictorium_model
+from EyeOfTerror.common_protocol import commander_order, validate_protocol_payload
 
 
 def request_json(base: str, method: str, path: str, payload: dict[str, object] | None = None) -> dict[str, object]:
@@ -41,6 +42,25 @@ def request_bytes(base: str, path: str) -> bytes:
     if not data:
         raise AssertionError(f"endpoint returned an empty file: {path}")
     return data
+
+
+def moriana_command(task: str, task_id: str) -> dict[str, object]:
+    order = commander_order(
+        f"mission-{task_id}",
+        to="Moriana",
+        user_request=task,
+        commander_intent="Проверить, что Мориана принимает приказ Вармастера как протокольный вход.",
+        primary_goal=task,
+        success_conditions=[
+            "governor_plan preserves the commander mission_id",
+            "worker_order packets preserve the commander mission_id",
+            "Moriana does not fall back to a direct raw task protocol",
+        ],
+        constraints=["Do not answer the user directly from Moriana."],
+        escalate_to_user_if=["visual task cannot be represented by active workers"],
+    )
+    validate_protocol_payload(order, expected_type="commander_order")
+    return order
 
 
 def _main() -> int:
@@ -89,6 +109,31 @@ def _main() -> int:
                 or not (run_dir / "artifact_registry.json").exists()
             ):
                 raise AssertionError(f"bad prepare_run payload: {prepared}")
+            protocol_task = "нарисуй протокольную картинку 512x512"
+            protocol_command = moriana_command(protocol_task, "moriana-http-protocol-run")
+            protocol_prepared = request_json(
+                base,
+                "POST",
+                "/prepare_run",
+                {
+                    "task": protocol_task,
+                    "task_id": "moriana-http-protocol-run",
+                    "commander_order": protocol_command,
+                },
+            )
+            protocol_run_dir = Path(str(protocol_prepared.get("run_dir") or ""))
+            protocol_plan = json.loads((protocol_run_dir / "governor_plan.json").read_text(encoding="utf-8"))
+            protocol_dispatch = json.loads((protocol_run_dir / "dispatch" / "image_planning.json").read_text(encoding="utf-8"))
+            if (
+                not protocol_prepared.get("ok")
+                or protocol_plan.get("mission_id") != "mission-moriana-http-protocol-run"
+                or protocol_dispatch.get("worker_order", {}).get("mission_id") != "mission-moriana-http-protocol-run"
+                or protocol_dispatch.get("request", {}).get("worker_order", {}).get("mission_id") != "mission-moriana-http-protocol-run"
+            ):
+                raise AssertionError(
+                    "Moriana /prepare_run did not preserve commander_order mission_id: "
+                    f"prepared={protocol_prepared} plan={protocol_plan} dispatch={protocol_dispatch}"
+                )
             executed = request_json(
                 base,
                 "POST",

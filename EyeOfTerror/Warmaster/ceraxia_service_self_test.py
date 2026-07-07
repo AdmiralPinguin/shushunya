@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import threading
 import urllib.error
@@ -9,9 +10,14 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from eye_of_terror.contracts import build_code_task_contract
 from eye_of_terror.inner_circle.ceraxia import plan_code_task
 from eye_of_terror.inner_circle.ceraxia_service import make_handler, oversight_template, pipeline_summary, required_workers, resolve_run_dir
+from EyeOfTerror.common_protocol import commander_order, validate_protocol_payload
 
 
 def request_json(url: str, payload: dict | None = None) -> dict:
@@ -20,6 +26,23 @@ def request_json(url: str, payload: dict | None = None) -> dict:
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method=method)
     with urllib.request.urlopen(req, timeout=60) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def ceraxia_command(task: str, task_id: str) -> dict:
+    order = commander_order(
+        f"mission-{task_id}",
+        to="Ceraxia",
+        user_request=task,
+        commander_intent="Проверить протокольный вход Цераксии через приказ Вармастера.",
+        primary_goal=task,
+        success_conditions=[
+            "governor_plan preserves the commander mission_id",
+            "worker_order packets preserve the commander mission_id",
+        ],
+        constraints=["Do not answer the user directly from the governor layer."],
+    )
+    validate_protocol_payload(order, expected_type="commander_order")
+    return order
 
 
 def main() -> int:
@@ -195,6 +218,29 @@ def main() -> int:
                 or not expectations.get("worker_brief", {}).get("must_produce")
             ):
                 raise AssertionError(f"Ceraxia dispatch should carry task profile and worker brief: {implementation_dispatch}")
+            protocol_run_dir = root / "runs" / "protocol-run"
+            protocol_task = "почини python приложение"
+            protocol_prepared = request_json(
+                base + "/prepare_run",
+                {
+                    "task": protocol_task,
+                    "task_id": "ceraxia-protocol-test",
+                    "run_dir": str(protocol_run_dir),
+                    "commander_order": ceraxia_command(protocol_task, "ceraxia-protocol-test"),
+                },
+            )
+            protocol_plan = json.loads((protocol_run_dir / "governor_plan.json").read_text(encoding="utf-8"))
+            protocol_dispatch = json.loads((protocol_run_dir / "dispatch" / "implementation.json").read_text(encoding="utf-8"))
+            if (
+                not protocol_prepared.get("ok")
+                or protocol_plan.get("mission_id") != "mission-ceraxia-protocol-test"
+                or protocol_dispatch.get("worker_order", {}).get("mission_id") != "mission-ceraxia-protocol-test"
+                or protocol_dispatch.get("request", {}).get("worker_order", {}).get("mission_id") != "mission-ceraxia-protocol-test"
+            ):
+                raise AssertionError(
+                    "Ceraxia /prepare_run did not preserve commander_order mission_id: "
+                    f"prepared={protocol_prepared} plan={protocol_plan} dispatch={protocol_dispatch}"
+                )
             try:
                 request_json(
                     base + "/prepare_run",

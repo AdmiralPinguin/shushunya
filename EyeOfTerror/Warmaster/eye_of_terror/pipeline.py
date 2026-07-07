@@ -123,9 +123,10 @@ def dispatch_packet_with_worker_order(packet: dict[str, Any], revision_context: 
     return enriched
 
 
-def build_dispatch_packets(contract: TaskContract, oversight: dict[str, Any] | None = None) -> list[DispatchPacket]:
+def build_dispatch_packets(contract: TaskContract, oversight: dict[str, Any] | None = None, mission_id: str | None = None) -> list[DispatchPacket]:
     packets: list[DispatchPacket] = []
     contract_payload = contract.to_dict()
+    resolved_mission_id = str(mission_id or f"mission-{contract.task_id}").strip()
     artifacts_by_step = {step.step_id: step.expected_artifacts for step in contract.worker_plan}
     for step in contract.worker_plan:
         worker = worker_by_name(step.worker)
@@ -153,7 +154,7 @@ def build_dispatch_packets(contract: TaskContract, oversight: dict[str, Any] | N
             if isinstance(item, str) and item.strip():
                 quality_requirements.append(item.strip())
         order = worker_order(
-            f"mission-{contract.task_id}",
+            resolved_mission_id,
             step_id=step.step_id,
             sender=contract.assigned_governor,
             to=worker.name,
@@ -214,11 +215,16 @@ def pipeline_status(contract: TaskContract, packets: list[DispatchPacket]) -> di
     }
 
 
-def write_pipeline_run(contract: TaskContract, run_dir: Path, oversight: dict[str, Any] | None = None) -> dict[str, Any]:
+def write_pipeline_run(
+    contract: TaskContract,
+    run_dir: Path,
+    oversight: dict[str, Any] | None = None,
+    mission_id: str | None = None,
+) -> dict[str, Any]:
     run_dir.mkdir(parents=True, exist_ok=True)
     dispatch_dir = run_dir / "dispatch"
     dispatch_dir.mkdir(parents=True, exist_ok=True)
-    packets = build_dispatch_packets(contract, oversight=oversight)
+    packets = build_dispatch_packets(contract, oversight=oversight, mission_id=mission_id)
     current_packet_names = {f"{packet.step_id}.json" for packet in packets}
     for stale_packet in dispatch_dir.glob("*.json"):
         if stale_packet.name not in current_packet_names:

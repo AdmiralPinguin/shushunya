@@ -253,7 +253,7 @@ def plan_actions(contract: dict[str, Any], ok: bool, errors: list[str], availabi
 class MorianaPlan:
     contract: TaskContract
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, command: dict[str, Any] | None = None) -> dict[str, Any]:
         contract = self.contract.to_dict()
         validation_errors = validate_task_contract_payload(contract)
         availability = worker_availability(contract_required_workers(contract))
@@ -276,7 +276,7 @@ class MorianaPlan:
             "ok": ok,
             "governor": GOVERNOR,
             "contract": contract,
-            "governor_plan": protocol_governor_plan(contract, {}),
+            "governor_plan": protocol_governor_plan(contract, command or {}),
             "validation": {"ok": not validation_errors, "errors": validation_errors},
             "pipeline": pipeline,
             "resolved_workers": resolved_workers,
@@ -394,12 +394,13 @@ def resolve_run_dir(default_run_root: Path, requested: str, task_id: str) -> Pat
     return resolved
 
 
-def prepare_run(task: str, task_id: str | None, run_dir: Path) -> dict[str, Any]:
+def prepare_run(task: str, task_id: str | None, run_dir: Path, command: dict[str, Any] | None = None) -> dict[str, Any]:
     plan = plan_image_task(task, task_id=task_id)
-    payload = plan.to_dict()
+    payload = plan.to_dict(command=command)
     if not payload.get("ok"):
         return {"ok": False, "governor": GOVERNOR, "error": "plan is not ready", "plan": payload}
-    status = write_pipeline_run(plan.contract, run_dir, oversight=payload["oversight"])
+    mission_id = str((command or {}).get("mission_id") or f"mission-{plan.contract.task_id}")
+    status = write_pipeline_run(plan.contract, run_dir, oversight=payload["oversight"], mission_id=mission_id)
     (run_dir / "governor_plan.json").write_text(json.dumps(payload["governor_plan"], ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     task_kind = "comic" if is_comics_task(task) else ("image_series" if is_image_series_task(task) else "image")
     runtime_status = MorianaRunStore(run_dir.parent).ensure_run(plan.contract.task_id, task, task_kind, payload)
@@ -409,11 +410,16 @@ def prepare_run(task: str, task_id: str | None, run_dir: Path) -> dict[str, Any]
 
 
 def create_or_execute_run(run_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    command = payload.get("commander_order") if isinstance(payload.get("commander_order"), dict) else {}
+    if command:
+        validate_protocol_payload(command, expected_type="commander_order")
     task = str(payload.get("task") or payload.get("request") or "").strip()
+    if not task and command:
+        task = str(command.get("primary_goal") or command.get("commander_intent") or command.get("user_request") or "").strip()
     if not task:
         raise ValueError("task is required")
     plan = plan_image_task(task, task_id=str(payload.get("task_id") or "").strip() or None)
-    plan_payload = plan.to_dict()
+    plan_payload = plan.to_dict(command=command)
     if not plan_payload.get("ok"):
         return {"ok": False, "governor": GOVERNOR, "error": "plan is not ready", "plan": plan_payload}
     task_kind = "comic" if is_comics_task(task) else ("image_series" if is_image_series_task(task) else "image")
@@ -637,10 +643,10 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                         raise ValueError("task is required")
                     planned = plan_image_task(task, task_id=task_id)
                     run_dir = resolve_run_dir(default_run_root, str(payload.get("run_dir") or ""), planned.contract.task_id)
-                    response(self, 200, prepare_run(task, planned.contract.task_id, run_dir))
+                    response(self, 200, prepare_run(task, planned.contract.task_id, run_dir, command=command))
                     return
                 if path == "/runs":
-                    response(self, 200, create_or_execute_run(default_run_root, payload))
+                    response(self, 200, create_or_execute_run(default_run_root, {**payload, "task": task}))
                     return
                 parts = [part for part in path.split("/") if part]
                 if len(parts) == 3 and parts[0] == "runs":

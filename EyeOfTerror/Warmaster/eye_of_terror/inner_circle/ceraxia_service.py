@@ -303,7 +303,8 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                     return
                 if self.path == "/prepare_run":
                     run_dir = resolve_run_dir(default_run_root, str(payload.get("run_dir") or ""), plan.contract.task_id)
-                    status = write_pipeline_run(plan.contract, run_dir, oversight=oversight_plan(plan.contract))
+                    mission_id = str(command.get("mission_id") or f"mission-{plan.contract.task_id}")
+                    status = write_pipeline_run(plan.contract, run_dir, oversight=oversight_plan(plan.contract), mission_id=mission_id)
                     plan_payload = payload_with_plan_view(plan.to_dict())
                     governor_plan_payload = protocol_governor_plan(plan_payload, command)
                     (run_dir / "governor_plan.json").write_text(json.dumps(governor_plan_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")

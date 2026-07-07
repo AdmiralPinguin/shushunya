@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import threading
 import urllib.error
@@ -9,8 +10,13 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from eye_of_terror.contracts import build_research_writing_contract
 from eye_of_terror.inner_circle.iskandar_service import make_handler, oversight_template, pipeline_summary, required_workers, resolve_run_dir
+from EyeOfTerror.common_protocol import commander_order, validate_protocol_payload
 
 
 def request_json(url: str, payload: dict | None = None) -> dict:
@@ -25,6 +31,23 @@ def request_options(url: str) -> int:
     req = urllib.request.Request(url, method="OPTIONS")
     with urllib.request.urlopen(req, timeout=60) as response:
         return response.status
+
+
+def iskandar_command(task: str, task_id: str) -> dict:
+    order = commander_order(
+        f"mission-{task_id}",
+        to="IskandarKhayon",
+        user_request=task,
+        commander_intent="Проверить протокольный вход Искандара через приказ Вармастера.",
+        primary_goal=task,
+        success_conditions=[
+            "governor_plan preserves the commander mission_id",
+            "worker_order packets preserve the commander mission_id",
+        ],
+        constraints=["Do not answer the user directly from the governor layer."],
+    )
+    validate_protocol_payload(order, expected_type="commander_order")
+    return order
 
 
 def main() -> int:
@@ -85,7 +108,7 @@ def main() -> int:
                 capabilities.get("worker_availability", {}).get("ok") is not True
                 or capabilities.get("worker_availability", {}).get("missing_workers")
                 or capabilities.get("worker_availability", {}).get("unavailable_workers")
-                or capabilities.get("worker_availability", {}).get("resolved_workers", {}).get("Lexmechanic", {}).get("status") != "prototype"
+                or capabilities.get("worker_availability", {}).get("resolved_workers", {}).get("Lexmechanic", {}).get("status") not in {"prototype", "active"}
             ):
                 raise AssertionError(f"capabilities did not expose worker availability: {capabilities}")
             if (
@@ -154,6 +177,29 @@ def main() -> int:
                 or prepared_fact_dispatch.get("request", {}).get("quality_expectations", {}).get("final_review", {}).get("final_step") != "finalize"
             ):
                 raise AssertionError(f"prepare_run did not write dispatch quality expectations: {prepared_fact_dispatch}")
+            protocol_run_dir = root / "runs" / "protocol-run"
+            protocol_task = "Собери события Скалатракса"
+            protocol_prepared = request_json(
+                base + "/prepare_run",
+                {
+                    "task": protocol_task,
+                    "task_id": "iskandar-protocol-test",
+                    "run_dir": str(protocol_run_dir),
+                    "commander_order": iskandar_command(protocol_task, "iskandar-protocol-test"),
+                },
+            )
+            protocol_plan = json.loads((protocol_run_dir / "governor_plan.json").read_text(encoding="utf-8"))
+            protocol_dispatch = json.loads((protocol_run_dir / "dispatch" / "source_discovery.json").read_text(encoding="utf-8"))
+            if (
+                not protocol_prepared.get("ok")
+                or protocol_plan.get("mission_id") != "mission-iskandar-protocol-test"
+                or protocol_dispatch.get("worker_order", {}).get("mission_id") != "mission-iskandar-protocol-test"
+                or protocol_dispatch.get("request", {}).get("worker_order", {}).get("mission_id") != "mission-iskandar-protocol-test"
+            ):
+                raise AssertionError(
+                    "Iskandar /prepare_run did not preserve commander_order mission_id: "
+                    f"prepared={protocol_prepared} plan={protocol_plan} dispatch={protocol_dispatch}"
+                )
             try:
                 request_json(
                     base + "/prepare_run",
