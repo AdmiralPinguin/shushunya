@@ -18,6 +18,7 @@ if str(WARMMASTER_ROOT) not in sys.path:
     sys.path.insert(0, str(WARMMASTER_ROOT))
 
 from EyeOfTerror.Pictorium.Moriana.moriana_governor import create_or_execute_run
+from EyeOfTerror.common_protocol import commander_order
 
 
 DEFAULT_RUN_ROOT = PROJECT_ROOT / "runtime" / "pictorium" / "runs"
@@ -102,6 +103,21 @@ def read_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def moriana_command(task: str, task_id: str) -> dict[str, Any]:
+    return commander_order(
+        f"mission-{task_id}",
+        to="Moriana",
+        user_request=task,
+        commander_intent="Провести live visual trial через протокол Пикториума.",
+        primary_goal=task,
+        success_conditions=[
+            "Moriana получает задачу только через commander_order",
+            "live trial фиксирует run status, quality report и final manifest",
+        ],
+        constraints=[],
+    )
+
+
 def visual_artifacts(registry: dict[str, Any]) -> list[dict[str, Any]]:
     artifacts = registry.get("artifacts") if isinstance(registry.get("artifacts"), list) else []
     return [
@@ -125,6 +141,7 @@ def run_trial(
     payload = {
         "task": trial["task"],
         "task_id": task_id,
+        "commander_order": moriana_command(str(trial["task"]), task_id),
         "execute": True,
         "submit": True,
         "wait_for_result": True,

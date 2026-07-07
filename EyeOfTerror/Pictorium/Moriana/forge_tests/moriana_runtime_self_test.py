@@ -33,6 +33,7 @@ from EyeOfTerror.Pictorium.Moriana.moriana_governor import create_or_execute_run
 from EyeOfTerror.Pictorium.Moriana.moriana_executor import execute_revision_run
 from EyeOfTerror.Pictorium.Moriana.moriana_runtime import MorianaRunStore
 from EyeOfTerror.Pictorium.testing.fake_model_server import fake_pictorium_model
+from EyeOfTerror.common_protocol import commander_order
 
 
 def load_json(path: Path) -> dict[str, object]:
@@ -77,6 +78,31 @@ def assert_run_workspace(run_dir: Path) -> None:
 def artifact_types(run_dir: Path) -> set[str]:
     registry = load_json(run_dir / "artifact_registry.json")
     return {str(item.get("type") or "") for item in registry.get("artifacts", []) if isinstance(item, dict)}
+
+
+def moriana_command(task: str, task_id: str) -> dict[str, object]:
+    return commander_order(
+        f"mission-{task_id}",
+        to="Moriana",
+        user_request=task,
+        commander_intent="Создать и проверить визуальный run через Пикториум.",
+        primary_goal=task,
+        success_conditions=[
+            "Moriana работает только по commander_order",
+            "воркеры получают структурированные worker_order",
+            "результат фиксирует качество и блокеры",
+        ],
+        constraints=[],
+    )
+
+
+def run_payload(task: str, task_id: str, **extra: object) -> dict[str, object]:
+    return {
+        "task": task,
+        "task_id": task_id,
+        "commander_order": moriana_command(task, task_id),
+        **extra,
+    }
 
 
 def _main() -> int:
@@ -175,15 +201,17 @@ def _main() -> int:
         prepared_status = load_json(run_dir / "status.json")
         if prepared_status.get("run_id") != "prepared-image" or not prepared_status.get("pictorium_runtime"):
             raise AssertionError(f"prepare_run did not install Moriana runtime state: {prepared_status}")
+        try:
+            create_or_execute_run(run_root, {"task": "сырой запрос без приказа", "task_id": "raw-run-rejected"})
+        except ValueError as exc:
+            if "commander_order is required" not in str(exc):
+                raise
+        else:
+            raise AssertionError("Moriana create_or_execute_run accepted raw task without commander_order")
 
         success = create_or_execute_run(
             run_root,
-            {
-                "task": "нарисуй простую картинку алтаря 512x512",
-                "task_id": "image-success",
-                "execute": True,
-                "test_artifact_mode": "good",
-            },
+            run_payload("нарисуй простую картинку алтаря 512x512", "image-success", execute=True, test_artifact_mode="good"),
         )
         if not success.get("ok") or success.get("status", {}).get("status") != "completed":
             raise AssertionError(f"image success run did not complete: {success}")
@@ -224,13 +252,7 @@ def _main() -> int:
 
         revision = create_or_execute_run(
             run_root,
-            {
-                "task": "нарисуй сложную картинку кузни 512x512",
-                "task_id": "image-revision",
-                "execute": True,
-                "test_artifact_mode": "bad_then_good",
-                "max_revision_cycles": 1,
-            },
+            run_payload("нарисуй сложную картинку кузни 512x512", "image-revision", execute=True, test_artifact_mode="bad_then_good", max_revision_cycles=1),
         )
         revision_dir = Path(str(revision["run_dir"]))
         revision_registry = load_json(revision_dir / "artifact_registry.json")
@@ -258,11 +280,7 @@ def _main() -> int:
 
         failure = create_or_execute_run(
             run_root,
-            {
-                "task": "нарисуй картинку без тестового артефакта 512x512",
-                "task_id": "image-pending-failure",
-                "execute": True,
-            },
+            run_payload("нарисуй картинку без тестового артефакта 512x512", "image-pending-failure", execute=True),
         )
         failure_dir = Path(str(failure["run_dir"]))
         if failure.get("ok") or load_json(failure_dir / "status.json").get("status") != "revising":
@@ -293,14 +311,7 @@ def _main() -> int:
 
         pending = create_or_execute_run(
             run_root,
-            {
-                "task": "нарисуй pending forge картинку 512x512",
-                "task_id": "image-pending-forge-job",
-                "execute": True,
-                "submit": True,
-                "wait_for_result": True,
-                "max_wait_sec": 0,
-            },
+            run_payload("нарисуй pending forge картинку 512x512", "image-pending-forge-job", execute=True, submit=True, wait_for_result=True, max_wait_sec=0),
         )
         pending_dir = Path(str(pending["run_dir"]))
         pending_registry = load_json(pending_dir / "artifact_registry.json")
@@ -317,12 +328,12 @@ def _main() -> int:
 
         series = create_or_execute_run(
             run_root,
-            {
-                "task": "сделай серию 3 изображения про один и тот же древний механикум-алтарь 512x512",
-                "task_id": "image-series-success",
-                "execute": True,
-                "test_artifact_mode": "series_good",
-            },
+            run_payload(
+                "сделай серию 3 изображения про один и тот же древний механикум-алтарь 512x512",
+                "image-series-success",
+                execute=True,
+                test_artifact_mode="series_good",
+            ),
         )
         series_dir = Path(str(series["run_dir"]))
         series_registry = load_json(series_dir / "artifact_registry.json")
@@ -351,11 +362,7 @@ def _main() -> int:
 
         failed_series = create_or_execute_run(
             run_root,
-            {
-                "task": "сделай серию 2 изображения для проверки ревизии 512x512",
-                "task_id": "image-series-revision",
-                "execute": True,
-            },
+            run_payload("сделай серию 2 изображения для проверки ревизии 512x512", "image-series-revision", execute=True),
         )
         failed_series_dir = Path(str(failed_series["run_dir"]))
         if failed_series.get("ok") or load_json(failed_series_dir / "final" / "revision_decision.json").get("action") != "wait_or_resubmit_forge_job":
@@ -388,12 +395,7 @@ def _main() -> int:
 
         comic = create_or_execute_run(
             run_root,
-            {
-                "task": "сделай комикс 4 панели про техножреца у древней кузни",
-                "task_id": "comic-success",
-                "execute": True,
-                "test_artifact_mode": "comic_panels_good",
-            },
+            run_payload("сделай комикс 4 панели про техножреца у древней кузни", "comic-success", execute=True, test_artifact_mode="comic_panels_good"),
         )
         comic_dir = Path(str(comic["run_dir"]))
         comic_types = artifact_types(comic_dir)
@@ -435,12 +437,7 @@ def _main() -> int:
                 base,
                 "POST",
                 "/runs",
-                {
-                    "task": "нарисуй HTTP картинку 512x512",
-                    "task_id": "http-image",
-                    "execute": True,
-                    "test_artifact_mode": "good",
-                },
+                run_payload("нарисуй HTTP картинку 512x512", "http-image", execute=True, test_artifact_mode="good"),
             )
             if not created.get("ok") or created.get("run_id") != "http-image":
                 raise AssertionError(f"HTTP create/execute failed: {created}")
@@ -492,11 +489,7 @@ def _main() -> int:
                 base,
                 "POST",
                 "/runs",
-                {
-                    "task": "нарисуй HTTP картинку для ревизии 512x512",
-                    "task_id": "http-image-revision",
-                    "execute": True,
-                },
+                run_payload("нарисуй HTTP картинку для ревизии 512x512", "http-image-revision", execute=True),
             )
             if http_failed.get("ok") or http_failed.get("revision_decision", {}).get("action") != "wait_or_resubmit_forge_job":
                 raise AssertionError(f"HTTP failed revision fixture did not request revision: {http_failed}")

@@ -412,10 +412,11 @@ def prepare_run(task: str, task_id: str | None, run_dir: Path, command: dict[str
 
 def create_or_execute_run(run_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     command = payload.get("commander_order") if isinstance(payload.get("commander_order"), dict) else {}
-    if command:
-        validate_protocol_payload(command, expected_type="commander_order")
+    if not command:
+        raise ValueError("commander_order is required; direct Moriana run creation is not accepted")
+    validate_protocol_payload(command, expected_type="commander_order")
     task = str(payload.get("task") or payload.get("request") or "").strip()
-    if not task and command:
+    if not task:
         task = task_text_from_commander_order(command)
     if not task:
         raise ValueError("task is required")

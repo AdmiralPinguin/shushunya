@@ -20,6 +20,7 @@ if str(WARMMASTER_ROOT) not in sys.path:
 
 from EyeOfTerror.Pictorium.Moriana.moriana_governor import create_or_execute_run
 from EyeOfTerror.Pictorium.testing.fake_model_server import fake_pictorium_model
+from EyeOfTerror.common_protocol import commander_order
 
 
 TRIALS = [
@@ -75,10 +76,26 @@ def load_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def moriana_command(task: str, task_id: str) -> dict[str, Any]:
+    return commander_order(
+        f"mission-{task_id}",
+        to="Moriana",
+        user_request=task,
+        commander_intent="Провести визуальный quality trial через протокол Пикториума.",
+        primary_goal=task,
+        success_conditions=[
+            "Moriana получает задачу только через commander_order",
+            "результат содержит quality report и final manifest",
+        ],
+        constraints=[],
+    )
+
+
 def trial_record(run_root: Path, trial: dict[str, Any], asset_root: Path) -> dict[str, Any]:
     payload = dict(trial["payload"])
     payload["task"] = trial["task"]
     payload["task_id"] = f"quality-{trial['id']}"
+    payload["commander_order"] = moriana_command(str(payload["task"]), str(payload["task_id"]))
     if payload.pop("external_artifact", False):
         artifact_path = asset_root / f"{trial['id']}.png"
         Image.new("RGB", (512, 512), (40, 50, 70)).save(artifact_path)
