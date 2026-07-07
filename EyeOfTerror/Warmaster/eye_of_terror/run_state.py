@@ -617,7 +617,7 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
         "task_id": task_id,
         "governor": governor,
         "status": status,
-        "source": "task_ledger_and_run_summary",
+        "source": "mission_protocol_progress_events_and_run_summary",
         "chat_independent": True,
         "entries": entries,
         "activity_cards": entries,

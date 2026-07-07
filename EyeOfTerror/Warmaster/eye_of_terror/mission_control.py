@@ -753,16 +753,32 @@ def _read_json_dir(directory: Path, limit: int = 100) -> list[dict[str, Any]]:
     return items[-max(0, limit) :]
 
 
+def _count_by_key(items: list[dict[str, Any]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        value = str(item.get(key) or "").strip()
+        if not value:
+            continue
+        counts[value] = counts.get(value, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def mission_protocol_summary(mission_dir: Path) -> dict[str, Any]:
     worker_orders = _read_json_dir(mission_dir / "worker_orders", limit=1000)
     worker_reports = _read_json_dir(mission_dir / "worker_reports", limit=1000)
     governor_reports = _read_json_dir(mission_dir / "governor_reports", limit=1000)
     acceptance_reviews = _read_json_dir(mission_dir / "acceptance_reviews", limit=1000)
     revision_orders = _read_json_dir(mission_dir / "revision_orders", limit=1000)
+    progress_events = _read_events(mission_dir / "progress_events.jsonl", limit=10000)
     return {
         "has_mission_intake": bool(_read_json(mission_dir / "mission_intake.json")),
         "has_commander_order": bool(_read_json(mission_dir / "commander_order.json")),
         "has_governor_plan": bool(_read_json(mission_dir / "governor_plan.json")),
+        "progress_event_count": len(progress_events),
+        "progress_event_roles": _count_by_key(progress_events, "role"),
+        "progress_event_phases": _count_by_key(progress_events, "phase"),
+        "progress_event_statuses": _count_by_key(progress_events, "status"),
+        "latest_progress_event": progress_events[-1] if progress_events else {},
         "worker_order_count": len(worker_orders),
         "worker_report_count": len(worker_reports),
         "governor_report_count": len(governor_reports),
