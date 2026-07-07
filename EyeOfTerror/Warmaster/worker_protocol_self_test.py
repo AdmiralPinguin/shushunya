@@ -15,7 +15,12 @@ if str(WARM_ROOT) not in sys.path:
 
 from EyeOfTerror.common_protocol import validate_protocol_payload
 from eye_of_terror.inner_circle.iskandar import oversight_plan, plan_research_writing
-from eye_of_terror.mission_control import link_run_to_mission, record_worker_protocol_report, worker_report_from_payload
+from eye_of_terror.mission_control import (
+    link_run_to_mission,
+    record_worker_execution_started,
+    record_worker_protocol_report,
+    worker_report_from_payload,
+)
 from eye_of_terror.pipeline import write_pipeline_run
 
 
@@ -60,6 +65,7 @@ def main() -> int:
         synced_order = synced.get("worker_order") if isinstance(synced.get("worker_order"), dict) else {}
         if synced_order.get("mission_id") != mission_dir.name:
             raise AssertionError(f"worker_order mission_id was not synced: {synced_order}")
+        record_worker_execution_started(run_dir, synced)
         report = worker_report_from_payload(
             mission_dir.name,
             step_id="source_discovery",
@@ -73,6 +79,15 @@ def main() -> int:
         events = (mission_dir / "progress_events.jsonl").read_text(encoding="utf-8").strip().splitlines()
         if not any("source_discovery" in line for line in events):
             raise AssertionError("worker progress event was not appended")
+        parsed_events = [json.loads(line) for line in events]
+        if not any(
+            item.get("role") == "worker"
+            and item.get("phase") == "executing"
+            and item.get("status") == "running"
+            and item.get("actor") == synced_order.get("to")
+            for item in parsed_events
+        ):
+            raise AssertionError(f"worker execution start progress_event was not appended: {parsed_events}")
     print("[ok] Warmaster worker protocol")
     return 0
 

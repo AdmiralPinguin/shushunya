@@ -16,7 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 from EyeOfTerror.model_brain import attach_model_brain, request_model_decision
 
 from .ledger import TaskLedger
-from .mission_control import record_worker_protocol_report, worker_report_from_payload
+from .mission_control import record_worker_execution_started, record_worker_protocol_report, worker_report_from_payload
 from .pipeline import dispatch_packet_with_worker_order, write_json_atomic
 
 
@@ -402,6 +402,10 @@ def execute_run(
         ledger = TaskLedger.load(ledger_path)
         if ledger.cancel_requested():
             break
+        try:
+            record_worker_execution_started(run_dir, load_json(dispatch_path))
+        except Exception:  # noqa: BLE001 - progress reporting must not hide the worker result.
+            pass
         result = run_step(repo_root, dispatch_path, workspace_root, timeout_sec, revision_context=revision_contexts.get(dispatch_path.stem), timeout_retries=timeout_retries)
         results.append(result)
         step_details: dict[str, Any] = {}

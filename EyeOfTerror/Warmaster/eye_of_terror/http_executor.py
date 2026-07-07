@@ -9,7 +9,7 @@ from typing import Any
 
 from .local_executor import ordered_dispatch_paths, revision_contexts_from_result
 from .ledger import TaskLedger
-from .mission_control import record_worker_protocol_report, worker_report_from_payload
+from .mission_control import record_worker_execution_started, record_worker_protocol_report, worker_report_from_payload
 from .pipeline import dispatch_packet_with_worker_order, write_json_atomic
 
 
@@ -200,6 +200,10 @@ def execute_run(
         ledger = TaskLedger.load(ledger_path)
         if ledger.cancel_requested():
             break
+        try:
+            record_worker_execution_started(run_dir, load_json(dispatch_path))
+        except Exception:  # noqa: BLE001 - progress reporting must not hide the worker result.
+            pass
         result = run_step(dispatch_path, host, timeout_sec, revision_context=revision_contexts.get(dispatch_path.stem))
         results.append(result)
         worker_view = worker_view_from_payload(result.payload)

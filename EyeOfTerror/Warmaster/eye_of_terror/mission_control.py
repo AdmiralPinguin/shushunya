@@ -332,6 +332,35 @@ def record_worker_orders(run_dir: Path, mission_id: str, mission_dir: Path) -> d
     return {"ok": count > 0, "count": count}
 
 
+def record_worker_execution_started(run_dir: Path, packet: dict[str, Any]) -> None:
+    ref = mission_ref_for_run(run_dir)
+    mission_dir = mission_dir_from_ref(ref)
+    if not mission_dir:
+        return
+    order = packet.get("worker_order") if isinstance(packet.get("worker_order"), dict) else {}
+    if not order:
+        return
+    mission_id = str(ref.get("mission_id") or order.get("mission_id") or mission_dir.name)
+    step_id = str(order.get("step_id") or packet.get("step_id") or "")
+    worker = str(order.get("to") or packet.get("worker") or "Worker")
+    mission = _read_json(mission_dir / "mission.json")
+    if mission:
+        mission["status"] = "executing"
+        _write_json(mission_dir / "mission.json", mission)
+    append_progress_event(
+        mission_dir / "progress_events.jsonl",
+        progress_event(
+            mission_id,
+            actor=worker,
+            role="worker",
+            phase="executing",
+            status="running",
+            title=f"Воркер начал шаг {step_id}",
+            body=str(order.get("task") or packet.get("purpose") or ""),
+        ),
+    )
+
+
 def mission_ref_for_run(run_dir: Path) -> dict[str, Any]:
     return _read_json(run_dir / "mission_ref.json")
 
