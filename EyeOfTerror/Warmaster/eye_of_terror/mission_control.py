@@ -667,6 +667,7 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
     mission = _read_json(mission_dir / "mission.json")
     if mission:
         record_mission_state(mission_dir, "governor_review", active=True)
+    _write_json(mission_dir / "governor_report.json", report)
     _write_json(_next_numbered_path(mission_dir / "governor_reports", "governor_report"), report)
     append_progress_event(
         mission_dir / "progress_events.jsonl",
@@ -685,6 +686,7 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
     mission = _read_json(mission_dir / "mission.json")
     if mission:
         record_mission_state(mission_dir, "warmaster_acceptance", active=True)
+    _write_json(mission_dir / "acceptance_review.json", review)
     _write_json(_next_numbered_path(mission_dir / "acceptance_reviews", "acceptance_review"), review)
     ledger.record_event("warmaster_acceptance_recorded", {"accepted": bool(review.get("accepted")), "status": review.get("status"), "reason": review.get("reason")})
     if review.get("accepted"):
@@ -713,6 +715,7 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
         required_steps=(review.get("required_revision") or {}).get("required_steps") if isinstance(review.get("required_revision"), dict) and isinstance((review.get("required_revision") or {}).get("required_steps"), list) else [],
     )
     validate_protocol_payload(rev_order_payload, expected_type="revision_order")
+    _write_json(mission_dir / "revision_order.json", rev_order_payload)
     _write_json(_next_numbered_path(mission_dir / "revision_orders", "revision_order"), rev_order_payload)
     revision_plan = revision_plan_from_acceptance(run_dir, result, review)
     updated_result = dict(result)
@@ -850,6 +853,9 @@ def mission_protocol_summary(mission_dir: Path) -> dict[str, Any]:
         "governor_report_count": len(governor_reports),
         "acceptance_review_count": len(acceptance_reviews),
         "revision_order_count": len(revision_orders),
+        "has_governor_report": bool(_read_json(mission_dir / "governor_report.json")),
+        "has_acceptance_review": bool(_read_json(mission_dir / "acceptance_review.json")),
+        "has_revision_order": bool(_read_json(mission_dir / "revision_order.json")),
         "has_final_response": bool(_read_json(mission_dir / "final_response.json")),
     }
 
@@ -877,8 +883,11 @@ def mission_state(warmaster_root: Path, mission_id: str, event_limit: int = 100)
         "commander_error": _read_json(mission_dir / "commander_error.json"),
         "worker_orders": _read_json_dir(mission_dir / "worker_orders", limit=event_limit),
         "worker_reports": _read_json_dir(mission_dir / "worker_reports", limit=event_limit),
+        "governor_report": _read_json(mission_dir / "governor_report.json"),
         "governor_reports": _read_json_dir(mission_dir / "governor_reports", limit=event_limit),
+        "acceptance_review": _read_json(mission_dir / "acceptance_review.json"),
         "acceptance_reviews": _read_json_dir(mission_dir / "acceptance_reviews", limit=event_limit),
+        "revision_order": _read_json(mission_dir / "revision_order.json"),
         "revision_orders": _read_json_dir(mission_dir / "revision_orders", limit=event_limit),
         "final_response": _read_json(mission_dir / "final_response.json"),
         "progress_events": progress_events,

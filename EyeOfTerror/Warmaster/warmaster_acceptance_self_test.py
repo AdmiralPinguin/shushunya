@@ -16,7 +16,7 @@ if str(WARM_ROOT) not in sys.path:
 from EyeOfTerror.common_protocol import commander_order, validate_protocol_payload
 import eye_of_terror.mission_control as mission_control
 from eye_of_terror.ledger import TaskLedger
-from eye_of_terror.mission_control import record_warmaster_acceptance
+from eye_of_terror.mission_control import mission_state, record_warmaster_acceptance
 from eye_of_terror.run_state import run_summary
 
 
@@ -123,8 +123,14 @@ def main() -> int:
         validate_protocol_payload(review, expected_type="acceptance_review")
         if not (mission_dir / "governor_reports").exists():
             raise AssertionError("governor report directory was not created")
+        latest_report = json.loads((mission_dir / "governor_report.json").read_text(encoding="utf-8"))
+        validate_protocol_payload(latest_report, expected_type="governor_report")
         if not review.get("accepted"):
             raise AssertionError(f"deterministic accepted path was not accepted: {result}")
+        latest_review = json.loads((mission_dir / "acceptance_review.json").read_text(encoding="utf-8"))
+        validate_protocol_payload(latest_review, expected_type="acceptance_review")
+        if latest_review.get("accepted") is not True:
+            raise AssertionError(f"latest acceptance_review.json did not record accepted decision: {latest_review}")
         final_response_path = mission_dir / "final_response.json"
         if not final_response_path.exists():
             raise AssertionError("accepted result did not write final_response.json")
@@ -136,6 +142,14 @@ def main() -> int:
         summary_final = run_summary(run_dir).get("mission_protocol", {}).get("final_response", {})
         if summary_final.get("answer") != final_response.get("answer"):
             raise AssertionError(f"run_summary did not expose final_response: {summary_final}")
+        accepted_state = mission_state(root, mission_dir.name)
+        if (
+            accepted_state.get("governor_report", {}).get("mission_id") != mission_dir.name
+            or accepted_state.get("acceptance_review", {}).get("accepted") is not True
+            or accepted_state.get("protocol_summary", {}).get("has_governor_report") is not True
+            or accepted_state.get("protocol_summary", {}).get("has_acceptance_review") is not True
+        ):
+            raise AssertionError(f"mission_state did not expose latest acceptance artifacts: {accepted_state}")
         revision_mission_dir, revision_run_dir, _ = write_acceptance_fixture(
             root,
             "acceptance-needs-revision",
@@ -169,6 +183,12 @@ def main() -> int:
             raise AssertionError("needs_revision incorrectly wrote final_response.json")
         if not list((revision_mission_dir / "revision_orders").glob("revision_order-*.json")):
             raise AssertionError("needs_revision did not write revision_order")
+        latest_revision_order = json.loads((revision_mission_dir / "revision_order.json").read_text(encoding="utf-8"))
+        validate_protocol_payload(latest_revision_order, expected_type="revision_order")
+        latest_revision_review = json.loads((revision_mission_dir / "acceptance_review.json").read_text(encoding="utf-8"))
+        validate_protocol_payload(latest_revision_review, expected_type="acceptance_review")
+        if latest_revision_review.get("accepted") or latest_revision_review.get("escalate_to_user"):
+            raise AssertionError(f"latest acceptance review did not keep revision internal: {latest_revision_review}")
         revision_mission = json.loads((revision_mission_dir / "mission.json").read_text(encoding="utf-8"))
         if revision_mission.get("status") != "revision":
             raise AssertionError(f"needs_revision did not move mission to revision: {revision_mission}")
@@ -185,6 +205,13 @@ def main() -> int:
         actions = revision_summary.get("actions") if isinstance(revision_summary.get("actions"), dict) else {}
         if not actions.get("can_execute_revision"):
             raise AssertionError(f"revision run is not directly actionable: {actions}")
+        revision_state_payload = mission_state(root, revision_mission_dir.name)
+        if (
+            revision_state_payload.get("revision_order", {}).get("type") != "revision_order"
+            or revision_state_payload.get("acceptance_review", {}).get("accepted") is not False
+            or revision_state_payload.get("protocol_summary", {}).get("has_revision_order") is not True
+        ):
+            raise AssertionError(f"mission_state did not expose latest revision artifacts: {revision_state_payload}")
         print("[ok] Warmaster live acceptance")
         return 0
 
