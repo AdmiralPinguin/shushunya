@@ -39,6 +39,78 @@ def main() -> int:
     )
     if legacy_fallback:
         raise AssertionError(f"legacy final payload bypassed final_response gate: {legacy_fallback!r}")
+    activity_only = final_message(
+        {
+            "status": "completed",
+            "summary": {"status": "completed", "mission_protocol": {}},
+            "governor_activity": {
+                "chat_independent": True,
+                "progress_events": [
+                    {
+                        "type": "progress_event",
+                        "actor": "IskandarKhayon",
+                        "role": "governor",
+                        "phase": "executing",
+                        "status": "running",
+                        "title": "Проверяю источники",
+                        "body": "Это отчет для вкладки бригады, не финал чата.",
+                    }
+                ],
+                "activity_cards": [
+                    {
+                        "kind": "progress_event",
+                        "headline": "Проверяю источники",
+                        "detail": "Это отчет для вкладки бригады, не финал чата.",
+                    }
+                ],
+            },
+        }
+    )
+    if activity_only:
+        raise AssertionError(f"brigade activity leaked to chat final message: {activity_only!r}")
+    activity_payload = {
+        "chat_independent": True,
+        "progress_events": [
+            {
+                "type": "progress_event",
+                "actor": "Ceraxia",
+                "role": "governor",
+                "phase": "planning",
+                "status": "running",
+                "title": "Собираю план работ",
+                "body": "Карточка для вкладки Цераксии.",
+                "created_at": "2026-07-07T00:00:00Z",
+            }
+        ],
+        "protocol_activity_cards": [
+            {
+                "kind": "progress_event",
+                "headline": "Собираю план работ",
+                "detail": "Карточка для вкладки Цераксии.",
+            }
+        ],
+        "activity_cards": [
+            {
+                "kind": "progress_event",
+                "headline": "Собираю план работ",
+                "detail": "Карточка для вкладки Цераксии.",
+            }
+        ],
+    }
+    agent_task = ArchiveHandler.warmaster_run_as_agent_task(
+        None,
+        {"task_id": "activity-separation", "status": "running", "governor": "Ceraxia", "goal": "проверка вкладок"},
+        active=True,
+        activity=activity_payload,
+    )
+    if (
+        agent_task.get("final")
+        or agent_task.get("activity_log")
+        or agent_task.get("progress_events") != activity_payload["progress_events"]
+        or agent_task.get("activity_cards") != activity_payload["activity_cards"]
+        or agent_task.get("protocol_activity_cards") != activity_payload["protocol_activity_cards"]
+    ):
+        raise AssertionError(f"Warmaster activity was not kept as brigade-tab payload: {agent_task}")
     journal_accepted = final_message_from_orchestration(
         {
             "status": "completed",
