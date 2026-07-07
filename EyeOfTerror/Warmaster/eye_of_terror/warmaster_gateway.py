@@ -32,7 +32,7 @@ from .local_executor import WORKER_COMMANDS, execute_run as execute_local_run, i
 from .pipeline import write_pipeline_run
 from .registry import worker_refs
 from .routing import route_message
-from .mission_control import governor_task_from_order, link_run_to_mission, list_missions, mission_state, open_mission
+from .mission_control import build_commander_order, governor_task_from_order, link_run_to_mission, list_missions, mission_id_for, mission_state, open_mission
 from .orchestrator import (
     cancel_http_worker_tasks,
     execute_run_cycle,
@@ -802,15 +802,53 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     governor_transport = str(payload.get("governor_transport") or default_governor_transport).strip() or default_governor_transport
                     governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
                     include_brigade_health = bool(payload.get("include_brigade_health"))
+                    mission_id = mission_id_for(task_id, message)
+                    commander = build_commander_order(message, mission_id)
+                    if not commander.get("ok"):
+                        failed = {
+                            "ok": False,
+                            "phase": "commander_intake",
+                            "task_id": task_id or "",
+                            "mission_id": mission_id,
+                            "error": str(commander.get("error") or "Warmaster commander intake failed"),
+                            "error_code": str(commander.get("error_code") or "commander_intake_failed"),
+                            "commander_preview": commander,
+                        }
+                        failed = attach_model_brain(failed, model_decision)
+                        response(self, 400, failed)
+                        return
+                    command = commander.get("commander_order") if isinstance(commander.get("commander_order"), dict) else {}
+                    command_task = governor_task_from_order(command)
                     preflight = preflight_task(
-                        message,
+                        command_task,
                         task_id,
                         run_root,
                         governor_transport=governor_transport,
                         governor_host=governor_host,
                         include_brigade_health=include_brigade_health,
+                        forced_governor=str(command.get("to") or "") or None,
+                        commander_order=command,
+                        require_commander_order=True,
                     )
+                    actions = preflight.get("actions") if isinstance(preflight.get("actions"), dict) else {}
+                    next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
+                    body = next_action.get("body") if isinstance(next_action.get("body"), dict) else {}
+                    if body:
+                        body["message"] = message
+                        body["task"] = message
+                        next_action["body"] = body
+                        actions["next_action"] = next_action
+                        preflight["actions"] = actions
                     preflight = payload_with_task_view(preflight, fallback_task_id=task_id or "")
+                    preflight["protocol_mode"] = "commander_order"
+                    if isinstance(commander.get("route"), dict):
+                        preflight["route"] = commander["route"]
+                    preflight["mission"] = {
+                        "mission_id": mission_id,
+                        "assigned_governor": str(command.get("to") or ""),
+                        "mission_dir": "",
+                    }
+                    preflight["commander_order"] = command
                     preflight = attach_model_brain(preflight, model_decision)
                     response(self, 409 if preflight.get("error_code") == "task_exists" else (200 if preflight.get("ok") else 400), preflight)
                     return

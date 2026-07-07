@@ -883,6 +883,10 @@ def main() -> int:
                 or preflight.get("decision", {}).get("can_create_task") is not True
                 or preflight.get("display", {}).get("headline") != "Task is ready"
                 or preflight.get("model_brain", {}).get("status") != "answered"
+                or preflight.get("protocol_mode") != "commander_order"
+                or preflight.get("commander_order", {}).get("type") != "commander_order"
+                or preflight.get("commander_order", {}).get("from") != "Warmaster"
+                or preflight.get("mission", {}).get("mission_id") != preflight.get("commander_order", {}).get("mission_id")
             ):
                 raise AssertionError(f"task preflight should not create a run: {preflight}")
             if "brigade_readiness" in preflight:
