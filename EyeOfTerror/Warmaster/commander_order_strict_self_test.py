@@ -13,6 +13,7 @@ if str(WARM_ROOT) not in sys.path:
     sys.path.insert(0, str(WARM_ROOT))
 
 from EyeOfTerror.common_protocol import commander_order
+import eye_of_terror.task_prepare as task_prepare_module
 from eye_of_terror.task_prepare import prepare_task, preflight_task
 
 
@@ -47,17 +48,24 @@ def main() -> int:
         )
         if missing_prepare.get("error_code") != "commander_order_required":
             raise AssertionError(f"strict prepare did not require commander_order: {missing_prepare}")
-        strict_preflight = preflight_task(
-            "Исследуй Скалатракс.",
-            "strict-with-order-preflight",
-            run_root,
-            governor_transport="local",
-            forced_governor="IskandarKhayon",
-            commander_order=order,
-            require_commander_order=True,
-        )
+        original_route_message = task_prepare_module.route_message
+        task_prepare_module.route_message = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("forced commander path must not call route_message"))
+        try:
+            strict_preflight = preflight_task(
+                "Исследуй Скалатракс.",
+                "strict-with-order-preflight",
+                run_root,
+                governor_transport="local",
+                forced_governor="IskandarKhayon",
+                commander_order=order,
+                require_commander_order=True,
+            )
+        finally:
+            task_prepare_module.route_message = original_route_message
         if not strict_preflight.get("ok") or strict_preflight.get("protocol_mode") != "commander_order":
             raise AssertionError(f"strict preflight did not use commander_order mode: {strict_preflight}")
+        if strict_preflight.get("route", {}).get("source") != "forced_governor":
+            raise AssertionError(f"strict preflight did not expose commander route source: {strict_preflight}")
         legacy_preflight = preflight_task(
             "Исследуй Скалатракс.",
             "strict-legacy-preflight",
