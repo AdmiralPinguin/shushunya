@@ -237,7 +237,7 @@ def plan_actions(contract: dict[str, Any], ok: bool, errors: list[str], availabi
             "kind": "prepare_run",
             "method": "POST",
             "endpoint": "POST /prepare_run",
-            "body": {"task": str(contract.get("goal") or ""), "task_id": str(contract.get("task_id") or "")},
+            "body": {"commander_order": "<same commander_order used for /plan>", "task_id": str(contract.get("task_id") or "")},
             "reason": "Moriana image plan is valid and Image Brigade workers are registered",
         }
     else:
@@ -415,9 +415,7 @@ def create_or_execute_run(run_root: Path, payload: dict[str, Any]) -> dict[str, 
     if not command:
         raise ValueError("commander_order is required; direct Moriana run creation is not accepted")
     validate_protocol_payload(command, expected_type="commander_order")
-    task = str(payload.get("task") or payload.get("request") or "").strip()
-    if not task:
-        task = task_text_from_commander_order(command)
+    task = task_text_from_commander_order(command)
     if not task:
         raise ValueError("task is required")
     plan = plan_image_task(task, task_id=str(payload.get("task_id") or "").strip() or None)
@@ -516,9 +514,7 @@ def task_from_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     command = payload.get("commander_order") if isinstance(payload.get("commander_order"), dict) else {}
     if command:
         validate_protocol_payload(command, expected_type="commander_order")
-        task = str(payload.get("task") or payload.get("request") or "").strip()
-        if not task:
-            task = task_text_from_commander_order(command)
+        task = task_text_from_commander_order(command)
         return task, command
     raise ValueError("commander_order is required; direct governor task input is not accepted")
 

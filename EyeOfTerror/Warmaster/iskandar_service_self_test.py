@@ -187,7 +187,8 @@ def main() -> int:
                 or plan.get("pipeline", {}).get("steps", [])[0].get("worker") != "CorpusIngestor"
                 or plan.get("actions", {}).get("can_prepare_run") is not True
                 or plan.get("actions", {}).get("next_action", {}).get("kind") != "prepare_run"
-                or plan.get("actions", {}).get("next_action", {}).get("body", {}).get("task") != "Собери события Скалатракса"
+                or plan.get("actions", {}).get("next_action", {}).get("body", {}).get("commander_order") != "<same commander_order used for /plan>"
+                or "task" in plan.get("actions", {}).get("next_action", {}).get("body", {})
                 or plan.get("actions", {}).get("next_action", {}).get("body", {}).get("task_id") != "iskandar-http-test"
                 or plan.get("phase") != "plan_ready"
                 or plan.get("decision", {}).get("can_prepare_run") is not True
@@ -203,7 +204,7 @@ def main() -> int:
             if (
                 not protocol_only_plan.get("ok")
                 or protocol_only_plan.get("governor_plan", {}).get("understanding") != "Собери события Скалатракса"
-                or str(protocol_only_plan.get("actions", {}).get("next_action", {}).get("body", {}).get("task") or "").startswith("ПРИКАЗ ВАРМАСТЕРА")
+                or "task" in protocol_only_plan.get("actions", {}).get("next_action", {}).get("body", {})
             ):
                 raise AssertionError(f"Iskandar /plan did not use commander_order as authority: {protocol_only_plan}")
             run_dir = root / "runs" / "custom-run"

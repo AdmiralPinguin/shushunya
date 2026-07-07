@@ -287,7 +287,7 @@ def plan_actions(contract: dict[str, Any], ok: bool, errors: list[str], missing_
             "method": "POST",
             "endpoint": "POST /prepare_run",
             "body": {
-                "task": str(contract.get("goal") or ""),
+                "commander_order": "<same commander_order used for /plan>",
                 "task_id": str(contract.get("task_id") or ""),
             },
             "reason": "governor plan is valid and required workers are available",

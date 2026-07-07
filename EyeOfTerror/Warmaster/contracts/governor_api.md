@@ -122,15 +122,15 @@ POST /prepare_run
     "kind": "plan_task",
     "method": "POST",
     "endpoint": "POST /plan",
-    "body": {"task": "<task>", "task_id": "<optional-task-id>"},
-    "reason": "inspect an Iskandar plan for a concrete task"
+    "body": {"commander_order": "<commander_order>", "task_id": "<optional-task-id>"},
+    "reason": "inspect an Iskandar plan for a Warmaster commander_order"
   },
   "client_action": {
     "kind": "plan_task",
     "method": "POST",
     "path": "/plan",
-    "body": {"task": "<task>", "task_id": "<optional-task-id>"},
-    "reason": "inspect an Iskandar plan for a concrete task"
+    "body": {"commander_order": "<commander_order>", "task_id": "<optional-task-id>"},
+    "reason": "inspect an Iskandar plan for a Warmaster commander_order"
   },
   "capabilities": ["lore_reconstruction_planning", "dispatch_packet_preparation", "oversight_plan", "step_quality_matrix"],
   "endpoints": ["GET /health", "GET /capabilities", "POST /plan", "POST /prepare_run"]
@@ -159,10 +159,32 @@ pipeline payload.
 
 ```json
 {
-  "task": "User task text",
+  "commander_order": {
+    "type": "commander_order",
+    "protocol_version": 1,
+    "mission_id": "mission-...",
+    "created_at": "2026-07-07T00:00:00Z",
+    "from": "Warmaster",
+    "to": "IskandarKhayon",
+    "user_request": "User task text",
+    "commander_intent": "What Warmaster wants the governor to achieve",
+    "primary_goal": "Concrete governor objective",
+    "success_conditions": ["quality condition"],
+    "constraints": [],
+    "escalate_to_user_if": [],
+    "reporting_policy": {
+      "progress_events_required": true,
+      "final_report_required": true,
+      "revision_is_internal": true
+    }
+  },
   "task_id": "optional-stable-id"
 }
 ```
+
+Governors must reject raw task bodies without `commander_order`. If a legacy
+transport field such as `task` is present next to `commander_order`, it is not
+authoritative; the governor derives its working task from the commander order.
 
 ## POST /plan Response
 
@@ -180,7 +202,7 @@ pipeline payload.
       "kind": "prepare_run",
       "method": "POST",
       "endpoint": "POST /prepare_run",
-      "body": {"task": "User task text", "task_id": "optional-stable-id"},
+      "body": {"commander_order": "<same commander_order used for /plan>", "task_id": "optional-stable-id"},
       "reason": "governor plan is valid and required workers are available"
     }
   },
@@ -202,14 +224,14 @@ pipeline payload.
     "kind": "prepare_run",
     "method": "POST",
     "endpoint": "POST /prepare_run",
-    "body": {"task": "User task text", "task_id": "optional-stable-id"},
+    "body": {"commander_order": "<same commander_order used for /plan>", "task_id": "optional-stable-id"},
     "reason": "governor plan is valid and required workers are available"
   },
   "client_action": {
     "kind": "prepare_run",
     "method": "POST",
     "path": "/prepare_run",
-    "body": {"task": "User task text", "task_id": "optional-stable-id"},
+    "body": {"commander_order": "<same commander_order used for /plan>", "task_id": "optional-stable-id"},
     "reason": "governor plan is valid and required workers are available"
   }
 }
@@ -230,7 +252,7 @@ Warmaster handoff logic.
 
 ```json
 {
-  "task": "User task text",
+  "commander_order": "<same commander_order used for /plan>",
   "task_id": "optional-stable-id",
   "run_dir": "optional/output/path"
 }

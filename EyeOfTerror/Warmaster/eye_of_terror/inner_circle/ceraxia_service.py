@@ -76,9 +76,7 @@ def task_from_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     command = payload.get("commander_order") if isinstance(payload.get("commander_order"), dict) else {}
     if command:
         validate_protocol_payload(command, expected_type="commander_order")
-        task = str(payload.get("task") or payload.get("message") or "").strip()
-        if not task:
-            task = task_text_from_commander_order(command)
+        task = task_text_from_commander_order(command)
         return task, command
     raise ValueError("commander_order is required; direct governor task input is not accepted")
 
@@ -149,12 +147,17 @@ def callable_contract_payload(task: str, task_id: str | None, repo_path: str = "
         "patch_contract": plan_payload.get("patch_contract", {}),
         "plan": plan_payload,
         "next_action": {
-            "kind": "prepare_run",
-            "method": "POST",
-            "endpoint": "POST /prepare_run",
-            "body": {"task": normalized_task, "task_id": plan_payload.get("contract", {}).get("task_id", task_id or ""), "run_dir": "<optional-run-dir>"},
-            "reason": "callable contract is ready; prepare a concrete Ceraxia run package",
+        "kind": "prepare_run",
+        "method": "POST",
+        "endpoint": "POST /prepare_run",
+        "body": {
+            "commander_order": "<commander_order>",
+            "task_id": plan_payload.get("contract", {}).get("task_id", task_id or ""),
+            "repo_path": repo_path,
+            "run_dir": "<optional-run-dir>",
         },
+        "reason": "callable contract is ready; prepare a concrete Ceraxia run package",
+    },
     }
 
 
@@ -166,8 +169,8 @@ def service_capabilities() -> dict[str, Any]:
         "kind": "plan_task",
         "method": "POST",
         "endpoint": "POST /plan",
-        "body": {"task": "<task>", "task_id": "<optional-task-id>"},
-        "reason": "inspect a Ceraxia code plan for a concrete task",
+        "body": {"commander_order": "<commander_order>", "task_id": "<optional-task-id>"},
+        "reason": "inspect a Ceraxia code plan for a Warmaster commander_order",
     }
     return {
         "ok": True,

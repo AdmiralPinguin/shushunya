@@ -231,7 +231,7 @@ def main() -> int:
             if (
                 not protocol_only_plan.get("ok")
                 or protocol_only_plan.get("governor_plan", {}).get("understanding") != "почини python приложение"
-                or str(protocol_only_plan.get("actions", {}).get("next_action", {}).get("body", {}).get("task") or "").startswith("ПРИКАЗ ВАРМАСТЕРА")
+                or "task" in protocol_only_plan.get("actions", {}).get("next_action", {}).get("body", {})
             ):
                 raise AssertionError(f"Ceraxia /plan did not use commander_order as authority: {protocol_only_plan}")
             callable_contract = request_json(

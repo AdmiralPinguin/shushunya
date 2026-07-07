@@ -166,7 +166,7 @@ def _main() -> int:
             if (
                 not protocol_only_plan.get("ok")
                 or protocol_only_plan.get("governor_plan", {}).get("understanding") != "нарисуй протокольную картинку 512x512"
-                or str(protocol_only_plan.get("actions", {}).get("next_action", {}).get("body", {}).get("task") or "").startswith("ПРИКАЗ ВАРМАСТЕРА")
+                or "task" in protocol_only_plan.get("actions", {}).get("next_action", {}).get("body", {})
             ):
                 raise AssertionError(f"Moriana /plan did not use commander_order as authority: {protocol_only_plan}")
             prepared = request_json(
