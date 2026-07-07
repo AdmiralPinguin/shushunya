@@ -29,6 +29,16 @@ def main() -> int:
     )
     if accepted != "Принятый Вармастером финальный ответ.":
         raise AssertionError(f"accepted final_response was not preferred: {accepted!r}")
+    legacy_fallback = final_message(
+        {
+            "status": "completed",
+            "summary": {"status": "completed", "mission_protocol": {}},
+            "display": {"detail": "служебный completed detail"},
+            "final": {"deliverable": "legacy deliverable must not reach chat"},
+        }
+    )
+    if legacy_fallback:
+        raise AssertionError(f"legacy final payload bypassed final_response gate: {legacy_fallback!r}")
     journal_accepted = final_message_from_orchestration(
         {
             "status": "completed",
@@ -79,6 +89,26 @@ def main() -> int:
         raise AssertionError(f"final delivery wrote wrong chat payload: {delivered}")
     if delivered[0]["kwargs"].get("dedupe_key") != "warmaster:task-final-delivery:final":
         raise AssertionError(f"final delivery did not use stable dedupe key: {delivered}")
+    delivered.clear()
+    task_journal.fetch_orchestration = lambda task_id: {
+        "status": "completed",
+        "snapshot": {
+            "summary": {
+                "status": "completed",
+                "mission_protocol": {},
+            }
+        },
+        "final": {"deliverable": f"Недопустимый legacy финал {task_id}."},
+    }
+    task_journal.append_chat_message = lambda *args, **kwargs: delivered.append({"args": args, "kwargs": kwargs})
+    try:
+        if deliver_final_to_chat("task-without-final-response"):
+            raise AssertionError("deliver_final_to_chat accepted completed run without protocol final_response")
+    finally:
+        task_journal.fetch_orchestration = original_fetch
+        task_journal.append_chat_message = original_append
+    if delivered:
+        raise AssertionError(f"legacy final payload was delivered to chat: {delivered}")
     revision = final_message(
         {
             "status": "revision",
