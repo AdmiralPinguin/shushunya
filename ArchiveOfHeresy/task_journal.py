@@ -2,9 +2,9 @@
 
 Polls Warmaster runs and, on lifecycle transitions (task started, task finished
 with success/failure), writes an entry into memory: a labeled vector chunk in
-the shared namespace plus a deterministic wiki journal page. Nothing is posted
-to chat — this is memory only, so the persona can answer "что там с задачей X"
-and "чем ты занималась" from her own history.
+the shared namespace plus a deterministic wiki journal page. Completed final
+answers are also delivered to the shared chat once, while brigade progress stays
+out of the chat and remains available through Warmaster activity endpoints.
 """
 import json
 import threading
@@ -12,11 +12,13 @@ import time
 import os
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 import archive_state
 from archive_config import WARMASTER_BASE_URL
 from archive_httpio import proxy_json_url
 from archive_util import shared_memory_namespace, wiki_bookshelf_for_namespace
+from archive_ops import append_chat_message
 
 TASK_JOURNAL_ENABLED = os.environ.get("ARCHIVE_TASK_JOURNAL_ENABLED", "1").strip().lower() not in (
     "0",
@@ -30,6 +32,7 @@ TASK_JOURNAL_MAX_LINES = int(os.environ.get("ARCHIVE_TASK_JOURNAL_MAX_LINES", "3
 STATE_PATH = Path(__file__).resolve().parent / "archive" / "task_journal_state.json"
 JOURNAL_PAGE_TITLE = "Brigade Task Journal"
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+SHARED_CHAT_SESSION_ID = os.environ.get("ARCHIVE_SHARED_CHAT_SESSION_ID", "shushunya-main").strip() or "shushunya-main"
 
 
 def now_iso():
@@ -54,6 +57,61 @@ def fetch_runs():
     _status, response = proxy_json_url("GET", f"{WARMASTER_BASE_URL}/runs?limit={TASK_JOURNAL_RUNS_LIMIT}", timeout=30)
     runs = response.get("runs") if isinstance(response.get("runs"), list) else []
     return [run for run in runs if isinstance(run, dict) and str(run.get("task_id") or "").strip()]
+
+
+def fetch_orchestration(task_id):
+    _status, response = proxy_json_url(
+        "GET",
+        f"{WARMASTER_BASE_URL}/runs/{quote(task_id, safe='')}/orchestration?event_limit=0&events_after=0&max_bytes=20000",
+        timeout=30,
+    )
+    return response if isinstance(response, dict) else {}
+
+
+def final_message_from_orchestration(orchestration):
+    status = str(orchestration.get("status") or "").strip().lower()
+    snapshot = orchestration.get("snapshot") if isinstance(orchestration.get("snapshot"), dict) else {}
+    summary = snapshot.get("summary") if isinstance(snapshot.get("summary"), dict) else {}
+    if not status:
+        status = str(summary.get("status") or "").strip().lower()
+    if status != "completed":
+        return ""
+    protocol = summary.get("mission_protocol") if isinstance(summary.get("mission_protocol"), dict) else {}
+    final_response = protocol.get("final_response") if isinstance(protocol.get("final_response"), dict) else {}
+    final_answer = str(final_response.get("answer") or "").strip()
+    if final_answer:
+        return final_answer
+    final_payload = orchestration.get("final") if isinstance(orchestration.get("final"), dict) else {}
+    files = final_payload.get("files") if isinstance(final_payload.get("files"), list) else []
+    previews = []
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        preview = item.get("preview") if isinstance(item.get("preview"), dict) else {}
+        text = str(preview.get("text") or "").strip()
+        if text:
+            previews.append(text)
+    if previews:
+        return "\n\n".join(previews)
+    return str(final_payload.get("deliverable") or "").strip()
+
+
+def deliver_final_to_chat(task_id):
+    try:
+        final_message = final_message_from_orchestration(fetch_orchestration(task_id))
+    except Exception as exc:  # noqa: BLE001 - final delivery must not break the journal loop
+        print(f"Task journal final fetch failed for {task_id}: {exc}", flush=True)
+        return False
+    if not final_message:
+        return False
+    append_chat_message(
+        SHARED_CHAT_SESSION_ID,
+        "assistant",
+        final_message,
+        source="warmaster",
+        dedupe_key=f"warmaster:{task_id}:final",
+    )
+    return True
 
 
 def run_entry_text(run, event):
@@ -143,6 +201,8 @@ def poll_once():
             remember_entry(run_entry_text(run, "started"), task_id, "started")
         elif status in TERMINAL_STATUSES:
             remember_entry(run_entry_text(run, "finished"), task_id, f"finished-{status}")
+            if status == "completed":
+                deliver_final_to_chat(task_id)
     if changed:
         save_state(state)
     return {"runs": len(runs), "baseline": first_run}

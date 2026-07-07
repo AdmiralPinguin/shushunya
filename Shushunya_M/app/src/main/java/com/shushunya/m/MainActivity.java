@@ -2533,7 +2533,6 @@ public class MainActivity extends Activity {
 
         addMessage(true, originalText == null || originalText.trim().isEmpty() ? clean : originalText.trim());
         TextView answerBubble = addMessage(false, "Warmaster принимает задачу...", false);
-        StringBuilder warmasterTranscript = new StringBuilder("Warmaster принимает задачу...");
         setWaiting(true);
         String taskId = "client-" + System.currentTimeMillis();
         currentAgentTaskId = taskId;
@@ -2547,9 +2546,7 @@ public class MainActivity extends Activity {
 
         new Thread(() -> {
             PowerManager.WakeLock wakeLock = acquireAnswerWakeLock();
-            int displayed = 0;
             String acceptedTaskId = taskId;
-            String lastActivityText = "";
             final String[] acceptedTaskIdRef = {""};
             try {
                 acceptedTaskId = requestAgentStart(clean, taskId);
@@ -2559,51 +2556,30 @@ public class MainActivity extends Activity {
                         .edit()
                         .putString("current_agent_task_id", acceptedTaskId)
                         .apply();
+                String acceptedMessage = warmasterAcceptedChatMessage(acceptedTaskId);
+                main.post(() -> {
+                    answerBubble.setText(acceptedMessage);
+                    saveChatMessage(false, acceptedMessage);
+                    maybeScrollToBottom(false);
+                    refreshBrigadeMonitor();
+                });
                 while (true) {
                     JSONObject snapshot = requestAgentTaskSnapshot(acceptedTaskId);
-                    String activityText = warmasterActivityTextForChat(snapshot, acceptedTaskId);
-                    if (!activityText.isEmpty() && !activityText.equals(lastActivityText)) {
-                        lastActivityText = activityText;
-                        warmasterTranscript.setLength(0);
-                        warmasterTranscript.append(activityText);
-                        String fullLog = warmasterTranscript.toString();
-                        main.post(() -> {
-                            answerBubble.setText(fullLog);
-                            maybeScrollToBottom(false);
-                        });
-                    }
-                    JSONArray events = snapshot.optJSONArray("events");
-                    if (lastActivityText.isEmpty() && events != null) {
-                        int start = Math.max(0, Math.min(displayed, events.length()));
-                        for (int i = start; i < events.length(); i++) {
-                            JSONObject event = events.optJSONObject(i);
-                            String line = warmasterChatEventLine(event);
-                            if (!line.isEmpty()) {
-                                warmasterTranscript.append("\n").append(line);
-                                appendChatWarmasterLog(answerBubble, "\n" + line);
-                            }
-                        }
-                        displayed = events.length();
-                    }
                     JSONObject finalEvent = snapshot.optJSONObject("final");
                     if (finalEvent != null) {
                         String finalText = finalEvent.optString("message", "").trim();
                         boolean cancelled = finalEvent.optBoolean("cancelled", false);
-                        String result = finalText.isEmpty()
-                                ? (cancelled ? "Warmaster остановлен." : "Warmaster завершил задачу без финального текста.")
-                                : finalText;
-                        String finalBlock = "\n\n" + (cancelled ? "Остановлено:\n" : "Готово:\n") + result;
-                        warmasterTranscript.append(finalBlock);
-                        appendChatWarmasterLog(answerBubble, finalBlock);
-                        saveChatMessage(false, warmasterTranscript.toString());
-                        showAnswerNotification(result);
+                        String result = finalText.isEmpty() && cancelled ? "Warmaster остановлен." : finalText;
+                        if (!result.isEmpty()) {
+                            main.post(() -> {
+                                answerBubble.setText(result);
+                                maybeScrollToBottom(false);
+                            });
+                            showAnswerNotification(result);
+                        }
                         break;
                     }
                     if (!snapshot.optBoolean("running", false)) {
-                        String finalBlock = "\n\nWarmaster завершил задачу без финального события.";
-                        warmasterTranscript.append(finalBlock);
-                        appendChatWarmasterLog(answerBubble, finalBlock);
-                        saveChatMessage(false, warmasterTranscript.toString());
                         break;
                     }
                     Thread.sleep(2000);
@@ -2664,59 +2640,15 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private String warmasterChatEventLine(JSONObject event) {
-        if (event == null) {
-            return "";
-        }
-        String type = event.optString("type", "");
-        if ("heartbeat".equals(type)) {
-            return "";
-        }
-        String message = event.optString("message", "").trim();
-        if (message.isEmpty()) {
-            return "";
-        }
-        if ("step".equals(type)) {
-            return "Сейчас делаю: " + message;
-        }
-        return message;
-    }
-
-    private String warmasterActivityTextForChat(JSONObject snapshot, String taskId) {
-        if (snapshot == null) {
-            return "";
-        }
-        JSONArray entries = snapshot.optJSONArray("activity_cards");
-        if (entries == null) {
-            entries = snapshot.optJSONArray("activity_entries");
-        }
-        if (entries == null) {
-            JSONObject activity = snapshot.optJSONObject("governor_activity");
-            if (activity != null) {
-                entries = activity.optJSONArray("activity_cards");
-                if (entries == null) {
-                    entries = activity.optJSONArray("entries");
-                }
-            }
-        }
+    private String warmasterAcceptedChatMessage(String taskId) {
         String cleanTaskId = taskId == null ? "" : taskId.trim();
         StringBuilder out = new StringBuilder();
-        out.append("Warmaster ведет задачу");
+        out.append("Warmaster принял задачу.");
         if (!cleanTaskId.isEmpty()) {
-            out.append("\n").append(cleanTaskId);
+            out.append("\n").append("task_id=").append(cleanTaskId);
         }
-        out.append("\n\nХод работы открыт во вкладках бригад.");
+        out.append("\n\nХод работы открыт во вкладке Бригады; основной чат получит только финал или запрос твоего решения.");
         return out.toString();
-    }
-
-    private void appendChatWarmasterLog(TextView bubble, String line) {
-        if (bubble == null || line == null || line.isEmpty()) {
-            return;
-        }
-        main.post(() -> {
-            bubble.append(line);
-            maybeScrollToBottom(false);
-        });
     }
 
     private void resetAttachImageButton() {
