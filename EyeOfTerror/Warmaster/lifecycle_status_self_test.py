@@ -21,7 +21,7 @@ def write_json(path: Path, payload: dict[str, object]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def write_minimal_run(run_dir: Path, status: str) -> None:
+def write_minimal_run(run_dir: Path, status: str, result: dict[str, object] | None = None) -> None:
     write_json(run_dir / "status.json", {"task_id": run_dir.name, "status": status, "steps": []})
     write_json(
         run_dir / "task_ledger.json",
@@ -34,6 +34,7 @@ def write_minimal_run(run_dir: Path, status: str) -> None:
             "updated_at": "2026-01-01T00:00:00Z",
             "steps": [],
             "events": [],
+            "result": result or {},
         },
     )
 
@@ -82,6 +83,19 @@ def main() -> int:
             or mission_state.get("revision_is_internal") is not True
         ):
             raise AssertionError(f"mission_state did not expose canonical lifecycle: {mission_state}")
+
+        revision_plan = {"required": True, "steps": [{"step_id": "review", "worker": "ReductorVerifier", "reason": "needs more evidence"}]}
+        failed_revision_run = root / "failed-revision-run"
+        write_minimal_run(failed_revision_run, "failed", result={"ok": False, "status": "failed", "revision_plan": revision_plan})
+        failed_revision_summary = run_summary(failed_revision_run)
+        failed_revision_state = failed_revision_summary.get("mission_state") if isinstance(failed_revision_summary.get("mission_state"), dict) else {}
+        if (
+            failed_revision_state.get("status") != "revision"
+            or failed_revision_state.get("run_status") != "failed"
+            or failed_revision_state.get("user_visible_state") != "working"
+            or failed_revision_state.get("next_owner") != "governor"
+        ):
+            raise AssertionError(f"failed run with revision plan did not normalize to revision: {failed_revision_state}")
     print("[ok] Warmaster lifecycle status")
     return 0
 

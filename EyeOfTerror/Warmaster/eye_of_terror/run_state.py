@@ -274,6 +274,9 @@ def mission_state_view(summary: dict[str, Any], active: bool = False, phase: str
     lifecycle_status = str(summary.get("lifecycle_status") or "").strip()
     if lifecycle_status not in LIFECYCLE_STATUSES:
         lifecycle_status = lifecycle_status_for(str(summary.get("status") or ""), mission)
+    revision_plan = summary.get("revision_plan") if isinstance(summary.get("revision_plan"), dict) else {}
+    if lifecycle_status == "failed" and bool(revision_plan.get("required")):
+        lifecycle_status = "revision"
     assigned_governor = str(mission.get("assigned_governor") or mission_ref.get("assigned_governor") or command.get("to") or summary.get("governor") or "")
     return {
         "kind": "mission_state",
