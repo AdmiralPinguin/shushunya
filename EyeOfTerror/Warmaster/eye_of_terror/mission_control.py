@@ -6,9 +6,22 @@ import re
 from pathlib import Path
 from typing import Any
 
-from EyeOfTerror.common_protocol import append_progress_event, commander_order, mission_intake, progress_event, validate_protocol_payload
+from EyeOfTerror.common_protocol import (
+    acceptance_review,
+    append_progress_event,
+    commander_order,
+    final_response,
+    governor_report,
+    mission_intake,
+    progress_event,
+    revision_order,
+    validate_protocol_payload,
+)
 from EyeOfTerror.model_brain import request_model_decision
 
+from .artifacts import final_manifest_summary
+from .ledger import TaskLedger
+from .run_package import load_json_file, run_oversight
 from .routing import route_message
 
 
@@ -49,6 +62,12 @@ def _extract_json_object(text: str) -> dict[str, Any]:
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _next_numbered_path(directory: Path, prefix: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    existing = sorted(directory.glob(f"{prefix}-*.json"))
+    return directory / f"{prefix}-{len(existing) + 1:03d}.json"
 
 
 def commander_order_prompt_payload(message: str, route: dict[str, Any], mission_id: str) -> dict[str, Any]:
@@ -213,6 +232,265 @@ def link_run_to_mission(run_dir: Path, mission: dict[str, Any]) -> None:
         "assigned_governor": str((mission.get("commander_order") or {}).get("to") or ""),
     }
     _write_json(run_dir / "mission_ref.json", payload)
+
+
+def mission_ref_for_run(run_dir: Path) -> dict[str, Any]:
+    return _read_json(run_dir / "mission_ref.json")
+
+
+def mission_dir_from_ref(ref: dict[str, Any]) -> Path | None:
+    raw = str(ref.get("mission_dir") or "")
+    if not raw:
+        return None
+    path = Path(raw).resolve()
+    if not path.exists():
+        return None
+    return path
+
+
+def worker_for_step(run_dir: Path, step_id: str) -> str:
+    try:
+        status = load_json_file(run_dir / "status.json")
+    except Exception:
+        status = {}
+    for step in status.get("steps", []) if isinstance(status.get("steps"), list) else []:
+        if isinstance(step, dict) and str(step.get("step_id") or "") == step_id:
+            return str(step.get("worker") or "")
+    try:
+        ledger = TaskLedger.load(run_dir / "task_ledger.json").to_dict()
+    except Exception:
+        ledger = {}
+    for step in ledger.get("steps", []) if isinstance(ledger.get("steps"), list) else []:
+        if isinstance(step, dict) and str(step.get("step_id") or "") == step_id:
+            return str(step.get("worker") or "")
+    return ""
+
+
+def revision_source_step(run_dir: Path, result: dict[str, Any]) -> str:
+    oversight_payload = run_oversight(run_dir)
+    oversight = oversight_payload.get("oversight") if isinstance(oversight_payload.get("oversight"), dict) else {}
+    policy = oversight.get("revision_policy") if isinstance(oversight.get("revision_policy"), dict) else {}
+    source_step = str(policy.get("source_step") or "").strip()
+    if source_step:
+        return source_step
+    final_step = str(result.get("final_step") or "").strip()
+    if final_step:
+        return final_step
+    try:
+        status = load_json_file(run_dir / "status.json")
+    except Exception:
+        return "finalize"
+    steps = status.get("steps") if isinstance(status.get("steps"), list) else []
+    if steps and isinstance(steps[-1], dict):
+        return str(steps[-1].get("step_id") or "finalize")
+    return "finalize"
+
+
+def revision_plan_from_acceptance(run_dir: Path, result: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
+    step_id = revision_source_step(run_dir, result)
+    worker = worker_for_step(run_dir, step_id)
+    required_revision = review.get("required_revision") if isinstance(review.get("required_revision"), dict) else {}
+    return {
+        "required": True,
+        "focused_context": {
+            "warmaster_acceptance": review,
+            "previous_result_summary": str(result.get("summary") or ""),
+        },
+        "steps": [
+            {
+                "step_id": step_id,
+                "worker": worker,
+                "reason": str(review.get("reason") or required_revision.get("order") or "Warmaster acceptance rejected the result."),
+                "source": "warmaster_acceptance",
+                "priority": "blocker",
+            }
+        ],
+    }
+
+
+def governor_report_from_run(run_dir: Path, mission_id: str) -> dict[str, Any]:
+    ledger = TaskLedger.load(run_dir / "task_ledger.json").to_dict()
+    result = ledger.get("result") if isinstance(ledger.get("result"), dict) else {}
+    manifest = final_manifest_summary(result)
+    revision_plan = result.get("revision_plan") if isinstance(result.get("revision_plan"), dict) else {"required": False, "steps": []}
+    result_status = str(result.get("status") or "").strip().lower()
+    if revision_plan.get("required") or result_status in {"needs_revision", "blocked"}:
+        status = "needs_revision" if result_status != "blocked" else "blocked"
+    elif bool(result.get("ok")) or result_status in {"ready", "completed", "passed", "passed_with_warnings"}:
+        status = "ready"
+    else:
+        status = "failed"
+    quality_checks = [
+        {"name": "result_ok", "ok": bool(result.get("ok"))},
+        {"name": "no_revision_required", "ok": not bool(revision_plan.get("required"))},
+    ]
+    if manifest:
+        quality_checks.append({"name": "final_manifest_status", "ok": str(manifest.get("status") or "") in {"ready", "completed", "passed"}, "value": manifest.get("status", "")})
+        quality_checks.append({"name": "final_manifest_blockers", "ok": int(manifest.get("blocker_count") or 0) == 0, "value": manifest.get("blocker_count", 0)})
+    report = governor_report(
+        mission_id,
+        governor=str(ledger.get("governor") or ""),
+        status=status,
+        summary=str(result.get("summary") or ""),
+        deliverables=[str(item) for item in result.get("artifacts", [])] if isinstance(result.get("artifacts"), list) else [],
+        quality_review={
+            "passed": status == "ready",
+            "checks": quality_checks,
+            "final_manifest_summary": manifest,
+        },
+        revision_plan=revision_plan,
+        user_facing_answer=str(result.get("summary") or ""),
+    )
+    validate_protocol_payload(report, expected_type="governor_report")
+    return report
+
+
+def acceptance_prompt_payload(command: dict[str, Any], report: dict[str, Any], ledger_result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "commander_order": command,
+        "governor_report": report,
+        "ledger_result": ledger_result,
+        "required_json_schema": {
+            "accepted": "boolean",
+            "reason": "short concrete acceptance or rejection reason",
+            "escalate_to_user": "boolean, true only for real user choice/access blocker",
+            "required_revision": {
+                "order": "revision order for the governor if accepted=false and escalate_to_user=false",
+                "required_steps": ["optional existing pipeline step ids to prefer"],
+            },
+        },
+    }
+
+
+def build_acceptance_review(command: dict[str, Any], report: dict[str, Any], ledger_result: dict[str, Any]) -> dict[str, Any]:
+    model_decision = request_model_decision(
+        "WarmasterAcceptance",
+        "Final acceptance authority over governor reports",
+        acceptance_prompt_payload(command, report, ledger_result),
+        layer="command",
+        instructions=(
+            "Return one strict JSON object and nothing else. Decide whether the governor report satisfies the commander_order. "
+            "Do not accept internal needs_revision/blocker reports as final user answers. Reject shallow or incomplete results. "
+            "Set escalate_to_user=true only when a real user decision, missing access, or external impossibility blocks progress."
+        ),
+    )
+    if not model_decision.get("ok"):
+        review = acceptance_review(
+            str(report.get("mission_id") or ""),
+            accepted=False,
+            reason="WarmasterAcceptance model brain unavailable.",
+            required_revision={"to": str(report.get("governor") or ""), "order": "Повторить приемку после восстановления модели."},
+            escalate_to_user=True,
+        )
+        return {"ok": False, "acceptance_review": review, "model_brain": model_decision, "error_code": "acceptance_model_unavailable"}
+    try:
+        parsed = _extract_json_object(str(model_decision.get("content") or ""))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        review = acceptance_review(
+            str(report.get("mission_id") or ""),
+            accepted=False,
+            reason=f"WarmasterAcceptance returned invalid JSON: {exc}",
+            required_revision={"to": str(report.get("governor") or ""), "order": "Повторить приемку с валидным JSON-решением."},
+            escalate_to_user=True,
+        )
+        return {"ok": False, "acceptance_review": review, "model_brain": model_decision, "error_code": "invalid_acceptance_json"}
+    required_revision = parsed.get("required_revision") if isinstance(parsed.get("required_revision"), dict) else {}
+    review = acceptance_review(
+        str(report.get("mission_id") or ""),
+        accepted=bool(parsed.get("accepted")),
+        reason=str(parsed.get("reason") or "").strip() or "Warmaster acceptance decision recorded.",
+        required_revision={
+            "to": str(report.get("governor") or ""),
+            "order": str(required_revision.get("order") or parsed.get("reason") or "Доработать результат по условиям приемки."),
+            "required_steps": required_revision.get("required_steps") if isinstance(required_revision.get("required_steps"), list) else [],
+        },
+        escalate_to_user=bool(parsed.get("escalate_to_user")),
+    )
+    validate_protocol_payload(review, expected_type="acceptance_review")
+    return {"ok": True, "acceptance_review": review, "model_brain": model_decision}
+
+
+def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
+    ref = mission_ref_for_run(run_dir)
+    mission_dir = mission_dir_from_ref(ref)
+    if not mission_dir:
+        return {"ok": True, "skipped": True, "reason": "run has no mission_ref"}
+    mission_id = str(ref.get("mission_id") or mission_dir.name)
+    existing_final = _read_json(mission_dir / "final_response.json")
+    existing_mission = _read_json(mission_dir / "mission.json")
+    if existing_final and existing_mission.get("status") == "completed":
+        return {"ok": True, "accepted": True, "already_recorded": True, "final_response": existing_final}
+    command = _read_json(mission_dir / "commander_order.json")
+    ledger = TaskLedger.load(run_dir / "task_ledger.json")
+    result = ledger.to_dict().get("result") if isinstance(ledger.to_dict().get("result"), dict) else {}
+    report = governor_report_from_run(run_dir, mission_id)
+    _write_json(_next_numbered_path(mission_dir / "governor_reports", "governor_report"), report)
+    append_progress_event(
+        mission_dir / "progress_events.jsonl",
+        progress_event(
+            mission_id,
+            actor=str(report.get("governor") or "Governor"),
+            role="governor",
+            phase="reviewing",
+            status="done" if report.get("status") == "ready" else "blocked",
+            title="Бригадир передал финальный отчет",
+            body=str(report.get("summary") or report.get("status") or ""),
+        ),
+    )
+    decision = build_acceptance_review(command, report, result)
+    review = decision["acceptance_review"]
+    _write_json(_next_numbered_path(mission_dir / "acceptance_reviews", "acceptance_review"), review)
+    ledger.record_event("warmaster_acceptance_recorded", {"accepted": bool(review.get("accepted")), "status": review.get("status"), "reason": review.get("reason")})
+    mission = _read_json(mission_dir / "mission.json")
+    if review.get("accepted"):
+        final = final_response(mission_id, "completed", str(report.get("user_facing_answer") or report.get("summary") or "Задача выполнена."), artifacts=report.get("deliverables") if isinstance(report.get("deliverables"), list) else [])
+        validate_protocol_payload(final, expected_type="final_response")
+        _write_json(mission_dir / "final_response.json", final)
+        mission["status"] = "completed"
+        _write_json(mission_dir / "mission.json", mission)
+        append_progress_event(
+            mission_dir / "progress_events.jsonl",
+            progress_event(mission_id, "Warmaster", "commander", "completed", "done", "Финал принят", str(review.get("reason") or "Результат принят.")),
+        )
+        return {"ok": True, "accepted": True, "governor_report": report, "acceptance_review": review, "decision": decision}
+    if review.get("escalate_to_user"):
+        mission["status"] = "blocked"
+        _write_json(mission_dir / "mission.json", mission)
+        ledger.force_status("blocked", reason=str(review.get("reason") or "Warmaster acceptance requires user escalation."))
+        append_progress_event(
+            mission_dir / "progress_events.jsonl",
+            progress_event(mission_id, "Warmaster", "commander", "blocked", "blocked", "Нужна эскалация", str(review.get("reason") or "")),
+        )
+        return {"ok": False, "accepted": False, "blocked": True, "governor_report": report, "acceptance_review": review, "decision": decision}
+    rev_order_payload = revision_order(
+        mission_id,
+        to=str(report.get("governor") or ""),
+        reason=str(review.get("reason") or "Warmaster rejected the result."),
+        order=str((review.get("required_revision") or {}).get("order") if isinstance(review.get("required_revision"), dict) else "Доработать результат."),
+        required_steps=(review.get("required_revision") or {}).get("required_steps") if isinstance(review.get("required_revision"), dict) and isinstance((review.get("required_revision") or {}).get("required_steps"), list) else [],
+    )
+    validate_protocol_payload(rev_order_payload, expected_type="revision_order")
+    _write_json(_next_numbered_path(mission_dir / "revision_orders", "revision_order"), rev_order_payload)
+    revision_plan = revision_plan_from_acceptance(run_dir, result, review)
+    updated_result = dict(result)
+    updated_result.update(
+        {
+            "ok": False,
+            "status": "needs_revision",
+            "summary": str(review.get("reason") or "Warmaster rejected the result and ordered revision."),
+            "revision_plan": revision_plan,
+            "warmaster_acceptance": review,
+        }
+    )
+    ledger.set_result(updated_result)
+    ledger.force_status("failed", reason="Warmaster rejected completed run and ordered revision.")
+    mission["status"] = "revision"
+    _write_json(mission_dir / "mission.json", mission)
+    append_progress_event(
+        mission_dir / "progress_events.jsonl",
+        progress_event(mission_id, "Warmaster", "commander", "revising", "running", "Назначена ревизия", str(review.get("reason") or "")),
+    )
+    return {"ok": False, "accepted": False, "revision_required": True, "governor_report": report, "acceptance_review": review, "revision_order": rev_order_payload, "revision_plan": revision_plan, "decision": decision}
 
 
 def _read_json(path: Path) -> dict[str, Any]:

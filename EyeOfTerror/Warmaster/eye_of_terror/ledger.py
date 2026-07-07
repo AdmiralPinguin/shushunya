@@ -56,7 +56,7 @@ class TaskLedger:
             raise ValueError(f"ledger must be a JSON object: {path}")
         return cls(path=path, data=payload)
 
-    def save(self) -> None:
+    def save(self, preserve_terminal: bool = True) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.exists():
             try:
@@ -66,7 +66,7 @@ class TaskLedger:
             if isinstance(current, dict):
                 current_status = str(current.get("status") or "")
                 new_status = str(self.data.get("status") or "")
-                terminal_preserved = (
+                terminal_preserved = preserve_terminal and (
                     current_status in TERMINAL_STATUSES
                     and current_status != new_status
                     and not (current_status == "failed" and new_status == "blocked")
@@ -117,6 +117,11 @@ class TaskLedger:
     def set_status(self, status: str) -> None:
         self.data["status"] = status
         self.record_event("status_changed", {"status": status})
+
+    def force_status(self, status: str, reason: str = "") -> None:
+        self.data["status"] = status
+        self.data.setdefault("events", []).append({"at": now_iso(), "type": "status_forced", "payload": {"status": status, "reason": reason}})
+        self.save(preserve_terminal=False)
 
     def request_cancel(self, reason: str = "") -> bool:
         if str(self.data.get("status") or "") in TERMINAL_STATUSES:

@@ -18,7 +18,7 @@ from .gateway_util import resolve_run_child_path, validate_service_host
 from .http_executor import execute_run as execute_http_run, preflight_workers as preflight_http_workers
 from .ledger import TaskLedger
 from .local_executor import WORKER_COMMANDS, execute_run as execute_local_run, input_artifact_errors, ordered_dispatch_paths
-from .mission_control import link_run_to_mission, open_mission
+from .mission_control import link_run_to_mission, open_mission, record_warmaster_acceptance
 from .run_package import load_json_file, load_json_object, load_ledger_dict, run_oversight, sandbox_artifact_file_status
 from .run_state import list_runs, orchestration_state, run_progress, run_snapshot, run_summary
 from .run_validation import revision_plan_summary, run_oversight_summary, validate_oversight_against_run, validate_revision_plan
@@ -647,7 +647,30 @@ def research_loop_run(
                 cycle["revision_cycle"] = revision_cycles
                 cycle["revision_fingerprint"] = fingerprint
             elif status == "completed":
-                stop_reason = "completed"
+                acceptance = record_warmaster_acceptance(run_dir)
+                cycle["warmaster_acceptance"] = {
+                    "ok": bool(acceptance.get("ok")),
+                    "accepted": bool(acceptance.get("accepted")),
+                    "blocked": bool(acceptance.get("blocked")),
+                    "revision_required": bool(acceptance.get("revision_required")),
+                    "skipped": bool(acceptance.get("skipped")),
+                    "already_recorded": bool(acceptance.get("already_recorded")),
+                }
+                if acceptance.get("revision_required"):
+                    cycle["stop_reason"] = "warmaster_revision_ordered"
+                    cycles.append(cycle)
+                    continue
+                if acceptance.get("blocked"):
+                    stop_reason = "warmaster_acceptance_blocked"
+                    cycle["stop_reason"] = stop_reason
+                    cycles.append(cycle)
+                    break
+                if acceptance.get("accepted") or acceptance.get("skipped"):
+                    stop_reason = "completed"
+                    cycle["stop_reason"] = stop_reason
+                    cycles.append(cycle)
+                    break
+                stop_reason = "warmaster_acceptance_failed"
                 cycle["stop_reason"] = stop_reason
                 cycles.append(cycle)
                 break
