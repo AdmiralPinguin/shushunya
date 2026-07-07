@@ -4,7 +4,18 @@ import re
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageChops, ImageStat
+try:
+    from PIL import Image, ImageChops, ImageStat
+except ModuleNotFoundError:  # Pillow lives in the forge venv; planners import this module without it
+
+    class _PillowMissing:
+        def __getattr__(self, name):
+            raise ModuleNotFoundError("Pillow is required for image evaluation but is not installed in this interpreter")
+
+        def open(self, *args, **kwargs):  # noqa: A003 - mirrors PIL.Image.open
+            raise ModuleNotFoundError("Pillow is required for image evaluation but is not installed in this interpreter")
+
+    Image = ImageChops = ImageStat = _PillowMissing()
 
 from EyeOfTerror.Pictorium.Moriana.forge_runtime import config
 

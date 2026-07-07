@@ -154,7 +154,11 @@ def run_actions(
         and package_valid
         and oversight_valid
         and not research_loop_blocked
-        and status not in {"running", "cancelling", "queued", "corrupt", "blocked"}
+        # "blocked" is NOT excluded: ledger_status_for_execution routes runs that
+        # need revision into "blocked" (instead of "failed"), so revision must be
+        # startable from it. True user-decision blockers carry revision_plan.required
+        # False and stay non-runnable via revision_required above.
+        and status not in {"running", "cancelling", "queued", "corrupt"}
     )
     loop_runnable = runnable or revision_runnable or (resume_required and package_valid and oversight_valid)
     actions = {

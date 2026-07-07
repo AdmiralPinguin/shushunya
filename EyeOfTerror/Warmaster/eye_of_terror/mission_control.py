@@ -629,23 +629,9 @@ def build_acceptance_review(command: dict[str, Any], report: dict[str, Any], led
         )
         validate_protocol_payload(review, expected_type="acceptance_review")
         return {"ok": True, "acceptance_review": review, "model_brain": {"status": "skipped", "reason": "governor_report.status=blocked"}}
-    quality_review = report.get("quality_review") if isinstance(report.get("quality_review"), dict) else {}
-    manifest = quality_review.get("final_manifest_summary") if isinstance(quality_review.get("final_manifest_summary"), dict) else {}
-    if (
-        report_status == "ready"
-        and quality_review.get("passed") is True
-        and str(manifest.get("status") or "").strip().lower() in {"ready", "completed", "passed"}
-        and int(manifest.get("blocker_count") or 0) == 0
-    ):
-        review = acceptance_review(
-            str(report.get("mission_id") or ""),
-            accepted=True,
-            reason="Структурная приемка пройдена: отчет готов, финальный manifest готов, блокеров нет.",
-            required_revision={"to": str(report.get("governor") or ""), "order": "", "required_steps": []},
-            escalate_to_user=False,
-        )
-        validate_protocol_payload(review, expected_type="acceptance_review")
-        return {"ok": True, "acceptance_review": review, "model_brain": {"status": "skipped", "reason": "structured_acceptance_gate_passed"}}
+    # No structural auto-accept: a clean-looking governor report is exactly the case
+    # the commander must re-check himself. Only rejections/escalations skip the model
+    # (returning work the governor itself called unfinished needs no judgement).
     model_decision = request_model_decision(
         "WarmasterAcceptance",
         "Final acceptance authority over governor reports",

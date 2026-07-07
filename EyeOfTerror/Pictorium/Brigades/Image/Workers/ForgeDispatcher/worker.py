@@ -14,9 +14,6 @@ from EyeOfTerror.Pictorium.Brigades.Image.worker_api import (
     worker_model_guidance,
 )
 from EyeOfTerror.Pictorium.Brigades.Image.worker_api import worker_contract as base_contract
-from EyeOfTerror.Pictorium.Moriana.forge_runtime.queue import ForgeQueue
-from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import JobSpec
-from EyeOfTerror.Pictorium.Moriana.forge_runtime.storage import ForgeStore
 
 
 WORKER = "ForgeDispatcher"
@@ -32,7 +29,18 @@ def worker_contract() -> dict[str, Any]:
     )
 
 
-def _store(data: dict[str, Any]) -> ForgeStore:
+def _forge_runtime():
+    # Lazy import: the forge runtime needs Pillow/pydantic from the forge venv,
+    # while worker_contract/planning must import under any interpreter.
+    from EyeOfTerror.Pictorium.Moriana.forge_runtime.queue import ForgeQueue
+    from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import JobSpec
+    from EyeOfTerror.Pictorium.Moriana.forge_runtime.storage import ForgeStore
+
+    return ForgeQueue, JobSpec, ForgeStore
+
+
+def _store(data: dict[str, Any]):
+    _ForgeQueue, _JobSpec, ForgeStore = _forge_runtime()
     raw_db_path = str(data.get("db_path") or "").strip()
     if raw_db_path:
         return ForgeStore(Path(raw_db_path))
@@ -51,6 +59,7 @@ def prepare_dispatch(payload: dict[str, Any] | None) -> dict[str, Any]:
     raw_spec = data.get("job_spec") if isinstance(data.get("job_spec"), dict) else data.get("spec")
     if not isinstance(raw_spec, dict):
         raise ValueError("ForgeDispatcher requires job_spec")
+    ForgeQueue, JobSpec, _ForgeStore = _forge_runtime()
     spec = JobSpec(**raw_spec)
     queue = ForgeQueue(_store(data), start_worker=False)
     submit = bool(data.get("submit", False))
