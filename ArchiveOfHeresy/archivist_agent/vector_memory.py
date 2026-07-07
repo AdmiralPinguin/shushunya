@@ -224,6 +224,9 @@ class VectorMemory:
                 db.execute("ALTER TABLE vector_chunks ADD COLUMN memory_namespace TEXT NOT NULL DEFAULT 'default'")
             if "embedding_version" not in columns:
                 db.execute("ALTER TABLE vector_chunks ADD COLUMN embedding_version TEXT NOT NULL DEFAULT 'legacy'")
+            if "label" not in columns:
+                # Epistemic label from the librarian: факт|мнение|прикол|ошибка|болтовня|задача, '' = unlabeled
+                db.execute("ALTER TABLE vector_chunks ADD COLUMN label TEXT NOT NULL DEFAULT ''")
             db.execute(
                 """
                 UPDATE vector_chunks
@@ -251,7 +254,7 @@ class VectorMemory:
                 db.execute("ALTER TABLE vector_indexed_turns ADD COLUMN embedding_version TEXT NOT NULL DEFAULT 'legacy'")
             db.execute("CREATE INDEX IF NOT EXISTS idx_vector_indexed_namespace ON vector_indexed_turns(memory_namespace)")
 
-    def index_turn(self, record):
+    def index_turn(self, record, label=""):
         if record.get("status") != "ok":
             return 0
         turn_id = record.get("turn_id")
@@ -294,6 +297,7 @@ class VectorMemory:
                         chunk,
                         embedding_version,
                         json.dumps(embedding, ensure_ascii=False, sort_keys=True),
+                        str(label or "").strip(),
                     )
                 )
 
@@ -304,9 +308,9 @@ class VectorMemory:
             db.executemany(
                 """
                 INSERT OR REPLACE INTO vector_chunks (
-                    id, turn_id, conversation_id, memory_namespace, created_at, role, chunk_index, content, embedding_version, embedding_json
+                    id, turn_id, conversation_id, memory_namespace, created_at, role, chunk_index, content, embedding_version, embedding_json, label
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )
@@ -463,7 +467,7 @@ class VectorMemory:
             db.row_factory = sqlite3.Row
             for row in db.execute(
                 f"""
-                SELECT id, turn_id, conversation_id, memory_namespace, created_at, role, chunk_index, content, embedding_json
+                SELECT id, turn_id, conversation_id, memory_namespace, created_at, role, chunk_index, content, embedding_json, label
                 FROM vector_chunks
                 {where}
                 ORDER BY created_at DESC
@@ -490,6 +494,7 @@ class VectorMemory:
                         "created_at": row["created_at"],
                         "role": row["role"],
                         "content": row["content"],
+                        "label": row["label"],
                     }
                 )
 

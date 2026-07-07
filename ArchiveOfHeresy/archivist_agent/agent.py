@@ -44,8 +44,19 @@ LIBRARIAN_TASK_PROMPT = os.environ.get(
     "Если тема сменилась, верни action=new и summary только для новой темы. "
     "Не копируй лишнюю болтовню, но сохраняй всю инженерно важную информацию. "
     "Не добавляй факты, которых нет во входных данных. "
-    "importance от 1 до 5: 1 временное, 3 полезный рабочий контекст, 5 архитектура или долговременная память.",
+    "importance от 1 до 5: 1 временное, 3 полезный рабочий контекст, 5 архитектура или долговременная память. "
+    "Также подпиши обмен эпистемическим ярлыком label: "
+    "'факт' — проверяемая информация или сообщение о реальном событии; "
+    "'мнение' — оценка, предпочтение или суждение; "
+    "'прикол' — шутка, сарказм, ирония, провокация; "
+    "'ошибка' — обмен содержит неверное утверждение или исправление предыдущей ошибки; "
+    "'болтовня' — приветствия, проверки связи, междометия без информации; "
+    "'задача' — поручение, просьба что-то сделать или напомнить. "
+    "Ярлык описывает суть обмена целиком; при сомнении между 'факт' и 'мнение' выбирай 'мнение'.",
 )
+# Epistemic labels the librarian stamps on each exchange ('' = unlabeled/legacy).
+TURN_LABELS = ("факт", "мнение", "прикол", "ошибка", "болтовня", "задача")
+
 LIBRARIAN_WIKI_TASK_PROMPT = os.environ.get(
     "ARCHIVE_LIBRARIAN_WIKI_TASK_PROMPT",
     "Обнови wiki memory ArchiveOfHeresy по свежим сообщениям. "
@@ -344,13 +355,14 @@ class Librarian:
         if not user_text or not assistant_text:
             return {"status": "skipped", "reason": "empty_exchange"}
 
-        vector_chunks = 0
-        if self.vector_memory is not None:
-            vector_chunks = self.vector_memory.index_turn(record)
-
         index = self.bookshelf.load_index()
         active = self.bookshelf.active_focus(index)
         decision = self.agent_cycle(record, index, active, user_text, assistant_text)
+
+        # Vector indexing runs after the librarian decision so chunks carry its label.
+        vector_chunks = 0
+        if self.vector_memory is not None:
+            vector_chunks = self.vector_memory.index_turn(record, label=decision.get("label") or "")
 
         if not active or decision["action"] == "new":
             if active:
@@ -372,6 +384,7 @@ class Librarian:
             "status": "ok",
             "memory_namespace": self.memory_namespace,
             "vector_chunks": vector_chunks,
+            "label": decision.get("label") or "",
             "focus": {
                 "action": decision["action"],
                 "id": focus.get("id"),
@@ -452,13 +465,14 @@ class Librarian:
                         "title": "short topic title",
                         "importance": "integer 1..5",
                         "summary": "compact focus book body for the current topic",
+                        "label": "факт|мнение|прикол|ошибка|болтовня|задача",
                     },
                 },
             },
             "rules": [
                 "Return exactly one JSON object.",
                 "To use a tool, return {\"tool\":\"read_active_focus\"}.",
-                "To finish, return {\"tool\":\"finish\",\"action\":\"continue|new\",\"title\":\"...\",\"importance\":1..5,\"summary\":\"...\"}.",
+                "To finish, return {\"tool\":\"finish\",\"action\":\"continue|new\",\"title\":\"...\",\"importance\":1..5,\"summary\":\"...\",\"label\":\"факт|мнение|прикол|ошибка|болтовня|задача\"}.",
                 "If there is an active book and the new exchange may belong to it, read it before finish.",
                 "Keep summary compact but preserve all useful facts, decisions, constraints, names, paths, commands, and next steps for the current topic.",
                 "Do not imitate the assistant persona from the conversation.",
@@ -486,6 +500,7 @@ class Librarian:
             "title": active.get("title") if active else user_text[:80],
             "importance": active.get("importance") if active else 3,
             "summary": f"Пользователь: {user_text}\nМодель: {assistant_text}",
+            "label": "",
         }
 
     def normalize_decision(self, decision, active, user_text, assistant_text):
@@ -498,11 +513,16 @@ class Librarian:
         if not summary:
             summary = trim_text(f"Пользователь: {user_text}\nМодель: {assistant_text}", 5000)
 
+        label = str(decision.get("label") or "").strip().lower()
+        if label not in TURN_LABELS:
+            label = ""
+
         return {
             "action": action,
             "title": title,
             "importance": clamp_importance(decision.get("importance")),
             "summary": summary,
+            "label": label,
         }
 
 
