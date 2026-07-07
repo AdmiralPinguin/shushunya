@@ -33,6 +33,9 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         print("%s - %s" % (self.address_string(), fmt % args), flush=True)
 
     def do_GET(self):
+        if self.path.startswith("/archive/client/"):
+            self.path = "/archive/mobile/" + self.path[len("/archive/client/") :]
+
         if self.path == "/health":
             namespaces = known_memory_namespaces()
             write_json(
@@ -400,6 +403,9 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         write_json(self, 404, {"error": "Not found"})
 
     def do_POST(self):
+        if self.path.startswith("/archive/client/"):
+            self.path = "/archive/mobile/" + self.path[len("/archive/client/") :]
+
         if self.path == "/archive/chat/completions":
             if not require_auth(self, allow_mobile=True):
                 return
@@ -531,6 +537,42 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             "at": str(event.get("at") or ""),
         }
 
+    def warmaster_activity_entry_as_agent_event(self, entry, index, total):
+        headline = str(entry.get("headline") or entry.get("kind") or "Warmaster activity").strip()
+        detail = str(entry.get("detail") or "").strip()
+        message = headline if not detail else f"{headline}: {detail}"
+        return {
+            "type": "step",
+            "step": index + 1,
+            "max_steps": max(total, 1),
+            "message": message,
+            "warmaster_event_type": str(entry.get("kind") or "governor_activity"),
+            "severity": str(entry.get("severity") or ""),
+            "worker": str(entry.get("worker") or ""),
+            "step_id": str(entry.get("step_id") or ""),
+            "status": str(entry.get("status") or ""),
+            "at": str(entry.get("at") or ""),
+        }
+
+    def warmaster_activity_from_payload(self, payload):
+        if not isinstance(payload, dict):
+            return {}
+        activity = payload.get("governor_activity")
+        if isinstance(activity, dict) and activity:
+            return activity
+        snapshot = payload.get("snapshot")
+        if isinstance(snapshot, dict):
+            activity = snapshot.get("governor_activity")
+            if isinstance(activity, dict) and activity:
+                return activity
+        return {}
+
+    def warmaster_fetch_activity(self, task_id):
+        if not task_id:
+            return {}
+        _status, response = proxy_json_url("GET", f"{WARMASTER_BASE_URL}/runs/{quote(task_id, safe='')}/activity", timeout=10)
+        return self.warmaster_activity_from_payload(response)
+
     def warmaster_final_message(self, orchestration):
         final_payload = orchestration.get("final") if isinstance(orchestration.get("final"), dict) else {}
         files = final_payload.get("files") if isinstance(final_payload.get("files"), list) else []
@@ -554,7 +596,8 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             or ""
         ).strip()
 
-    def warmaster_run_as_agent_task(self, run, active=False, final_text=""):
+    def warmaster_run_as_agent_task(self, run, active=False, final_text="", activity=None):
+        activity = activity if isinstance(activity, dict) else self.warmaster_activity_from_payload(run)
         status = str(run.get("status") or "").lower()
         task_id = str(run.get("task_id") or "").strip()
         running = bool(active) or status in {"running", "queued", "cancelling"}
@@ -569,6 +612,11 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             or progress.get("next_ready_step_id")
             or ""
         ).strip()
+        activity_entries = activity.get("entries") if isinstance(activity.get("entries"), list) else []
+        activity_log = str(activity.get("log_text") or "").strip()
+        if activity_entries:
+            last_entry = activity_entries[-1] if isinstance(activity_entries[-1], dict) else {}
+            current_step = str(last_entry.get("headline") or current_step).strip()
         return {
             "backend": "warmaster",
             "task_id": task_id,
@@ -581,6 +629,9 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             "current_step": current_step,
             "progress": progress,
             "final": final_text,
+            "activity_log": activity_log,
+            "activity_entries": activity_entries,
+            "governor_activity": activity,
             "updated_at": str(run.get("updated_at") or ""),
             "created_at": str(run.get("created_at") or ""),
         }
@@ -616,11 +667,17 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             status, response = proxy_json_url("GET", f"{WARMASTER_BASE_URL}/runs?limit={limit}", timeout=30)
             active = set(response.get("process_active_runs") if isinstance(response.get("process_active_runs"), list) else [])
             runs = response.get("runs") if isinstance(response.get("runs"), list) else []
-            tasks = [
-                self.warmaster_run_as_agent_task(run, active=str(run.get("task_id") or "") in active)
-                for run in runs
-                if isinstance(run, dict)
-            ]
+            tasks = []
+            for run in runs:
+                if not isinstance(run, dict):
+                    continue
+                task_id = str(run.get("task_id") or "").strip()
+                activity = {}
+                try:
+                    activity = self.warmaster_fetch_activity(task_id)
+                except Exception:
+                    activity = self.warmaster_activity_from_payload(run)
+                tasks.append(self.warmaster_run_as_agent_task(run, active=task_id in active, activity=activity))
             write_json(self, status, {"ok": True, "backend": "warmaster", "tasks": tasks, "warmaster": response})
         except HTTPError as exc:
             self.write_proxy_error(exc)
@@ -643,17 +700,26 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             status, orchestration = proxy_json_url("GET", f"{WARMASTER_BASE_URL}{path}", timeout=30)
             snapshot = orchestration.get("snapshot") if isinstance(orchestration.get("snapshot"), dict) else {}
             summary = snapshot.get("summary") if isinstance(snapshot.get("summary"), dict) else {}
+            activity = self.warmaster_activity_from_payload(orchestration)
+            activity_entries = activity.get("entries") if isinstance(activity.get("entries"), list) else []
             display_events = orchestration.get("display_events") if isinstance(orchestration.get("display_events"), list) else []
             raw_events = snapshot.get("events") if isinstance(snapshot.get("events"), list) else []
-            event_source = raw_events or display_events
-            events = [
-                self.warmaster_event_as_agent_event(event, index, len(event_source))
-                for index, event in enumerate(event_source)
-                if isinstance(event, dict)
-            ]
+            if activity_entries:
+                events = [
+                    self.warmaster_activity_entry_as_agent_event(entry, index, len(activity_entries))
+                    for index, entry in enumerate(activity_entries)
+                    if isinstance(entry, dict)
+                ]
+            else:
+                event_source = raw_events or display_events
+                events = [
+                    self.warmaster_event_as_agent_event(event, index, len(event_source))
+                    for index, event in enumerate(event_source)
+                    if isinstance(event, dict)
+                ]
             final_message = self.warmaster_final_message(orchestration)
             active = bool(orchestration.get("active"))
-            task = self.warmaster_run_as_agent_task(summary, active=active, final_text=final_message)
+            task = self.warmaster_run_as_agent_task(summary, active=active, final_text=final_message, activity=activity)
             terminal = not active and str(summary.get("status") or "").lower() not in {"running", "queued", "cancelling", ""}
             final_event = None
             if terminal:
@@ -677,6 +743,9 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "task_id": task_id,
                 "running": active,
                 "events": events,
+                "activity_entries": activity_entries,
+                "activity_log": str(activity.get("log_text") or "").strip(),
+                "governor_activity": activity,
                 "final": final_event,
                 **task,
                 "warmaster": orchestration,
@@ -712,7 +781,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             write_json(self, 400, {"ok": False, "error": "task is required"})
             return
         task_id = str(payload.get("task_id") or "").strip()
-        client_source = str(payload.get("client_source") or payload.get("source") or "mobile").strip()[:80] or "mobile"
+        client_source = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
         warmaster_payload = {
             "message": task,
             "task_id": task_id,
@@ -757,7 +826,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             status, response = proxy_json_url(
                 "POST",
                 f"{WARMASTER_BASE_URL}/runs/{quote(task_id, safe='')}/cancel",
-                payload={"reason": str(payload.get("reason") or "mobile user requested cancel")},
+                payload={"reason": str(payload.get("reason") or "client requested cancel")},
                 timeout=30,
             )
             response["backend"] = "warmaster"
@@ -775,7 +844,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             {
                 "ok": False,
                 "backend": "warmaster",
-                "error": "streaming mobile agent endpoint was removed with standalone agent; use /archive/mobile/agent/start and poll /archive/mobile/agent/task",
+                "error": "streaming client agent endpoint was removed with standalone agent; use /archive/client/agent/start and poll /archive/client/agent/task",
             },
         )
 
@@ -898,13 +967,13 @@ class ArchiveHandler(BaseHTTPRequestHandler):
 
     def run_mobile_warmaster_payload(self, payload):
         session_id = shared_chat_session_id(payload.get("session_id") or SHARED_CHAT_SESSION_ID)
-        client_source = str(payload.get("client_source") or payload.get("source") or "mobile").strip()[:80] or "mobile"
+        client_source = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
         original_text = trim_chat_text(payload.get("text") or payload.get("message") or "")
         task = trim_chat_text(payload.get("warmaster_task") or "")
         if not task:
             raise ValueError("warmaster task is empty")
 
-        task_id = str(payload.get("task_id") or f"mobile-{uuid.uuid4().hex[:12]}").strip()
+        task_id = str(payload.get("task_id") or f"client-{uuid.uuid4().hex[:12]}").strip()
         warmaster_payload = {
             "message": task,
             "task_id": task_id,
@@ -924,18 +993,19 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             source=client_source,
             dedupe_key=f"warmaster:{resolved_task_id}:user" if resolved_task_id else None,
         )
-        accepted = f"Warmaster принял задачу: task_id={resolved_task_id or task_id}. Смотри ход во вкладке Бригады."
-        append_chat_message(
-            session_id,
-            "assistant",
-            accepted,
-            source="warmaster",
-            dedupe_key=f"warmaster:{resolved_task_id}:accepted" if resolved_task_id else None,
-        )
+        activity = {}
+        try:
+            activity = self.warmaster_fetch_activity(resolved_task_id or task_id)
+        except Exception:
+            activity = {}
+        activity_log = str(activity.get("log_text") or "").strip()
+        accepted = activity_log or f"Warmaster запустил бригаду: task_id={resolved_task_id or task_id}. Ход работы доступен во вкладке Бригады."
         response["ok"] = 200 <= status < 300
         response["backend"] = "warmaster"
         response["task_id"] = resolved_task_id or task_id
         response["message"] = accepted
+        response["activity_log"] = activity_log
+        response["governor_activity"] = activity
         return response
 
     def mobile_chat_start(self):
@@ -953,7 +1023,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         payload["stream"] = False
         payload["session_id"] = session_id
         payload["memory_namespace"] = shared_memory_namespace(payload.get("memory_namespace"))
-        payload["client_source"] = str(payload.get("client_source") or payload.get("source") or "mobile").strip()[:80] or "mobile"
+        payload["client_source"] = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
         warmaster_task = "" if image_data_url else self.mobile_chat_warmaster_task(session_id, text)
         if warmaster_task:
             payload["warmaster_task"] = warmaster_task
@@ -1129,7 +1199,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             graph_enabled = internal_flag(payload.get("graph_enabled", focus_enabled), default=True)
             archive_system_prompt_enabled = internal_flag(payload.get("archive_system_prompt_enabled", True), default=True)
             memory_namespace = shared_memory_namespace(payload.get("memory_namespace") or SHARED_MEMORY_NAMESPACE)
-            client_source = str(payload.get("client_source") or payload.get("source") or "mobile").strip()[:80] or "mobile"
+            client_source = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
             stream = internal_flag(payload.get("stream", True), default=True)
             model = payload.get("model") or DEFAULT_MODEL
             system_prompt = ""
@@ -1153,7 +1223,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 administratum_message = administratum_intent_context(administratum_result)
             mobile_payload = {
                 "model": model,
-                "user": f"mobile:{session_id}",
+                "user": session_id,
                 "archive_enabled": archive_enabled,
                 "focus_enabled": focus_enabled,
                 "vector_enabled": vector_enabled,
@@ -1174,7 +1244,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     magos_message = magos.prepare_request(
                         memory_messages,
                         model=model,
-                        conversation_id=f"mobile:{session_id}",
+                        conversation_id=session_id,
                         turn_id=turn_id,
                         memory_namespace=memory_namespace,
                     )
@@ -1220,8 +1290,8 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             record = {
                 "turn_id": turn_id,
                 "created_at": created_at,
-                "source": "mobile-chat-session",
-                "conversation_id": f"mobile:{session_id}",
+                "source": f"{client_source}-chat-session",
+                "conversation_id": session_id,
                 "memory_namespace": memory_namespace,
                 "archive_enabled": archive_enabled,
                 "focus_enabled": focus_enabled,

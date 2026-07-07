@@ -77,7 +77,7 @@ public class MainActivity extends Activity {
     private static final String SERVER_MEMORY_NAMESPACE = "shushunya";
     private static final int REQUEST_NOTIFICATIONS = 42;
     private static final String DEFAULT_BASE_URL = "https://chat.shushunya.com";
-    private static final String MOBILE_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; ShushunyaM/2.4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36";
+    private static final String CLIENT_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; ShushunyaM/2.4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36";
     private static final String MODEL = "gemma-4-12b-it-UD-Q5_K_XL.gguf";
     private static final int AUDIO_SAMPLE_RATE = 16000;
     private static final int REQUEST_RECORD_AUDIO = 41;
@@ -930,7 +930,7 @@ public class MainActivity extends Activity {
         payload.put("text", text);
 
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/translate/start");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/translate/start");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -984,7 +984,7 @@ public class MainActivity extends Activity {
         payload.put("text", text);
 
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/translate");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/translate");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -1011,7 +1011,7 @@ public class MainActivity extends Activity {
         if (clean.isEmpty() || agentRunning) {
             return;
         }
-        String taskId = "mobile-" + System.currentTimeMillis();
+        String taskId = "client-" + System.currentTimeMillis();
         currentAgentTaskId = taskId;
         agentDisplayedEventCount = 0;
         agentCancelRequested = false;
@@ -1368,7 +1368,7 @@ public class MainActivity extends Activity {
         payload.put("technical", true);
         payload.put("max_steps", 200);
         payload.put("memory_namespace", SERVER_MEMORY_NAMESPACE);
-        payload.put("client_source", "mobile");
+        payload.put("client_source", "app");
         payload.put("archive_task", true);
         payload.put("task_memory", true);
         payload.put("include_stderr", false);
@@ -1376,7 +1376,7 @@ public class MainActivity extends Activity {
         payload.put("wait_for_slot", false);
 
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/agent/run-stream");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/agent/run-stream");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -1438,7 +1438,7 @@ public class MainActivity extends Activity {
         payload.put("technical", true);
         payload.put("max_steps", 200);
         payload.put("memory_namespace", SERVER_MEMORY_NAMESPACE);
-        payload.put("client_source", "mobile");
+        payload.put("client_source", "app");
         payload.put("archive_task", true);
         payload.put("task_memory", true);
         payload.put("include_stderr", false);
@@ -1446,7 +1446,7 @@ public class MainActivity extends Activity {
         payload.put("wait_for_slot", false);
 
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/agent/start");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/agent/start");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -1476,7 +1476,7 @@ public class MainActivity extends Activity {
     }
 
     private JSONObject requestAgentTaskSnapshot(String taskId) throws Exception {
-        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/agent/task?task_id=" + taskId + "&limit=160");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/agent/task?task_id=" + taskId + "&limit=160");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
         conn.setConnectTimeout(12000);
@@ -1494,7 +1494,7 @@ public class MainActivity extends Activity {
     }
 
     private JSONObject requestAgentTaskList() throws Exception {
-        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/agent/tasks?prefix=mobile&limit=" + AGENT_HISTORY_LIMIT);
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/agent/tasks?prefix=client&limit=" + AGENT_HISTORY_LIMIT);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
         conn.setConnectTimeout(12000);
@@ -1560,6 +1560,10 @@ public class MainActivity extends Activity {
                 summary.append("Готово.");
             } else {
                 summary.append("Завершилось без успешного final.");
+            }
+            String activityLog = task.optString("activity_log", "").trim();
+            if (!activityLog.isEmpty()) {
+                summary.append("\n\n").append(activityLog);
             }
             if (!finalText.isEmpty()) {
                 summary.append("\n\n").append(finalText);
@@ -1631,7 +1635,7 @@ public class MainActivity extends Activity {
         JSONObject payload = new JSONObject();
         payload.put("task_id", taskId);
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/agent/cancel");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/agent/cancel");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -1663,7 +1667,7 @@ public class MainActivity extends Activity {
         payload.put("technical", true);
         payload.put("max_steps", 200);
         payload.put("memory_namespace", SERVER_MEMORY_NAMESPACE);
-        payload.put("client_source", "mobile");
+        payload.put("client_source", "app");
         payload.put("archive_task", true);
         payload.put("task_memory", true);
         payload.put("include_steps", false);
@@ -1672,7 +1676,7 @@ public class MainActivity extends Activity {
         payload.put("wait_for_slot", false);
 
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/agent/run");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/agent/run");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -1703,7 +1707,7 @@ public class MainActivity extends Activity {
     }
 
     private String requestAgentState() throws Exception {
-        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/agent/state");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/agent/state");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
         conn.setConnectTimeout(12000);
@@ -1803,7 +1807,7 @@ public class MainActivity extends Activity {
     }
 
     private String requestRemoteSttLive(String language, String titleText) throws Exception {
-        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/stt-live");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/stt-live");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -1876,7 +1880,7 @@ public class MainActivity extends Activity {
         }
 
         byte[] body = pcm.toByteArray();
-        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/stt-pcm");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/stt-pcm");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -2358,7 +2362,7 @@ public class MainActivity extends Activity {
         TextView answerBubble = addMessage(false, "Warmaster принимает задачу...", false);
         StringBuilder warmasterTranscript = new StringBuilder("Warmaster принимает задачу...");
         setWaiting(true);
-        String taskId = "mobile-" + System.currentTimeMillis();
+        String taskId = "client-" + System.currentTimeMillis();
         currentAgentTaskId = taskId;
         agentDisplayedEventCount = 0;
         agentCancelRequested = false;
@@ -2376,6 +2380,7 @@ public class MainActivity extends Activity {
             PowerManager.WakeLock wakeLock = acquireAnswerWakeLock();
             int displayed = 0;
             String acceptedTaskId = taskId;
+            String lastActivityLog = "";
             try {
                 acceptedTaskId = requestAgentStart(clean, taskId);
                 currentAgentTaskId = acceptedTaskId;
@@ -2383,12 +2388,21 @@ public class MainActivity extends Activity {
                         .edit()
                         .putString("current_agent_task_id", acceptedTaskId)
                         .apply();
-                warmasterTranscript.append("\nПринято: task_id=").append(acceptedTaskId);
-                appendChatWarmasterLog(answerBubble, "\nПринято: task_id=" + acceptedTaskId);
                 while (true) {
                     JSONObject snapshot = requestAgentTaskSnapshot(acceptedTaskId);
+                    String activityLog = snapshot.optString("activity_log", "").trim();
+                    if (!activityLog.isEmpty() && !activityLog.equals(lastActivityLog)) {
+                        lastActivityLog = activityLog;
+                        warmasterTranscript.setLength(0);
+                        warmasterTranscript.append("Warmaster ведет задачу: task_id=").append(acceptedTaskId).append("\n\n").append(activityLog);
+                        String fullLog = warmasterTranscript.toString();
+                        main.post(() -> {
+                            answerBubble.setText(fullLog);
+                            maybeScrollToBottom(false);
+                        });
+                    }
                     JSONArray events = snapshot.optJSONArray("events");
-                    if (events != null) {
+                    if (lastActivityLog.isEmpty() && events != null) {
                         int start = Math.max(0, Math.min(displayed, events.length()));
                         for (int i = start; i < events.length(); i++) {
                             JSONObject event = events.optJSONObject(i);
@@ -2508,7 +2522,7 @@ public class MainActivity extends Activity {
         payload.put("archive_enabled", true);
         payload.put("focus_enabled", true);
         payload.put("memory_namespace", SERVER_MEMORY_NAMESPACE);
-        payload.put("client_source", "mobile");
+        payload.put("client_source", "app");
         payload.put("max_tokens", 2048);
         payload.put("temperature", 0.4);
         payload.put("stream", true);
@@ -2574,7 +2588,7 @@ public class MainActivity extends Activity {
         payload.put("archive_enabled", true);
         payload.put("focus_enabled", true);
         payload.put("memory_namespace", SERVER_MEMORY_NAMESPACE);
-        payload.put("client_source", "mobile");
+        payload.put("client_source", "app");
         payload.put("max_tokens", 2048);
         payload.put("temperature", 0.4);
         payload.put("stream", false);
@@ -2585,7 +2599,7 @@ public class MainActivity extends Activity {
         }
 
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/chat/start");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/start");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -2612,7 +2626,7 @@ public class MainActivity extends Activity {
     }
 
     private JSONObject requestMobileJobSnapshot(String jobId) throws Exception {
-        URL url = new URL(trimSlash(baseUrl) + "/archive/mobile/job?job_id=" + jobId);
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/job?job_id=" + jobId);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
         conn.setConnectTimeout(12000);
@@ -2666,11 +2680,11 @@ public class MainActivity extends Activity {
     }
 
     private void applyMobileAuth(HttpURLConnection conn) {
-        conn.setRequestProperty("User-Agent", MOBILE_USER_AGENT);
-        String apiKey = BuildConfig.MOBILE_API_KEY == null ? "" : BuildConfig.MOBILE_API_KEY.trim();
+        conn.setRequestProperty("User-Agent", CLIENT_USER_AGENT);
+        String apiKey = BuildConfig.CLIENT_API_KEY == null ? "" : BuildConfig.CLIENT_API_KEY.trim();
         if (!apiKey.isEmpty()) {
             conn.setRequestProperty("Authorization", "Bearer " + apiKey);
-            conn.setRequestProperty("X-Shushunya-Mobile-Key", apiKey);
+            conn.setRequestProperty("X-Shushunya-Client-Key", apiKey);
         }
     }
 

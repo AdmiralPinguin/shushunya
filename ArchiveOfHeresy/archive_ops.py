@@ -218,7 +218,7 @@ def run_mobile_chat_payload(payload):
         payload = dict(payload)
         payload["stream"] = False
         session_id = shared_chat_session_id(payload.get("session_id") or payload.get("user") or "default")
-        client_source = str(payload.get("client_source") or payload.get("source") or "mobile").strip()[:80] or "mobile"
+        client_source = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
         text = trim_chat_text(payload.get("text") or payload.get("message") or "")
         image_data_url = str(payload.get("image_data_url") or "").strip()
         if not text and not image_data_url:

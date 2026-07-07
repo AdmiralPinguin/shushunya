@@ -206,12 +206,12 @@ def shared_chat_answer(chat_id, text, username=None):
         "stream": False,
         "text": text,
     }
-    started = request_json(f"{LLM_BASE_URL}/archive/mobile/chat/start", payload, timeout=30)
+    started = request_json(f"{LLM_BASE_URL}/archive/client/chat/start", payload, timeout=30)
     job_id = str(started.get("job_id") or "").strip()
     if not job_id:
         raise RuntimeError(f"Archive did not return job_id: {started}")
     while RUNNING:
-        snapshot = archive_get(f"/archive/mobile/job?job_id={job_id}", timeout=30)
+        snapshot = archive_get(f"/archive/client/job?job_id={job_id}", timeout=30)
         status = snapshot.get("status")
         if status == "done":
             response = snapshot.get("response") or {}

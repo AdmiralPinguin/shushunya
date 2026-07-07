@@ -24,12 +24,17 @@ def write_json(handler, status, payload):
     handler.wfile.write(body)
 
 
-def authorized(handler, allow_mobile=False):
-    if not ARCHIVE_API_KEY and not ARCHIVE_MOBILE_API_KEY:
+def authorized(handler, allow_mobile=False, allow_client=False):
+    if not ARCHIVE_API_KEY and not ARCHIVE_CLIENT_API_KEY and not ARCHIVE_MOBILE_API_KEY:
         return True
 
     auth = handler.headers.get("Authorization", "").strip()
     if ARCHIVE_API_KEY and auth == f"Bearer {ARCHIVE_API_KEY}":
+        return True
+    client_key = handler.headers.get("X-Shushunya-Client-Key", "").strip()
+    if (allow_client or allow_mobile) and ARCHIVE_CLIENT_API_KEY and (
+        auth == f"Bearer {ARCHIVE_CLIENT_API_KEY}" or client_key == ARCHIVE_CLIENT_API_KEY
+    ):
         return True
     mobile_key = handler.headers.get("X-Shushunya-Mobile-Key", "").strip()
     if allow_mobile and ARCHIVE_MOBILE_API_KEY and (
@@ -39,8 +44,8 @@ def authorized(handler, allow_mobile=False):
     return False
 
 
-def require_auth(handler, allow_mobile=False):
-    if authorized(handler, allow_mobile=allow_mobile):
+def require_auth(handler, allow_mobile=False, allow_client=False):
+    if authorized(handler, allow_mobile=allow_mobile, allow_client=allow_client):
         return True
     write_json(
         handler,
