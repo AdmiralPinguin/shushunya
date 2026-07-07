@@ -52,10 +52,10 @@ def payload_with_task_view(payload: dict[str, Any], fallback_task_id: str = "") 
     error_code = str(payload.get("error_code") or "")
     route = payload.get("route") if isinstance(payload.get("route"), dict) else {}
     governor = str(payload.get("governor") or route.get("governor") or "")
-    if ok and next_action.get("kind") == "create_task":
+    if ok and next_action.get("kind") in {"create_task", "prepare_orchestrated_task"}:
         phase = "task_ready"
         headline = "Task is ready"
-        detail = str(next_action.get("reason") or "Task can be created")
+        detail = str(next_action.get("reason") or "Task can be prepared")
         severity = "info"
     elif ok:
         phase = "task_created"

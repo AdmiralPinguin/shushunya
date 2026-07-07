@@ -423,13 +423,14 @@ def orchestrate_run_task(
             "client_action": prepared.get("client_action") if isinstance(prepared.get("client_action"), dict) else {},
         }
     if not auto_start:
-        state = orchestration_state(run_root / run_task_id, event_limit=5, events_after=0)
         if run_task_id:
             link_run_to_mission(run_root / run_task_id, mission)
+        state = orchestration_state(run_root / run_task_id, event_limit=5, events_after=0)
         return {
             "ok": True,
             "phase": "ready_to_start",
             "task_id": run_task_id,
+            "run_dir": str(run_root / run_task_id),
             "mission_id": str(mission.get("mission_id") or ""),
             "mission": {
                 "mission_id": str(mission.get("mission_id") or ""),
@@ -443,7 +444,7 @@ def orchestrate_run_task(
             "decision": state.get("decision", {}),
             "display": state.get("display", {}),
             "display_events": state.get("display_events", []),
-            "client_action": state.get("client_action", {}),
+            "client_action": prepared.get("client_action") if isinstance(prepared.get("client_action"), dict) else state.get("client_action", {}),
         }
     started = orchestrate_start_run(
         run_root,

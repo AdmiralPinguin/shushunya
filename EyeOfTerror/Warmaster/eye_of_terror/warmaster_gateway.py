@@ -653,7 +653,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
                     timeout_sec = max(1, min(int(payload.get("timeout_sec") or 30), 7200))
                     include_brigade_health = bool(payload.get("include_brigade_health"))
-                    prepared = orchestrate_prepare_task(
+                    prepared = orchestrate_run_task(
                         message,
                         task_id,
                         run_root,
@@ -663,6 +663,9 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         host=host,
                         timeout_sec=timeout_sec,
                         include_brigade_health=include_brigade_health,
+                        auto_start=False,
+                        force=bool(payload.get("force")),
+                        reuse_existing=bool(payload.get("reuse_existing", True)),
                     )
                     prepared = attach_model_brain(prepared, model_decision)
                     response(self, 200 if prepared.get("ok") else 409, prepared)

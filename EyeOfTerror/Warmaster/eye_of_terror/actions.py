@@ -58,11 +58,11 @@ def task_preflight_actions(
     create_body = task_preflight_body(task_id, False, governor_transport, governor_host, message)
     if ok:
         next_action = {
-            "kind": "create_task",
+            "kind": "prepare_orchestrated_task",
             "method": "POST",
-            "endpoint": "POST /task",
+            "endpoint": "POST /orchestrate",
             "body": create_body,
-            "reason": "task preflight passed",
+            "reason": "task preflight passed; prepare through Warmaster commander protocol",
         }
     elif error_code == "task_exists":
         next_action = {
@@ -281,6 +281,7 @@ def gateway_actions() -> dict[str, Any]:
         "can_orchestrate_run": True,
         "can_preflight_runs": True,
         "can_create_task": True,
+        "can_create_legacy_task": True,
         "can_start_runs": True,
         "can_resume_interrupted_runs": True,
         "can_list_recoverable_runs": True,
@@ -292,9 +293,10 @@ def gateway_actions() -> dict[str, Any]:
         "can_execute_step_subsets": True,
         "can_cancel_runs": True,
         "can_check_brigade_readiness": True,
-        "preferred_task_flow": ["POST /task_preflight", "POST /campaign_preflight when decomposition is required", "POST /task", "POST /runs/{task_id}/preflight_http", "POST /runs/{task_id}/start_http"],
+        "preferred_task_flow": ["POST /orchestrate_run", "GET /runs/{task_id}/orchestration?events_after=0"],
         "campaign_flow": ["POST /campaign_preflight", "POST /campaign", "POST /campaigns/{campaign_id}/start", "GET /campaigns/{campaign_id}"],
-        "prepare_task_flow": ["POST /orchestrate", "POST /orchestrate_start", "GET /runs/{task_id}/orchestration?events_after=0"],
+        "diagnostic_prepare_flow": ["POST /task_preflight", "POST /orchestrate", "POST /orchestrate_start", "GET /runs/{task_id}/orchestration?events_after=0"],
+        "legacy_direct_task_flow": ["POST /task", "POST /runs/{task_id}/preflight_http", "POST /runs/{task_id}/start_http"],
         "chat_task_flow": ["POST /orchestrate_run", "GET /runs/{task_id}/orchestration?events_after=0"],
         "research_loop_flow": ["POST /orchestrate", "POST /runs/{task_id}/start_research_loop_http", "GET /runs/{task_id}/orchestration?events_after=0"],
         "polling": ["GET /events?after=0", "GET /runs/{task_id}/snapshot?events_after=0", "GET /runs/{task_id}/activity"],

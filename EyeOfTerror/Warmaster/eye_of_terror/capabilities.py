@@ -38,6 +38,16 @@ def gateway_capabilities() -> dict[str, Any]:
         },
         "next_action": next_action,
         "client_action": executable_client_action("", next_action),
+        "command_protocol_endpoints": [
+            "POST /orchestrate_run",
+            "POST /orchestrate",
+            "GET /runs/{task_id}/orchestration",
+            "GET /runs/{task_id}/activity",
+        ],
+        "legacy_diagnostic_endpoints": [
+            "POST /task_preflight",
+            "POST /task",
+        ],
         "capabilities": [
             "model_backed_gateway_orchestration",
             "task_routing",

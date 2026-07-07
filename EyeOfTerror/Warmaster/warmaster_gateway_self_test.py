@@ -582,8 +582,11 @@ def main() -> int:
                 or not capabilities.get("actions", {}).get("can_list_orchestration_cards")
                 or not capabilities.get("actions", {}).get("can_bulk_start_recoverable_runs")
                 or not capabilities.get("actions", {}).get("can_poll_global_events")
-                or "POST /task_preflight" not in capabilities.get("actions", {}).get("preferred_task_flow", [])
-                or "POST /runs/{task_id}/preflight_http" not in capabilities.get("actions", {}).get("preferred_task_flow", [])
+                or capabilities.get("actions", {}).get("preferred_task_flow", [None])[0] != "POST /orchestrate_run"
+                or "POST /task" not in capabilities.get("actions", {}).get("legacy_direct_task_flow", [])
+                or "POST /orchestrate" not in capabilities.get("actions", {}).get("diagnostic_prepare_flow", [])
+                or "POST /orchestrate_run" not in capabilities.get("command_protocol_endpoints", [])
+                or "POST /task" not in capabilities.get("legacy_diagnostic_endpoints", [])
                 or "GET /events?after=0" not in capabilities.get("actions", {}).get("polling", [])
                 or "GET /recovery" not in capabilities.get("actions", {}).get("maintenance", [])
                 or "GET /runs/{task_id}/package" not in capabilities.get("actions", {}).get("run_inspection", [])
@@ -712,7 +715,8 @@ def main() -> int:
                 or image_preflight.get("governor") != "Moriana"
                 or image_preflight.get("contract_summary", {}).get("assigned_governor") != "Moriana"
                 or image_preflight.get("contract_summary", {}).get("step_count") != 5
-                or image_preflight.get("actions", {}).get("next_action", {}).get("kind") != "create_task"
+                or image_preflight.get("actions", {}).get("next_action", {}).get("kind") != "prepare_orchestrated_task"
+                or image_preflight.get("client_action", {}).get("path") != "/orchestrate"
                 or image_preflight.get("governor_plan_actions", {}).get("next_action", {}).get("kind") != "prepare_run"
             ):
                 raise AssertionError(f"image route should preflight through Moriana: {image_preflight}")
@@ -724,6 +728,8 @@ def main() -> int:
                 or comic_preflight.get("contract_summary", {}).get("assigned_governor") != "Moriana"
                 or comic_preflight.get("contract_summary", {}).get("kind") != "comic_generation"
                 or comic_preflight.get("contract_summary", {}).get("step_count") != 5
+                or comic_preflight.get("actions", {}).get("next_action", {}).get("kind") != "prepare_orchestrated_task"
+                or comic_preflight.get("client_action", {}).get("path") != "/orchestrate"
                 or comic_preflight.get("governor_plan_actions", {}).get("next_action", {}).get("kind") != "prepare_run"
             ):
                 raise AssertionError(f"comic route should preflight through Moriana: {comic_preflight}")
@@ -734,6 +740,8 @@ def main() -> int:
                 or series_preflight.get("route", {}).get("kind") != "image_series_generation"
                 or series_preflight.get("contract_summary", {}).get("kind") != "image_series_generation"
                 or series_preflight.get("contract_summary", {}).get("step_count") != 5
+                or series_preflight.get("actions", {}).get("next_action", {}).get("kind") != "prepare_orchestrated_task"
+                or series_preflight.get("client_action", {}).get("path") != "/orchestrate"
             ):
                 raise AssertionError(f"image series route should preflight through Moriana: {series_preflight}")
             try:
@@ -775,9 +783,9 @@ def main() -> int:
                 or preflight.get("actions", {}).get("can_create_task") is not True
                 or preflight_action_body.get("message") != "Исследуй Скалатракс и сделай report."
                 or preflight_action_body.get("task_id") != "warmaster-preflight-test"
-                or preflight.get("actions", {}).get("next_action", {}).get("kind") != "create_task"
+                or preflight.get("actions", {}).get("next_action", {}).get("kind") != "prepare_orchestrated_task"
                 or preflight.get("actions", {}).get("next_action", {}).get("method") != "POST"
-                or preflight.get("client_action", {}).get("path") != "/task"
+                or preflight.get("client_action", {}).get("path") != "/orchestrate"
                 or preflight.get("phase") != "task_ready"
                 or preflight.get("decision", {}).get("can_create_task") is not True
                 or preflight.get("display", {}).get("headline") != "Task is ready"
@@ -812,12 +820,14 @@ def main() -> int:
             )
             orchestrated_run_dir = Path(orchestrated.get("run_dir", ""))
             orchestrated_ledger = json.loads((orchestrated_run_dir / "task_ledger.json").read_text(encoding="utf-8"))
+            orchestrated_mission_ref = json.loads((orchestrated_run_dir / "mission_ref.json").read_text(encoding="utf-8"))
             if (
                 not orchestrated.get("ok")
                 or orchestrated.get("phase") != "ready_to_start"
-                or [item.get("stage") for item in orchestrated.get("trace", [])] != ["task_preflight", "task", "run_preflight"]
-                or orchestrated.get("next_action", {}).get("kind") != "start_run"
-                or orchestrated.get("next_action", {}).get("endpoint") != "POST /runs/{task_id}/start_local"
+                or [item.get("stage") for item in orchestrated.get("trace", [])] != ["commander_intake", "task_preflight", "task", "run_preflight"]
+                or not str(orchestrated.get("mission_id") or "").startswith("mission-")
+                or orchestrated_mission_ref.get("mission_id") != orchestrated.get("mission_id")
+                or not Path(str(orchestrated_mission_ref.get("mission_dir") or "")).joinpath("commander_order.json").exists()
                 or orchestrated.get("client_action", {}).get("path") != "/runs/warmaster-orchestrate-test/start_local"
                 or orchestrated_ledger.get("status") != "created"
                 or not any(item.get("type") == "run_preflight_recorded" for item in orchestrated_ledger.get("events", []))
