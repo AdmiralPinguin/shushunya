@@ -14,11 +14,29 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
+import urllib.request
+
 import archive_state
-from archive_config import WARMASTER_BASE_URL
+from archive_config import ARCHIVE_API_KEY, ARCHIVE_BASE_URL, DEFAULT_MODEL, WARMASTER_BASE_URL
 from archive_httpio import proxy_json_url
 from archive_util import shared_memory_namespace, wiki_bookshelf_for_namespace
 from archive_ops import append_chat_message
+
+
+def _post_self(path, payload, timeout=240):
+    """POST to our own HTTP API (the chat pipeline needs the full handler stack)."""
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        ARCHIVE_BASE_URL + path,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    if ARCHIVE_API_KEY:
+        request.add_header("Authorization", f"Bearer {ARCHIVE_API_KEY}")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        body = response.read().decode("utf-8")
+        return response.status, json.loads(body) if body else {}
 
 TASK_JOURNAL_ENABLED = os.environ.get("ARCHIVE_TASK_JOURNAL_ENABLED", "1").strip().lower() not in (
     "0",
@@ -29,6 +47,12 @@ TASK_JOURNAL_ENABLED = os.environ.get("ARCHIVE_TASK_JOURNAL_ENABLED", "1").strip
 TASK_JOURNAL_INTERVAL_SEC = max(15.0, float(os.environ.get("ARCHIVE_TASK_JOURNAL_INTERVAL_SEC", "60")))
 TASK_JOURNAL_RUNS_LIMIT = int(os.environ.get("ARCHIVE_TASK_JOURNAL_RUNS_LIMIT", "30"))
 TASK_JOURNAL_MAX_LINES = int(os.environ.get("ARCHIVE_TASK_JOURNAL_MAX_LINES", "300"))
+TASK_ESCALATION_TO_CHAT = os.environ.get("ARCHIVE_TASK_ESCALATION_TO_CHAT_ENABLED", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
 STATE_PATH = Path(__file__).resolve().parent / "archive" / "task_journal_state.json"
 JOURNAL_PAGE_TITLE = "Brigade Task Journal"
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
@@ -132,6 +156,83 @@ def deliver_final_to_chat(task_id):
     return True
 
 
+def escalation_facts(task_id, run):
+    """Collect Warmaster's own verdict about a stuck/failed run: acceptance
+    reason, revision order, manifest blockers. Data packaging only — the
+    judgement already happened in Warmaster's acceptance review."""
+    facts = {
+        "task_id": task_id,
+        "goal": " ".join(str(run.get("goal") or "").split())[:300],
+        "governor": str(run.get("governor") or ""),
+        "status": str(run.get("status") or "").lower(),
+    }
+    try:
+        orchestration = fetch_orchestration(task_id)
+    except Exception as exc:  # noqa: BLE001 - escalation must survive Warmaster hiccups
+        facts["detail_error"] = str(exc)
+        return facts
+    summary = _orchestration_summary(orchestration)
+    protocol = summary.get("mission_protocol") if isinstance(summary.get("mission_protocol"), dict) else {}
+    review = _latest_acceptance_review(protocol)
+    if review:
+        facts["warmaster_reason"] = str(review.get("reason") or "")
+        facts["escalate_to_user"] = bool(review.get("escalate_to_user"))
+        required = review.get("required_revision") if isinstance(review.get("required_revision"), dict) else {}
+        if required.get("order"):
+            facts["required_order"] = str(required.get("order") or "")
+    manifest = summary.get("final_manifest_summary") if isinstance(summary.get("final_manifest_summary"), dict) else {}
+    blockers = manifest.get("blockers") if isinstance(manifest.get("blockers"), list) else []
+    if blockers:
+        facts["blockers"] = [str(item)[:200] for item in blockers[:5]]
+    return facts
+
+
+def deliver_escalation_to_chat(task_id, run, event_kind):
+    if not TASK_ESCALATION_TO_CHAT:
+        return False
+    facts = escalation_facts(task_id, run)
+    lines = [f"[Доклад Warmaster'а владельцу]", f"kind: {event_kind}"]
+    if event_kind == "task_blocked":
+        lines.append("Задача бригады остановлена и ждёт решения владельца.")
+    else:
+        lines.append("Задача бригады провалена, доложи владельцу честно.")
+    lines.append(f"task: {facts.get('goal')}")
+    lines.append(f"губернатор: {facts.get('governor')}; task_id: {task_id}")
+    if facts.get("warmaster_reason"):
+        lines.append(f"вердикт Warmaster'а: {facts['warmaster_reason']}")
+    if facts.get("required_order"):
+        lines.append(f"что требуется: {facts['required_order']}")
+    for blocker in facts.get("blockers") or []:
+        lines.append(f"блокер: {blocker}")
+    lines.append(
+        "Сформулируй это владельцу голосом Шушуни: что случилось и какое решение или ресурс нужен от него. "
+        "Не выдумывай деталей сверх доклада. Не создавай из этого новую задачу."
+    )
+    request_payload = {
+        "model": DEFAULT_MODEL,
+        "user": SHARED_CHAT_SESSION_ID,
+        "session_id": SHARED_CHAT_SESSION_ID,
+        "client_source": "warmaster",
+        "source": "warmaster",
+        "archive_enabled": True,
+        "focus_enabled": True,
+        "archive_system_prompt_enabled": True,
+        "intent_detection": False,
+        "system_event": True,
+        "metadata": {"source": "warmaster", "system_event": True, "event_kind": event_kind, "task_id": task_id},
+        "messages": [{"role": "user", "content": "\n".join(lines)}],
+        "stream": False,
+        "temperature": 0.4,
+        "max_tokens": 1024,
+    }
+    try:
+        _status, response = _post_self("/v1/chat/completions", request_payload)
+        return bool(response)
+    except Exception as exc:  # noqa: BLE001 - escalation delivery must not break the poller
+        print(f"Task escalation delivery failed for {task_id}: {exc}", flush=True)
+        return False
+
+
 def run_entry_text(run, event):
     task_id = str(run.get("task_id") or "")
     governor = str(run.get("governor") or "").strip() or "неизвестный губернатор"
@@ -143,6 +244,8 @@ def run_entry_text(run, event):
     status = str(run.get("status") or "").lower()
     if event == "started":
         return f"Шушуня начала задачу бригады {task_id} (губернатор {governor}): {goal}"
+    if event == "blocked":
+        return f"Задача бригады {task_id} остановлена и ждёт решения владельца (губернатор {governor}{step_note}): {goal}"
     outcome = {"completed": "успешно выполнила", "failed": "провалила", "cancelled": "отменила"}.get(status, f"завершила со статусом {status}")
     return f"Шушуня {outcome} задачу бригады {task_id} (губернатор {governor}{step_note}): {goal}"
 
@@ -215,12 +318,17 @@ def poll_once():
         changed = True
         if first_run:
             continue  # baseline pass: learn current state silently, no retro-entries
-        if previous is None and status not in TERMINAL_STATUSES:
+        if previous is None and status not in TERMINAL_STATUSES and status != "blocked":
             remember_entry(run_entry_text(run, "started"), task_id, "started")
+        elif status == "blocked":
+            remember_entry(run_entry_text(run, "blocked"), task_id, "blocked")
+            deliver_escalation_to_chat(task_id, run, "task_blocked")
         elif status in TERMINAL_STATUSES:
             remember_entry(run_entry_text(run, "finished"), task_id, f"finished-{status}")
             if status == "completed":
                 deliver_final_to_chat(task_id)
+            elif status == "failed":
+                deliver_escalation_to_chat(task_id, run, "task_failed")
     if changed:
         save_state(state)
     return {"runs": len(runs), "baseline": first_run}
