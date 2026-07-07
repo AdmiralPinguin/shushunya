@@ -56,6 +56,10 @@ def create_task(payload: dict[str, Any], db_path: Path = DB_PATH) -> dict[str, A
         next_run = parse_datetime(str(next_run), timezone_name).replace(microsecond=0).isoformat()
     if due_at:
         due_at = parse_datetime(str(due_at), timezone_name).replace(microsecond=0).isoformat()
+    # Empty string must not survive to the DB: claim_due_tasks compares strings,
+    # and '' <= now is always true, so an unscheduled task would fire instantly.
+    next_run = next_run or None
+    due_at = due_at or None
     task_id = str(payload.get("id") or uuid.uuid4()).strip()
     created_at = now_iso(timezone_name)
     values = {
@@ -155,7 +159,7 @@ def claim_due_tasks(limit: int = 20, db_path: Path = DB_PATH) -> list[dict[str, 
         rows = db.execute(
             """
             SELECT * FROM tasks
-            WHERE status = 'active' AND next_run IS NOT NULL AND next_run <= ?
+            WHERE status = 'active' AND next_run IS NOT NULL AND next_run != '' AND next_run <= ?
             ORDER BY next_run ASC
             LIMIT ?
             """,

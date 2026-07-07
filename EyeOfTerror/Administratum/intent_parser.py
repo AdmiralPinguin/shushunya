@@ -9,6 +9,10 @@ from .timeutil import DEFAULT_TZ
 INTENT_SYSTEM_PROMPT = (
     "You detect whether the user's Russian text creates a reminder, todo, routine, or watch for Administratum. "
     "Return one strict JSON object only. If no time/task/watch instruction exists, return {\"intent\":\"none\",\"confidence\":0}. "
+    "NOT tasks (always intent=none): requests to recall or repeat what was already said "
+    "('напомни, что я говорил', 'повтори', 'расскажи еще раз', 'что мы обсуждали') — that is memory recall; "
+    "requests to remember a fact with no scheduled action ('запиши на память', 'запомни, что ...') — memory handles that itself. "
+    "A reminder requires an explicit future time or interval ('завтра в 9', 'через час', 'каждое утро'). "
     "For create_task return: intent=create_task, kind=reminder|todo|routine|watch, title, body, due_at ISO-8601 or empty, "
     "interval string or empty, timezone, confidence 0..1, needs_confirmation boolean, reason. "
     "For watch also include target and condition. Use current date/time from the user message context. "

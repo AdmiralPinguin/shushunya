@@ -943,6 +943,10 @@ def create_administratum_task_from_intent(intent, session_id, client_source):
         return {"created": False, "reason": "low_confidence_or_missing_title", "intent": intent}
     if bool(intent.get("needs_confirmation")) and str(intent.get("kind") or "") in {"watch", "routine"}:
         return {"created": False, "reason": "confirmation_required", "intent": intent}
+    kind = str(intent.get("kind") or "").strip()
+    if kind == "reminder" and not str(intent.get("due_at") or "").strip() and not str(intent.get("interval") or "").strip():
+        # A reminder with nothing to schedule would fire instantly and echo the user.
+        return {"created": False, "reason": "reminder_without_schedule", "intent": intent}
     endpoint_kind, administratum_payload = administratum_payload_from_intent(intent, session_id=session_id, client_source=client_source)
     if endpoint_kind == "watch":
         try:
@@ -978,6 +982,14 @@ def administratum_intent_context(result):
                 "Administratum watch created. Confirm to the owner in Shushunya's voice exactly what was recorded.\n"
                 f"id: {watch.get('id')}\ntitle: {watch.get('title')}\nwatch_type: {watch.get('watch_type')}\n"
                 f"target: {watch.get('target')}\ncondition_json: {watch.get('condition_json')}"
+            ),
+        }
+    if result.get("reason") == "reminder_without_schedule":
+        return {
+            "role": "system",
+            "content": (
+                "Administratum detected a reminder request but no time or interval was given, so nothing was created. "
+                "Do not claim a reminder was recorded. Ask the owner when to remind, in one short question."
             ),
         }
     if result.get("reason") == "confirmation_required":
