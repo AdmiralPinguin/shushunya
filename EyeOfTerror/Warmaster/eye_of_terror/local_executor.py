@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 from EyeOfTerror.model_brain import attach_model_brain, request_model_decision
 
 from .ledger import TaskLedger
+from .mission_control import record_worker_protocol_report, worker_report_from_payload
 from .pipeline import write_json_atomic
 
 
@@ -396,12 +397,22 @@ def execute_run(
             break
         result = run_step(repo_root, dispatch_path, workspace_root, timeout_sec, revision_context=revision_contexts.get(dispatch_path.stem), timeout_retries=timeout_retries)
         results.append(result)
+        step_details: dict[str, Any] = {}
+        try:
+            packet = load_json(dispatch_path)
+            order = packet.get("worker_order") if isinstance(packet.get("worker_order"), dict) else {}
+            report = worker_report_from_payload(str(order.get("mission_id") or f"mission-{contract.get('task_id') or run_dir.name}"), result.step_id, result.worker, result.payload, result.ok)
+            record_worker_protocol_report(run_dir, report)
+            step_details["worker_report"] = report
+        except Exception as exc:  # noqa: BLE001 - protocol reporting must not hide the worker result.
+            step_details["worker_report_error"] = str(exc)
         ledger.record_step(
             result.step_id,
             result.worker,
             str(result.payload.get("status") or ("completed" if result.ok else "failed")),
             [str(item) for item in result.payload.get("artifacts", [])] if isinstance(result.payload.get("artifacts"), list) else [],
             str(result.payload.get("summary") or result.payload.get("error") or ""),
+            step_details,
         )
         if not result.ok:
             break

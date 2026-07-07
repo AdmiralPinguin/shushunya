@@ -9,6 +9,7 @@ from typing import Any
 
 from .local_executor import ordered_dispatch_paths, revision_contexts_from_result
 from .ledger import TaskLedger
+from .mission_control import record_worker_protocol_report, worker_report_from_payload
 from .pipeline import write_json_atomic
 
 
@@ -204,6 +205,14 @@ def execute_run(
         results.append(result)
         worker_view = worker_view_from_payload(result.payload)
         step_details = {"worker_view": worker_view} if worker_view else None
+        try:
+            packet = load_json(dispatch_path)
+            order = packet.get("worker_order") if isinstance(packet.get("worker_order"), dict) else {}
+            report = worker_report_from_payload(str(order.get("mission_id") or f"mission-{contract.get('task_id') or run_dir.name}"), result.step_id, result.worker, result.payload, result.ok)
+            record_worker_protocol_report(run_dir, report)
+            step_details = {**(step_details or {}), "worker_report": report}
+        except Exception as exc:  # noqa: BLE001 - protocol reporting must not hide the worker result.
+            step_details = {**(step_details or {}), "worker_report_error": str(exc)}
         ledger.record_step(
             result.step_id,
             result.worker,

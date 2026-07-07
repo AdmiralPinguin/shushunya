@@ -16,12 +16,11 @@ from EyeOfTerror.common_protocol import (
     progress_event,
     revision_order,
     validate_protocol_payload,
+    worker_report,
 )
 from EyeOfTerror.model_brain import request_model_decision
 
-from .artifacts import final_manifest_summary
 from .ledger import TaskLedger
-from .run_package import load_json_file, run_oversight
 from .routing import route_message
 
 
@@ -226,12 +225,37 @@ def open_mission(warmaster_root: Path, message: str, task_id: str | None, source
 def link_run_to_mission(run_dir: Path, mission: dict[str, Any]) -> None:
     if not mission.get("ok"):
         return
+    raw_mission_dir = str(mission.get("mission_dir") or "")
+    if raw_mission_dir:
+        Path(raw_mission_dir).mkdir(parents=True, exist_ok=True)
     payload = {
         "mission_id": str(mission.get("mission_id") or ""),
-        "mission_dir": str(mission.get("mission_dir") or ""),
+        "mission_dir": raw_mission_dir,
         "assigned_governor": str((mission.get("commander_order") or {}).get("to") or ""),
     }
     _write_json(run_dir / "mission_ref.json", payload)
+    sync_dispatch_worker_orders(run_dir, payload["mission_id"])
+
+
+def sync_dispatch_worker_orders(run_dir: Path, mission_id: str) -> None:
+    dispatch_dir = run_dir / "dispatch"
+    if not dispatch_dir.exists():
+        return
+    for dispatch_path in dispatch_dir.glob("*.json"):
+        packet = _read_json(dispatch_path)
+        if not packet:
+            continue
+        order = packet.get("worker_order") if isinstance(packet.get("worker_order"), dict) else {}
+        request = packet.get("request") if isinstance(packet.get("request"), dict) else {}
+        request_order = request.get("worker_order") if isinstance(request.get("worker_order"), dict) else {}
+        if order:
+            order["mission_id"] = mission_id
+            packet["worker_order"] = order
+        if request_order:
+            request_order["mission_id"] = mission_id
+            request["worker_order"] = request_order
+            packet["request"] = request
+        _write_json(dispatch_path, packet)
 
 
 def mission_ref_for_run(run_dir: Path) -> dict[str, Any]:
@@ -249,10 +273,7 @@ def mission_dir_from_ref(ref: dict[str, Any]) -> Path | None:
 
 
 def worker_for_step(run_dir: Path, step_id: str) -> str:
-    try:
-        status = load_json_file(run_dir / "status.json")
-    except Exception:
-        status = {}
+    status = _read_json(run_dir / "status.json")
     for step in status.get("steps", []) if isinstance(status.get("steps"), list) else []:
         if isinstance(step, dict) and str(step.get("step_id") or "") == step_id:
             return str(step.get("worker") or "")
@@ -267,8 +288,7 @@ def worker_for_step(run_dir: Path, step_id: str) -> str:
 
 
 def revision_source_step(run_dir: Path, result: dict[str, Any]) -> str:
-    oversight_payload = run_oversight(run_dir)
-    oversight = oversight_payload.get("oversight") if isinstance(oversight_payload.get("oversight"), dict) else {}
+    oversight = _read_json(run_dir / "oversight.json")
     policy = oversight.get("revision_policy") if isinstance(oversight.get("revision_policy"), dict) else {}
     source_step = str(policy.get("source_step") or "").strip()
     if source_step:
@@ -276,10 +296,7 @@ def revision_source_step(run_dir: Path, result: dict[str, Any]) -> str:
     final_step = str(result.get("final_step") or "").strip()
     if final_step:
         return final_step
-    try:
-        status = load_json_file(run_dir / "status.json")
-    except Exception:
-        return "finalize"
+    status = _read_json(run_dir / "status.json")
     steps = status.get("steps") if isinstance(status.get("steps"), list) else []
     if steps and isinstance(steps[-1], dict):
         return str(steps[-1].get("step_id") or "finalize")
@@ -308,7 +325,68 @@ def revision_plan_from_acceptance(run_dir: Path, result: dict[str, Any], review:
     }
 
 
+def worker_report_from_payload(mission_id: str, step_id: str, worker: str, payload: dict[str, Any], ok: bool) -> dict[str, Any]:
+    raw_status = str(payload.get("status") or "").strip().lower()
+    if raw_status in {"blocked"}:
+        status = "blocked"
+    elif raw_status in {"needs_revision"} or (isinstance(payload.get("revision_plan"), dict) and payload.get("revision_plan", {}).get("required")):
+        status = "needs_revision"
+    elif ok and raw_status in {"ready", "completed", "passed", "passed_with_warnings", "done"}:
+        status = "done"
+    elif ok and not raw_status:
+        status = "done"
+    else:
+        status = "failed"
+    report = worker_report(
+        mission_id,
+        step_id=step_id,
+        worker=worker,
+        status=status,
+        summary=str(payload.get("summary") or payload.get("error") or raw_status or "Worker step finished."),
+        artifacts=[str(item) for item in payload.get("artifacts", [])] if isinstance(payload.get("artifacts"), list) else [],
+        problems=[str(item) for item in payload.get("problems", [])] if isinstance(payload.get("problems"), list) else [],
+        next_recommended_action=str(payload.get("next_recommended_action") or payload.get("next_action") or ""),
+    )
+    validate_protocol_payload(report, expected_type="worker_report")
+    return report
+
+
+def record_worker_protocol_report(run_dir: Path, report: dict[str, Any]) -> None:
+    ref = mission_ref_for_run(run_dir)
+    mission_dir = mission_dir_from_ref(ref)
+    if not mission_dir:
+        return
+    mission_id = str(ref.get("mission_id") or report.get("mission_id") or mission_dir.name)
+    report = dict(report)
+    report["mission_id"] = mission_id
+    validate_protocol_payload(report, expected_type="worker_report")
+    step_id = str(report.get("step_id") or "step")
+    _write_json(_next_numbered_path(mission_dir / "worker_reports", f"worker_report-{step_id}"), report)
+    phase = "executing"
+    event_status = "done"
+    if report.get("status") in {"blocked", "needs_revision"}:
+        phase = "revising" if report.get("status") == "needs_revision" else "blocked"
+        event_status = "blocked"
+    elif report.get("status") == "failed":
+        phase = "failed"
+        event_status = "failed"
+    append_progress_event(
+        mission_dir / "progress_events.jsonl",
+        progress_event(
+            mission_id,
+            actor=str(report.get("worker") or "Worker"),
+            role="worker",
+            phase=phase,
+            status=event_status,
+            title=f"Шаг {step_id}: {report.get('status')}",
+            body=str(report.get("summary") or ""),
+        ),
+    )
+
+
 def governor_report_from_run(run_dir: Path, mission_id: str) -> dict[str, Any]:
+    from .artifacts import final_manifest_summary
+
     ledger = TaskLedger.load(run_dir / "task_ledger.json").to_dict()
     result = ledger.get("result") if isinstance(ledger.get("result"), dict) else {}
     manifest = final_manifest_summary(result)

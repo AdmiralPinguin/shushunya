@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from EyeOfTerror.common_protocol import validate_protocol_payload, worker_order
+
 from .contracts import TaskContract
 from .registry import worker_by_name
 
@@ -26,6 +28,7 @@ class DispatchPacket:
     depends_on: list[str]
     input_artifacts: list[str]
     expected_artifacts: list[str]
+    worker_order: dict[str, Any]
     request: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
@@ -38,6 +41,7 @@ class DispatchPacket:
             "depends_on": self.depends_on,
             "input_artifacts": self.input_artifacts,
             "expected_artifacts": self.expected_artifacts,
+            "worker_order": self.worker_order,
             "request": self.request,
         }
 
@@ -113,6 +117,23 @@ def build_dispatch_packets(contract: TaskContract, oversight: dict[str, Any] | N
         quality_expectations = quality_expectations_for_step(oversight, step.step_id)
         if quality_expectations:
             request["quality_expectations"] = quality_expectations
+        quality_requirements: list[str] = []
+        step_quality = quality_expectations.get("step_quality") if isinstance(quality_expectations.get("step_quality"), dict) else {}
+        for item in step_quality.get("checks", []) if isinstance(step_quality.get("checks"), list) else []:
+            if isinstance(item, str) and item.strip():
+                quality_requirements.append(item.strip())
+        order = worker_order(
+            f"mission-{contract.task_id}",
+            step_id=step.step_id,
+            sender=contract.assigned_governor,
+            to=worker.name,
+            task=step.purpose,
+            input_artifacts=input_artifacts,
+            expected_output=", ".join(step.expected_artifacts) if step.expected_artifacts else step.purpose,
+            quality_requirements=quality_requirements,
+        )
+        validate_protocol_payload(order, expected_type="worker_order")
+        request["worker_order"] = order
         packets.append(
             DispatchPacket(
                 task_id=contract.task_id,
@@ -123,6 +144,7 @@ def build_dispatch_packets(contract: TaskContract, oversight: dict[str, Any] | N
                 depends_on=step.depends_on,
                 input_artifacts=input_artifacts,
                 expected_artifacts=step.expected_artifacts,
+                worker_order=order,
                 request=request,
             )
         )
