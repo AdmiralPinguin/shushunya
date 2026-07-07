@@ -46,7 +46,6 @@ def gateway_capabilities() -> dict[str, Any]:
         ],
         "legacy_diagnostic_endpoints": [
             "POST /task_preflight",
-            "POST /task",
         ],
         "capabilities": [
             "model_backed_gateway_orchestration",
@@ -135,7 +134,6 @@ def gateway_capabilities() -> dict[str, Any]:
             "POST /orchestrate",
             "POST /orchestrate_start",
             "POST /orchestrate_run",
-            "POST /task",
             "GET /runs",
             "GET /runs?limit=20",
             "GET /runs/{task_id}",

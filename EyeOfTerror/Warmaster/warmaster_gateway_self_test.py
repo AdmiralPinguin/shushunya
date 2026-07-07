@@ -24,6 +24,7 @@ import eye_of_terror.routing as routing
 import eye_of_terror.local_executor as local_executor
 import eye_of_terror.task_prepare as task_prepare
 import eye_of_terror.warmaster_gateway as warmaster_gateway
+from EyeOfTerror.common_protocol import commander_order, validate_protocol_payload
 from EyeOfTerror.model_brain import model_contract
 from eye_of_terror.inner_circle.iskandar_service import make_handler as make_iskandar_handler
 from eye_of_terror.warmaster_gateway import brigade_readiness_summary, cancel_http_worker_tasks, compact_brigade_readiness, make_handler, parse_limit, parse_nonnegative_int, prepare_run_root, requested_step_ids_from_payload, resolve_run_child_path, resume_step_ids_from_run, revision_step_ids_from_run, valid_task_id, validate_service_host
@@ -127,6 +128,24 @@ def write_gateway_test_corpus(corpus_root: Path) -> None:
 
 def write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def iskandar_command(task: str, task_id: str) -> dict:
+    order = commander_order(
+        mission_id=f"mission-{task_id}",
+        to="IskandarKhayon",
+        user_request=task,
+        commander_intent="Prepare an IskandarKhayon research run through the shared command protocol.",
+        primary_goal=task,
+        success_conditions=[
+            "governor service receives commander_order",
+            "prepared run package preserves mission protocol artifacts",
+            "raw direct governor task input is not used",
+        ],
+        constraints=["Do not use direct raw governor task input."],
+    )
+    validate_protocol_payload(order, expected_type="commander_order")
+    return order
 
 
 def patch_dispatch_ports(run_dir: Path, port: int) -> None:
@@ -469,6 +488,7 @@ def main() -> int:
                 "warmaster-governor-http-test",
                 run_root,
                 ServiceGovernor(),
+                commander_order=iskandar_command("Исследуй Скалатракс и сделай report.", "warmaster-governor-http-test"),
             )
             if (
                 not service_prepared.get("ok")
@@ -490,6 +510,7 @@ def main() -> int:
                     "warmaster-governor-bad-prepare-test",
                     run_root,
                     BadPrepareGovernor(),
+                    commander_order=iskandar_command("Исследуй Скалатракс и сделай report.", "warmaster-governor-bad-prepare-test"),
                 )
                 if (
                     bad_prepared.get("error_code") != "governor_prepare_invalid_run"
@@ -502,6 +523,7 @@ def main() -> int:
                     "warmaster-governor-bad-dispatch-test",
                     run_root,
                     BadPrepareGovernor(),
+                    commander_order=iskandar_command("Исследуй Скалатракс и сделай report.", "warmaster-governor-bad-dispatch-test"),
                 )
                 if (
                     bad_dispatch_prepared.get("error_code") != "governor_prepare_invalid_run"
@@ -515,6 +537,7 @@ def main() -> int:
                     "warmaster-governor-bad-worker-test",
                     run_root,
                     BadPrepareGovernor(),
+                    commander_order=iskandar_command("Исследуй Скалатракс и сделай report.", "warmaster-governor-bad-worker-test"),
                 )
                 if (
                     bad_worker_prepared.get("error_code") != "governor_prepare_invalid_run"
@@ -534,6 +557,7 @@ def main() -> int:
                     "warmaster-governor-missing-workers-test",
                     run_root,
                     ServiceGovernor(),
+                    commander_order=iskandar_command("Исследуй Скалатракс и сделай report.", "warmaster-governor-missing-workers-test"),
                 )
                 if (
                     missing_workers.get("error_code") != "governor_workers_missing"
@@ -554,25 +578,26 @@ def main() -> int:
             try:
                 gateway_base = f"http://127.0.0.1:{gateway_server.server_port}"
                 service_task = request_json(
-                    gateway_base + "/task",
-                    {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-default-http-governor-test"},
+                    gateway_base + "/orchestrate_run",
+                    {
+                        "message": "Исследуй Скалатракс и сделай report.",
+                        "task_id": "warmaster-default-http-governor-test",
+                        "auto_start": False,
+                    },
                 )
-                if service_task.get("governor_transport") != "http" or not service_task.get("ok"):
-                    raise AssertionError(f"gateway did not use default http governor transport: {service_task}")
-                service_preflight = request_json(
-                    gateway_base + "/task_preflight",
-                    {"message": "Исследуй Скалатракс и сделай report.", "task_id": "warmaster-default-http-preflight-test"},
-                )
-                service_preflight_body = service_preflight.get("actions", {}).get("next_action", {}).get("body", {})
+                service_task_preflight = service_task.get("prepare", {}).get("task_preflight", {})
+                if service_task_preflight.get("governor_transport") != "http" or not service_task.get("ok"):
+                    raise AssertionError(f"gateway did not use command protocol with default http governor transport: {service_task}")
+                if not Path(str(service_task.get("mission", {}).get("mission_dir") or "")).joinpath("commander_order.json").exists():
+                    raise AssertionError(f"default http governor run did not persist commander_order: {service_task}")
+                service_preflight = next((item for item in service_task.get("trace", []) if item.get("stage") == "task_preflight"), {})
+                service_preflight_body = service_preflight.get("next_action", {}).get("body", {})
                 if (
                     not service_preflight.get("ok")
-                    or service_preflight.get("governor_transport") != "http"
-                    or service_preflight.get("governor_plan_actions", {}).get("next_action", {}).get("kind") != "prepare_run"
-                    or service_preflight_body.get("message") != "Исследуй Скалатракс и сделай report."
                     or service_preflight_body.get("governor_transport") != "http"
-                    or service_preflight_body.get("task_id") != "warmaster-default-http-preflight-test"
+                    or service_preflight_body.get("task_id") != "warmaster-default-http-governor-test"
                 ):
-                    raise AssertionError(f"http governor task preflight did not preserve creation action transport: {service_preflight}")
+                    raise AssertionError(f"http governor command preflight did not preserve creation action transport: {service_preflight}")
             finally:
                 gateway_server.shutdown()
                 gateway_thread.join(timeout=120)
@@ -657,12 +682,14 @@ def main() -> int:
                 or not capabilities.get("actions", {}).get("can_bulk_start_recoverable_runs")
                 or not capabilities.get("actions", {}).get("can_poll_global_events")
                 or capabilities.get("actions", {}).get("preferred_task_flow", [None])[0] != "POST /orchestrate_run"
-                or "POST /task with allow_legacy_direct_task=true" not in capabilities.get("actions", {}).get("legacy_direct_task_flow", [])
                 or capabilities.get("actions", {}).get("can_create_legacy_task")
+                or capabilities.get("actions", {}).get("legacy_direct_task_available")
+                or capabilities.get("actions", {}).get("legacy_direct_task_flow")
                 or not capabilities.get("actions", {}).get("legacy_direct_task_requires_explicit_opt_in")
                 or "POST /orchestrate" not in capabilities.get("actions", {}).get("diagnostic_prepare_flow", [])
                 or "POST /orchestrate_run" not in capabilities.get("command_protocol_endpoints", [])
-                or "POST /task" not in capabilities.get("legacy_diagnostic_endpoints", [])
+                or "POST /task" in capabilities.get("legacy_diagnostic_endpoints", [])
+                or "POST /task" in capabilities.get("endpoints", [])
                 or "GET /events?after=0" not in capabilities.get("actions", {}).get("polling", [])
                 or "GET /recovery" not in capabilities.get("actions", {}).get("maintenance", [])
                 or "GET /runs/{task_id}/package" not in capabilities.get("actions", {}).get("run_inspection", [])
