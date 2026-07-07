@@ -634,15 +634,37 @@ def research_loop_run(
             summary = run_summary(run_dir)
             actions = summary.get("actions") if isinstance(summary.get("actions"), dict) else {}
             status = str(summary.get("status") or "")
+            progress = summary.get("progress") if isinstance(summary.get("progress"), dict) else {}
+            pending_step_ids = [str(step_id) for step_id in progress.get("pending_step_ids", []) if step_id]
             cycle: dict[str, Any] = {
                 "index": len(cycles),
                 "status": status,
                 "next_action": actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {},
             }
-            if actions.get("can_start"):
+            if actions.get("can_start") or status in {"created", "assigned"}:
                 operation = "full"
-            elif allow_resume and actions.get("can_resume"):
+            elif allow_resume and actions.get("can_resume") and pending_step_ids:
                 operation = "resume"
+            elif allow_resume and actions.get("can_resume") and not pending_step_ids:
+                planned_steps = int(progress.get("planned_steps") or 0)
+                completed_steps = int(progress.get("completed_steps") or 0)
+                failed_steps = int(progress.get("failed_steps") or 0)
+                if planned_steps > 0 and completed_steps >= planned_steps and failed_steps == 0:
+                    TaskLedger.load(run_dir / "task_ledger.json").set_status("completed")
+                    record_research_loop_event(
+                        run_dir,
+                        "research_loop_completed_empty_resume",
+                        {"planned_steps": planned_steps, "completed_steps": completed_steps},
+                    )
+                    cycle["stop_reason"] = "normalized_completed"
+                    cycle["resume_skipped"] = "no_pending_steps"
+                    cycles.append(cycle)
+                    continue
+                stop_reason = "needs_attention"
+                cycle["stop_reason"] = stop_reason
+                cycle["resume_skipped"] = "no_pending_steps"
+                cycles.append(cycle)
+                break
             elif actions.get("can_execute_revision"):
                 if revision_cycles >= max_revision_cycles:
                     stop_reason = "revision_cycle_limit"

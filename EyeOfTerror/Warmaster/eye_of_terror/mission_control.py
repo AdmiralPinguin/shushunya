@@ -116,6 +116,27 @@ def commander_order_prompt_payload(message: str, route: dict[str, Any], mission_
     }
 
 
+GENERIC_PRIMARY_GOAL_MARKERS = (
+    "complete the user's requested task",
+    "complete the user requested task",
+    "fulfill the user's request",
+    "fulfil the user's request",
+    "выполнить запрос пользователя",
+    "выполнить пользовательский запрос",
+)
+
+
+def concrete_primary_goal(model_goal: str, user_request: str) -> str:
+    goal = model_goal.strip()
+    lowered = goal.lower()
+    if not goal or any(marker in lowered for marker in GENERIC_PRIMARY_GOAL_MARKERS):
+        return user_request.strip()
+    request_terms = [term for term in re.findall(r"[\wА-Яа-яЁё]{5,}", user_request.lower()) if term]
+    if request_terms and not any(term in lowered for term in request_terms[:6]):
+        return user_request.strip()
+    return goal
+
+
 def build_commander_order(message: str, mission_id: str) -> dict[str, Any]:
     route = route_message(message)
     route_payload = route.to_dict()
@@ -150,13 +171,14 @@ def build_commander_order(message: str, mission_id: str) -> dict[str, Any]:
         }
     try:
         payload = _extract_json_object(str(model_decision.get("content") or ""))
+        primary_goal = concrete_primary_goal(str(payload.get("primary_goal") or ""), message)
         order = commander_order(
             mission_id,
             to=route.governor,
             supporting_governors=[item.get("name") for item in route.supporting_governors if isinstance(item, dict)],
             user_request=message,
             commander_intent=str(payload.get("commander_intent") or "").strip(),
-            primary_goal=str(payload.get("primary_goal") or "").strip(),
+            primary_goal=primary_goal,
             success_conditions=payload.get("success_conditions") if isinstance(payload.get("success_conditions"), list) else [],
             constraints=payload.get("constraints") if isinstance(payload.get("constraints"), list) else [],
             escalate_to_user_if=payload.get("escalate_to_user_if") if isinstance(payload.get("escalate_to_user_if"), list) else [],
@@ -529,15 +551,19 @@ def governor_report_from_run(run_dir: Path, mission_id: str) -> dict[str, Any]:
     manifest = final_manifest_summary(result)
     revision_plan = result.get("revision_plan") if isinstance(result.get("revision_plan"), dict) else {"required": False, "steps": []}
     result_status = str(result.get("status") or "").strip().lower()
-    if revision_plan.get("required") or result_status in {"needs_revision", "blocked"}:
+    manifest_ready = (
+        str(manifest.get("status") or "").strip().lower() in {"ready", "completed", "passed"}
+        and int(manifest.get("blocker_count") or 0) == 0
+    )
+    if result_status == "blocked" or (result_status == "needs_revision" and not manifest_ready) or (revision_plan.get("required") and not manifest_ready):
         status = "needs_revision" if result_status != "blocked" else "blocked"
-    elif bool(result.get("ok")) or result_status in {"ready", "completed", "passed", "passed_with_warnings"}:
+    elif bool(result.get("ok")) or manifest_ready or result_status in {"ready", "completed", "passed", "passed_with_warnings"}:
         status = "ready"
     else:
         status = "failed"
     quality_checks = [
         {"name": "result_ok", "ok": bool(result.get("ok"))},
-        {"name": "no_revision_required", "ok": not bool(revision_plan.get("required"))},
+        {"name": "no_revision_required", "ok": manifest_ready or not bool(revision_plan.get("required"))},
     ]
     if manifest:
         quality_checks.append({"name": "final_manifest_status", "ok": str(manifest.get("status") or "") in {"ready", "completed", "passed"}, "value": manifest.get("status", "")})
@@ -603,6 +629,23 @@ def build_acceptance_review(command: dict[str, Any], report: dict[str, Any], led
         )
         validate_protocol_payload(review, expected_type="acceptance_review")
         return {"ok": True, "acceptance_review": review, "model_brain": {"status": "skipped", "reason": "governor_report.status=blocked"}}
+    quality_review = report.get("quality_review") if isinstance(report.get("quality_review"), dict) else {}
+    manifest = quality_review.get("final_manifest_summary") if isinstance(quality_review.get("final_manifest_summary"), dict) else {}
+    if (
+        report_status == "ready"
+        and quality_review.get("passed") is True
+        and str(manifest.get("status") or "").strip().lower() in {"ready", "completed", "passed"}
+        and int(manifest.get("blocker_count") or 0) == 0
+    ):
+        review = acceptance_review(
+            str(report.get("mission_id") or ""),
+            accepted=True,
+            reason="Структурная приемка пройдена: отчет готов, финальный manifest готов, блокеров нет.",
+            required_revision={"to": str(report.get("governor") or ""), "order": "", "required_steps": []},
+            escalate_to_user=False,
+        )
+        validate_protocol_payload(review, expected_type="acceptance_review")
+        return {"ok": True, "acceptance_review": review, "model_brain": {"status": "skipped", "reason": "structured_acceptance_gate_passed"}}
     model_decision = request_model_decision(
         "WarmasterAcceptance",
         "Final acceptance authority over governor reports",

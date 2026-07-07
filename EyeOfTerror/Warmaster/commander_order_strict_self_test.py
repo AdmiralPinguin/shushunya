@@ -25,7 +25,7 @@ def main() -> int:
         user_request="Исследуй Скалатракс и собери источники.",
         commander_intent="Проверить, что боевой путь идет через приказ Вармастера.",
         primary_goal="Подготовить исследовательский план через бригадира.",
-        success_conditions=["подготовка использует commander_order", "legacy direct task не считается strict-протоколом"],
+        success_conditions=["подготовка использует commander_order", "путь без commander_order не считается strict-протоколом"],
     )
     governor_task = governor_task_from_order(order)
     if governor_task != order.get("primary_goal") or governor_task.startswith("ПРИКАЗ ВАРМАСТЕРА"):
@@ -81,15 +81,15 @@ def main() -> int:
             raise AssertionError(f"strict preflight did not use commander_order mode: {strict_preflight}")
         if strict_preflight.get("route", {}).get("source") != "forced_governor":
             raise AssertionError(f"strict preflight did not expose commander route source: {strict_preflight}")
-        legacy_preflight = preflight_task(
+        missing_order_preflight = preflight_task(
             "Исследуй Скалатракс.",
-            "strict-legacy-preflight",
+            "strict-missing-order-preflight",
             run_root,
             governor_transport="local",
             forced_governor="IskandarKhayon",
         )
-        if legacy_preflight.get("protocol_mode") != "legacy_direct_task":
-            raise AssertionError(f"legacy preflight was not marked as legacy: {legacy_preflight}")
+        if missing_order_preflight.get("protocol_mode") != "commander_order_missing":
+            raise AssertionError(f"preflight without commander_order was not marked: {missing_order_preflight}")
     print("[ok] Warmaster commander-order strict gate")
     return 0
 

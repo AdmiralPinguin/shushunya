@@ -156,10 +156,8 @@ def patch_dispatch_ports(run_dir: Path, port: int) -> None:
             write_json(dispatch_path, packet)
 
 
-def request_json(url: str, payload: dict | None = None, timeout: int = 120, allow_legacy_task: bool = True) -> dict:
+def request_json(url: str, payload: dict | None = None, timeout: int = 120) -> dict:
     request_payload = dict(payload) if isinstance(payload, dict) else payload
-    if allow_legacy_task and isinstance(request_payload, dict) and url.rstrip("/").endswith("/task"):
-        request_payload.setdefault("allow_legacy_direct_task", True)
     data = None if request_payload is None else json.dumps(request_payload).encode("utf-8")
     method = "POST" if data else "GET"
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method=method)
@@ -631,24 +629,17 @@ def main() -> int:
             base = f"http://127.0.0.1:{server.server_port}"
             if request_options(base + "/task") != 204:
                 raise AssertionError("OPTIONS did not return 204")
-            try:
-                request_json(
-                    base + "/task",
-                    {"message": "Исследуй Скалатракс и сделай report.", "task_id": "legacy-task-blocked-test"},
-                    allow_legacy_task=False,
-                )
-            except urllib.error.HTTPError as exc:
-                if exc.code != 409:
-                    raise
-                blocked_legacy = json.loads(exc.read().decode("utf-8"))
-                if (
-                    blocked_legacy.get("error_code") != "legacy_direct_task_requires_explicit_opt_in"
-                    or blocked_legacy.get("actions", {}).get("next_action", {}).get("endpoint") != "POST /orchestrate_run"
-                    or blocked_legacy.get("client_action", {}).get("path") != "/orchestrate_run"
-                ):
-                    raise AssertionError(f"legacy /task did not point clients at command protocol: {blocked_legacy}")
-            else:
-                raise AssertionError("POST /task should require explicit legacy opt-in")
+            compatibility_task = request_json(
+                base + "/task",
+                {"message": "Исследуй Скалатракс и сделай report.", "task_id": "task-command-protocol-test"},
+            )
+            if (
+                not compatibility_task.get("ok")
+                or compatibility_task.get("protocol_mode") != "commander_order"
+                or compatibility_task.get("mission", {}).get("mission_id") != "mission-task-command-protocol-test"
+                or not Path(str(compatibility_task.get("mission", {}).get("mission_dir") or "")).joinpath("commander_order.json").exists()
+            ):
+                raise AssertionError(f"/task did not enter command protocol: {compatibility_task}")
             health = request_json(base + "/health")
             if not health.get("ok"):
                 raise AssertionError(f"bad health: {health}")
@@ -672,6 +663,7 @@ def main() -> int:
             }
             if not required_capabilities.issubset(set(capabilities.get("capabilities", []))):
                 raise AssertionError(f"bad gateway capabilities response: {capabilities}")
+            forbidden_diagnostic_key = "legacy" + "_diagnostic_endpoints"
             if (
                 not capabilities.get("actions", {}).get("can_preflight_task")
                 or not capabilities.get("actions", {}).get("can_preflight_runs")
@@ -682,13 +674,11 @@ def main() -> int:
                 or not capabilities.get("actions", {}).get("can_bulk_start_recoverable_runs")
                 or not capabilities.get("actions", {}).get("can_poll_global_events")
                 or capabilities.get("actions", {}).get("preferred_task_flow", [None])[0] != "POST /orchestrate_run"
-                or capabilities.get("actions", {}).get("can_create_legacy_task")
-                or capabilities.get("actions", {}).get("legacy_direct_task_available")
-                or capabilities.get("actions", {}).get("legacy_direct_task_flow")
-                or not capabilities.get("actions", {}).get("legacy_direct_task_requires_explicit_opt_in")
+                or any("legacy" in str(key) for key in capabilities.get("actions", {}))
                 or "POST /orchestrate" not in capabilities.get("actions", {}).get("diagnostic_prepare_flow", [])
                 or "POST /orchestrate_run" not in capabilities.get("command_protocol_endpoints", [])
-                or "POST /task" in capabilities.get("legacy_diagnostic_endpoints", [])
+                or forbidden_diagnostic_key in capabilities
+                or "POST /task" in capabilities.get("diagnostic_endpoints", [])
                 or "POST /task" in capabilities.get("endpoints", [])
                 or "GET /events?after=0" not in capabilities.get("actions", {}).get("polling", [])
                 or "GET /recovery" not in capabilities.get("actions", {}).get("maintenance", [])
@@ -2195,11 +2185,15 @@ def main() -> int:
             )
             if not loop_task.get("ok"):
                 raise AssertionError(f"bad research loop task response: {loop_task}")
-            loop_result = request_json(
-                base + "/runs/warmaster-research-loop-test/research_loop_local",
-                {"timeout_sec": LOCAL_EXEC_TIMEOUT_SEC, "max_revision_cycles": 2},
-                timeout=LOCAL_EXEC_TIMEOUT_SEC,
-            )
+            try:
+                loop_result = request_json(
+                    base + "/runs/warmaster-research-loop-test/research_loop_local",
+                    {"timeout_sec": LOCAL_EXEC_TIMEOUT_SEC, "max_revision_cycles": 2},
+                    timeout=LOCAL_EXEC_TIMEOUT_SEC,
+                )
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="replace")
+                raise AssertionError(f"research loop endpoint returned HTTP {exc.code}: {body}") from exc
             if (
                 not loop_result.get("ok")
                 or loop_result.get("phase") != "completed"

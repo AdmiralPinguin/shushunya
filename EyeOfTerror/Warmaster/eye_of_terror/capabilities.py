@@ -44,7 +44,7 @@ def gateway_capabilities() -> dict[str, Any]:
             "GET /runs/{task_id}/orchestration",
             "GET /runs/{task_id}/activity",
         ],
-        "legacy_diagnostic_endpoints": [
+        "diagnostic_endpoints": [
             "POST /task_preflight",
         ],
         "capabilities": [

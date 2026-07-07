@@ -123,14 +123,14 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
             ledger_by_step[step_id] = step
         step_status = str(step.get("status") or "unknown")
         by_status[step_status] = by_status.get(step_status, 0) + 1
-    completed = by_status.get("completed", 0) + by_status.get("ready", 0)
+    completed_statuses = {"completed", "ready", "passed", "passed_with_warnings"}
+    completed = sum(count for status, count in by_status.items() if status in completed_statuses)
     failed = by_status.get("failed", 0)
     planned_step_ids = [
         str(step.get("step_id") or "")
         for step in planned_steps
         if isinstance(step, dict) and step.get("step_id")
     ]
-    completed_statuses = {"completed", "ready", "passed_with_warnings"}
     completed_step_ids = [
         step_id
         for step_id in planned_step_ids

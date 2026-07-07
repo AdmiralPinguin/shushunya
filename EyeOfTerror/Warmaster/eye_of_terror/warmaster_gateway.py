@@ -32,7 +32,7 @@ from .local_executor import WORKER_COMMANDS, execute_run as execute_local_run, i
 from .pipeline import write_pipeline_run
 from .registry import worker_refs
 from .routing import route_message
-from .mission_control import list_missions, mission_state
+from .mission_control import governor_task_from_order, link_run_to_mission, list_missions, mission_state, open_mission
 from .orchestrator import (
     cancel_http_worker_tasks,
     execute_run_cycle,
@@ -189,43 +189,6 @@ from .runtime_state import (
     REPO_ROOT,
     TASK_ID_RE,
 )
-
-
-def legacy_direct_task_rejection(message: str, task_id: str | None, governor_transport: str, governor_host: str) -> dict[str, Any]:
-    body: dict[str, Any] = {"message": message}
-    if task_id:
-        body["task_id"] = task_id
-    if governor_transport:
-        body["governor_transport"] = governor_transport
-    if governor_host:
-        body["governor_host"] = governor_host
-    return {
-        "ok": False,
-        "gateway": "WarmasterGateway",
-        "phase": "task_blocked",
-        "error": "POST /task is a legacy diagnostic entrypoint and requires allow_legacy_direct_task=true",
-        "error_code": "legacy_direct_task_requires_explicit_opt_in",
-        "protocol_mode": "commander_order_required",
-        "task_id": task_id or "",
-        "actions": {
-            "can_create_task": False,
-            "can_orchestrate_run": True,
-            "next_action": {
-                "kind": "use_command_protocol",
-                "method": "POST",
-                "endpoint": "POST /orchestrate_run",
-                "body": body,
-                "reason": "normal tasks must enter through Warmaster commander_order protocol",
-            },
-        },
-        "client_action": {
-            "kind": "use_command_protocol",
-            "method": "POST",
-            "path": "/orchestrate_run",
-            "body": body,
-            "reason": "normal tasks must enter through Warmaster commander_order protocol",
-        },
-    }
 
 
 def gateway_model_decision(operation: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -797,13 +760,32 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     task_id = str(payload.get("task_id") or "").strip() or None
                     governor_transport = str(payload.get("governor_transport") or default_governor_transport).strip() or default_governor_transport
                     governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
-                    if not bool(payload.get("allow_legacy_direct_task")):
-                        rejected = legacy_direct_task_rejection(message, task_id, governor_transport, governor_host)
-                        rejected = attach_model_brain(rejected, model_decision)
-                        response(self, 409, rejected)
+                    warmaster_root = Path(__file__).resolve().parents[1]
+                    mission = open_mission(warmaster_root, message, task_id, source_channel="main_chat")
+                    if not mission.get("ok"):
+                        failed = attach_model_brain(mission, model_decision)
+                        response(self, 400, failed)
                         return
-                    prepared = prepare_task(message, task_id, run_root, governor_transport=governor_transport, governor_host=governor_host)
+                    command = mission.get("commander_order") if isinstance(mission.get("commander_order"), dict) else {}
+                    prepared = prepare_task(
+                        governor_task_from_order(command),
+                        task_id,
+                        run_root,
+                        governor_transport=governor_transport,
+                        governor_host=governor_host,
+                        forced_governor=str(command.get("to") or "") or None,
+                        commander_order=command,
+                        require_commander_order=True,
+                    )
+                    if prepared.get("ok") and prepared.get("run_dir"):
+                        link_run_to_mission(Path(str(prepared.get("run_dir"))), mission)
                     prepared = payload_with_task_view(prepared, fallback_task_id=task_id or "")
+                    prepared["protocol_mode"] = "commander_order"
+                    prepared["mission"] = {
+                        "mission_id": str(mission.get("mission_id") or ""),
+                        "assigned_governor": str(command.get("to") or ""),
+                        "mission_dir": str(mission.get("mission_dir") or ""),
+                    }
                     prepared = attach_model_brain(prepared, model_decision)
                     response(self, 409 if prepared.get("error_code") == "task_exists" else (200 if prepared.get("ok") else 400), prepared)
                     return

@@ -80,10 +80,7 @@ def task_from_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         if not task:
             task = task_text_from_commander_order(command)
         return task, command
-    if not bool(payload.get("allow_legacy_direct_task")):
-        raise ValueError("commander_order is required; direct governor task input requires allow_legacy_direct_task=true")
-    task = str(payload.get("task") or payload.get("message") or "").strip()
-    return task, command
+    raise ValueError("commander_order is required; direct governor task input is not accepted")
 
 
 def protocol_governor_plan(plan_payload: dict[str, Any], command: dict[str, Any]) -> dict[str, Any]:

@@ -95,9 +95,6 @@ def _main() -> int:
             raise AssertionError(f"bad direct task rejection: {exc}") from exc
     else:
         raise AssertionError("Moriana accepted direct task input without commander_order")
-    legacy_task, legacy_command = task_from_payload({"task": "diagnostic direct task", "allow_legacy_direct_task": True})
-    if legacy_task != "diagnostic direct task" or legacy_command:
-        raise AssertionError(f"Moriana legacy diagnostic opt-in drifted: {legacy_task!r} {legacy_command}")
     with tempfile.TemporaryDirectory(prefix="moriana-service-self-test-") as tmp:
         run_root = Path(tmp) / "runs"
         server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(run_root))

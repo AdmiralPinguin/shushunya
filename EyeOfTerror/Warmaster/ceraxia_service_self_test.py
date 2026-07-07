@@ -76,9 +76,6 @@ def main() -> int:
             raise AssertionError(f"bad direct task rejection: {exc}") from exc
     else:
         raise AssertionError("Ceraxia accepted direct task input without commander_order")
-    legacy_task, legacy_command = task_from_payload({"task": "diagnostic direct task", "allow_legacy_direct_task": True})
-    if legacy_task != "diagnostic direct task" or legacy_command:
-        raise AssertionError(f"Ceraxia legacy diagnostic opt-in drifted: {legacy_task!r} {legacy_command}")
     contract_workers = [
         step.worker
         for step in build_code_task_contract("почини python приложение", task_id="ceraxia-service-test").worker_plan

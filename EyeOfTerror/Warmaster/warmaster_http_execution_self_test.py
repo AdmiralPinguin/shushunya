@@ -73,15 +73,15 @@ def main() -> int:
         try:
             base = f"http://127.0.0.1:{gateway.server_port}"
             task = request_json(
-                base + "/task",
+                base + "/orchestrate_run",
                 {
                     "message": "Собери все известное о событиях Скалатракса.",
                     "task_id": "warmaster-http-test",
-                    "allow_legacy_direct_task": True,
+                    "auto_start": False,
                 },
             )
-            if not task.get("ok"):
-                raise AssertionError(f"gateway task failed: {task}")
+            if not task.get("ok") or task.get("phase") != "ready_to_start":
+                raise AssertionError(f"gateway command-protocol task failed: {task}")
             run_dir = Path(task["run_dir"])
             status = read_json(run_dir / "status.json")
             ports_by_worker: dict[str, int] = {}
