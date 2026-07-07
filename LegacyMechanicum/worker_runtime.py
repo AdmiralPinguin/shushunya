@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from EyeOfTerror.common_protocol import validate_protocol_payload, worker_report
 from EyeOfTerror.model_brain import attach_model_brain, model_contract, request_model_decision
 
 
@@ -88,6 +89,79 @@ def worker_next_action(task_id: str, status: str) -> dict[str, Any]:
     if status in {"completed", "ready", "passed", "passed_with_warnings", "failed", "blocked", "cancelled"}:
         return {"kind": "inspect_task", "method": "GET", "endpoint": f"GET /tasks/{task_id}", "body": {}, "reason": "inspect recorded worker task"}
     return {"kind": "inspect_task", "method": "GET", "endpoint": f"GET /tasks/{task_id}", "body": {}, "reason": "inspect worker task state"}
+
+
+def _worker_report_status(payload: dict[str, Any], ok: bool) -> str:
+    status = str(payload.get("status") or "").strip().lower()
+    if status == "blocked":
+        return "blocked"
+    if status == "needs_revision" or (isinstance(payload.get("revision_plan"), dict) and payload.get("revision_plan", {}).get("required")):
+        return "needs_revision"
+    if ok and status in {"", "ready", "completed", "passed", "passed_with_warnings", "done"}:
+        return "done"
+    return "failed"
+
+
+def _worker_report_artifacts(payload: dict[str, Any]) -> list[str]:
+    artifacts = payload.get("artifacts")
+    if isinstance(artifacts, list):
+        return [str(item) for item in artifacts if str(item).strip()]
+    artifact = payload.get("artifact")
+    if isinstance(artifact, str) and artifact.strip():
+        return [artifact.strip()]
+    return []
+
+
+def _worker_report_problems(payload: dict[str, Any]) -> list[str]:
+    problems = payload.get("problems")
+    if isinstance(problems, list):
+        return [str(item) for item in problems if str(item).strip()]
+    blockers = payload.get("blockers")
+    if isinstance(blockers, list):
+        return [json.dumps(item, ensure_ascii=False, sort_keys=True) if isinstance(item, dict) else str(item) for item in blockers if str(item).strip()]
+    error = str(payload.get("error") or "").strip()
+    return [error] if error else []
+
+
+def _fallback_step_id(task_id: str, request: dict[str, Any]) -> str:
+    step = request.get("step") if isinstance(request.get("step"), dict) else {}
+    step_id = str(step.get("step_id") or "").strip()
+    if step_id:
+        return step_id
+    if ":" in task_id:
+        suffix = task_id.rsplit(":", 1)[1].strip()
+        if suffix:
+            return suffix
+    return "run"
+
+
+def protocol_worker_report(worker_name: str, task_id: str, request: dict[str, Any], payload: dict[str, Any], ok: bool) -> dict[str, Any]:
+    order = request.get("worker_order") if isinstance(request.get("worker_order"), dict) else {}
+    mission_id = str(order.get("mission_id") or f"mission-{task_id.split(':', 1)[0]}").strip()
+    step_id = str(order.get("step_id") or _fallback_step_id(task_id, request)).strip()
+    report = worker_report(
+        mission_id,
+        step_id=step_id,
+        worker=str(order.get("to") or payload.get("worker") or worker_name),
+        status=_worker_report_status(payload, ok),
+        summary=str(payload.get("summary") or payload.get("error") or payload.get("status") or "Worker step finished."),
+        artifacts=_worker_report_artifacts(payload),
+        problems=_worker_report_problems(payload),
+        next_recommended_action=str(payload.get("next_recommended_action") or payload.get("next_action") or ""),
+    )
+    validate_protocol_payload(report, expected_type="worker_report")
+    return report
+
+
+def payload_with_protocol_worker_report(payload: dict[str, Any], worker_name: str, task_id: str, request: dict[str, Any], ok: bool) -> dict[str, Any]:
+    if not task_id:
+        return payload
+    enriched = dict(payload)
+    try:
+        enriched["worker_report"] = protocol_worker_report(worker_name, task_id, request, enriched, ok)
+    except Exception as exc:  # noqa: BLE001 - legacy worker payload must still be inspectable.
+        enriched["worker_report_error"] = str(exc)
+    return enriched
 
 
 def payload_with_worker_view(payload: dict[str, Any], worker_name: str, task_id: str = "", status: str = "") -> dict[str, Any]:
@@ -321,6 +395,7 @@ def make_handler(
                 response(self, 404, {"ok": False, "error": "not found"})
                 return
             task_id = ""
+            request: dict[str, Any] = {}
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 payload = json.loads(self.rfile.read(length).decode("utf-8"))
@@ -340,6 +415,7 @@ def make_handler(
                         "status": "failed",
                         "error": f"worker mismatch: expected {worker_name}, got {packet_worker}",
                     }
+                    result = payload_with_protocol_worker_report(result, worker_name, task_id, request, ok=False)
                     if task_id:
                         with tasks_lock:
                             task = ensure_task(task_id)
@@ -368,6 +444,7 @@ def make_handler(
                         "input_artifact_errors": artifact_errors,
                         "quality_expectation_errors": quality_errors,
                     }
+                    result = payload_with_protocol_worker_report(result, worker_name, task_id, request, ok=False)
                     if task_id:
                         with tasks_lock:
                             task = ensure_task(task_id)
@@ -385,6 +462,7 @@ def make_handler(
                 request = dict(request)
                 request["model_brain"] = model_decision
                 result = attach_model_brain(run_worker(request, workspace_root), model_decision)
+                result = payload_with_protocol_worker_report(result, worker_name, task_id, request, ok=bool(result.get("ok")))
                 if task_id:
                     with tasks_lock:
                         task = ensure_task(task_id)
@@ -397,7 +475,8 @@ def make_handler(
                         task = ensure_task(task_id)
                         task["status"] = "failed"
                         task["error"] = str(exc)
-                response(self, 500, payload_with_worker_view({"ok": False, "worker": worker_name, "task_id": task_id, "status": "failed", "error": str(exc)}, worker_name, task_id=task_id, status="failed"))
+                failure = payload_with_protocol_worker_report({"ok": False, "worker": worker_name, "task_id": task_id, "status": "failed", "error": str(exc)}, worker_name, task_id, request, ok=False)
+                response(self, 500, payload_with_worker_view(failure, worker_name, task_id=task_id, status="failed"))
 
     return WorkerHandler
 

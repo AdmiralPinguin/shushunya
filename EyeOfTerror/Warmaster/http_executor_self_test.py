@@ -2,23 +2,25 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from eye_of_terror.http_executor import execute_run, run_step, terminal_payload_allows_completion
 from eye_of_terror.warmaster_gateway import event_display
-from EyeOfTerror.common_protocol import worker_order
+from EyeOfTerror.common_protocol import worker_order, worker_report
 
-import sys
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
 MECHANICUM_ROOT = REPO_ROOT / "LegacyMechanicum"
 if str(MECHANICUM_ROOT) not in sys.path:
     sys.path.insert(0, str(MECHANICUM_ROOT))
 
-from worker_runtime import load_worker, make_handler  # noqa: E402
+from worker_runtime import make_handler  # noqa: E402
 
 
 def write_json(path: Path, payload: dict) -> None:
@@ -82,6 +84,44 @@ class FailingRunHandler(BaseHTTPRequestHandler):
         return
 
 
+class ProtocolReportRunHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        response = {"ok": True, "worker": "ProtocolWorker"}
+        encoded = json.dumps(response).encode("utf-8")
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+    def do_POST(self) -> None:
+        report = worker_report(
+            "mission-protocol-executor",
+            step_id="protocol_step",
+            worker="ProtocolWorker",
+            status="done",
+            summary="Canonical worker report from service.",
+            artifacts=["/work/protocol/result.json"],
+        )
+        response = {
+            "ok": True,
+            "worker": "ProtocolWorker",
+            "task_id": "protocol-report-test",
+            "status": "completed",
+            "summary": "Legacy payload summary should not replace worker_report.",
+            "worker_report": report,
+        }
+        encoded = json.dumps(response).encode("utf-8")
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+
 def main() -> int:
     if terminal_payload_allows_completion({"ok": True, "status": "blocked"}):
         raise AssertionError("blocked terminal payload should not complete a run")
@@ -99,7 +139,19 @@ def main() -> int:
         source = work / "test" / "source_map.json"
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text(json.dumps({"topic": "other", "sources": []}), encoding="utf-8")
-        run_worker = load_worker(REPO_ROOT / "EyeOfTerror" / "Scriptorium" / "Brigade" / "NoosphericExtractor", "noospheric_extractor")
+        def run_worker(request: dict, workspace_root: Path) -> dict:
+            output_path = workspace_root / "test" / "direct_event_notes.json"
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps({"ok": True, "task_id": request.get("task_id")}, ensure_ascii=False), encoding="utf-8")
+            return {
+                "ok": True,
+                "worker": "NoosphericExtractor",
+                "task_id": str(request.get("task_id") or ""),
+                "status": "completed",
+                "summary": "Test worker wrote direct event notes.",
+                "artifacts": ["/work/test/direct_event_notes.json"],
+            }
+
         server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler("NoosphericExtractor", work, run_worker))
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -225,6 +277,52 @@ def main() -> int:
             finally:
                 failing_server.shutdown()
                 failing_thread.join(timeout=5)
+            protocol_run = root / "protocol-report-run"
+            protocol_dispatch_dir = protocol_run / "dispatch"
+            protocol_server = ThreadingHTTPServer(("127.0.0.1", 0), ProtocolReportRunHandler)
+            protocol_thread = threading.Thread(target=protocol_server.serve_forever, daemon=True)
+            protocol_thread.start()
+            try:
+                write_json(
+                    protocol_run / "contract.json",
+                    {
+                        "task_id": "protocol-report-test",
+                        "goal": "Validate canonical worker_report pass-through.",
+                        "assigned_governor": "TestGovernor",
+                    },
+                )
+                write_json(
+                    protocol_run / "status.json",
+                    {
+                        "steps": [{"step_id": "protocol_step", "worker": "ProtocolWorker", "port": protocol_server.server_port}],
+                        "dispatch_dir": str(protocol_dispatch_dir),
+                    },
+                )
+                write_json(
+                    protocol_dispatch_dir / "protocol_step.json",
+                    {
+                        "step_id": "protocol_step",
+                        "worker": "ProtocolWorker",
+                        "port": protocol_server.server_port,
+                        "request": {"task_id": "protocol-report-test"},
+                    },
+                )
+                protocol_summary = execute_run(protocol_run, timeout_sec=30)
+                if not protocol_summary.get("ok"):
+                    raise AssertionError(f"protocol report worker should complete the run: {protocol_summary}")
+                protocol_ledger = json.loads((protocol_run / "task_ledger.json").read_text(encoding="utf-8"))
+                protocol_step = next((item for item in protocol_ledger.get("steps", []) if item.get("step_id") == "protocol_step"), {})
+                protocol_report = protocol_step.get("details", {}).get("worker_report", {})
+                if (
+                    protocol_report.get("mission_id") != "mission-protocol-executor"
+                    or protocol_report.get("step_id") != "protocol_step"
+                    or protocol_report.get("summary") != "Canonical worker report from service."
+                    or protocol_report.get("artifacts") != ["/work/protocol/result.json"]
+                ):
+                    raise AssertionError(f"HTTP executor did not preserve canonical service worker_report: {protocol_ledger}")
+            finally:
+                protocol_server.shutdown()
+                protocol_thread.join(timeout=5)
             capture_dispatch = root / "capture.json"
             capture_server = ThreadingHTTPServer(("127.0.0.1", 0), CaptureRunHandler)
             capture_thread = threading.Thread(target=capture_server.serve_forever, daemon=True)

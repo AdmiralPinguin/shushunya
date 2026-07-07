@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import threading
 import urllib.error
@@ -9,14 +10,19 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from EyeOfTerror.common_protocol import validate_protocol_payload, worker_order
 from worker_runtime import load_worker, make_handler
 
 
-def request_json(url: str, payload: dict | None = None) -> dict:
+def request_json(url: str, payload: dict | None = None, timeout: int = 240) -> dict:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     method = "POST" if data else "GET"
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method=method)
-    with urllib.request.urlopen(req, timeout=5) as response:
+    with urllib.request.urlopen(req, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -85,9 +91,43 @@ def main() -> int:
                 not result.get("ok")
                 or result.get("display", {}).get("headline") != "NoosphericExtractor task completed"
                 or result.get("client_action", {}).get("path") != "/tasks/runtime-test"
-                or result.get("model_brain", {}).get("status") != "disabled"
+                or result.get("model_brain", {}).get("kind") != "eye_of_terror_model_brain"
+                or result.get("model_brain", {}).get("mode") != "active"
             ):
                 raise AssertionError(f"bad run response: {result}")
+            report = result.get("worker_report") if isinstance(result.get("worker_report"), dict) else {}
+            validate_protocol_payload(report, expected_type="worker_report")
+            if report.get("mission_id") != "mission-runtime-test" or report.get("step_id") != "run" or report.get("status") != "done":
+                raise AssertionError(f"worker runtime did not attach fallback protocol worker_report: {report}")
+            protocol_order = worker_order(
+                "mission-runtime-protocol",
+                step_id="fact_extraction",
+                sender="IskandarKhayon",
+                to="NoosphericExtractor",
+                task="Извлечь факты из source_map.",
+                expected_output="/work/test/direct_event_notes.json",
+                input_artifacts=["/work/test/source_map.json"],
+                quality_requirements=["return direct notes"],
+            )
+            protocol_result = request_json(
+                base + "/run",
+                {
+                    "request": {
+                        "task_id": "runtime-protocol:fact_extraction",
+                        "input_artifacts": ["/work/test/source_map.json"],
+                        "step": {"step_id": "fact_extraction", "expected_artifacts": ["/work/test/direct_event_notes.json"]},
+                        "worker_order": protocol_order,
+                    }
+                },
+            )
+            protocol_report = protocol_result.get("worker_report") if isinstance(protocol_result.get("worker_report"), dict) else {}
+            validate_protocol_payload(protocol_report, expected_type="worker_report")
+            if (
+                protocol_report.get("mission_id") != "mission-runtime-protocol"
+                or protocol_report.get("step_id") != "fact_extraction"
+                or protocol_report.get("worker") != "NoosphericExtractor"
+            ):
+                raise AssertionError(f"worker runtime did not preserve worker_order in worker_report: {protocol_report}")
             task = request_json(base + "/tasks/runtime-test")
             if (
                 not task.get("ok")
@@ -132,6 +172,10 @@ def main() -> int:
                 wrong_worker = json.loads(exc.read().decode("utf-8"))
                 if "worker mismatch" not in wrong_worker.get("error", ""):
                     raise AssertionError(f"bad worker mismatch response: {wrong_worker}")
+                wrong_report = wrong_worker.get("worker_report") if isinstance(wrong_worker.get("worker_report"), dict) else {}
+                validate_protocol_payload(wrong_report, expected_type="worker_report")
+                if wrong_report.get("status") != "failed":
+                    raise AssertionError(f"worker mismatch did not attach failed worker_report: {wrong_report}")
             else:
                 raise AssertionError("worker runtime should reject packets addressed to another worker")
             wrong_worker_task = request_json(base + "/tasks/wrong-worker-test")

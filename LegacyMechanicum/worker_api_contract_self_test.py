@@ -36,6 +36,8 @@ def main() -> int:
         raise AssertionError(f"Worker API contract mismatch: missing={missing} extra={extra}")
     if "worker mismatch" not in contract_text():
         raise AssertionError("Worker API contract must document dispatch worker mismatch rejection")
+    if '"worker_report"' not in contract_text() or "canonical command-protocol result" not in contract_text():
+        raise AssertionError("Worker API contract must document canonical worker_report responses")
     print("[ok] Worker API contract")
     return 0
 

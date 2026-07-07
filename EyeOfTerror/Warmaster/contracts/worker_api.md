@@ -193,9 +193,30 @@ recorded terminal status or result.
   "summary": "...",
   "artifacts": [],
   "gaps": [],
-  "confidence": "medium"
+  "confidence": "medium",
+  "worker_report": {
+    "type": "worker_report",
+    "protocol_version": 1,
+    "mission_id": "mission-stable-task-id",
+    "step_id": "fact_extraction",
+    "worker": "Lexmechanic",
+    "status": "done",
+    "summary": "...",
+    "artifacts": [],
+    "problems": [],
+    "next_recommended_action": ""
+  }
 }
 ```
+
+`worker_report` is the canonical command-protocol result for `/run`. The
+legacy top-level fields remain worker-domain payload for compatibility, but
+Warmaster, mission storage, and brigade activity views should be able to consume
+the embedded `worker_report` without reverse-engineering worker-specific JSON.
+If the request includes `worker_order`, the report must preserve its
+`mission_id`, `step_id`, and target worker. If a legacy direct request has no
+`worker_order`, the shared runtime derives a conservative fallback mission id
+from `task_id` and marks the step as `run`.
 
 Executors treat a successful terminal payload as complete only when `ok=true`,
 `revision_plan.required` is not true, and `status` is one of `ready`,

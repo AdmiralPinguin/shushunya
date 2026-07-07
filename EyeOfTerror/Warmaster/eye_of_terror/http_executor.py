@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from EyeOfTerror.common_protocol import validate_protocol_payload
+
 from .local_executor import ordered_dispatch_paths, revision_contexts_from_result
 from .ledger import TaskLedger
 from .mission_control import record_worker_execution_started, record_worker_protocol_report, worker_report_from_payload
@@ -211,7 +213,16 @@ def execute_run(
         try:
             packet = load_json(dispatch_path)
             order = packet.get("worker_order") if isinstance(packet.get("worker_order"), dict) else {}
-            report = worker_report_from_payload(str(order.get("mission_id") or f"mission-{contract.get('task_id') or run_dir.name}"), result.step_id, result.worker, result.payload, result.ok)
+            raw_report = result.payload.get("worker_report") if isinstance(result.payload.get("worker_report"), dict) else {}
+            report = {}
+            if raw_report:
+                try:
+                    validate_protocol_payload(raw_report, expected_type="worker_report")
+                    report = raw_report
+                except Exception as exc:  # noqa: BLE001 - fall back so old or malformed workers still leave a protocol trace.
+                    step_details = {**(step_details or {}), "worker_report_validation_error": str(exc)}
+            if not report:
+                report = worker_report_from_payload(str(order.get("mission_id") or f"mission-{contract.get('task_id') or run_dir.name}"), result.step_id, result.worker, result.payload, result.ok)
             record_worker_protocol_report(run_dir, report)
             step_details = {**(step_details or {}), "worker_report": report}
         except Exception as exc:  # noqa: BLE001 - protocol reporting must not hide the worker result.
