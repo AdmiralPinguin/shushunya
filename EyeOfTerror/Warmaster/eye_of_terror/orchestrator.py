@@ -189,7 +189,7 @@ def orchestrate_prepare_task(
     include_brigade_health: bool = False,
     forced_governor: str | None = None,
     commander_order: dict[str, Any] | None = None,
-    require_commander_order: bool = False,
+    require_commander_order: bool = True,
 ) -> dict[str, Any]:
     if run_mode not in {"local", "http"}:
         raise ValueError("run_mode must be local or http")

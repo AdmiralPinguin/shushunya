@@ -274,7 +274,12 @@ def main() -> int:
         if timeout_payload.get("attempt_count") != 1 or timeout_payload.get("timeout_retries") != 0:
             raise AssertionError(f"zero-second timeout should not be retried: {timeout_summary}")
         timeout_ledger = json.loads((timeout_run / "task_ledger.json").read_text(encoding="utf-8"))
-        if timeout_ledger.get("status") != "failed" or timeout_ledger.get("steps", [{}])[0].get("status") != "failed":
+        timeout_result = timeout_ledger.get("result") if isinstance(timeout_ledger.get("result"), dict) else {}
+        if (
+            timeout_ledger.get("status") != "blocked"
+            or timeout_ledger.get("steps", [{}])[0].get("status") != "failed"
+            or timeout_result.get("revision_plan", {}).get("required") is not True
+        ):
             raise AssertionError(f"worker timeout was not recorded durably: {timeout_ledger}")
         flaky_repo = root / "flaky-repo"
         flaky_worker_dir = flaky_repo / "workers"

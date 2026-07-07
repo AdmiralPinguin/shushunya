@@ -374,6 +374,20 @@ def terminal_payload_allows_completion(payload: dict[str, Any]) -> bool:
     return True
 
 
+def ledger_status_for_execution(summary: dict[str, Any], final_payload: dict[str, Any], cancelled: bool, partial_execution: bool) -> str:
+    if cancelled:
+        return "cancelled"
+    if summary.get("ok") and partial_execution:
+        return "interrupted"
+    if summary.get("ok"):
+        return "completed"
+    final_status = str(final_payload.get("status") or "").strip().lower()
+    revision_plan = final_payload.get("revision_plan") if isinstance(final_payload.get("revision_plan"), dict) else {}
+    if final_status in {"blocked", "needs_revision"} or revision_plan.get("required") is True:
+        return "blocked"
+    return "failed"
+
+
 def execute_run(
     repo_root: Path,
     run_dir: Path,
@@ -476,7 +490,7 @@ def execute_run(
                 "revision_plan": final_payload.get("revision_plan", {}),
             }
         )
-    ledger.set_status("interrupted" if summary["ok"] and partial_execution else ("completed" if summary["ok"] else ("cancelled" if cancelled else "failed")))
+    ledger.set_status(ledger_status_for_execution(summary, final_payload if isinstance(final_payload, dict) else {}, cancelled, partial_execution))
     return summary
 
 

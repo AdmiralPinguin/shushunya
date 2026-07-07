@@ -8,12 +8,16 @@ import threading
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WARM_ROOT = Path(__file__).resolve().parent
+for path in (REPO_ROOT, WARM_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
 from eye_of_terror.http_executor import execute_run
 from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction
 from eye_of_terror.pipeline import write_pipeline_run
 
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
 MECHANICUM_ROOT = REPO_ROOT / "LegacyMechanicum"
 if str(MECHANICUM_ROOT) not in sys.path:
     sys.path.insert(0, str(MECHANICUM_ROOT))
