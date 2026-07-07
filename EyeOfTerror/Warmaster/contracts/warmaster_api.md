@@ -41,6 +41,7 @@ GET  /runs?limit=20
 GET  /runs/{task_id}
 GET  /runs/{task_id}/summary
 GET  /runs/{task_id}/snapshot
+GET  /runs/{task_id}/activity
 GET  /runs/{task_id}/orchestration
 GET  /runs/{task_id}/active
 GET  /runs/{task_id}/steps/{step_id}
@@ -146,7 +147,7 @@ health-checked registry summaries include reachable/unreachable counts.
 
 ## Task Creation
 
-`POST /task_preflight` accepts the same routing fields as `POST /task`, but does
+`POST /task_preflight` accepts routing fields for diagnostic review, but does
 not write a run package or ledger. It returns the selected route, governor,
 contract validation result, missing worker references, and the run directory
 that would be created. It also returns a compact `contract_summary` with planned
@@ -161,17 +162,18 @@ Set `include_brigade_health=true` to include compact `brigade_readiness`
 (`ready`, blocker/warning counts, blockers, and warnings) in the preflight
 response without fetching the full `/brigade_health` service payload.
 Task preflight responses include `actions.can_create_task` and
-`actions.next_action` so chat clients can either create the task, inspect an
-existing run after a `task_id` conflict, or inspect brigade/governor
+`actions.next_action` so chat clients can move into `POST /orchestrate`, inspect
+an existing run after a `task_id` conflict, or inspect brigade/governor
 diagnostics after validation failures. HTTP responses also expose top-level
 `phase`, `decision`, `display`, `next_action`, and executable `client_action`
 fields for the same recommendation.
-`POST /task` responses use the same action hint vocabulary for both successful
-creation and rejected creation attempts. Successful creation recommends run
-preflight before execution, while rejected creation attempts point clients to
-existing-run, brigade, governor, capability, or preflight diagnostics. HTTP
-responses also expose top-level `phase`, `decision`, `display`, `next_action`,
-and executable `client_action` for the recommended next step.
+Normal clients must submit work through `POST /orchestrate_run`. `POST /task`
+is a legacy diagnostic entrypoint only: without
+`allow_legacy_direct_task=true`, it returns
+`error_code=legacy_direct_task_requires_explicit_opt_in` and a
+`use_command_protocol` action pointing to `POST /orchestrate_run`. When that
+explicit legacy flag is present, `/task` responses use the same action hint
+vocabulary for successful legacy creation and rejected creation attempts.
 When task preflight is run with explicit or default HTTP governor transport,
 its `create_task` and retry action bodies preserve `governor_transport` and
 `governor_host` so clients can follow `actions.next_action` without switching

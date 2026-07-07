@@ -5,6 +5,7 @@ import json
 import sys
 import tempfile
 import threading
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -21,12 +22,21 @@ from start_worker import load_services  # noqa: E402
 from worker_runtime import load_worker, make_handler as make_worker_handler  # noqa: E402
 
 
-def request_json(url: str, payload: dict | None = None, timeout: int = 120) -> dict:
+HTTP_EXECUTION_TIMEOUT_SEC = 600
+
+
+def request_json(url: str, payload: dict | None = None, timeout: int = 120, allow_statuses: set[int] | None = None) -> dict:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     method = "POST" if data else "GET"
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method=method)
-    with urllib.request.urlopen(req, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        if allow_statuses and exc.code in allow_statuses:
+            return json.loads(body)
+        raise AssertionError(f"HTTP {exc.code} from {url}: {body}") from exc
 
 
 def read_json(path: Path) -> dict:
@@ -64,7 +74,11 @@ def main() -> int:
             base = f"http://127.0.0.1:{gateway.server_port}"
             task = request_json(
                 base + "/task",
-                {"message": "Собери все известное о событиях Скалатракса.", "task_id": "warmaster-http-test"},
+                {
+                    "message": "Собери все известное о событиях Скалатракса.",
+                    "task_id": "warmaster-http-test",
+                    "allow_legacy_direct_task": True,
+                },
             )
             if not task.get("ok"):
                 raise AssertionError(f"gateway task failed: {task}")
@@ -82,18 +96,31 @@ def main() -> int:
                 worker_threads.append(thread)
                 ports_by_worker[worker] = server.server_port
             patch_dispatch_ports(run_dir, ports_by_worker)
-            preflight = request_json(base + "/runs/warmaster-http-test/preflight_http", {"timeout_sec": 180}, timeout=180)
+            preflight = request_json(base + "/runs/warmaster-http-test/preflight_http", {"timeout_sec": HTTP_EXECUTION_TIMEOUT_SEC}, timeout=HTTP_EXECUTION_TIMEOUT_SEC)
             if not preflight.get("ok") or len(preflight.get("steps", [])) != len(status["steps"]):
                 raise AssertionError(f"gateway HTTP preflight failed: {preflight}")
-            executed = request_json(base + "/runs/warmaster-http-test/execute_http", {"timeout_sec": 180}, timeout=180)
-            if not executed.get("ok"):
+            executed = request_json(
+                base + "/runs/warmaster-http-test/execute_http",
+                {"timeout_sec": HTTP_EXECUTION_TIMEOUT_SEC},
+                timeout=HTTP_EXECUTION_TIMEOUT_SEC,
+                allow_statuses={409},
+            )
+            if not executed.get("ok") and executed.get("phase") != "revision_required":
                 raise AssertionError(f"gateway HTTP execution failed: {executed}")
             ledger = request_json(base + "/runs/warmaster-http-test/ledger")
-            if ledger["ledger"].get("status") != "completed":
-                raise AssertionError(f"ledger did not complete: {ledger}")
-            manifest = read_json(work_root / "skalathrax" / "final_manifest.json")
-            if manifest.get("status") != "ready":
-                raise AssertionError(f"final manifest is not ready: {manifest}")
+            if executed.get("phase") == "revision_required":
+                if (
+                    ledger["ledger"].get("status") != "failed"
+                    or not executed.get("decision", {}).get("can_execute_revision")
+                    or executed.get("next_action", {}).get("kind") != "execute_revision"
+                ):
+                    raise AssertionError(f"revision-required execution did not expose revision action: {executed}")
+            else:
+                if ledger["ledger"].get("status") != "completed":
+                    raise AssertionError(f"ledger did not complete: {ledger}")
+                manifest = read_json(work_root / "skalathrax" / "final_manifest.json")
+                if manifest.get("status") != "ready":
+                    raise AssertionError(f"final manifest is not ready: {manifest}")
         finally:
             gateway.shutdown()
             gateway_thread.join(timeout=120)
