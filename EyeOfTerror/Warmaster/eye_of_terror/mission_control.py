@@ -224,15 +224,18 @@ def open_mission(warmaster_root: Path, message: str, task_id: str | None, source
 
 
 def record_governor_plan(run_dir: Path, mission_id: str, mission_dir: Path) -> dict[str, Any]:
+    command = _read_json(mission_dir / "commander_order.json")
     plan = _read_json(run_dir / "governor_plan.json")
     if plan:
         plan["mission_id"] = mission_id
+        if str(plan.get("understanding") or "").strip().startswith("ПРИКАЗ ВАРМАСТЕРА"):
+            plan["understanding"] = str(command.get("primary_goal") or command.get("commander_intent") or plan.get("understanding") or "").strip()
         validate_protocol_payload(plan, expected_type="governor_plan")
     else:
         contract = _read_json(run_dir / "contract.json")
         if not contract:
             return {"ok": False, "error": "contract.json is missing"}
-        plan = governor_plan_from_contract(mission_id, contract)
+        plan = governor_plan_from_contract(mission_id, contract, command)
         validate_protocol_payload(plan, expected_type="governor_plan")
     _write_json(mission_dir / "governor_plan.json", plan)
     _write_json(_next_numbered_path(mission_dir / "governor_plans", "governor_plan"), plan)
@@ -249,7 +252,7 @@ def record_governor_plan(run_dir: Path, mission_id: str, mission_dir: Path) -> d
             phase="planning",
             status="done",
             title="Бригадир составил план",
-            body=f"Шагов: {len(plan.get('work_plan') if isinstance(plan.get('work_plan'), list) else [])}. Цель: {plan.get('understanding')}",
+            body=f"Шагов: {len(plan.get('work_plan') if isinstance(plan.get('work_plan'), list) else [])}. Цель: {str(plan.get('understanding') or '').strip()}",
         ),
     )
     return {"ok": True, "governor_plan": plan}

@@ -2,7 +2,7 @@
   "name": "OcularisRenderium",
   "port": 7012,
   "role": "javascript render and screenshot worker",
-  "status": "prototype",
+  "status": "active",
   "capabilities": ["model_guided_render_triage", "javascript_render", "dom_snapshot", "screenshot", "network_trace", "render_required_sources"],
   "model_brain": {
     "required": true,

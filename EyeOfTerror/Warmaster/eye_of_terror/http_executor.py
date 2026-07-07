@@ -10,7 +10,7 @@ from typing import Any
 from .local_executor import ordered_dispatch_paths, revision_contexts_from_result
 from .ledger import TaskLedger
 from .mission_control import record_worker_protocol_report, worker_report_from_payload
-from .pipeline import write_json_atomic
+from .pipeline import dispatch_packet_with_worker_order, write_json_atomic
 
 
 @dataclass
@@ -121,10 +121,9 @@ def run_step(dispatch_path: Path, host: str, timeout_sec: int, revision_context:
     worker = str(packet.get("worker") or "")
     port = int(packet.get("port") or 0)
     if revision_context:
-        packet = dict(packet)
-        request = dict(packet.get("request") if isinstance(packet.get("request"), dict) else {})
-        request["revision_context"] = revision_context
-        packet["request"] = request
+        packet = dispatch_packet_with_worker_order(packet, revision_context=revision_context)
+    else:
+        packet = dispatch_packet_with_worker_order(packet)
     url = f"http://{host}:{port}/run"
     try:
         payload = post_json(url, packet, timeout_sec)

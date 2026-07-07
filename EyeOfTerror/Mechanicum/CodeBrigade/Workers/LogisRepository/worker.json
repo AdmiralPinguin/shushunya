@@ -1,6 +1,6 @@
 {
   "name": "LogisRepository",
-  "status": "prototype",
+  "status": "active",
   "port": 7015,
   "role": "code repository surveyor",
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",

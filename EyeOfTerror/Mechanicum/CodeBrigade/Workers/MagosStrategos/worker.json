@@ -1,6 +1,6 @@
 {
   "name": "MagosStrategos",
-  "status": "prototype",
+  "status": "active",
   "port": 7016,
   "role": "code change planner",
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",

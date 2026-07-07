@@ -90,7 +90,7 @@ def task_from_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 def protocol_governor_plan(plan_payload: dict[str, Any], command: dict[str, Any]) -> dict[str, Any]:
     contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else {}
     mission_id = str(command.get("mission_id") or f"mission-{contract.get('task_id') or 'unassigned'}")
-    payload = governor_plan_from_contract(mission_id, contract)
+    payload = governor_plan_from_contract(mission_id, contract, command)
     validate_protocol_payload(payload, expected_type="governor_plan")
     return payload
 

@@ -2,7 +2,7 @@
   "name": "Lexmechanic",
   "port": 7002,
   "role": "source researcher",
-  "status": "prototype",
+  "status": "active",
   "capabilities": ["model_guided_source_strategy", "web_search", "source_map", "reliability_labels"],
   "model_brain": {
     "required": true,

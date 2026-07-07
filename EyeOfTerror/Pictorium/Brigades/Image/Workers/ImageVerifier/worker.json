@@ -2,7 +2,7 @@
   "name": "ImageVerifier",
   "port": 7025,
   "role": "generated artifact verifier and visual risk reporter",
-  "status": "prototype",
+  "status": "active",
   "capabilities": ["image_metadata_checks", "dimension_check", "edit_delta_check", "planned_artifact_manifest"],
   "model_brain": {
     "required": true,

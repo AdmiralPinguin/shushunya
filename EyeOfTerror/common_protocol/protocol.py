@@ -120,7 +120,11 @@ def governor_plan(
     }
 
 
-def governor_plan_from_contract(mission_id: str, contract: dict[str, Any]) -> dict[str, Any]:
+def governor_plan_from_contract(
+    mission_id: str,
+    contract: dict[str, Any],
+    commander_order_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     worker_plan = contract.get("worker_plan") if isinstance(contract.get("worker_plan"), list) else []
     work_plan: list[dict[str, Any]] = []
     for step in worker_plan:
@@ -138,7 +142,12 @@ def governor_plan_from_contract(mission_id: str, contract: dict[str, Any]) -> di
     return governor_plan(
         mission_id,
         governor=str(contract.get("assigned_governor") or "").strip(),
-        understanding=str(contract.get("goal") or "").strip(),
+        understanding=str(
+            (commander_order_payload or {}).get("primary_goal")
+            or (commander_order_payload or {}).get("commander_intent")
+            or contract.get("goal")
+            or ""
+        ).strip(),
         work_plan=work_plan,
         quality_gates=_strings(contract.get("quality_gates") if isinstance(contract.get("quality_gates"), list) else []),
         expected_deliverables=_strings(contract.get("required_artifacts") if isinstance(contract.get("required_artifacts"), list) else []),

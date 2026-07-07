@@ -1499,7 +1499,10 @@ public class MainActivity extends Activity {
                 addAgentMessage(true, prompt, false);
             }
             addAgentTaskCard(task, false);
-            JSONArray activityEntries = task.optJSONArray("activity_entries");
+            JSONArray activityEntries = task.optJSONArray("activity_cards");
+            if (activityEntries == null) {
+                activityEntries = task.optJSONArray("activity_entries");
+            }
             if (activityEntries != null && activityEntries.length() > 0) {
                 for (int j = 0; j < activityEntries.length(); j++) {
                     JSONObject entry = activityEntries.optJSONObject(j);
@@ -2683,11 +2686,17 @@ public class MainActivity extends Activity {
         if (snapshot == null) {
             return "";
         }
-        JSONArray entries = snapshot.optJSONArray("activity_entries");
+        JSONArray entries = snapshot.optJSONArray("activity_cards");
+        if (entries == null) {
+            entries = snapshot.optJSONArray("activity_entries");
+        }
         if (entries == null) {
             JSONObject activity = snapshot.optJSONObject("governor_activity");
             if (activity != null) {
-                entries = activity.optJSONArray("entries");
+                entries = activity.optJSONArray("activity_cards");
+                if (entries == null) {
+                    entries = activity.optJSONArray("entries");
+                }
             }
         }
         String cleanTaskId = taskId == null ? "" : taskId.trim();
@@ -2696,31 +2705,7 @@ public class MainActivity extends Activity {
         if (!cleanTaskId.isEmpty()) {
             out.append("\n").append(cleanTaskId);
         }
-        if (entries == null || entries.length() == 0) {
-            String activityLog = snapshot.optString("activity_log", "").trim();
-            if (!activityLog.isEmpty()) {
-                out.append("\n\n").append(activityLog);
-                return out.toString();
-            }
-            return "";
-        }
-        out.append("\n\nХод работы:");
-        for (int i = 0; i < entries.length(); i++) {
-            JSONObject entry = entries.optJSONObject(i);
-            if (entry == null) {
-                continue;
-            }
-            String headline = entry.optString("headline", "").trim();
-            String detail = entry.optString("detail", "").trim();
-            if (headline.isEmpty() && detail.isEmpty()) {
-                continue;
-            }
-            out.append("\n\n").append(i + 1).append(". ");
-            out.append(headline.isEmpty() ? "Шаг" : headline);
-            if (!detail.isEmpty()) {
-                out.append("\n   ").append(detail);
-            }
-        }
+        out.append("\n\nХод работы открыт во вкладках бригад.");
         return out.toString();
     }
 

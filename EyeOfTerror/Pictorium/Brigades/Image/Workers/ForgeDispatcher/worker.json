@@ -2,7 +2,7 @@
   "name": "ForgeDispatcher",
   "port": 7024,
   "role": "ForgeRuntime dry-run validator and job submitter",
-  "status": "prototype",
+  "status": "active",
   "capabilities": ["job_validation", "dry_run", "queued_submit", "structured_runtime_blockers"],
   "model_brain": {
     "required": true,

@@ -2,7 +2,7 @@
   "name": "ArtifactFinalis",
   "port": 7026,
   "role": "final manifest and delivery package builder",
-  "status": "prototype",
+  "status": "active",
   "capabilities": ["final_manifest", "blocker_rollup", "artifact_inventory", "handoff_summary"],
   "model_brain": {
     "required": true,

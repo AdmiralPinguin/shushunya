@@ -2,7 +2,7 @@
   "name": "Panelwright",
   "port": 7030,
   "role": "per-panel Image Brigade package builder",
-  "status": "prototype",
+  "status": "active",
   "capabilities": ["panel_image_plans", "resource_checks", "forge_dry_run", "image_brigade_execution_layer"],
   "model_brain": {
     "required": true,

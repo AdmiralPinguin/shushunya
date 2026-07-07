@@ -2,7 +2,7 @@
   "name": "ReductorVerifier",
   "port": 7006,
   "role": "critic and verifier",
-  "status": "prototype",
+  "status": "active",
   "capabilities": ["contract_review", "source_coverage_review", "semantic_model_critique", "hallucination_risk", "evidence_lead_risk_reporting"],
   "model_brain": {
     "required": true,

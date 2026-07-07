@@ -294,7 +294,7 @@ def plan_image_task(task: str, task_id: str | None = None) -> MorianaPlan:
 
 def protocol_governor_plan(contract: dict[str, Any], command: dict[str, Any]) -> dict[str, Any]:
     mission_id = str(command.get("mission_id") or f"mission-{contract.get('task_id') or 'unassigned'}")
-    payload = governor_plan_from_contract(mission_id, contract)
+    payload = governor_plan_from_contract(mission_id, contract, command)
     validate_protocol_payload(payload, expected_type="governor_plan")
     return payload
 

@@ -36,6 +36,11 @@ def main() -> int:
         dispatch = read_json(run_dir / "dispatch" / "source_discovery.json")
         order = dispatch.get("worker_order") if isinstance(dispatch.get("worker_order"), dict) else {}
         validate_protocol_payload(order, expected_type="worker_order")
+        request = dispatch.get("request") if isinstance(dispatch.get("request"), dict) else {}
+        request_order = request.get("worker_order") if isinstance(request.get("worker_order"), dict) else {}
+        validate_protocol_payload(request_order, expected_type="worker_order")
+        if request.get("task") != order.get("task") or request.get("expected_output") != order.get("expected_output"):
+            raise AssertionError(f"legacy request was not normalized from worker_order: {request}")
         if order.get("mission_id") != "mission-worker-protocol":
             raise AssertionError(f"initial worker_order mission_id was not task-derived: {order}")
         link_run_to_mission(

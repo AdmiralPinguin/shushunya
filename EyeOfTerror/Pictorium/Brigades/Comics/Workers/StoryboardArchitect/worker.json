@@ -2,7 +2,7 @@
   "name": "StoryboardArchitect",
   "port": 7028,
   "role": "storyboard and continuity planner",
-  "status": "prototype",
+  "status": "active",
   "capabilities": ["storyboard", "panel_prompts", "continuity_notes"],
   "model_brain": {
     "required": true,

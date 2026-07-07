@@ -58,12 +58,28 @@ def mission_ref_for_run(run_dir: Path) -> dict[str, Any]:
     return _read_json(run_dir / "mission_ref.json")
 
 
-def mission_progress_events_for_run(run_dir: Path, limit: int = 200) -> list[dict[str, Any]]:
+def mission_dir_for_run(run_dir: Path) -> Path | None:
     ref = mission_ref_for_run(run_dir)
     raw_mission_dir = str(ref.get("mission_dir") or "")
     if not raw_mission_dir:
+        return None
+    return Path(raw_mission_dir)
+
+
+def mission_protocol_payloads_for_run(run_dir: Path) -> dict[str, dict[str, Any]]:
+    mission_dir = mission_dir_for_run(run_dir)
+    if mission_dir is None:
+        return {}
+    return {
+        "commander_order": _read_json(mission_dir / "commander_order.json"),
+        "governor_plan": _read_json(mission_dir / "governor_plan.json"),
+    }
+
+
+def mission_progress_events_for_run(run_dir: Path, limit: int = 200) -> list[dict[str, Any]]:
+    mission_dir = mission_dir_for_run(run_dir)
+    if mission_dir is None:
         return []
-    mission_dir = Path(raw_mission_dir)
     return _read_jsonl(mission_dir / "progress_events.jsonl", limit=limit)
 
 
@@ -218,6 +234,7 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         "oversight_summary": run_oversight_summary(run_dir),
         "final_manifest_summary": final_manifest_summary(result),
         "mission_ref": mission_ref_for_run(run_dir),
+        "mission_protocol": mission_protocol_payloads_for_run(run_dir),
         "mission_progress_events": mission_progress_events_for_run(run_dir),
         "progress": run_progress(status, ledger),
         "last_preflight": last_run_preflight(ledger),
@@ -268,6 +285,26 @@ def _short_text(value: Any, max_chars: int = 800) -> str:
     if len(text) <= max_chars:
         return text
     return text[: max(0, max_chars - 1)].rstrip() + "…"
+
+
+def _protocol_task_brief(summary: dict[str, Any], ledger: dict[str, Any], max_chars: int = 520) -> tuple[str, str]:
+    protocol = summary.get("mission_protocol") if isinstance(summary.get("mission_protocol"), dict) else {}
+    command = protocol.get("commander_order") if isinstance(protocol.get("commander_order"), dict) else {}
+    plan = protocol.get("governor_plan") if isinstance(protocol.get("governor_plan"), dict) else {}
+    for source, candidate in (
+        ("commander_order.primary_goal", command.get("primary_goal")),
+        ("commander_order.commander_intent", command.get("commander_intent")),
+        ("governor_plan.understanding", plan.get("understanding")),
+    ):
+        text = str(candidate or "").strip()
+        if text:
+            return _short_text(text, max_chars), source
+    raw_goal = str(summary.get("goal") or ledger.get("goal") or "").strip()
+    if raw_goal.startswith("ПРИКАЗ ВАРМАСТЕРА"):
+        match = re.search(r"Главная цель:\s*(.+?)(?:\n\n|\n[A-ZА-ЯЁ][^:\n]{1,80}:|$)", raw_goal, re.S)
+        if match:
+            return _short_text(match.group(1), max_chars), "legacy_goal.extracted_primary_goal"
+    return _short_text(raw_goal, max_chars), "legacy_goal"
 
 
 def _status_severity(status: str) -> str:
@@ -501,13 +538,15 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
     manifest_summary = summary.get("final_manifest_summary") if isinstance(summary.get("final_manifest_summary"), dict) else {}
     blockers = manifest_summary.get("blockers") if isinstance(manifest_summary.get("blockers"), list) else []
     warnings = manifest_summary.get("warnings") if isinstance(manifest_summary.get("warnings"), list) else []
+    task_brief, task_brief_source = _protocol_task_brief(summary, ledger)
     entries: list[dict[str, Any]] = [
         {
             "kind": "task_received",
             "severity": "info",
             "at": str(ledger.get("created_at") or summary.get("created_at") or ""),
             "headline": f"{governor or 'Бригадир'} получил задачу",
-            "detail": _short_text(summary.get("goal") or ledger.get("goal"), 1400),
+            "detail": task_brief,
+            "protocol_source": task_brief_source,
         }
     ]
     mission_events = summary.get("mission_progress_events") if isinstance(summary.get("mission_progress_events"), list) else []
@@ -580,6 +619,7 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
         "source": "task_ledger_and_run_summary",
         "chat_independent": True,
         "entries": entries,
+        "activity_cards": entries,
         "final_report": entries[-1] if entries else {},
         "log_text": "\n".join(log_lines),
         "polling": {

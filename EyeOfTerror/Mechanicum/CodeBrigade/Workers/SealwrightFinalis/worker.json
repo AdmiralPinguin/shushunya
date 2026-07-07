@@ -1,6 +1,6 @@
 {
   "name": "SealwrightFinalis",
-  "status": "prototype",
+  "status": "active",
   "port": 7020,
   "role": "code final handoff packager",
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",

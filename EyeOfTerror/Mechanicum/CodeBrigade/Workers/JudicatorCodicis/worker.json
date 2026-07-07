@@ -1,6 +1,6 @@
 {
   "name": "JudicatorCodicis",
-  "status": "prototype",
+  "status": "active",
   "port": 7019,
   "role": "code review critic",
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",

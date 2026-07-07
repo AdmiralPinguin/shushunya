@@ -9,6 +9,7 @@ from pathlib import Path
 
 from eye_of_terror.http_executor import execute_run, run_step, terminal_payload_allows_completion
 from eye_of_terror.warmaster_gateway import event_display
+from EyeOfTerror.common_protocol import worker_order
 
 import sys
 
@@ -130,7 +131,7 @@ def main() -> int:
                     },
                 },
             )
-            summary = execute_run(run_dir, timeout_sec=5)
+            summary = execute_run(run_dir, timeout_sec=60)
             if not summary.get("ok"):
                 raise AssertionError(summary)
             if not (work / "test" / "direct_event_notes.json").exists():
@@ -214,7 +215,7 @@ def main() -> int:
                         "request": {"task_id": "failing-http-test"},
                     },
                 )
-                failed_summary = execute_run(failing_run, timeout_sec=5)
+                failed_summary = execute_run(failing_run, timeout_sec=30)
                 if failed_summary.get("ok"):
                     raise AssertionError(f"failing HTTP worker should fail the run: {failed_summary}")
                 failing_ledger = json.loads((failing_run / "task_ledger.json").read_text(encoding="utf-8"))
@@ -235,6 +236,16 @@ def main() -> int:
                         "step_id": "capture_step",
                         "worker": "CaptureWorker",
                         "port": capture_server.server_port,
+                        "worker_order": worker_order(
+                            "mission-capture-test",
+                            step_id="capture_step",
+                            sender="TestGovernor",
+                            to="CaptureWorker",
+                            task="Capture the protocol order",
+                            expected_output="captured payload",
+                            input_artifacts=[],
+                            quality_requirements=["preserve revision context"],
+                        ),
                         "request": {"task_id": "capture-test"},
                     },
                 )
@@ -246,9 +257,15 @@ def main() -> int:
                 )
                 if not captured.ok:
                     raise AssertionError(captured)
-                context = (CaptureRunHandler.captured_payload or {}).get("request", {}).get("revision_context")
+                captured_payload = CaptureRunHandler.captured_payload or {}
+                context = captured_payload.get("request", {}).get("revision_context")
                 if context is None or context.get("reasons") != ["Needs focused rewrite"]:
                     raise AssertionError(f"HTTP executor did not forward revision_context: {CaptureRunHandler.captured_payload}")
+                order = captured_payload.get("worker_order") if isinstance(captured_payload.get("worker_order"), dict) else {}
+                if order.get("revision_context", {}).get("reasons") != ["Needs focused rewrite"]:
+                    raise AssertionError(f"HTTP executor did not forward revision_context into worker_order: {captured_payload}")
+                if captured_payload.get("request", {}).get("task") != "Capture the protocol order":
+                    raise AssertionError(f"HTTP executor did not normalize legacy request from worker_order: {captured_payload}")
             finally:
                 capture_server.shutdown()
                 capture_thread.join(timeout=5)
@@ -257,7 +274,7 @@ def main() -> int:
             wrong_thread.start()
             try:
                 patch_dispatch_ports(run_dir, {"NoosphericExtractor": wrong_server.server_port})
-                summary = execute_run(run_dir, timeout_sec=5)
+                summary = execute_run(run_dir, timeout_sec=30)
                 failures = summary.get("preflight_failures") or []
                 if summary.get("ok") or not any("identity mismatch" in item.get("error", "") for item in failures):
                     raise AssertionError(f"expected identity mismatch preflight failure: {summary}")

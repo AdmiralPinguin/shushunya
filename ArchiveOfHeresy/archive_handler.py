@@ -613,6 +613,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             or ""
         ).strip()
         activity_entries = activity.get("entries") if isinstance(activity.get("entries"), list) else []
+        activity_cards = activity.get("activity_cards") if isinstance(activity.get("activity_cards"), list) else activity_entries
         activity_log = str(activity.get("log_text") or "").strip()
         if activity_entries:
             last_entry = activity_entries[-1] if isinstance(activity_entries[-1], dict) else {}
@@ -631,6 +632,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             "final": final_text,
             "activity_log": activity_log,
             "activity_entries": activity_entries,
+            "activity_cards": activity_cards,
             "governor_activity": activity,
             "updated_at": str(run.get("updated_at") or ""),
             "created_at": str(run.get("created_at") or ""),
@@ -702,6 +704,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             summary = snapshot.get("summary") if isinstance(snapshot.get("summary"), dict) else {}
             activity = self.warmaster_activity_from_payload(orchestration)
             activity_entries = activity.get("entries") if isinstance(activity.get("entries"), list) else []
+            activity_cards = activity.get("activity_cards") if isinstance(activity.get("activity_cards"), list) else activity_entries
             display_events = orchestration.get("display_events") if isinstance(orchestration.get("display_events"), list) else []
             raw_events = snapshot.get("events") if isinstance(snapshot.get("events"), list) else []
             if activity_entries:
@@ -744,6 +747,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "running": active,
                 "events": events,
                 "activity_entries": activity_entries,
+                "activity_cards": activity_cards,
                 "activity_log": str(activity.get("log_text") or "").strip(),
                 "governor_activity": activity,
                 "final": final_event,
@@ -1043,12 +1047,16 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         except Exception:
             activity = {}
         activity_log = str(activity.get("log_text") or "").strip()
+        activity_entries = activity.get("entries") if isinstance(activity.get("entries"), list) else []
+        activity_cards = activity.get("activity_cards") if isinstance(activity.get("activity_cards"), list) else activity_entries
         accepted = self.warmaster_acceptance_message(resolved_task_id or task_id)
         response["ok"] = self.warmaster_loop_started_or_active(loop_status, loop_response) if loop_status else 200 <= status < 300
         response["backend"] = "warmaster"
         response["task_id"] = resolved_task_id or task_id
         response["message"] = accepted
         response["activity_log"] = activity_log
+        response["activity_entries"] = activity_entries
+        response["activity_cards"] = activity_cards
         response["governor_activity"] = activity
         response["research_loop"] = loop_response
         return response

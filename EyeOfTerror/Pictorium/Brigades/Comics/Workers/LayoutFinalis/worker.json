@@ -2,7 +2,7 @@
   "name": "LayoutFinalis",
   "port": 7031,
   "role": "comic layout and final manifest builder",
-  "status": "prototype",
+  "status": "active",
   "capabilities": ["page_layout", "final_manifest", "blocker_rollup"],
   "model_brain": {
     "required": true,

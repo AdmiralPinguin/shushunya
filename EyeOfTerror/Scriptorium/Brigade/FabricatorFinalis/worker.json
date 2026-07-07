@@ -2,7 +2,7 @@
   "name": "FabricatorFinalis",
   "port": 7007,
   "role": "finalizer, packager, telegram sender",
-  "status": "prototype",
+  "status": "active",
   "capabilities": ["model_guided_final_readiness", "fb2", "markdown_bundle", "telegram_send_document", "critic_metric_manifest"],
   "model_brain": {
     "required": true,

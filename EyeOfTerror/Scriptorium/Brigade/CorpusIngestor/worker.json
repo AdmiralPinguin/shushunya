@@ -2,7 +2,7 @@
   "name": "CorpusIngestor",
   "port": 7013,
   "role": "local corpus indexer",
-  "status": "prototype",
+  "status": "active",
   "capabilities": ["model_guided_corpus_triage", "local_corpus_scan", "primary_text_candidates", "epub_fb2_text_extraction"],
   "model_brain": {
     "required": true,

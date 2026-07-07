@@ -462,13 +462,19 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     return
                 if len(parts) == 3 and parts[2] == "activity":
                     snapshot = run_snapshot(run_dir, event_limit=0, events_after=0)
+                    activity = snapshot.get("governor_activity", {}) if isinstance(snapshot.get("governor_activity"), dict) else {}
+                    entries = activity.get("entries") if isinstance(activity.get("entries"), list) else []
+                    activity_cards = activity.get("activity_cards") if isinstance(activity.get("activity_cards"), list) else entries
                     response(
                         self,
                         200,
                         {
                             "ok": bool(snapshot.get("ok")),
                             "task_id": task_id,
-                            "governor_activity": snapshot.get("governor_activity", {}),
+                            "governor_activity": activity,
+                            "entries": entries,
+                            "activity_cards": activity_cards,
+                            "activity_log": str(activity.get("log_text") or ""),
                             "summary": snapshot.get("summary", {}),
                             "active": bool(snapshot.get("active")),
                         },

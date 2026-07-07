@@ -2,7 +2,7 @@
   "name": "CharacterSheetwright",
   "port": 7029,
   "role": "comic character sheet planner using Image Brigade",
-  "status": "prototype",
+  "status": "active",
   "capabilities": ["character_sheet_plan", "image_brigade_promptwright"],
   "model_brain": {
     "required": true,

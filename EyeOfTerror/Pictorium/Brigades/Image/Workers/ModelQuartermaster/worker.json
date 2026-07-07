@@ -2,7 +2,7 @@
   "name": "ModelQuartermaster",
   "port": 7023,
   "role": "model, LoRA, embedding, and asset readiness inspector",
-  "status": "prototype",
+  "status": "active",
   "capabilities": ["capability_report", "model_readiness", "asset_profile_report", "structured_blockers"],
   "model_brain": {
     "required": true,

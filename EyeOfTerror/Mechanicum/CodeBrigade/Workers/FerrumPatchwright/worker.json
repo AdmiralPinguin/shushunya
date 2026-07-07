@@ -1,6 +1,6 @@
 {
   "name": "FerrumPatchwright",
-  "status": "prototype",
+  "status": "active",
   "port": 7017,
   "role": "code patch manifest builder",
   "api_contract": "EyeOfTerror/Warmaster/contracts/worker_api.md",

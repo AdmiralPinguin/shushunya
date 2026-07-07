@@ -2,7 +2,7 @@
   "name": "ScenarioScribe",
   "port": 7027,
   "role": "comic scenario planner",
-  "status": "prototype",
+  "status": "active",
   "capabilities": ["scenario", "beats", "cast_style_constraints"],
   "model_brain": {
     "required": true,

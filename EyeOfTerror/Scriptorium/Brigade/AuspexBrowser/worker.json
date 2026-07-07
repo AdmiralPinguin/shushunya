@@ -2,7 +2,7 @@
   "name": "AuspexBrowser",
   "port": 7009,
   "role": "browser worker",
-  "status": "prototype",
+  "status": "active",
   "capabilities": ["model_guided_acquisition", "http_fetch", "source_snapshots", "blocked_source_recording"],
   "model_brain": {
     "required": true,

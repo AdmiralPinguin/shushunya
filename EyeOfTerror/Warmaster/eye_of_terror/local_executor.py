@@ -17,7 +17,7 @@ from EyeOfTerror.model_brain import attach_model_brain, request_model_decision
 
 from .ledger import TaskLedger
 from .mission_control import record_worker_protocol_report, worker_report_from_payload
-from .pipeline import write_json_atomic
+from .pipeline import dispatch_packet_with_worker_order, write_json_atomic
 
 
 WORKER_COMMANDS = {
@@ -183,11 +183,7 @@ def revision_contexts_from_result(result: dict[str, Any]) -> dict[str, dict[str,
 
 
 def write_revision_dispatch(dispatch_path: Path, packet: dict[str, Any], revision_context: dict[str, Any]) -> Path:
-    enriched = dict(packet)
-    request = dict(enriched.get("request") if isinstance(enriched.get("request"), dict) else {})
-    request["revision_context"] = revision_context
-    enriched["request"] = request
-    return write_execution_dispatch(dispatch_path, enriched)
+    return write_execution_dispatch(dispatch_path, dispatch_packet_with_worker_order(packet, revision_context=revision_context))
 
 
 def write_execution_dispatch(dispatch_path: Path, packet: dict[str, Any]) -> Path:
@@ -221,6 +217,7 @@ def run_step(
         return StepResult(dispatch_path.stem, "", 2, False, payload, "", payload["error"])
     worker = str(packet.get("worker") or "")
     step_id = str(packet.get("step_id") or dispatch_path.stem)
+    packet = dispatch_packet_with_worker_order(packet, revision_context=revision_context)
     request = packet.get("request") if isinstance(packet.get("request"), dict) else packet
     artifact_errors = input_artifact_errors(request, workspace_root)
     quality_errors = quality_expectation_errors(request, worker)
@@ -245,14 +242,23 @@ def run_step(
     temp_dispatch_path: Path | None = None
     execution_packet = dict(packet)
     execution_request = dict(request)
-    if revision_context:
-        execution_request["revision_context"] = revision_context
+    worker_order = execution_packet.get("worker_order") if isinstance(execution_packet.get("worker_order"), dict) else {}
     model_decision = request_model_decision(
         worker,
         worker,
-        execution_request,
+        {
+            "worker_order": worker_order,
+            "legacy_request": execution_request,
+            "execution_contract": {
+                "primary_input": "worker_order",
+                "legacy_request_is_compatibility": True,
+            },
+        },
         layer="local_executor",
-        instructions="You are the model brain for a local pipeline worker subprocess. Stay inside the worker role and return guidance for this exact step.",
+        instructions=(
+            "You are the model brain for a local pipeline worker subprocess. Treat worker_order as the primary order. "
+            "Use legacy_request only for compatibility fields and artifact context. Stay inside the worker role and return guidance for this exact step."
+        ),
     )
     if model_decision.get("status") != "answered":
         payload = {
@@ -266,6 +272,7 @@ def run_step(
         }
         return StepResult(step_id, worker, 2, False, attach_model_brain(payload, model_decision), "", payload["error"])
     execution_request["model_brain"] = model_decision
+    execution_request = dispatch_packet_with_worker_order({**execution_packet, "request": execution_request}).get("request", execution_request)
     execution_packet["request"] = execution_request
     temp_dispatch_path = write_execution_dispatch(dispatch_path, execution_packet)
     execution_dispatch_path = temp_dispatch_path

@@ -93,6 +93,36 @@ def quality_hints_for_request(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def normalize_request_with_worker_order(request: dict[str, Any], order: dict[str, Any]) -> dict[str, Any]:
+    validate_protocol_payload(order, expected_type="worker_order")
+    normalized = dict(request)
+    normalized["worker_order"] = order
+    normalized.setdefault("task", str(order.get("task") or ""))
+    normalized.setdefault("expected_output", str(order.get("expected_output") or ""))
+    normalized.setdefault("input_artifacts", list(order.get("input_artifacts") if isinstance(order.get("input_artifacts"), list) else []))
+    normalized.setdefault("quality_requirements", list(order.get("quality_requirements") if isinstance(order.get("quality_requirements"), list) else []))
+    normalized.setdefault("revision_context", dict(order.get("revision_context") if isinstance(order.get("revision_context"), dict) else {}))
+    return normalized
+
+
+def dispatch_packet_with_worker_order(packet: dict[str, Any], revision_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    order = packet.get("worker_order") if isinstance(packet.get("worker_order"), dict) else {}
+    if not order:
+        return dict(packet)
+    order = dict(order)
+    if revision_context:
+        order["revision_context"] = revision_context
+    validate_protocol_payload(order, expected_type="worker_order")
+    request = dict(packet.get("request") if isinstance(packet.get("request"), dict) else {})
+    if revision_context:
+        request["revision_context"] = revision_context
+    request = normalize_request_with_worker_order(request, order)
+    enriched = dict(packet)
+    enriched["worker_order"] = order
+    enriched["request"] = request
+    return enriched
+
+
 def build_dispatch_packets(contract: TaskContract, oversight: dict[str, Any] | None = None) -> list[DispatchPacket]:
     packets: list[DispatchPacket] = []
     contract_payload = contract.to_dict()
@@ -133,7 +163,7 @@ def build_dispatch_packets(contract: TaskContract, oversight: dict[str, Any] | N
             quality_requirements=quality_requirements,
         )
         validate_protocol_payload(order, expected_type="worker_order")
-        request["worker_order"] = order
+        request = normalize_request_with_worker_order(request, order)
         packets.append(
             DispatchPacket(
                 task_id=contract.task_id,

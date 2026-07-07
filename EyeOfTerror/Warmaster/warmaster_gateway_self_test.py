@@ -864,7 +864,8 @@ def main() -> int:
             if (
                 not orchestrated_run.get("ok")
                 or orchestrated_run.get("phase") != "started"
-                or [item.get("stage") for item in orchestrated_run.get("trace", [])] != ["task_preflight", "task", "run_preflight", "orchestrate_start"]
+                or [item.get("stage") for item in orchestrated_run.get("trace", [])]
+                != ["commander_intake", "task_preflight", "task", "run_preflight", "orchestrate_start"]
                 or orchestrated_run.get("start", {}).get("operation") != "start"
                 or orchestrated_run.get("next_action", {}).get("kind") != "poll"
                 or orchestrated_run.get("orchestration", {}).get("task_id") != "warmaster-orchestrate-run-test"
@@ -875,6 +876,9 @@ def main() -> int:
                 or orchestrated_run.get("model_brain", {}).get("status") != "answered"
             ):
                 raise AssertionError(f"one-shot orchestration did not prepare and start a run: {orchestrated_run}")
+            plan_understanding = str(orchestrated_run.get("prepare", {}).get("governor_plan", {}).get("understanding") or "")
+            if plan_understanding.startswith("ПРИКАЗ ВАРМАСТЕРА"):
+                raise AssertionError(f"governor_plan leaked raw commander order: {plan_understanding}")
             orchestrated_run_events = request_json(base + "/runs/warmaster-orchestrate-run-test/events")
             if (
                 not any(item.get("type") == "run_preflight_recorded" for item in orchestrated_run_events.get("events", []))

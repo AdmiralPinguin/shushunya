@@ -48,7 +48,11 @@ def governor_payload_for(message: str, task_id: str | None, commander_order: dic
     return payload
 
 
-def attach_governor_plan_payload(payload: dict[str, Any], mission_id: str) -> dict[str, Any]:
+def attach_governor_plan_payload(
+    payload: dict[str, Any],
+    mission_id: str,
+    commander_order: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     contract = payload.get("contract") if isinstance(payload.get("contract"), dict) else {}
     if not contract:
         return payload
@@ -56,10 +60,17 @@ def attach_governor_plan_payload(payload: dict[str, Any], mission_id: str) -> di
         mission_id = f"mission-{str(contract.get('task_id') or '').strip()}"
     plan = payload.get("governor_plan") if isinstance(payload.get("governor_plan"), dict) else None
     if plan is None:
-        plan = governor_plan_from_contract(mission_id, contract)
+        plan = governor_plan_from_contract(mission_id, contract, commander_order)
     else:
         plan = dict(plan)
         plan["mission_id"] = mission_id
+        if str(plan.get("understanding") or "").strip().startswith("ПРИКАЗ ВАРМАСТЕРА"):
+            plan["understanding"] = str(
+                (commander_order or {}).get("primary_goal")
+                or (commander_order or {}).get("commander_intent")
+                or plan.get("understanding")
+                or ""
+            ).strip()
     validate_protocol_payload(plan, expected_type="governor_plan")
     payload["governor_plan"] = plan
     return payload
@@ -80,7 +91,7 @@ def prepare_task_via_governor_service(
     governor_payload = governor_payload_for(message, task_id, commander_order=commander_order)
     try:
         plan = post_json(base + "/plan", governor_payload)
-        plan = attach_governor_plan_payload(plan, mission_id_from_commander(task_id, commander_order))
+        plan = attach_governor_plan_payload(plan, mission_id_from_commander(task_id, commander_order), commander_order)
     except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
         return {
             "ok": False,
@@ -430,7 +441,7 @@ def prepare_task(
             ),
         }
     plan_payload = plan.to_dict()
-    plan_payload = attach_governor_plan_payload(plan_payload, mission_id_from_commander(plan.contract.task_id, commander_order))
+    plan_payload = attach_governor_plan_payload(plan_payload, mission_id_from_commander(plan.contract.task_id, commander_order), commander_order)
     oversight_errors = plan_oversight_errors(contract_payload, plan_payload)
     if oversight_errors:
         return {
@@ -545,7 +556,7 @@ def preflight_task(
                 }
         try:
             plan_payload = post_json(base + "/plan", governor_payload_for(message, task_id, commander_order=commander_order))
-            plan_payload = attach_governor_plan_payload(plan_payload, mission_id_from_commander(task_id, commander_order))
+            plan_payload = attach_governor_plan_payload(plan_payload, mission_id_from_commander(task_id, commander_order), commander_order)
         except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
             return {
                 "ok": False,
@@ -565,7 +576,7 @@ def preflight_task(
         else:
             plan = plan_lore_reconstruction(message, task_id=task_id)
         plan_payload = plan.to_dict()
-        plan_payload = attach_governor_plan_payload(plan_payload, mission_id_from_commander(str(plan.contract.task_id), commander_order))
+        plan_payload = attach_governor_plan_payload(plan_payload, mission_id_from_commander(str(plan.contract.task_id), commander_order), commander_order)
         contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else plan.contract.to_dict()
         oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else {}
     resolved_task_id = str(contract.get("task_id") or "").strip()
