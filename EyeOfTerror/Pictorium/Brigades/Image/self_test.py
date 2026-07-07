@@ -11,12 +11,30 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from PIL import Image
 
+from EyeOfTerror.common_protocol import validate_protocol_payload, worker_order
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ArtifactFinalis.worker import build_final_manifest
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ForgeDispatcher.worker import prepare_dispatch
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ImageVerifier.worker import verify_image
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ModelQuartermaster.worker import inspect_resources
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.Promptwright.worker import prepare_image_plan
 from EyeOfTerror.Pictorium.testing.fake_model_server import fake_pictorium_model
+
+
+MISSION_ID = "mission-pictorium-image-worker-order-self-test"
+
+
+def order_payload(worker: str, step_id: str, task: str, expected_output: str) -> dict[str, object]:
+    return {
+        "worker_order": worker_order(
+            mission_id=MISSION_ID,
+            step_id=step_id,
+            sender="Moriana",
+            to=worker,
+            task=task,
+            expected_output=expected_output,
+            quality_requirements=["return a shared worker_report"],
+        )
+    }
 
 
 def assert_execution_packet(payload: dict[str, object], worker: str) -> None:
@@ -39,22 +57,49 @@ def assert_model_guidance(payload: dict[str, object], worker: str) -> None:
         raise AssertionError(f"{worker} model_guidance did not contain structured decision: {payload}")
 
 
+def assert_worker_report(payload: dict[str, object], worker: str, step_id: str) -> None:
+    if payload.get("protocol_mode") != "worker_order":
+        raise AssertionError(f"{worker} did not run in worker_order protocol mode: {payload}")
+    order = payload.get("worker_order") if isinstance(payload.get("worker_order"), dict) else {}
+    report = payload.get("worker_report") if isinstance(payload.get("worker_report"), dict) else {}
+    validate_protocol_payload(order, expected_type="worker_order")
+    validate_protocol_payload(report, expected_type="worker_report")
+    if (
+        order.get("mission_id") != MISSION_ID
+        or report.get("mission_id") != MISSION_ID
+        or report.get("step_id") != step_id
+        or report.get("worker") != worker
+    ):
+        raise AssertionError(f"{worker} worker_report drifted from worker_order: {payload}")
+
+
 def _main() -> int:
-    plan = prepare_image_plan({"request": "smoke test image 512x512", "use_memory": False, "use_thinker": False})
+    plan = prepare_image_plan(
+        {
+            **order_payload("Promptwright", "image_planning", "smoke test image 512x512", "/work/pictorium/image_plan.json"),
+            "request": "this legacy field must not override worker_order",
+            "use_memory": False,
+            "use_thinker": False,
+        }
+    )
     if not plan.get("ok") or plan.get("plan_kind") != "job":
         raise AssertionError(f"Promptwright failed: {plan}")
     assert_execution_packet(plan, "Promptwright")
     assert_model_guidance(plan, "Promptwright")
+    assert_worker_report(plan, "Promptwright", "image_planning")
     spec = plan["job_spec"]
     if spec.get("width") != 512 or spec.get("height") != 512:
         raise AssertionError(f"Promptwright dimensions failed: {spec}")
     long_plan = prepare_image_plan(
         {
-            "request": (
+            **order_payload(
+                "Promptwright",
+                "image_planning",
                 "cinematic comic panel, ancient forge, tech-priest, ritual altar, "
                 "same character, same style, no text, no speech bubbles, dramatic smoke, "
                 "red light, brass machinery, readable composition, detailed background, "
-                "continuity reference, establishing shot, 512x512 steps 8"
+                "continuity reference, establishing shot, 512x512 steps 8",
+                "/work/pictorium/image_plan.json",
             ),
             "use_memory": False,
             "use_thinker": False,
@@ -72,44 +117,83 @@ def _main() -> int:
         or compaction.get("kind") != "prompt_compaction"
     ):
         raise AssertionError(f"Promptwright prompt compaction failed: {long_spec}")
+    assert_worker_report(long_plan, "Promptwright", "image_planning")
 
-    resources = inspect_resources({"job_spec": spec})
+    resources = inspect_resources(
+        {
+            **order_payload("ModelQuartermaster", "resource_readiness", "inspect local resources", "/work/pictorium/resource_report.json"),
+            "job_spec": spec,
+        }
+    )
     if "capabilities" not in resources or "resource_report" not in resources:
         raise AssertionError(f"ModelQuartermaster failed: {resources}")
     assert_execution_packet(resources, "ModelQuartermaster")
     assert_revision_packet(resources, "ModelQuartermaster")
     assert_model_guidance(resources, "ModelQuartermaster")
+    assert_worker_report(resources, "ModelQuartermaster", "resource_readiness")
 
     with tempfile.TemporaryDirectory(prefix="pictorium-image-self-test-") as tmp:
-        dispatch = prepare_dispatch({"job_spec": spec, "submit": True, "db_path": str(Path(tmp) / "forge.sqlite3")})
+        dispatch = prepare_dispatch(
+            {
+                **order_payload("ForgeDispatcher", "forge_dispatch", "validate and queue forge job", "/work/pictorium/forge_jobs.json"),
+                "job_spec": spec,
+                "submit": True,
+                "db_path": str(Path(tmp) / "forge.sqlite3"),
+            }
+        )
         if not dispatch.get("ok") or not dispatch.get("dispatch", {}).get("valid") or not dispatch.get("job_record"):
             raise AssertionError(f"ForgeDispatcher failed: {dispatch}")
         assert_execution_packet(dispatch, "ForgeDispatcher")
         assert_revision_packet(dispatch, "ForgeDispatcher")
         assert_model_guidance(dispatch, "ForgeDispatcher")
+        assert_worker_report(dispatch, "ForgeDispatcher", "forge_dispatch")
 
-        planned_verification = verify_image({"job_spec": spec, "job_record": dispatch["job_record"]})
+        planned_verification = verify_image(
+            {
+                **order_payload("ImageVerifier", "image_verification", "verify pending image artifact", "/work/pictorium/image_verification.json"),
+                "job_spec": spec,
+                "job_record": dispatch["job_record"],
+            }
+        )
         if planned_verification.get("ok") or planned_verification.get("blockers", [{}])[0].get("code") != "artifact_not_generated":
             raise AssertionError(f"ImageVerifier planned state failed: {planned_verification}")
         assert_execution_packet(planned_verification, "ImageVerifier")
         assert_revision_packet(planned_verification, "ImageVerifier")
         assert_model_guidance(planned_verification, "ImageVerifier")
+        assert_worker_report(planned_verification, "ImageVerifier", "image_verification")
 
         image_path = Path(tmp) / "artifact.png"
         Image.new("RGB", (512, 512), (20, 30, 40)).save(image_path)
-        verification = verify_image({"artifact_path": str(image_path), "job_spec": spec, "job_record": dispatch["job_record"]})
+        verification = verify_image(
+            {
+                **order_payload("ImageVerifier", "image_verification", "verify generated image artifact", "/work/pictorium/image_verification.json"),
+                "artifact_path": str(image_path),
+                "job_spec": spec,
+                "job_record": dispatch["job_record"],
+            }
+        )
         if not verification.get("ok") or not verification.get("verification", {}).get("dimension_match", {}).get("ok"):
             raise AssertionError(f"ImageVerifier concrete artifact failed: {verification}")
         assert_execution_packet(verification, "ImageVerifier")
         assert_revision_packet(verification, "ImageVerifier")
         assert_model_guidance(verification, "ImageVerifier")
+        assert_worker_report(verification, "ImageVerifier", "image_verification")
 
-        final = build_final_manifest({"plan": plan, "resources": resources, "dispatch": dispatch, "verification": verification})
+        final = build_final_manifest(
+            {
+                **order_payload("ArtifactFinalis", "finalize", "build final visual manifest", "/work/pictorium/final_manifest.json"),
+                "plan": plan,
+                "resources": resources,
+                "dispatch": dispatch,
+                "verification": verification,
+            }
+        )
         if not final.get("ok") or final.get("final_manifest", {}).get("status") != "ready":
             raise AssertionError(f"ArtifactFinalis failed: {final}")
         assert_execution_packet(final, "ArtifactFinalis")
         assert_revision_packet(final, "ArtifactFinalis")
         assert_model_guidance(final, "ArtifactFinalis")
+        assert_worker_report(final, "ArtifactFinalis", "finalize")
 
     print("[ok] Pictorium Image Brigade workers")
     return 0

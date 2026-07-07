@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import Any
 
+from EyeOfTerror.common_protocol import validate_protocol_payload, worker_report
 from EyeOfTerror.Pictorium.pictorium_model import (
     attach_model_guidance,
     model_guidance_blockers,
@@ -11,26 +13,64 @@ from EyeOfTerror.Pictorium.pictorium_model import (
 
 
 API_VERSION = 1
+_PAYLOAD_STACK: ContextVar[tuple[dict[str, Any], ...]] = ContextVar("pictorium_worker_payload_stack", default=())
+
+
+def _push_payload(payload: dict[str, Any]) -> None:
+    _PAYLOAD_STACK.set((*_PAYLOAD_STACK.get(), payload))
+
+
+def _pop_payload() -> dict[str, Any] | None:
+    stack = _PAYLOAD_STACK.get()
+    if not stack:
+        return None
+    payload = stack[-1]
+    _PAYLOAD_STACK.set(stack[:-1])
+    return payload
 
 
 def response(worker: str, payload: dict[str, Any], *, ok: bool = True) -> dict[str, Any]:
-    return {
+    result = {
         "ok": ok,
         "worker": worker,
         "api_version": API_VERSION,
         **payload,
     }
+    request_payload = _pop_payload()
+    if isinstance(request_payload, dict):
+        order = worker_order_from_payload(request_payload)
+        if order:
+            if str(order.get("to") or "").strip() != worker:
+                raise ValueError(f"worker_order.to={order.get('to')!r} cannot be handled by {worker}")
+            result.setdefault("protocol_mode", "worker_order")
+            result.setdefault("worker_order", order)
+            result.setdefault("worker_report", worker_report_from_response(worker, order, result, ok=ok))
+        else:
+            result.setdefault("protocol_mode", "legacy_payload")
+    return result
 
 
 def require_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     if payload is None:
+        _push_payload({})
         return {}
     if not isinstance(payload, dict):
         raise TypeError("worker payload must be a JSON object")
+    _push_payload(payload)
     return payload
 
 
+def worker_order_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    order = payload.get("worker_order") if isinstance(payload.get("worker_order"), dict) else {}
+    if order:
+        validate_protocol_payload(order, expected_type="worker_order")
+    return order
+
+
 def task_text(payload: dict[str, Any]) -> str:
+    order = worker_order_from_payload(payload)
+    if order:
+        return str(order.get("task") or "").strip()
     text = str(payload.get("request") or payload.get("task") or "").strip()
     if text:
         return text
@@ -62,10 +102,66 @@ def worker_contract(
         "role": role,
         "callable": "handle(payload: dict) -> dict",
         "capabilities": capabilities,
-        "input_fields": inputs,
-        "output_fields": [*outputs, "execution_packet", "revision_packet", "model_guidance"],
+        "input_fields": ["worker_order", *inputs],
+        "output_fields": [*outputs, "worker_report", "protocol_mode", "execution_packet", "revision_packet", "model_guidance"],
         "model_brain": pictorium_model_contract(name, role),
     }
+
+
+def _blocker_messages(blockers: Any) -> list[str]:
+    if not isinstance(blockers, list):
+        return []
+    messages = []
+    for blocker in blockers:
+        if isinstance(blocker, dict):
+            message = str(blocker.get("message") or blocker.get("code") or "").strip()
+        else:
+            message = str(blocker or "").strip()
+        if message:
+            messages.append(message)
+    return messages
+
+
+def _next_action(packet: dict[str, Any]) -> str:
+    next_steps = packet.get("next_steps")
+    if isinstance(next_steps, list):
+        return ", ".join(str(item).strip() for item in next_steps if str(item).strip())
+    return str(next_steps or "").strip()
+
+
+def worker_report_from_response(
+    worker: str,
+    order: dict[str, Any],
+    result: dict[str, Any],
+    *,
+    ok: bool,
+) -> dict[str, Any]:
+    packet = result.get("execution_packet") if isinstance(result.get("execution_packet"), dict) else {}
+    blockers = packet.get("blockers") if isinstance(packet.get("blockers"), list) else result.get("blockers")
+    artifacts = packet.get("produced_artifacts") if isinstance(packet.get("produced_artifacts"), list) else []
+    status = "done" if ok else "failed"
+    if blockers:
+        status = "blocked"
+    summary = str(
+        result.get("summary")
+        or packet.get("step")
+        or result.get("artifact")
+        or order.get("expected_output")
+        or order.get("task")
+        or f"{worker} completed work"
+    ).strip()
+    report = worker_report(
+        mission_id=str(order.get("mission_id") or ""),
+        step_id=str(order.get("step_id") or ""),
+        worker=worker,
+        status=status,
+        summary=summary,
+        artifacts=[str(item) for item in artifacts if str(item).strip()],
+        problems=_blocker_messages(blockers),
+        next_recommended_action=_next_action(packet),
+    )
+    validate_protocol_payload(report, expected_type="worker_report")
+    return report
 
 
 def worker_model_guidance(worker: str, role: str, payload: dict[str, Any], instructions: str) -> dict[str, Any]:
