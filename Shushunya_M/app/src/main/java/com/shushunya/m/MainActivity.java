@@ -1498,33 +1498,33 @@ public class MainActivity extends Activity {
             if (!prompt.isEmpty()) {
                 addAgentMessage(true, prompt, false);
             }
-            StringBuilder summary = new StringBuilder();
-            String brigade = agentBrigadeLabel(governor);
-            if (!brigade.isEmpty()) {
-                summary.append("Бригада: ").append(brigade).append("\n");
-            }
-            if (!taskId.isEmpty()) {
-                summary.append("task_id=").append(taskId).append("\n");
-            }
-            if (running) {
-                summary.append(currentStep.isEmpty()
-                        ? "Сейчас делает: выполняет задачу."
-                        : "Сейчас делает: " + currentStep);
-            } else if (cancelled) {
-                summary.append("Остановлено.");
-            } else if (success) {
-                summary.append("Готово.");
+            addAgentTaskCard(task, false);
+            JSONArray activityEntries = task.optJSONArray("activity_entries");
+            if (activityEntries != null && activityEntries.length() > 0) {
+                for (int j = 0; j < activityEntries.length(); j++) {
+                    JSONObject entry = activityEntries.optJSONObject(j);
+                    if (entry != null) {
+                        addAgentActivityEntry(entry, j, activityEntries.length(), false);
+                    }
+                }
             } else {
-                summary.append("Завершилось без успешного final.");
-            }
-            String activityLog = task.optString("activity_log", "").trim();
-            if (!activityLog.isEmpty()) {
-                summary.append("\n\n").append(activityLog);
+                StringBuilder summary = new StringBuilder();
+                if (running) {
+                    summary.append(currentStep.isEmpty()
+                            ? "Сейчас делает: выполняет задачу."
+                            : "Сейчас делает: " + currentStep);
+                } else if (cancelled) {
+                    summary.append("Остановлено.");
+                } else if (success) {
+                    summary.append("Готово.");
+                } else {
+                    summary.append("Завершилось без успешного final.");
+                }
+                addAgentMessage(false, summary.toString(), false);
             }
             if (!finalText.isEmpty()) {
-                summary.append("\n\n").append(finalText);
+                addAgentFinalMessage(finalText, false);
             }
-            addAgentMessage(false, summary.toString(), false);
         }
         if (shown == 0) {
             String label = agentBrigadeLabel(agentBrigadeFilter);
@@ -1540,6 +1540,220 @@ public class MainActivity extends Activity {
         }
         String governor = task.optString("governor", "").trim();
         return governor.equalsIgnoreCase(filter) || agentBrigadeLabel(governor).equalsIgnoreCase(agentBrigadeLabel(filter));
+    }
+
+    private String agentTaskStatusLabel(JSONObject task) {
+        if (task.optBoolean("running", false)) {
+            return "В работе";
+        }
+        if (task.optBoolean("cancelled", false)) {
+            return "Остановлено";
+        }
+        if (task.optBoolean("success", false)) {
+            return "Готово";
+        }
+        return "Требует внимания";
+    }
+
+    private int agentSeverityColor(String severity, String status) {
+        String cleanSeverity = severity == null ? "" : severity.trim().toLowerCase();
+        String cleanStatus = status == null ? "" : status.trim().toLowerCase();
+        if ("error".equals(cleanSeverity) || "failed".equals(cleanStatus) || "blocked".equals(cleanStatus) || "preflight_failed".equals(cleanStatus)) {
+            return Color.rgb(220, 91, 91);
+        }
+        if ("warning".equals(cleanSeverity) || "needs_revision".equals(cleanStatus) || "cancelled".equals(cleanStatus)) {
+            return Color.rgb(229, 183, 82);
+        }
+        if ("completed".equals(cleanStatus) || "passed_with_warnings".equals(cleanStatus)) {
+            return Color.rgb(73, 203, 145);
+        }
+        return Color.rgb(33, 190, 181);
+    }
+
+    private TextView agentSmallLabel(String text, int textColor) {
+        TextView label = new TextView(this);
+        label.setText(text);
+        label.setTextColor(textColor);
+        label.setTextSize(12);
+        label.setSingleLine(true);
+        label.setEllipsize(TextUtils.TruncateAt.END);
+        label.setPadding(dp(8), dp(3), dp(8), dp(3));
+        label.setBackground(pill(Color.rgb(8, 24, 43), Color.argb(150, Color.red(textColor), Color.green(textColor), Color.blue(textColor)), dp(12)));
+        return label;
+    }
+
+    private void addAgentTaskCard(JSONObject task, boolean animate) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(12), dp(10), dp(12), dp(10));
+        card.setBackground(pill(Color.rgb(7, 26, 44), Color.rgb(47, 103, 121), dp(12)));
+        card.setAlpha(animate ? 0f : 1f);
+        card.setTranslationY(animate ? dp(10) : 0f);
+
+        String governor = task.optString("governor", "").trim();
+        String brigade = agentBrigadeLabel(governor);
+        String taskId = task.optString("task_id", "").trim();
+        String currentStep = task.optString("current_step", "").trim();
+        String statusLabel = agentTaskStatusLabel(task);
+        int statusColor = agentSeverityColor("", task.optString("status", ""));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        TextView title = new TextView(this);
+        title.setText(brigade.isEmpty() ? "Бригада" : brigade);
+        title.setTextColor(Color.rgb(235, 251, 248));
+        title.setTextSize(16);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        top.addView(agentSmallLabel(statusLabel, statusColor), new LinearLayout.LayoutParams(-2, -2));
+        card.addView(top, new LinearLayout.LayoutParams(-1, -2));
+
+        if (!taskId.isEmpty()) {
+            TextView id = new TextView(this);
+            id.setText(taskId);
+            id.setTextColor(Color.rgb(120, 168, 181));
+            id.setTextSize(12);
+            id.setSingleLine(true);
+            id.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+            id.setPadding(0, dp(4), 0, 0);
+            card.addView(id, new LinearLayout.LayoutParams(-1, -2));
+        }
+
+        if (!currentStep.isEmpty()) {
+            TextView step = new TextView(this);
+            step.setText("Сейчас: " + currentStep);
+            step.setTextColor(Color.rgb(205, 232, 229));
+            step.setTextSize(14);
+            step.setLineSpacing(dp(2), 1.0f);
+            step.setPadding(0, dp(8), 0, 0);
+            card.addView(step, new LinearLayout.LayoutParams(-1, -2));
+        }
+
+        addAgentCardView(card, animate);
+    }
+
+    private void addAgentActivityEntry(JSONObject entry, int index, int total, boolean animate) {
+        String headline = entry.optString("headline", "").trim();
+        String detail = entry.optString("detail", "").trim();
+        String status = entry.optString("status", "").trim();
+        String severity = entry.optString("severity", "").trim();
+        String worker = entry.optString("worker", "").trim();
+        String kind = entry.optString("kind", "").trim();
+        int accent = agentSeverityColor(severity, status);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, 0, 0, 0);
+        row.setAlpha(animate ? 0f : 1f);
+        row.setTranslationY(animate ? dp(10) : 0f);
+
+        TextView rail = new TextView(this);
+        rail.setText("");
+        rail.setBackgroundColor(accent);
+        LinearLayout.LayoutParams railLp = new LinearLayout.LayoutParams(dp(4), -1);
+        railLp.rightMargin = dp(8);
+        row.addView(rail, railLp);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(10), dp(8), dp(10), dp(8));
+        card.setBackground(pill(Color.rgb(7, 22, 39), Color.rgb(34, 71, 91), dp(10)));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        TextView title = new TextView(this);
+        title.setText(headline.isEmpty() ? "Шаг " + (index + 1) : headline);
+        title.setTextColor(Color.rgb(230, 250, 247));
+        title.setTextSize(14);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setSingleLine(false);
+        top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        top.addView(agentSmallLabel((index + 1) + "/" + Math.max(total, 1), accent), new LinearLayout.LayoutParams(-2, -2));
+        card.addView(top, new LinearLayout.LayoutParams(-1, -2));
+
+        if (!detail.isEmpty()) {
+            TextView body = new TextView(this);
+            body.setText(detail);
+            body.setTextColor(Color.rgb(196, 226, 224));
+            body.setTextSize(13);
+            body.setLineSpacing(dp(2), 1.0f);
+            body.setPadding(0, dp(6), 0, 0);
+            card.addView(body, new LinearLayout.LayoutParams(-1, -2));
+        }
+
+        String metaText = "";
+        if (!worker.isEmpty()) {
+            metaText = worker;
+        } else if (!kind.isEmpty()) {
+            metaText = kind;
+        }
+        if (!status.isEmpty()) {
+            metaText = metaText.isEmpty() ? status : metaText + " · " + status;
+        }
+        if (!metaText.isEmpty()) {
+            TextView meta = new TextView(this);
+            meta.setText(metaText);
+            meta.setTextColor(Color.rgb(118, 159, 170));
+            meta.setTextSize(11);
+            meta.setSingleLine(true);
+            meta.setEllipsize(TextUtils.TruncateAt.END);
+            meta.setPadding(0, dp(6), 0, 0);
+            card.addView(meta, new LinearLayout.LayoutParams(-1, -2));
+        }
+
+        row.addView(card, new LinearLayout.LayoutParams(0, -2, 1));
+        addAgentCardView(row, animate);
+    }
+
+    private void addAgentFinalMessage(String finalText, boolean animate) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(12), dp(10), dp(12), dp(10));
+        card.setBackground(pill(Color.rgb(24, 30, 47), Color.rgb(229, 183, 82), dp(12)));
+        card.setAlpha(animate ? 0f : 1f);
+        card.setTranslationY(animate ? dp(10) : 0f);
+
+        TextView title = new TextView(this);
+        title.setText("Финальный ответ");
+        title.setTextColor(Color.rgb(247, 225, 160));
+        title.setTextSize(14);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        card.addView(title, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView body = new TextView(this);
+        body.setText(finalText);
+        body.setTextColor(Color.rgb(232, 238, 229));
+        body.setTextSize(14);
+        body.setLineSpacing(dp(2), 1.0f);
+        body.setPadding(0, dp(6), 0, 0);
+        card.addView(body, new LinearLayout.LayoutParams(-1, -2));
+
+        addAgentCardView(card, animate);
+    }
+
+    private void addAgentCardView(View card, boolean animate) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                Math.min(getResources().getDisplayMetrics().widthPixels - dp(40), dp(620)),
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.gravity = Gravity.LEFT;
+        lp.topMargin = dp(5);
+        lp.bottomMargin = dp(5);
+        lp.leftMargin = dp(4);
+        lp.rightMargin = dp(4);
+        agentMessageList.addView(card, lp);
+        if (animate) {
+            card.animate()
+                    .alpha(1f)
+                    .translationY(0f)
+                    .setDuration(210)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .start();
+        }
+        maybeScrollAgentToBottom(true);
     }
 
     private String agentBrigadeLabel(String governor) {
@@ -2332,7 +2546,7 @@ public class MainActivity extends Activity {
             PowerManager.WakeLock wakeLock = acquireAnswerWakeLock();
             int displayed = 0;
             String acceptedTaskId = taskId;
-            String lastActivityLog = "";
+            String lastActivityText = "";
             final String[] acceptedTaskIdRef = {""};
             try {
                 acceptedTaskId = requestAgentStart(clean, taskId);
@@ -2344,11 +2558,11 @@ public class MainActivity extends Activity {
                         .apply();
                 while (true) {
                     JSONObject snapshot = requestAgentTaskSnapshot(acceptedTaskId);
-                    String activityLog = snapshot.optString("activity_log", "").trim();
-                    if (!activityLog.isEmpty() && !activityLog.equals(lastActivityLog)) {
-                        lastActivityLog = activityLog;
+                    String activityText = warmasterActivityTextForChat(snapshot, acceptedTaskId);
+                    if (!activityText.isEmpty() && !activityText.equals(lastActivityText)) {
+                        lastActivityText = activityText;
                         warmasterTranscript.setLength(0);
-                        warmasterTranscript.append("Warmaster ведет задачу: task_id=").append(acceptedTaskId).append("\n\n").append(activityLog);
+                        warmasterTranscript.append(activityText);
                         String fullLog = warmasterTranscript.toString();
                         main.post(() -> {
                             answerBubble.setText(fullLog);
@@ -2356,7 +2570,7 @@ public class MainActivity extends Activity {
                         });
                     }
                     JSONArray events = snapshot.optJSONArray("events");
-                    if (lastActivityLog.isEmpty() && events != null) {
+                    if (lastActivityText.isEmpty() && events != null) {
                         int start = Math.max(0, Math.min(displayed, events.length()));
                         for (int i = start; i < events.length(); i++) {
                             JSONObject event = events.optJSONObject(i);
@@ -2463,6 +2677,51 @@ public class MainActivity extends Activity {
             return "Сейчас делаю: " + message;
         }
         return message;
+    }
+
+    private String warmasterActivityTextForChat(JSONObject snapshot, String taskId) {
+        if (snapshot == null) {
+            return "";
+        }
+        JSONArray entries = snapshot.optJSONArray("activity_entries");
+        if (entries == null) {
+            JSONObject activity = snapshot.optJSONObject("governor_activity");
+            if (activity != null) {
+                entries = activity.optJSONArray("entries");
+            }
+        }
+        String cleanTaskId = taskId == null ? "" : taskId.trim();
+        StringBuilder out = new StringBuilder();
+        out.append("Warmaster ведет задачу");
+        if (!cleanTaskId.isEmpty()) {
+            out.append("\n").append(cleanTaskId);
+        }
+        if (entries == null || entries.length() == 0) {
+            String activityLog = snapshot.optString("activity_log", "").trim();
+            if (!activityLog.isEmpty()) {
+                out.append("\n\n").append(activityLog);
+                return out.toString();
+            }
+            return "";
+        }
+        out.append("\n\nХод работы:");
+        for (int i = 0; i < entries.length(); i++) {
+            JSONObject entry = entries.optJSONObject(i);
+            if (entry == null) {
+                continue;
+            }
+            String headline = entry.optString("headline", "").trim();
+            String detail = entry.optString("detail", "").trim();
+            if (headline.isEmpty() && detail.isEmpty()) {
+                continue;
+            }
+            out.append("\n\n").append(i + 1).append(". ");
+            out.append(headline.isEmpty() ? "Шаг" : headline);
+            if (!detail.isEmpty()) {
+                out.append("\n   ").append(detail);
+            }
+        }
+        return out.toString();
     }
 
     private void appendChatWarmasterLog(TextView bubble, String line) {
