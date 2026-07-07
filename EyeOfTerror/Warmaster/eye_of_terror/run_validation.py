@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from EyeOfTerror.common_protocol import ProtocolValidationError, validate_protocol_payload
+
 from .brigade import contract_summary
 from .local_executor import ordered_dispatch_paths
 from .oversight_guard import compact_oversight_summary, downstream_revision_steps, validate_oversight_payload
@@ -303,4 +305,32 @@ def run_dispatch_package_errors(run_dir: Path, status: dict[str, Any]) -> list[s
         request_task_id = str(request.get("task_id") or "")
         if not request_task_id:
             errors.append(f"dispatch request.task_id missing for {expected_step_id}")
+        worker_order = packet.get("worker_order") if isinstance(packet.get("worker_order"), dict) else {}
+        request_worker_order = request.get("worker_order") if isinstance(request.get("worker_order"), dict) else {}
+        if not worker_order:
+            errors.append(f"dispatch worker_order missing for {expected_step_id}")
+        else:
+            try:
+                validate_protocol_payload(worker_order, expected_type="worker_order")
+            except ProtocolValidationError as exc:
+                errors.append(f"dispatch worker_order invalid for {expected_step_id}: {exc}")
+            if str(worker_order.get("step_id") or "") != expected_step_id:
+                errors.append(
+                    f"dispatch worker_order step_id mismatch for {expected_step_id}: "
+                    f"got {str(worker_order.get('step_id') or 'missing')}"
+                )
+            if expected_worker and str(worker_order.get("to") or "") != expected_worker:
+                errors.append(
+                    f"dispatch worker_order worker mismatch for {expected_step_id}: "
+                    f"expected {expected_worker}, got {str(worker_order.get('to') or 'missing')}"
+                )
+        if not request_worker_order:
+            errors.append(f"dispatch request.worker_order missing for {expected_step_id}")
+        else:
+            try:
+                validate_protocol_payload(request_worker_order, expected_type="worker_order")
+            except ProtocolValidationError as exc:
+                errors.append(f"dispatch request.worker_order invalid for {expected_step_id}: {exc}")
+            if worker_order and request_worker_order != worker_order:
+                errors.append(f"dispatch request.worker_order drift for {expected_step_id}")
     return errors
