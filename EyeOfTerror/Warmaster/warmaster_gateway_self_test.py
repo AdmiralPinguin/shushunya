@@ -875,6 +875,7 @@ def main() -> int:
                 or not preflight.get("oversight_validation", {}).get("ok")
                 or preflight.get("actions", {}).get("can_create_task") is not True
                 or preflight_action_body.get("message") != "Исследуй Скалатракс и сделай report."
+                or "task" in preflight_action_body
                 or preflight_action_body.get("task_id") != "warmaster-preflight-test"
                 or preflight.get("actions", {}).get("next_action", {}).get("kind") != "prepare_orchestrated_task"
                 or preflight.get("actions", {}).get("next_action", {}).get("method") != "POST"

@@ -835,7 +835,6 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     body = next_action.get("body") if isinstance(next_action.get("body"), dict) else {}
                     if body:
                         body["message"] = message
-                        body["task"] = message
                         next_action["body"] = body
                         actions["next_action"] = next_action
                         preflight["actions"] = actions
