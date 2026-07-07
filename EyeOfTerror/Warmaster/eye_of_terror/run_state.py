@@ -3,6 +3,7 @@ per-step/worker-task inspection built from a run package."""
 from __future__ import annotations
 
 import json
+import re
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -232,23 +233,175 @@ def _status_severity(status: str) -> str:
     return "info"
 
 
+STEP_ACTIVITY_LABELS = {
+    "corpus_ingestion": "поиск локальных материалов",
+    "source_discovery": "карту источников",
+    "source_acquisition": "загрузку источников",
+    "source_rendering": "рендер сложных страниц",
+    "fact_extraction": "извлечение фактов",
+    "structure_mapping": "хронологию и структуру",
+    "synthesis_planning": "план сборки текста",
+    "draft_reconstruction": "черновик реконструкции",
+    "critic_review": "проверку качества",
+    "finalize": "финальную упаковку результата",
+}
+
+
+WORKER_ACTIVITY_LABELS = {
+    "CorpusIngestor": "сборщик корпуса",
+    "Lexmechanic": "поисковик источников",
+    "AuspexBrowser": "загрузчик страниц",
+    "OcularisRenderium": "рендерер страниц",
+    "NoosphericExtractor": "извлекатель фактов",
+    "Chronologis": "хронолог",
+    "ScriptoriumArchitect": "планировщик текста",
+    "ScriptoriumDaemon": "писарь черновика",
+    "ReductorVerifier": "проверяющий",
+    "FabricatorFinalis": "финализатор",
+}
+
+
+def _step_label(step_id: str) -> str:
+    return STEP_ACTIVITY_LABELS.get(step_id, step_id.replace("_", " ") or "шаг")
+
+
+def _worker_label(worker: str) -> str:
+    return WORKER_ACTIVITY_LABELS.get(worker, worker or "воркер")
+
+
+def _extract_ints(text: str) -> list[int]:
+    return [int(item) for item in re.findall(r"\d+", text or "")]
+
+
+def _russian_step_detail(step_id: str, worker: str, status: str, summary: str) -> str:
+    numbers = _extract_ints(summary)
+    actor = _worker_label(worker)
+    if status in {"pending", "ready"}:
+        return f"{actor} готовит {_step_label(step_id)}; шаг еще не выполнен."
+    if status == "running":
+        return f"{actor} сейчас выполняет {_step_label(step_id)}."
+    if step_id == "corpus_ingestion" and numbers:
+        return f"{actor} проверил локальный корпус и нашел {numbers[0]} подходящих материалов."
+    if step_id == "source_discovery" and numbers:
+        return f"{actor} составил карту источников: найдено {numbers[0]} кандидатов для проверки."
+    if step_id == "source_acquisition" and numbers:
+        failed = numbers[1] if len(numbers) > 1 else 0
+        return f"{actor} загрузил материалы из {numbers[0]} источников; не удалось получить {failed}."
+    if step_id == "source_rendering" and numbers:
+        rendered = numbers[0]
+        total = numbers[1] if len(numbers) > 1 else rendered
+        return f"{actor} проверил страницы, которым мог потребоваться браузерный рендер: обработано {rendered} из {total}."
+    if step_id == "fact_extraction" and len(numbers) >= 2:
+        return f"{actor} извлек {numbers[0]} событий и {numbers[1]} проверяемых утверждений для исследовательского корпуса."
+    if step_id == "structure_mapping" and len(numbers) >= 2:
+        return f"{actor} выстроил структуру: {numbers[0]} раздела и {numbers[1]} событий в хронологии."
+    if step_id == "synthesis_planning":
+        return f"{actor} подготовил план, по которому черновик должен собираться из найденных фактов."
+    if step_id == "draft_reconstruction":
+        return f"{actor} собрал черновик реконструкции по подготовленному плану и корпусу фактов."
+    if step_id == "critic_review" and numbers:
+        warnings = numbers[1] if len(numbers) > 1 else 0
+        return f"{actor} проверил результат и нашел {numbers[0]} замечаний; предупреждений: {warnings}."
+    if step_id == "finalize":
+        if status in {"blocked", "failed", "needs_revision"}:
+            return f"{actor} отказался выпускать результат как готовый: проверка качества требует доработки."
+        return f"{actor} собрал финальный пакет и подготовил результат к выдаче."
+    if status in {"completed", "passed_with_warnings"}:
+        return f"{actor} завершил {_step_label(step_id)}; подробности сохранены в артефактах шага."
+    if status == "needs_revision":
+        return f"{actor} пометил {_step_label(step_id)} как требующий доработки."
+    if status in {"failed", "blocked", "preflight_failed"}:
+        return f"{actor} остановил {_step_label(step_id)}; шаг нельзя считать успешно закрытым."
+    return f"{actor} обновил состояние шага: {_step_label(step_id)}."
+
+
 def _step_activity_text(step: dict[str, Any]) -> tuple[str, str]:
     step_id = str(step.get("step_id") or "")
     worker = str(step.get("worker") or "")
     status = str(step.get("status") or "pending")
     summary = _short_text(step.get("summary"), 900)
-    label = f"{worker} / {step_id}" if worker and step_id else worker or step_id or "step"
+    label = _step_label(step_id)
+    detail = _russian_step_detail(step_id, worker, status, summary)
     if status in {"pending", "ready"}:
-        return f"Планирую шаг: {label}", summary or "Шаг еще не запускался."
+        return f"Планирую: {label}", detail
     if status == "running":
-        return f"Сейчас занимаюсь шагом: {label}", summary or "Шаг выполняется."
+        return f"Сейчас занимаюсь: {label}", detail
     if status in {"completed", "ready", "passed_with_warnings"}:
-        return f"Закончил шаг: {label}", summary or f"Статус: {status}."
+        return f"Закончил: {label}", detail
     if status == "needs_revision":
-        return f"Шаг требует доработки: {label}", summary or "Проверка нашла недостающие данные или слабое качество."
+        return f"Требует доработки: {label}", detail
     if status in {"failed", "blocked", "preflight_failed"}:
-        return f"Шаг остановлен: {label}", summary or f"Статус: {status}."
-    return f"Шаг обновлен: {label}", summary or f"Статус: {status}."
+        return f"Остановлено: {label}", detail
+    return f"Обновлен шаг: {label}", detail
+
+
+def _translate_revision_fragment(fragment: str) -> str:
+    text = _short_text(fragment, 900).strip()
+    if not text:
+        return ""
+    missing_event = re.search(r"Draft does not visibly cover required event:\s*(.+)", text, re.I)
+    if missing_event:
+        return "Черновик не раскрывает одно из обязательных событий."
+    mapped = re.search(r"too few mapped sources:\s*(\d+)\s*/\s*(\d+)", text, re.I)
+    if mapped:
+        return f"Недостаточно источников в карте: {mapped.group(1)} из {mapped.group(2)}."
+    live = re.search(r"too few live-discovered source candidates:\s*(\d+)\s*/\s*(\d+)", text, re.I)
+    if live:
+        return f"Недостаточно живых кандидатов, найденных через поиск: {live.group(1)} из {live.group(2)}."
+    direct = re.search(r"too few direct-evidence sources:\s*(\d+)\s*/\s*(\d+)", text, re.I)
+    if direct:
+        return f"Недостаточно источников с прямыми свидетельствами: {direct.group(1)} из {direct.group(2)}."
+    draft = re.search(r"draft is too short for requested depth:\s*(\d+)\s*/\s*(\d+)", text, re.I)
+    if draft:
+        return f"Черновик слишком короткий для требуемой глубины: {draft.group(1)} из {draft.group(2)} символов."
+    missing_primary = re.search(r"lacks accessible primary text URLs or local corpus files for:\s*(.+)", text, re.I)
+    if missing_primary:
+        return f"Нет доступных первичных текстов или локальных файлов для: {missing_primary.group(1).strip()}."
+    missing_local = re.search(r"Missing required local primary corpus texts:\s*(.+)", text, re.I)
+    if missing_local:
+        return f"В локальном корпусе не хватает обязательных первичных текстов: {missing_local.group(1).strip()}."
+    depends = re.search(r"Depends on revised step\s+([A-Za-z0-9_:-]+)", text, re.I)
+    if depends:
+        return f"Ждет доработки зависимого шага: {_step_label(depends.group(1))}."
+    return "Есть замечание проверки качества, которое требует ручного разбора."
+
+
+def _unique_texts(items: list[str], limit: int = 8) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in items:
+        text = item.strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        unique.append(text)
+        if len(unique) >= limit:
+            break
+    return unique
+
+
+def _russian_plural(value: int, one: str, few: str, many: str) -> str:
+    value_abs = abs(value)
+    if value_abs % 100 in {11, 12, 13, 14}:
+        return many
+    if value_abs % 10 == 1:
+        return one
+    if value_abs % 10 in {2, 3, 4}:
+        return few
+    return many
+
+
+def _revision_reason_text(raw_reason: str) -> str:
+    fragments = [fragment.strip() for fragment in str(raw_reason or "").split("|") if fragment.strip()]
+    missing_events = [
+        fragment
+        for fragment in fragments
+        if re.search(r"Draft does not visibly cover required event:", fragment, re.I)
+    ]
+    if missing_events and len(missing_events) == len(fragments):
+        return f"Черновик не раскрывает {len(missing_events)} обязательных событий."
+    translated = _unique_texts([_translate_revision_fragment(fragment) for fragment in fragments])
+    return " ".join(translated).strip()
 
 
 def _revision_reasons(revision_plan: dict[str, Any], limit: int = 8) -> list[dict[str, str]]:
@@ -257,15 +410,37 @@ def _revision_reasons(revision_plan: dict[str, Any], limit: int = 8) -> list[dic
     for item in steps[:limit]:
         if not isinstance(item, dict):
             continue
+        reason = _revision_reason_text(str(item.get("reason") or ""))
         reasons.append(
             {
                 "step_id": str(item.get("step_id") or ""),
                 "worker": str(item.get("worker") or ""),
                 "priority": str(item.get("priority") or ""),
-                "reason": _short_text(item.get("reason"), 1200),
+                "reason": reason or "Шаг требует доработки по результатам проверки качества.",
             }
         )
     return reasons
+
+
+def _final_report_detail(status: str, result: dict[str, Any], revision_plan: dict[str, Any], revision_summary: dict[str, Any]) -> str:
+    if status == "completed":
+        return "Бригада завершила задачу и подготовила результат к выдаче."
+    if revision_plan.get("required"):
+        step_count = int(revision_summary.get("step_count") or 0)
+        reasons = _revision_reasons(revision_plan, limit=3)
+        reason_text = " ".join(item.get("reason", "") for item in reasons if item.get("reason")).strip()
+        step_word = _russian_plural(step_count, "шаг", "шага", "шагов")
+        count_text = f"Нужно выполнить {step_count} {step_word} доработки." if step_count else "Нужна доработка."
+        return f"Я не выпускаю результат как окончательный. {count_text}" + (f" Главные причины: {reason_text}" if reason_text else "")
+    if status in {"failed", "blocked"}:
+        return "Бригада остановила выполнение; результат нельзя считать готовым без диагностики или новой команды."
+    if status == "running":
+        return "Бригада продолжает работу; финального результата еще нет."
+    if status == "cancelled":
+        return "Задача остановлена по запросу отмены."
+    if status:
+        return f"Текущий статус задачи: {status}."
+    return _short_text(result.get("summary"), 1000) or "Финальное состояние пока не определено."
 
 
 def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]:
@@ -286,7 +461,7 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
             "kind": "task_received",
             "severity": "info",
             "at": str(ledger.get("created_at") or summary.get("created_at") or ""),
-            "headline": f"{governor or 'Governor'} получил задачу",
+            "headline": f"{governor or 'Бригадир'} получил задачу",
             "detail": _short_text(summary.get("goal") or ledger.get("goal"), 1400),
         }
     ]
@@ -310,16 +485,13 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
             }
         )
     final_headline = "Финальный отчет бригадира"
-    final_detail = _short_text(result.get("summary") or status, 1000)
+    final_detail = _final_report_detail(status, result, revision_plan, revision_summary)
     if status == "completed":
         final_headline = "Финальный отчет: задача завершена"
-        final_detail = final_detail or "Бригада завершила задачу."
     elif revision_plan.get("required"):
         final_headline = "Финальный отчет: нужна ревизия"
-        final_detail = f"Бригада не выпускает результат как окончательный: требуется {int(revision_summary.get('step_count') or 0)} revision-шагов."
     elif status in {"failed", "blocked"}:
         final_headline = "Финальный отчет: задача остановлена"
-        final_detail = final_detail or "Бригада остановила выполнение; нужны диагностика или новая команда."
     entries.append(
         {
             "kind": "final_report",
