@@ -770,6 +770,38 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             write_json(self, 502, {"ok": False, "error": f"warmaster unavailable: {exc}"})
 
+    def warmaster_start_research_loop(self, task_id, payload):
+        loop_payload = {
+            "run_mode": str(payload.get("run_mode") or "http"),
+            "host": str(payload.get("host") or "127.0.0.1"),
+            "timeout_sec": int(payload.get("timeout_sec") or 1800),
+            "max_revision_cycles": int(payload.get("max_revision_cycles") or 3),
+            "allow_resume": bool(payload.get("allow_resume", True)),
+        }
+        try:
+            return proxy_json_url(
+                "POST",
+                f"{WARMASTER_BASE_URL}/runs/{quote(task_id, safe='')}/start_research_loop_http",
+                payload=loop_payload,
+                timeout=60,
+            )
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8") if exc.fp else ""
+            try:
+                parsed = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                parsed = {"ok": False, "error": body or str(exc)}
+            return exc.code, parsed
+
+    def warmaster_acceptance_message(self, task_id):
+        return f"Вармастер принял задачу и ведет исполнение: task_id={task_id}. Ход работы доступен во вкладке Бригады."
+
+    def warmaster_loop_started_or_active(self, status, payload):
+        if 200 <= int(status or 0) < 300:
+            return True
+        error = str((payload or {}).get("error") or "").lower()
+        return int(status or 0) == 409 and "already active" in error
+
     def mobile_agent_start(self):
         try:
             payload = read_json(self)
@@ -785,7 +817,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         warmaster_payload = {
             "message": task,
             "task_id": task_id,
-            "auto_start": True,
+            "auto_start": False,
             "reuse_existing": True,
             "run_mode": str(payload.get("run_mode") or "http"),
             "governor_transport": str(payload.get("governor_transport") or "http"),
@@ -794,6 +826,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=240)
             response_status = response.get("status") if isinstance(response.get("status"), dict) else {}
             resolved_task_id = str(response.get("task_id") or response_status.get("task_id") or task_id)
+            loop_status = 0
+            loop_response = {}
+            if 200 <= status < 300 and resolved_task_id:
+                loop_status, loop_response = self.warmaster_start_research_loop(resolved_task_id, payload)
             append_chat_message(
                 SHARED_CHAT_SESSION_ID,
                 "user",
@@ -803,7 +839,11 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             )
             response["backend"] = "warmaster"
             response["task_id"] = resolved_task_id
-            write_json(self, status if 200 <= status < 300 else 409, response)
+            response["message"] = self.warmaster_acceptance_message(resolved_task_id) if resolved_task_id else "Вармастер принял задачу."
+            response["research_loop"] = loop_response
+            accepted_status = self.warmaster_loop_started_or_active(loop_status, loop_response) if loop_status else 200 <= status < 300
+            response["ok"] = accepted_status
+            write_json(self, 202 if accepted_status else (loop_status if loop_status else 409), response)
         except HTTPError as exc:
             self.write_proxy_error(exc)
         except Exception as exc:
@@ -977,7 +1017,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         warmaster_payload = {
             "message": task,
             "task_id": task_id,
-            "auto_start": True,
+            "auto_start": False,
             "reuse_existing": True,
             "run_mode": str(payload.get("run_mode") or "http"),
             "governor_transport": str(payload.get("governor_transport") or "http"),
@@ -985,6 +1025,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=240)
         response_status = response.get("status") if isinstance(response.get("status"), dict) else {}
         resolved_task_id = str(response.get("task_id") or response_status.get("task_id") or task_id).strip()
+        loop_status = 0
+        loop_response = {}
+        if 200 <= status < 300 and resolved_task_id:
+            loop_status, loop_response = self.warmaster_start_research_loop(resolved_task_id, payload)
 
         append_chat_message(
             session_id,
@@ -999,13 +1043,14 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         except Exception:
             activity = {}
         activity_log = str(activity.get("log_text") or "").strip()
-        accepted = activity_log or f"Warmaster запустил бригаду: task_id={resolved_task_id or task_id}. Ход работы доступен во вкладке Бригады."
-        response["ok"] = 200 <= status < 300
+        accepted = self.warmaster_acceptance_message(resolved_task_id or task_id)
+        response["ok"] = self.warmaster_loop_started_or_active(loop_status, loop_response) if loop_status else 200 <= status < 300
         response["backend"] = "warmaster"
         response["task_id"] = resolved_task_id or task_id
         response["message"] = accepted
         response["activity_log"] = activity_log
         response["governor_activity"] = activity
+        response["research_loop"] = loop_response
         return response
 
     def mobile_chat_start(self):
