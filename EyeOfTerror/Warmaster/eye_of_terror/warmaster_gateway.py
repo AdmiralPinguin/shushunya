@@ -443,6 +443,20 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     events_after = parse_nonnegative_int(raw_events_after, default=0) if raw_events_after else None
                     response(self, 200, run_snapshot(run_dir, event_limit=event_limit, events_after=events_after))
                     return
+                if len(parts) == 3 and parts[2] == "activity":
+                    snapshot = run_snapshot(run_dir, event_limit=0, events_after=0)
+                    response(
+                        self,
+                        200,
+                        {
+                            "ok": bool(snapshot.get("ok")),
+                            "task_id": task_id,
+                            "governor_activity": snapshot.get("governor_activity", {}),
+                            "summary": snapshot.get("summary", {}),
+                            "active": bool(snapshot.get("active")),
+                        },
+                    )
+                    return
                 if len(parts) == 3 and parts[2] == "orchestration":
                     query = parse_qs(parsed.query)
                     raw_event_limit = query.get("event_limit", [""])[0]

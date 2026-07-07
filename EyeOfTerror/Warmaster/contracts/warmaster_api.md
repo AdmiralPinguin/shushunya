@@ -232,6 +232,12 @@ compact chat/UI fields such as `headline`, `detail`, `severity`, progress
 counts, next step/worker, and final deliverable path so clients do not need to
 parse the full run summary for common status rendering. The response also
 copies bounded `display_events` to the top level for task-detail history views.
+It also includes `governor_activity`, a chat-independent brigade-tab log built
+from the task ledger and run summary. `governor_activity.entries` is the
+brigadier's operational report: task received, each worker step, success or
+failure reasons, artifacts, revision blockers, and a final report. This field is
+for observability only; it is not the answer that Shushunya later sends to the
+main chat.
 `client_action` contains an executable method/path/body form of `next_action`
 with `{task_id}` already resolved for simple clients.
 
@@ -321,9 +327,12 @@ Clients should use:
 - `/runs/{task_id}/summary` for lightweight polling.
 - `/runs/{task_id}/snapshot` for a compact polling view containing summary,
   process-local active state, cursor events, executable `run_client_action`, and
-  artifact metadata.
+  artifact metadata. It includes `governor_activity` for brigade-tab rendering.
   Completed run summaries include `final_manifest_summary` when the final
   artifact is available.
+- `/runs/{task_id}/activity` for only the brigadier activity report. Use this in
+  brigade tabs when the UI needs a full operational log without fetching final
+  artifacts or mixing the report with Shushunya's chat response.
 - `/runs/{task_id}/steps/{step_id}` for one normalized step state from
   `summary.progress.step_states`. The response includes the standard run detail
   client-view fields.

@@ -217,6 +217,143 @@ def last_run_preflight(ledger: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _short_text(value: Any, max_chars: int = 800) -> str:
+    text = str(value or "").strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars - 1)].rstrip() + "…"
+
+
+def _status_severity(status: str) -> str:
+    if status in {"failed", "blocked", "corrupt"}:
+        return "error"
+    if status in {"needs_revision", "preflight_failed", "cancelled", "interrupted", "passed_with_warnings"}:
+        return "warning"
+    return "info"
+
+
+def _step_activity_text(step: dict[str, Any]) -> tuple[str, str]:
+    step_id = str(step.get("step_id") or "")
+    worker = str(step.get("worker") or "")
+    status = str(step.get("status") or "pending")
+    summary = _short_text(step.get("summary"), 900)
+    label = f"{worker} / {step_id}" if worker and step_id else worker or step_id or "step"
+    if status in {"pending", "ready"}:
+        return f"Планирую шаг: {label}", summary or "Шаг еще не запускался."
+    if status == "running":
+        return f"Сейчас занимаюсь шагом: {label}", summary or "Шаг выполняется."
+    if status in {"completed", "ready", "passed_with_warnings"}:
+        return f"Закончил шаг: {label}", summary or f"Статус: {status}."
+    if status == "needs_revision":
+        return f"Шаг требует доработки: {label}", summary or "Проверка нашла недостающие данные или слабое качество."
+    if status in {"failed", "blocked", "preflight_failed"}:
+        return f"Шаг остановлен: {label}", summary or f"Статус: {status}."
+    return f"Шаг обновлен: {label}", summary or f"Статус: {status}."
+
+
+def _revision_reasons(revision_plan: dict[str, Any], limit: int = 8) -> list[dict[str, str]]:
+    steps = revision_plan.get("steps") if isinstance(revision_plan.get("steps"), list) else []
+    reasons: list[dict[str, str]] = []
+    for item in steps[:limit]:
+        if not isinstance(item, dict):
+            continue
+        reasons.append(
+            {
+                "step_id": str(item.get("step_id") or ""),
+                "worker": str(item.get("worker") or ""),
+                "priority": str(item.get("priority") or ""),
+                "reason": _short_text(item.get("reason"), 1200),
+            }
+        )
+    return reasons
+
+
+def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]:
+    """Build a brigade-tab activity log independent from Shushunya chat replies."""
+    task_id = str(summary.get("task_id") or ledger.get("task_id") or "")
+    governor = str(summary.get("governor") or ledger.get("governor") or "")
+    status = str(summary.get("status") or ledger.get("status") or "unknown")
+    progress = summary.get("progress") if isinstance(summary.get("progress"), dict) else {}
+    step_states = progress.get("step_states") if isinstance(progress.get("step_states"), list) else []
+    result = summary.get("result") if isinstance(summary.get("result"), dict) else {}
+    revision_plan = summary.get("revision_plan") if isinstance(summary.get("revision_plan"), dict) else {}
+    revision_summary = summary.get("revision_plan_summary") if isinstance(summary.get("revision_plan_summary"), dict) else {}
+    manifest_summary = summary.get("final_manifest_summary") if isinstance(summary.get("final_manifest_summary"), dict) else {}
+    blockers = manifest_summary.get("blockers") if isinstance(manifest_summary.get("blockers"), list) else []
+    warnings = manifest_summary.get("warnings") if isinstance(manifest_summary.get("warnings"), list) else []
+    entries: list[dict[str, Any]] = [
+        {
+            "kind": "task_received",
+            "severity": "info",
+            "at": str(ledger.get("created_at") or summary.get("created_at") or ""),
+            "headline": f"{governor or 'Governor'} получил задачу",
+            "detail": _short_text(summary.get("goal") or ledger.get("goal"), 1400),
+        }
+    ]
+    for step in step_states:
+        if not isinstance(step, dict):
+            continue
+        status_text = str(step.get("status") or "pending")
+        headline, detail = _step_activity_text(step)
+        entries.append(
+            {
+                "kind": "step",
+                "severity": _status_severity(status_text),
+                "at": str(step.get("updated_at") or ""),
+                "step_id": str(step.get("step_id") or ""),
+                "worker": str(step.get("worker") or ""),
+                "status": status_text,
+                "headline": headline,
+                "detail": detail,
+                "artifacts": step.get("artifacts") if isinstance(step.get("artifacts"), list) else [],
+                "artifact_status": step.get("artifact_status") if isinstance(step.get("artifact_status"), list) else [],
+            }
+        )
+    final_headline = "Финальный отчет бригадира"
+    final_detail = _short_text(result.get("summary") or status, 1000)
+    if status == "completed":
+        final_headline = "Финальный отчет: задача завершена"
+        final_detail = final_detail or "Бригада завершила задачу."
+    elif revision_plan.get("required"):
+        final_headline = "Финальный отчет: нужна ревизия"
+        final_detail = f"Бригада не выпускает результат как окончательный: требуется {int(revision_summary.get('step_count') or 0)} revision-шагов."
+    elif status in {"failed", "blocked"}:
+        final_headline = "Финальный отчет: задача остановлена"
+        final_detail = final_detail or "Бригада остановила выполнение; нужны диагностика или новая команда."
+    entries.append(
+        {
+            "kind": "final_report",
+            "severity": _status_severity(status),
+            "at": str(summary.get("updated_at") or ledger.get("updated_at") or ""),
+            "headline": final_headline,
+            "detail": final_detail,
+            "blockers": blockers,
+            "warnings": warnings,
+            "revision_reasons": _revision_reasons(revision_plan),
+        }
+    )
+    log_lines = [
+        f"{entry.get('headline')}: {entry.get('detail')}".strip()
+        for entry in entries
+        if entry.get("headline") or entry.get("detail")
+    ]
+    return {
+        "kind": "governor_activity_report",
+        "task_id": task_id,
+        "governor": governor,
+        "status": status,
+        "source": "task_ledger_and_run_summary",
+        "chat_independent": True,
+        "entries": entries,
+        "final_report": entries[-1] if entries else {},
+        "log_text": "\n".join(log_lines),
+        "polling": {
+            "endpoint": f"GET /runs/{quote(task_id, safe='')}/activity",
+            "orchestration_endpoint": f"GET /runs/{quote(task_id, safe='')}/orchestration",
+        },
+    }
+
+
 def payload_with_run_view(payload: dict[str, Any], run_dir: Path, task_id: str = "") -> dict[str, Any]:
     summary = run_summary(run_dir)
     view = orchestration_view_fields(summary, task_id=task_id or run_dir.name)
@@ -391,6 +528,7 @@ def run_snapshot(run_dir: Path, event_limit: int | None = None, events_after: in
         payload["artifacts"] = []
     else:
         payload.update(artifact_status(ledger))
+        payload["governor_activity"] = governor_activity_report(payload["summary"], ledger)
     return payload
 
 
@@ -423,6 +561,7 @@ def orchestration_state(run_dir: Path, event_limit: int | None = 20, events_afte
         "decision": view["decision"],
         "display": view["display"],
         "display_events": snapshot.get("display_events", []),
+        "governor_activity": snapshot.get("governor_activity", {}),
         "snapshot": snapshot,
         "final": final_payload,
         "next_action": view["next_action"],

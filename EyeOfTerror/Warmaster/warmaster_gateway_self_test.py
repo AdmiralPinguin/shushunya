@@ -1284,11 +1284,22 @@ def main() -> int:
                 or snapshot.get("active")
                 or snapshot.get("event_cursor", {}).get("next") != 1
                 or len(snapshot.get("display_events", [])) != 1
+                or not snapshot.get("governor_activity", {}).get("chat_independent")
+                or len(snapshot.get("governor_activity", {}).get("entries", [])) < 2
+                or snapshot.get("governor_activity", {}).get("final_report", {}).get("kind") != "final_report"
                 or snapshot.get("run_client_action", {}).get("path") != "/runs/warmaster-test/start_http"
                 or snapshot.get("revision_plan", {}).get("required")
                 or snapshot.get("summary", {}).get("oversight_summary", {}).get("final_review", {}).get("critic_step") != "critic_review"
             ):
                 raise AssertionError(f"bad run snapshot: {snapshot}")
+            activity = request_json(base + "/runs/warmaster-test/activity")
+            if (
+                not activity.get("ok")
+                or not activity.get("governor_activity", {}).get("chat_independent")
+                or activity.get("governor_activity", {}).get("task_id") != "warmaster-test"
+                or "получил задачу" not in activity.get("governor_activity", {}).get("log_text", "")
+            ):
+                raise AssertionError(f"bad governor activity response: {activity}")
             run_active = request_json(base + "/runs/warmaster-test/active")
             if not run_active.get("ok") or run_active.get("active"):
                 raise AssertionError(f"bad run active response: {run_active}")
@@ -1601,6 +1612,7 @@ def main() -> int:
                 or completed_orchestration.get("display", {}).get("headline") != "Run completed"
                 or completed_orchestration.get("display", {}).get("final_deliverable") != "/work/skalathrax/reconstruction_ru.md"
                 or not completed_orchestration.get("display_events")
+                or completed_orchestration.get("governor_activity", {}).get("final_report", {}).get("kind") != "final_report"
                 or completed_orchestration.get("final", {}).get("summary", {}).get("status") != "ready"
                 or completed_orchestration.get("next_action", {}).get("kind") != "inspect_final"
                 or completed_orchestration.get("client_action", {}).get("path") != "/runs/warmaster-test/final"

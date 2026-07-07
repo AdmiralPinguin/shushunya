@@ -297,7 +297,7 @@ def gateway_actions() -> dict[str, Any]:
         "prepare_task_flow": ["POST /orchestrate", "POST /orchestrate_start", "GET /runs/{task_id}/orchestration?events_after=0"],
         "chat_task_flow": ["POST /orchestrate_run", "GET /runs/{task_id}/orchestration?events_after=0"],
         "research_loop_flow": ["POST /orchestrate", "POST /runs/{task_id}/start_research_loop_http", "GET /runs/{task_id}/orchestration?events_after=0"],
-        "polling": ["GET /events?after=0", "GET /runs/{task_id}/snapshot?events_after=0"],
+        "polling": ["GET /events?after=0", "GET /runs/{task_id}/snapshot?events_after=0", "GET /runs/{task_id}/activity"],
         "maintenance": ["GET /recovery", "POST /recovery/start_resume_local", "POST /recovery/start_resume_http", "POST /recover_stale"],
         "run_inspection": [
             "GET /runs/{task_id}/summary",
