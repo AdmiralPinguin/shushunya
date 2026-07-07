@@ -543,7 +543,7 @@ public class MainActivity extends Activity {
         view.setPadding(0, dp(6), 0, 0);
 
         agentStatus = new TextView(this);
-        agentStatus.setText("Warmaster подключен. Здесь монитор бригад.");
+        agentStatus.setText("Монитор бригад Warmaster.");
         agentStatus.setTextColor(Color.rgb(132, 219, 212));
         agentStatus.setTextSize(13);
         agentStatus.setSingleLine(true);
@@ -1006,6 +1006,17 @@ public class MainActivity extends Activity {
         return new JSONObject(response).optString("translation", "").trim();
     }
 
+    private String warmasterSubmitFailedMessage() {
+        return "Не удалось передать задачу на сервер. Ничего не запущено.";
+    }
+
+    private String warmasterMonitorDetachedMessage(String taskId) {
+        String cleanTaskId = taskId == null ? "" : taskId.trim();
+        return cleanTaskId.isEmpty()
+                ? "Экран не смог обновить ход работы. Если задача уже была принята сервером, она продолжает выполняться на ПК."
+                : "Экран не смог обновить ход работы. Задача " + cleanTaskId + " не остановлена и продолжает жить на ПК.";
+    }
+
     private void runAgentTask(String task) {
         String clean = task == null ? "" : task.trim();
         if (clean.isEmpty() || agentRunning) {
@@ -1021,15 +1032,13 @@ public class MainActivity extends Activity {
         addAgentMessage(true, clean, true);
         agentLiveBubble = addAgentMessage(false, "", true);
         appendAgentLog("Запускаю агента...");
-        getSharedPreferences(PREFS, MODE_PRIVATE)
-                .edit()
-                .putString("current_agent_task_id", taskId)
-                .apply();
         progress.setVisibility(View.VISIBLE);
         new Thread(() -> {
             PowerManager.WakeLock wakeLock = acquireAnswerWakeLock();
+            final String[] acceptedTaskIdRef = {""};
             try {
                 String acceptedTaskId = requestAgentStart(clean, taskId);
+                acceptedTaskIdRef[0] = acceptedTaskId;
                 currentAgentTaskId = acceptedTaskId;
                 getSharedPreferences(PREFS, MODE_PRIVATE)
                         .edit()
@@ -1051,18 +1060,31 @@ public class MainActivity extends Activity {
                     showAnswerNotification(result);
                 });
             } catch (Exception exc) {
+                String acceptedTaskId = acceptedTaskIdRef[0];
+                boolean accepted = !acceptedTaskId.isEmpty();
+                String message = accepted
+                        ? warmasterMonitorDetachedMessage(acceptedTaskId)
+                        : warmasterSubmitFailedMessage();
                 main.post(() -> {
                     agentRunning = false;
                     agentCancelRequested = false;
-                    currentAgentTaskId = "";
-                    getSharedPreferences(PREFS, MODE_PRIVATE)
-                            .edit()
-                            .remove("current_agent_task_id")
-                            .apply();
+                    if (accepted) {
+                        currentAgentTaskId = acceptedTaskId;
+                        getSharedPreferences(PREFS, MODE_PRIVATE)
+                                .edit()
+                                .putString("current_agent_task_id", acceptedTaskId)
+                                .apply();
+                    } else {
+                        currentAgentTaskId = "";
+                        getSharedPreferences(PREFS, MODE_PRIVATE)
+                                .edit()
+                                .remove("current_agent_task_id")
+                                .apply();
+                    }
                     setAgentRunButtonRunning(false);
                     progress.setVisibility(waiting ? View.VISIBLE : View.GONE);
-                    agentStatus.setText("Ошибка агента: " + exc.getMessage());
-                    appendAgentLog("! Ошибка агента: " + exc.getMessage());
+                    agentStatus.setText(message);
+                    appendAgentLog("! " + message);
                     agentLiveBubble = null;
                 });
             } finally {
@@ -1115,7 +1137,7 @@ public class MainActivity extends Activity {
                 if (!fallbackTaskId.isEmpty()) {
                     main.post(() -> restoreAgentTask(fallbackTaskId));
                 } else {
-                    main.post(() -> agentStatus.setText("История агента недоступна: " + exc.getMessage()));
+                    main.post(() -> agentStatus.setText("Историю бригад сейчас не удалось обновить. Задачи на ПК от этого не останавливаются."));
                 }
             }
         }).start();
@@ -1154,13 +1176,17 @@ public class MainActivity extends Activity {
                     agentLiveBubble = null;
                 });
             } catch (Exception exc) {
+                String taskIdText = currentAgentTaskId == null ? "" : currentAgentTaskId.trim();
+                String message = taskIdText.isEmpty()
+                        ? "Мониторинг бригады временно недоступен."
+                        : warmasterMonitorDetachedMessage(taskIdText);
                 main.post(() -> {
                     agentRunning = false;
                     agentCancelRequested = false;
                     setAgentRunButtonRunning(false);
                     progress.setVisibility(waiting ? View.VISIBLE : View.GONE);
-                    agentStatus.setText("Ошибка восстановления агента: " + exc.getMessage());
-                    appendAgentLog("! Ошибка восстановления: " + exc.getMessage());
+                    agentStatus.setText(message);
+                    appendAgentLog("! " + message);
                     agentLiveBubble = null;
                 });
             } finally {
@@ -1242,9 +1268,9 @@ public class MainActivity extends Activity {
             } catch (Exception exc) {
                 main.post(() -> {
                     if (agentStatus != null) {
-                        agentStatus.setText("Ошибка монитора: " + exc.getMessage());
+                        agentStatus.setText("Монитор бригад сейчас не обновился.");
                     }
-                    addAgentMessage(false, "! Ошибка монитора бригад: " + exc.getMessage(), true);
+                    addAgentMessage(false, "! Монитор бригад сейчас не обновился. Это не останавливает задачи на ПК.", true);
                 });
             }
         }).start();
@@ -1266,9 +1292,9 @@ public class MainActivity extends Activity {
             } catch (Exception exc) {
                 main.post(() -> {
                     if (agentStatus != null) {
-                        agentStatus.setText("Ошибка state: " + exc.getMessage());
+                        agentStatus.setText("Состояние Warmaster сейчас не обновилось.");
                     }
-                    addAgentMessage(false, "! Ошибка state: " + exc.getMessage(), true);
+                    addAgentMessage(false, "! Состояние Warmaster сейчас не обновилось. Задачи на ПК от этого не останавливаются.", true);
                 });
             }
         }).start();
@@ -1359,76 +1385,6 @@ public class MainActivity extends Activity {
             boolean cancelled = result != null && result.optBoolean("cancelled", false);
             agentStatus.setText(cancelled ? "Отменено." : event.optBoolean("ok", false) ? "Готово." : "Агент завершился с ошибкой.");
         }
-    }
-
-    private String requestAgentRunStream(String task, String taskId) throws Exception {
-        JSONObject payload = new JSONObject();
-        payload.put("task", task);
-        payload.put("task_id", taskId);
-        payload.put("technical", true);
-        payload.put("max_steps", 200);
-        payload.put("memory_namespace", SERVER_MEMORY_NAMESPACE);
-        payload.put("client_source", "app");
-        payload.put("archive_task", true);
-        payload.put("task_memory", true);
-        payload.put("include_stderr", false);
-        payload.put("shell_enabled", false);
-        payload.put("wait_for_slot", false);
-
-        byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(trimSlash(baseUrl) + "/archive/client/agent/run-stream");
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("POST");
-        conn.setConnectTimeout(12000);
-        conn.setReadTimeout(300000);
-        conn.setDoOutput(true);
-        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-        conn.setRequestProperty("Accept", "application/x-ndjson");
-        applyMobileAuth(conn);
-        try (OutputStream out = conn.getOutputStream()) {
-            out.write(body);
-        }
-
-        int code = conn.getResponseCode();
-        InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
-        if (code < 200 || code >= 300) {
-            String response = readAll(stream);
-            if (code == 409) {
-                throw new IllegalStateException("Warmaster занят, открой Бригады и повтори позже");
-            }
-            throw new IllegalStateException("HTTP " + code + ": " + response);
-        }
-
-        String finalMessage = "";
-        boolean ok = true;
-        boolean cancelled = false;
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String clean = line.trim();
-                if (clean.isEmpty()) {
-                    continue;
-                }
-                JSONObject event = new JSONObject(clean);
-                String type = event.optString("type", "");
-                if ("final".equals(type)) {
-                    finalMessage = event.optString("message", "").trim();
-                    cancelled = event.optBoolean("cancelled", false);
-                    ok = cancelled || event.optBoolean("ok", true);
-                } else if ("error".equals(type)) {
-                    ok = false;
-                    finalMessage = event.optString("message", "Ошибка агента");
-                }
-                main.post(() -> handleAgentEvent(event));
-            }
-        }
-        if (!ok) {
-            throw new IllegalStateException(finalMessage.isEmpty() ? "agent stream failed" : finalMessage);
-        }
-        if (cancelled && finalMessage.isEmpty()) {
-            return "Агент остановлен: задача отменена.";
-        }
-        return finalMessage.isEmpty() ? "Агент вернул пустой ответ." : finalMessage;
     }
 
     private String requestAgentStart(String task, String taskId) throws Exception {
@@ -2367,10 +2323,6 @@ public class MainActivity extends Activity {
         agentDisplayedEventCount = 0;
         agentCancelRequested = false;
         agentRunning = true;
-        getSharedPreferences(PREFS, MODE_PRIVATE)
-                .edit()
-                .putString("current_agent_task_id", taskId)
-                .apply();
         if (agentStatus != null) {
             agentStatus.setText("Warmaster выполняет задачу из основного чата...");
         }
@@ -2381,8 +2333,10 @@ public class MainActivity extends Activity {
             int displayed = 0;
             String acceptedTaskId = taskId;
             String lastActivityLog = "";
+            final String[] acceptedTaskIdRef = {""};
             try {
                 acceptedTaskId = requestAgentStart(clean, taskId);
+                acceptedTaskIdRef[0] = acceptedTaskId;
                 currentAgentTaskId = acceptedTaskId;
                 getSharedPreferences(PREFS, MODE_PRIVATE)
                         .edit()
@@ -2454,22 +2408,34 @@ public class MainActivity extends Activity {
                     refreshBrigadeMonitor();
                 });
             } catch (Exception exc) {
+                String acceptedForCatch = acceptedTaskIdRef[0];
+                boolean accepted = !acceptedForCatch.isEmpty();
+                String message = accepted
+                        ? warmasterMonitorDetachedMessage(acceptedForCatch)
+                        : warmasterSubmitFailedMessage();
                 main.post(() -> {
                     agentRunning = false;
                     agentCancelRequested = false;
-                    currentAgentTaskId = "";
-                    getSharedPreferences(PREFS, MODE_PRIVATE)
-                            .edit()
-                            .remove("current_agent_task_id")
-                            .apply();
+                    if (accepted) {
+                        currentAgentTaskId = acceptedForCatch;
+                        getSharedPreferences(PREFS, MODE_PRIVATE)
+                                .edit()
+                                .putString("current_agent_task_id", acceptedForCatch)
+                                .apply();
+                    } else {
+                        currentAgentTaskId = "";
+                        getSharedPreferences(PREFS, MODE_PRIVATE)
+                                .edit()
+                                .remove("current_agent_task_id")
+                                .apply();
+                    }
                     setWaiting(false);
                     setAgentRunButtonRunning(false);
-                    String error = "Warmaster сорвался: " + exc.getMessage();
-                    answerBubble.setText(error);
-                    saveChatMessage(false, error);
-                    showAnswerNotification(error);
+                    answerBubble.setText(message);
+                    saveChatMessage(false, message);
+                    showAnswerNotification(message);
                     if (agentStatus != null) {
-                        agentStatus.setText(error);
+                        agentStatus.setText(message);
                     }
                     maybeScrollToBottom(false);
                 });
