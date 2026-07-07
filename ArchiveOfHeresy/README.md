@@ -101,7 +101,12 @@ When the topic continues, it updates the active focus file. When the topic chang
 ArchiveOfHeresy injects the active focus file into model requests as compact context. Clients should not send long tails of previous chat messages; the active focus file replaces that history pressure.
 The archivist is instructed to keep every important decision, constraint, correction, status, path, command, and next step in that focus, so old chat messages should not be needed for normal continuation.
 
-Focus is scoped by `memory_namespace`. The local client split uses `default`, `telegram`, `mobile`, and `agent`, so separate modes do not overwrite each other's active focus.
+Focus is scoped by `memory_namespace`. User-facing transports (`default`,
+`telegram`, `mobile`, `agent`, and `warmaster`) are legacy aliases for the
+shared `shushunya` namespace and the shared `shushunya-main` chat session, so
+the same persona, memory, and task history are visible from every client.
+Specialized non-chat systems may still use their own namespaces, for example
+`demonsforge`.
 
 ## Wiki Memory
 

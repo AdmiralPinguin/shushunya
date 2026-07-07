@@ -19,8 +19,11 @@ The architecture remains unchanged: Magos runs before the answer, the Librarian
 runs after the answer, and external agents only propose writes through Memory
 Gateway.
 
-Namespaces are split by client mode: `default`, `telegram`, `mobile`, and
-`agent`. Each namespace has separate focus/wiki/vector/graph memory.
+User-facing client namespaces are unified: `default`, `telegram`, `mobile`,
+`agent`, and `warmaster` are legacy aliases migrated into the shared
+`shushunya` namespace and the shared `shushunya-main` chat session. Specialized
+non-chat namespaces can remain separate when a worker/domain needs isolated
+memory.
 
 `/v1/chat/completions` supports `archive_system_prompt_enabled=false` for agent
 callers that must keep their own system prompt as the top-priority instruction

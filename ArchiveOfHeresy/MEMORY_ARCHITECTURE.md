@@ -8,10 +8,12 @@ compact memory context before the answer and maintains memory after the answer.
 
 Memory is scoped with `memory_namespace`.
 
-- `default` is the normal chat namespace.
-- `warmaster` is the Warmaster orchestration and brigade namespace.
-- `telegram` is the Telegram bot namespace.
-- `mobile` is the Android app chat namespace.
+- `shushunya` is the shared user-facing namespace for the main persona,
+  Android app, Telegram, default chat, and Warmaster final delivery.
+- `default`, `telegram`, `mobile`, `agent`, and `warmaster` are legacy aliases
+  mapped into `shushunya` for chat/proposal writes and startup migration.
+- Specialized non-chat systems, such as `demonsforge`, may keep separate
+  namespaces when their memory should not become persona chat memory.
 - `voice` and `translator` are reserved for voice and translation flows when
   those clients start using Archive memory directly.
 
@@ -134,10 +136,11 @@ normal librarian path.
 
 Recommended namespaces:
 
-- `default`: ordinary chat memory.
-- `telegram`: Telegram bot memory.
-- `warmaster`: Warmaster orchestration and brigade memory.
-- `mobile`: mobile client memory.
+- `shushunya`: shared user-facing persona memory for Android, Telegram,
+  default chat, and Warmaster final delivery.
+- `default`, `telegram`, `mobile`, `agent`, `warmaster`: legacy transport
+  aliases mapped to `shushunya`; do not create new transport-specific persona
+  memory here.
 - `demonsforge`: DemonsForge long-term forge memory. DemonsForge SQLite remains
   a runtime/job/gallery store; durable forge facts should enter ArchiveOfHeresy
   through `/archive/memory/propose-change` only.
