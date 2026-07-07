@@ -9,6 +9,7 @@ from typing import Any
 from .artifacts import artifact_status
 from .gateway_util import valid_task_id, validate_service_host
 from .ledger import TaskLedger, now_iso
+from .mission_control import link_run_to_mission, open_mission
 from .orchestrator import cancel_http_worker_tasks, research_loop_run
 from .routing import route_message
 from .run_package import load_ledger_dict
@@ -670,23 +671,65 @@ def create_subrun(run_root: Path, campaign_id: str, subrun_id: str, governor_tra
     for handoff_id in subrun.get("requires_handoffs", []) if isinstance(subrun.get("requires_handoffs"), list) else []:
         handoff_state = state.get("handoffs", {}).get(str(handoff_id), {}) if isinstance(state.get("handoffs"), dict) else {}
         subrun["task"] = str(subrun["task"]).replace("{handoff_path}", str(handoff_state.get("path") or ""))
+    warmaster_root = Path(__file__).resolve().parents[1]
+    mission = open_mission(warmaster_root, str(subrun["task"]), str(subrun["task_id"]), source_channel=f"campaign:{campaign_id}:{subrun_id}")
+    if not mission.get("ok"):
+        return {
+            "ok": False,
+            "phase": "subrun_commander_intake_failed",
+            "campaign_id": campaign_id,
+            "subrun_id": subrun_id,
+            "task_id": str(subrun["task_id"]),
+            "mission": mission,
+            "error_code": str(mission.get("error_code") or "commander_intake_failed"),
+        }
+    command = mission.get("commander_order") if isinstance(mission.get("commander_order"), dict) else {}
+    expected_governor = str(subrun.get("governor") or "").strip()
+    assigned_governor = str(command.get("to") or "").strip()
+    if expected_governor and assigned_governor != expected_governor:
+        return {
+            "ok": False,
+            "phase": "subrun_commander_governor_mismatch",
+            "campaign_id": campaign_id,
+            "subrun_id": subrun_id,
+            "task_id": str(subrun["task_id"]),
+            "expected_governor": expected_governor,
+            "assigned_governor": assigned_governor,
+            "mission": mission,
+            "error_code": "campaign_subrun_governor_mismatch",
+        }
     prepared = prepare_task(
-        str(subrun["task"]),
+        str(mission.get("governor_task") or subrun["task"]),
         str(subrun["task_id"]),
         run_root,
         governor_transport=governor_transport,
         governor_host=governor_host,
-        forced_governor=str(subrun.get("governor") or ""),
+        forced_governor=assigned_governor or expected_governor,
+        commander_order=command,
+        require_commander_order=True,
     )
     if prepared.get("ok"):
+        link_run_to_mission(run_root / str(subrun["task_id"]), mission)
         plan_subrun = subrun_plan(plan, subrun_id)
         plan_subrun["task"] = subrun["task"]
+        plan_subrun["mission_id"] = str(mission.get("mission_id") or "")
         write_json(campaign_dir(run_root, campaign_id) / PLAN_FILE, plan)
         sub_state = state.setdefault("subruns", {}).setdefault(subrun_id, {})
-        sub_state.update({"status": "created", "created": True, "run_dir": str(run_root / str(subrun["task_id"]))})
-        record_campaign_event(state, "subrun_created", {"subrun_id": subrun_id, "task_id": subrun["task_id"]})
+        sub_state.update({"status": "created", "created": True, "run_dir": str(run_root / str(subrun["task_id"])), "mission_id": str(mission.get("mission_id") or "")})
+        record_campaign_event(state, "subrun_created", {"subrun_id": subrun_id, "task_id": subrun["task_id"], "mission_id": str(mission.get("mission_id") or "")})
         save_campaign_state(run_root, campaign_id, state)
-    return {"ok": bool(prepared.get("ok")), "phase": "subrun_created" if prepared.get("ok") else "subrun_create_failed", "campaign_id": campaign_id, "subrun_id": subrun_id, "task": prepared}
+    return {
+        "ok": bool(prepared.get("ok")),
+        "phase": "subrun_created" if prepared.get("ok") else "subrun_create_failed",
+        "campaign_id": campaign_id,
+        "subrun_id": subrun_id,
+        "mission": {
+            "mission_id": str(mission.get("mission_id") or ""),
+            "assigned_governor": assigned_governor,
+            "mission_dir": str(mission.get("mission_dir") or ""),
+        },
+        "task": prepared,
+    }
 
 
 def next_ready_subrun(plan: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:

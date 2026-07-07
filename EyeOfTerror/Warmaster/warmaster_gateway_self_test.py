@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import sys
 import tempfile
 import threading
 import time
@@ -11,7 +13,14 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import eye_of_terror.brigade as brigade
+import eye_of_terror.mission_control as mission_control
+import eye_of_terror.routing as routing
 import eye_of_terror.local_executor as local_executor
 import eye_of_terror.task_prepare as task_prepare
 import eye_of_terror.warmaster_gateway as warmaster_gateway
@@ -27,12 +36,54 @@ LOCAL_EXEC_TIMEOUT_SEC = 600
 
 
 def fake_model_decision(owner: str, role: str, request: dict, *, layer: str = "worker", instructions: str = "") -> dict:
+    if owner == "WarmasterRouter" or layer == "routing_service":
+        message = str(request.get("message") or "").lower()
+        governor = "IskandarKhayon"
+        kind = "research"
+        if any(term in message for term in ("код", "python", "repository", "приложени", "почини")) or re.search(r"\brepo\b", message):
+            governor = "Ceraxia"
+            kind = "code"
+        if any(term in message for term in ("stable diffusion", "рисовал", "изображ", "картин", "комикс", "панел", "серии", "серию")):
+            governor = "Moriana"
+            kind = "image_generation"
+        if any(term in message for term in ("комикс", "панел")):
+            kind = "comic_generation"
+        if any(term in message for term in ("серии", "серию", "series")):
+            kind = "image_series_generation"
+        content = {
+            "ok": True,
+            "governor": governor,
+            "kind": kind,
+            "requires_decomposition": False,
+            "supporting_governors": [],
+            "reason": "self-test model route",
+        }
+    elif owner == "WarmasterCommander" or layer == "command":
+        content = {
+            "commander_intent": "Frame the request as a mission for the selected governor.",
+            "primary_goal": "Complete the user's requested task and verify the result before final delivery.",
+            "success_conditions": [
+                "the assigned governor produces a structured report",
+                "internal revisions are not shown to the user as final answers",
+            ],
+            "constraints": ["use the common mission protocol"],
+            "escalate_to_user_if": ["a real user choice or unavailable external access blocks completion"],
+        }
+    elif owner == "WarmasterAcceptance" or layer == "acceptance":
+        content = {
+            "accepted": True,
+            "reason": "self-test acceptance passed",
+            "required_revision": {},
+            "escalate_to_user": False,
+        }
+    else:
+        content = {"status": "ok", "owner": owner, "layer": layer}
     return {
         **model_contract(owner, role, layer=layer),
         "ok": True,
         "status": "answered",
         "elapsed_ms": 1,
-        "content": json.dumps({"status": "ok", "owner": owner, "layer": layer}, ensure_ascii=False),
+        "content": json.dumps(content, ensure_ascii=False),
         "finish_reason": "stop",
         "error": "",
     }
@@ -41,6 +92,8 @@ def fake_model_decision(owner: str, role: str, request: dict, *, layer: str = "w
 def install_fast_model_brain() -> None:
     warmaster_gateway.request_model_decision = fake_model_decision
     local_executor.request_model_decision = fake_model_decision
+    mission_control.request_model_decision = fake_model_decision
+    routing.request_model_decision = fake_model_decision
 
 
 def write_gateway_test_corpus(corpus_root: Path) -> None:

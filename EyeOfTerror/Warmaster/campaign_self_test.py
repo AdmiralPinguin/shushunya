@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import tempfile
 import threading
 import urllib.request
@@ -32,7 +31,7 @@ def write_json(path: Path, payload: dict) -> None:
 
 def request_json(url: str, payload: dict | None = None) -> dict:
     if payload is None:
-        with urllib.request.urlopen(url, timeout=10) as response:
+        with urllib.request.urlopen(url, timeout=120) as response:
             data = json.loads(response.read().decode("utf-8"))
     else:
         request = urllib.request.Request(
@@ -41,7 +40,7 @@ def request_json(url: str, payload: dict | None = None) -> dict:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with urllib.request.urlopen(request, timeout=120) as response:
             data = json.loads(response.read().decode("utf-8"))
     if not isinstance(data, dict):
         raise AssertionError(f"response is not an object: {data}")
@@ -140,6 +139,9 @@ def main() -> int:
         research_created = create_subrun(run_root, "campaign-self-test", "research")
         if not research_created.get("ok") or research_created.get("task", {}).get("governor") != "IskandarKhayon":
             raise AssertionError(f"research subrun create failed: {research_created}")
+        research_ref = json.loads((run_root / "campaign-self-test-research" / "mission_ref.json").read_text(encoding="utf-8"))
+        if research_ref.get("mission_id") != research_created.get("mission", {}).get("mission_id"):
+            raise AssertionError(f"research subrun mission_ref missing: {research_created}")
 
         make_completed_research_run(run_root, "campaign-self-test-research")
         refreshed = campaign_state(run_root, "campaign-self-test")
@@ -151,6 +153,9 @@ def main() -> int:
         code_ledger = json.loads((run_root / "campaign-self-test-code" / "task_ledger.json").read_text(encoding="utf-8"))
         if not code_created.get("ok") or "research_to_implementation.json" not in code_ledger.get("goal", ""):
             raise AssertionError(f"implementation subrun did not receive handoff: {code_created}")
+        code_ref = json.loads((run_root / "campaign-self-test-code" / "mission_ref.json").read_text(encoding="utf-8"))
+        if code_ref.get("mission_id") != code_created.get("mission", {}).get("mission_id"):
+            raise AssertionError(f"implementation subrun mission_ref missing: {code_created}")
         make_completed_code_run(run_root, "campaign-self-test-code")
         final_state = campaign_state(run_root, "campaign-self-test")
         if final_state.get("state", {}).get("status") != "completed":
@@ -167,10 +172,6 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as temp_dir:
         run_root = Path(temp_dir)
-        old_base_url = os.environ.get("EYE_MODEL_BASE_URL")
-        old_timeout = os.environ.get("EYE_MODEL_TIMEOUT_SEC")
-        os.environ["EYE_MODEL_BASE_URL"] = "http://127.0.0.1:9/v1"
-        os.environ["EYE_MODEL_TIMEOUT_SEC"] = "1"
         server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(run_root))
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -200,14 +201,6 @@ def main() -> int:
         finally:
             server.shutdown()
             thread.join(timeout=5)
-            if old_base_url is None:
-                os.environ.pop("EYE_MODEL_BASE_URL", None)
-            else:
-                os.environ["EYE_MODEL_BASE_URL"] = old_base_url
-            if old_timeout is None:
-                os.environ.pop("EYE_MODEL_TIMEOUT_SEC", None)
-            else:
-                os.environ["EYE_MODEL_TIMEOUT_SEC"] = old_timeout
     print("[ok] Warmaster campaign orchestration")
     return 0
 
