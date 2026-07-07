@@ -561,8 +561,30 @@ def _final_report_detail(status: str, result: dict[str, Any], revision_plan: dic
     return _short_text(result.get("summary"), 1000) or "Финальное состояние пока не определено."
 
 
+def _progress_event_activity_card(event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "kind": "progress_event",
+        "source": "mission_protocol",
+        "severity": _status_severity(str(event.get("status") or "")),
+        "at": str(event.get("created_at") or ""),
+        "actor": str(event.get("actor") or ""),
+        "role": str(event.get("role") or ""),
+        "phase": str(event.get("phase") or ""),
+        "status": str(event.get("status") or ""),
+        "headline": str(event.get("title") or ""),
+        "detail": str(event.get("body") or ""),
+        "mission_id": str(event.get("mission_id") or ""),
+        "protocol_type": str(event.get("type") or ""),
+    }
+
+
 def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]:
-    """Build a brigade-tab activity log independent from Shushunya chat replies."""
+    """Build brigade-tab cards from mission protocol events and run summaries.
+
+    The main chat must not consume this report. It is a structured activity
+    surface for brigade tabs; ``progress_events`` are the primary protocol
+    stream, while run-summary cards are compatibility/diagnostic context.
+    """
     task_id = str(summary.get("task_id") or ledger.get("task_id") or "")
     governor = str(summary.get("governor") or ledger.get("governor") or "")
     status = str(summary.get("status") or ledger.get("status") or "unknown")
@@ -575,9 +597,16 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
     blockers = manifest_summary.get("blockers") if isinstance(manifest_summary.get("blockers"), list) else []
     warnings = manifest_summary.get("warnings") if isinstance(manifest_summary.get("warnings"), list) else []
     task_brief, task_brief_source = _protocol_task_brief(summary, ledger)
-    entries: list[dict[str, Any]] = [
+    mission_events = [
+        event
+        for event in summary.get("mission_progress_events", [])
+        if isinstance(event, dict) and bool(event.get("visible_to_user", True))
+    ] if isinstance(summary.get("mission_progress_events"), list) else []
+    protocol_cards = [_progress_event_activity_card(event) for event in mission_events]
+    summary_cards: list[dict[str, Any]] = [
         {
             "kind": "task_received",
+            "source": "run_summary",
             "severity": "info",
             "at": str(ledger.get("created_at") or summary.get("created_at") or ""),
             "headline": f"{governor or 'Бригадир'} получил задачу",
@@ -585,32 +614,15 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
             "protocol_source": task_brief_source,
         }
     ]
-    mission_events = summary.get("mission_progress_events") if isinstance(summary.get("mission_progress_events"), list) else []
-    for event in mission_events:
-        if not isinstance(event, dict):
-            continue
-        entries.append(
-            {
-                "kind": "mission_progress",
-                "severity": _status_severity(str(event.get("status") or "")),
-                "at": str(event.get("created_at") or ""),
-                "actor": str(event.get("actor") or ""),
-                "role": str(event.get("role") or ""),
-                "phase": str(event.get("phase") or ""),
-                "status": str(event.get("status") or ""),
-                "headline": str(event.get("title") or ""),
-                "detail": str(event.get("body") or ""),
-                "mission_id": str(event.get("mission_id") or ""),
-            }
-        )
     for step in step_states:
         if not isinstance(step, dict):
             continue
         status_text = str(step.get("status") or "pending")
         headline, detail = _step_activity_text(step)
-        entries.append(
+        summary_cards.append(
             {
                 "kind": "step",
+                "source": "run_summary",
                 "severity": _status_severity(status_text),
                 "at": str(step.get("updated_at") or ""),
                 "step_id": str(step.get("step_id") or ""),
@@ -630,9 +642,10 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
         final_headline = "Финальный отчет: нужна ревизия"
     elif status in {"failed", "blocked"}:
         final_headline = "Финальный отчет: задача остановлена"
-    entries.append(
+    summary_cards.append(
         {
             "kind": "final_report",
+            "source": "run_summary",
             "severity": _status_severity(status),
             "at": str(summary.get("updated_at") or ledger.get("updated_at") or ""),
             "headline": final_headline,
@@ -642,22 +655,21 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
             "revision_reasons": _revision_reasons(revision_plan),
         }
     )
-    log_lines = [
-        f"{entry.get('headline')}: {entry.get('detail')}".strip()
-        for entry in entries
-        if entry.get("headline") or entry.get("detail")
-    ]
+    entries = protocol_cards + summary_cards
     return {
         "kind": "governor_activity_report",
         "task_id": task_id,
         "governor": governor,
         "status": status,
-        "source": "mission_protocol_progress_events_and_run_summary",
+        "source": "mission_protocol_progress_events",
         "chat_independent": True,
+        "progress_events": mission_events,
+        "protocol_activity_cards": protocol_cards,
+        "summary_activity_cards": summary_cards,
         "entries": entries,
         "activity_cards": entries,
-        "final_report": entries[-1] if entries else {},
-        "log_text": "\n".join(log_lines),
+        "final_report": summary_cards[-1] if summary_cards else {},
+        "log_text": "",
         "polling": {
             "endpoint": f"GET /runs/{quote(task_id, safe='')}/activity",
             "orchestration_endpoint": f"GET /runs/{quote(task_id, safe='')}/orchestration",

@@ -502,6 +502,16 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     activity = snapshot.get("governor_activity", {}) if isinstance(snapshot.get("governor_activity"), dict) else {}
                     entries = activity.get("entries") if isinstance(activity.get("entries"), list) else []
                     activity_cards = activity.get("activity_cards") if isinstance(activity.get("activity_cards"), list) else entries
+                    progress_events = activity.get("progress_events") if isinstance(activity.get("progress_events"), list) else []
+                    protocol_cards = activity.get("protocol_activity_cards") if isinstance(activity.get("protocol_activity_cards"), list) else []
+                    summary_cards = activity.get("summary_activity_cards") if isinstance(activity.get("summary_activity_cards"), list) else []
+                    summary = snapshot.get("summary", {}) if isinstance(snapshot.get("summary"), dict) else {}
+                    protocol_summary = {}
+                    mission_protocol = summary.get("mission_protocol") if isinstance(summary.get("mission_protocol"), dict) else {}
+                    mission_ref = summary.get("mission_ref") if isinstance(summary.get("mission_ref"), dict) else {}
+                    mission_id = str(mission_ref.get("mission_id") or "")
+                    if mission_id:
+                        protocol_summary = mission_protocol.get("protocol_summary") if isinstance(mission_protocol.get("protocol_summary"), dict) else {}
                     response(
                         self,
                         200,
@@ -509,10 +519,14 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                             "ok": bool(snapshot.get("ok")),
                             "task_id": task_id,
                             "governor_activity": activity,
+                            "progress_events": progress_events,
+                            "protocol_activity_cards": protocol_cards,
+                            "summary_activity_cards": summary_cards,
                             "entries": entries,
                             "activity_cards": activity_cards,
-                            "activity_log": str(activity.get("log_text") or ""),
-                            "summary": snapshot.get("summary", {}),
+                            "activity_log": "",
+                            "protocol_summary": protocol_summary,
+                            "summary": summary,
                             "active": bool(snapshot.get("active")),
                         },
                     )

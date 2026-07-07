@@ -921,6 +921,16 @@ def main() -> int:
                 or orchestrated_state.get("snapshot", {}).get("summary", {}).get("task_id") != "warmaster-orchestrate-test"
             ):
                 raise AssertionError(f"orchestration state did not expose ready-to-start decision: {orchestrated_state}")
+            orchestrated_activity = request_json(base + "/runs/warmaster-orchestrate-test/activity")
+            if (
+                not orchestrated_activity.get("ok")
+                or not orchestrated_activity.get("progress_events")
+                or not orchestrated_activity.get("protocol_activity_cards")
+                or orchestrated_activity.get("activity_log")
+                or orchestrated_activity.get("governor_activity", {}).get("log_text")
+                or orchestrated_activity.get("activity_cards", [{}])[0].get("source") != "mission_protocol"
+            ):
+                raise AssertionError(f"command-protocol activity did not expose structured progress cards: {orchestrated_activity}")
             orchestrated_start = request_json(
                 base + "/orchestrate_start",
                 {"task_id": "warmaster-orchestrate-test", "run_mode": "local", "timeout_sec": 180},
@@ -1387,7 +1397,9 @@ def main() -> int:
                 not activity.get("ok")
                 or not activity.get("governor_activity", {}).get("chat_independent")
                 or activity.get("governor_activity", {}).get("task_id") != "warmaster-test"
-                or "получил задачу" not in activity.get("governor_activity", {}).get("log_text", "")
+                or not activity.get("summary_activity_cards")
+                or activity.get("activity_log")
+                or activity.get("governor_activity", {}).get("log_text")
             ):
                 raise AssertionError(f"bad governor activity response: {activity}")
             run_active = request_json(base + "/runs/warmaster-test/active")

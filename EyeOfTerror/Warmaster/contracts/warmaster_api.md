@@ -235,12 +235,15 @@ compact chat/UI fields such as `headline`, `detail`, `severity`, progress
 counts, next step/worker, and final deliverable path so clients do not need to
 parse the full run summary for common status rendering. The response also
 copies bounded `display_events` to the top level for task-detail history views.
-It also includes `governor_activity`, a chat-independent brigade-tab log built
-from the task ledger and run summary. `governor_activity.entries` is the
-brigadier's operational report: task received, each worker step, success or
-failure reasons, artifacts, revision blockers, and a final report. This field is
-for observability only; it is not the answer that Shushunya later sends to the
-main chat.
+It also includes `governor_activity`, a chat-independent brigade-tab report.
+`governor_activity.progress_events` is the primary mission-protocol stream
+loaded from `progress_events.jsonl`; `protocol_activity_cards` is the direct UI
+card projection of those events. `summary_activity_cards` adds diagnostic
+run-summary cards such as task received, step states, artifacts, revision
+blockers, and final report. `activity_cards` concatenates protocol cards first
+and summary cards second. These fields are for observability only; they are not
+the answer that Shushunya later sends to the main chat, and clients must not use
+text logs as the primary activity source.
 `client_action` contains an executable method/path/body form of `next_action`
 with `{task_id}` already resolved for simple clients.
 
@@ -334,8 +337,10 @@ Clients should use:
   Completed run summaries include `final_manifest_summary` when the final
   artifact is available.
 - `/runs/{task_id}/activity` for only the brigadier activity report. Use this in
-  brigade tabs when the UI needs a full operational log without fetching final
-  artifacts or mixing the report with Shushunya's chat response.
+  brigade tabs when the UI needs structured `progress_events`,
+  `protocol_activity_cards`, `summary_activity_cards`, and `activity_cards`
+  without fetching final artifacts or mixing the report with Shushunya's chat
+  response.
 - `/runs/{task_id}/steps/{step_id}` for one normalized step state from
   `summary.progress.step_states`. The response includes the standard run detail
   client-view fields.

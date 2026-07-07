@@ -620,7 +620,9 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         ).strip()
         activity_entries = activity.get("entries") if isinstance(activity.get("entries"), list) else []
         activity_cards = activity.get("activity_cards") if isinstance(activity.get("activity_cards"), list) else activity_entries
-        activity_log = str(activity.get("log_text") or "").strip()
+        progress_events = activity.get("progress_events") if isinstance(activity.get("progress_events"), list) else []
+        protocol_cards = activity.get("protocol_activity_cards") if isinstance(activity.get("protocol_activity_cards"), list) else []
+        summary_cards = activity.get("summary_activity_cards") if isinstance(activity.get("summary_activity_cards"), list) else []
         if activity_entries:
             last_entry = activity_entries[-1] if isinstance(activity_entries[-1], dict) else {}
             current_step = str(last_entry.get("headline") or current_step).strip()
@@ -636,7 +638,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             "current_step": current_step,
             "progress": progress,
             "final": final_text,
-            "activity_log": activity_log,
+            "activity_log": "",
+            "progress_events": progress_events,
+            "protocol_activity_cards": protocol_cards,
+            "summary_activity_cards": summary_cards,
             "activity_entries": activity_entries,
             "activity_cards": activity_cards,
             "governor_activity": activity,
@@ -711,6 +716,9 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             activity = self.warmaster_activity_from_payload(orchestration)
             activity_entries = activity.get("entries") if isinstance(activity.get("entries"), list) else []
             activity_cards = activity.get("activity_cards") if isinstance(activity.get("activity_cards"), list) else activity_entries
+            progress_events = activity.get("progress_events") if isinstance(activity.get("progress_events"), list) else []
+            protocol_cards = activity.get("protocol_activity_cards") if isinstance(activity.get("protocol_activity_cards"), list) else []
+            summary_cards = activity.get("summary_activity_cards") if isinstance(activity.get("summary_activity_cards"), list) else []
             display_events = orchestration.get("display_events") if isinstance(orchestration.get("display_events"), list) else []
             raw_events = snapshot.get("events") if isinstance(snapshot.get("events"), list) else []
             if activity_entries:
@@ -754,7 +762,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "events": events,
                 "activity_entries": activity_entries,
                 "activity_cards": activity_cards,
-                "activity_log": str(activity.get("log_text") or "").strip(),
+                "activity_log": "",
+                "progress_events": progress_events,
+                "protocol_activity_cards": protocol_cards,
+                "summary_activity_cards": summary_cards,
                 "governor_activity": activity,
                 "final": final_event,
                 **task,
@@ -1066,15 +1077,20 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             activity = self.warmaster_fetch_activity(resolved_task_id or task_id)
         except Exception:
             activity = {}
-        activity_log = str(activity.get("log_text") or "").strip()
         activity_entries = activity.get("entries") if isinstance(activity.get("entries"), list) else []
         activity_cards = activity.get("activity_cards") if isinstance(activity.get("activity_cards"), list) else activity_entries
+        progress_events = activity.get("progress_events") if isinstance(activity.get("progress_events"), list) else []
+        protocol_cards = activity.get("protocol_activity_cards") if isinstance(activity.get("protocol_activity_cards"), list) else []
+        summary_cards = activity.get("summary_activity_cards") if isinstance(activity.get("summary_activity_cards"), list) else []
         accepted = self.warmaster_acceptance_message(resolved_task_id or task_id)
         response["ok"] = self.warmaster_loop_started_or_active(loop_status, loop_response) if loop_status else 200 <= status < 300
         response["backend"] = "warmaster"
         response["task_id"] = resolved_task_id or task_id
         response["message"] = accepted
-        response["activity_log"] = activity_log
+        response["activity_log"] = ""
+        response["progress_events"] = progress_events
+        response["protocol_activity_cards"] = protocol_cards
+        response["summary_activity_cards"] = summary_cards
         response["activity_entries"] = activity_entries
         response["activity_cards"] = activity_cards
         response["governor_activity"] = activity
