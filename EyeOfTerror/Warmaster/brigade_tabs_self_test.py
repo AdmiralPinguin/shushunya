@@ -108,6 +108,18 @@ def main() -> int:
         raise AssertionError(f"worker progress card was not grouped into Iskandar tab: {iskandar}")
     if not any(card.get("card_title") == "Ищу источники" and card.get("card_body") == "Воркер проверяет карту источников." for card in iskandar_cards if isinstance(card, dict)):
         raise AssertionError(f"card title/body were not exposed for UI rendering: {iskandar}")
+    if any(card.get("source") != "mission_protocol" for card in iskandar_cards if isinstance(card, dict)):
+        raise AssertionError(f"brigade tab mixed non-protocol diagnostic cards into UI activity: {iskandar_cards}")
+    activity_cards = activity.get("activity_cards") if isinstance(activity.get("activity_cards"), list) else []
+    if (
+        len(activity_cards) != len(events)
+        or any(card.get("source") != "mission_protocol" for card in activity_cards if isinstance(card, dict))
+        or any(card.get("source") == "run_summary" for card in activity_cards if isinstance(card, dict))
+    ):
+        raise AssertionError(f"activity_cards must be progress_event-only: {activity}")
+    summary_cards = activity.get("summary_activity_cards") if isinstance(activity.get("summary_activity_cards"), list) else []
+    if not summary_cards or not all(card.get("source") == "run_summary" for card in summary_cards if isinstance(card, dict)):
+        raise AssertionError(f"run-summary diagnostics should remain separate from brigade activity: {activity}")
     if not iskandar.get("active"):
         raise AssertionError(f"running worker event should mark brigade tab active: {iskandar}")
     if activity.get("log_text"):

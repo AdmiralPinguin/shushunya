@@ -768,7 +768,6 @@ def _card_governor(card: dict[str, Any], fallback_governor: str, worker_governor
 
 def _brigade_tabs(
     protocol_cards: list[dict[str, Any]],
-    summary_cards: list[dict[str, Any]],
     mission_events: list[dict[str, Any]],
     summary: dict[str, Any],
     ledger: dict[str, Any],
@@ -816,16 +815,6 @@ def _brigade_tabs(
             tab["status"] = status
         tab["active"] = status in {"started", "running"} or str(card.get("phase") or "") in {"planning", "executing", "reviewing", "revising", "finalizing"}
 
-    if summary_cards:
-        governor = fallback_governor or str((protocol.get("commander_order") or {}).get("to") if isinstance(protocol.get("commander_order"), dict) else "")
-        tab = ensure_tab(governor)
-        for card in summary_cards:
-            if isinstance(card, dict):
-                tab["activity_cards"].append(card)
-                tab["latest_card"] = card
-        if tab["status"] == "idle":
-            tab["status"] = str(summary.get("status") or ledger.get("status") or "unknown")
-
     ordered = sorted(
         tabs.values(),
         key=lambda item: (0 if item.get("key") != "warmaster" else 1, str(item.get("label") or "")),
@@ -841,8 +830,8 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
     """Build brigade-tab cards from mission protocol events and run summaries.
 
     The main chat must not consume this report. It is a structured activity
-    surface for brigade tabs; ``progress_events`` are the primary protocol
-    stream, while run-summary cards are compatibility/diagnostic context.
+    surface for brigade tabs; ``progress_events`` are the only UI activity
+    stream, while run-summary cards stay separate as diagnostics.
     """
     task_id = str(summary.get("task_id") or ledger.get("task_id") or "")
     governor = str(summary.get("governor") or ledger.get("governor") or "")
@@ -914,8 +903,8 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
             "revision_reasons": _revision_reasons(revision_plan),
         }
     )
-    entries = protocol_cards + summary_cards
-    brigade_tabs = _brigade_tabs(protocol_cards, summary_cards, mission_events, summary, ledger)
+    entries = protocol_cards
+    brigade_tabs = _brigade_tabs(protocol_cards, mission_events, summary, ledger)
     return {
         "kind": "governor_activity_report",
         "task_id": task_id,
@@ -927,6 +916,7 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
         "progress_events": mission_events,
         "protocol_activity_cards": protocol_cards,
         "summary_activity_cards": summary_cards,
+        "diagnostic_summary_cards": summary_cards,
         "entries": entries,
         "activity_cards": entries,
         "final_report": summary_cards[-1] if summary_cards else {},
