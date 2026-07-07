@@ -553,6 +553,31 @@ def acceptance_prompt_payload(command: dict[str, Any], report: dict[str, Any], l
 
 
 def build_acceptance_review(command: dict[str, Any], report: dict[str, Any], ledger_result: dict[str, Any]) -> dict[str, Any]:
+    report_status = str(report.get("status") or "").strip()
+    if report_status == "needs_revision":
+        review = acceptance_review(
+            str(report.get("mission_id") or ""),
+            accepted=False,
+            reason="Бригадир вернул внутренний needs_revision; пользовательский финал запрещен до доработки.",
+            required_revision={
+                "to": str(report.get("governor") or ""),
+                "order": "Выполнить внутреннюю ревизию по governor_report.revision_plan и повторно передать отчет Вармастеру.",
+                "required_steps": [],
+            },
+            escalate_to_user=False,
+        )
+        validate_protocol_payload(review, expected_type="acceptance_review")
+        return {"ok": True, "acceptance_review": review, "model_brain": {"status": "skipped", "reason": "governor_report.status=needs_revision"}}
+    if report_status == "blocked":
+        review = acceptance_review(
+            str(report.get("mission_id") or ""),
+            accepted=False,
+            reason="Бригадир заблокировал задачу; требуется решение или внешний ресурс пользователя.",
+            required_revision={"to": str(report.get("governor") or ""), "order": "Ожидать решения пользователя по блокеру.", "required_steps": []},
+            escalate_to_user=True,
+        )
+        validate_protocol_payload(review, expected_type="acceptance_review")
+        return {"ok": True, "acceptance_review": review, "model_brain": {"status": "skipped", "reason": "governor_report.status=blocked"}}
     model_decision = request_model_decision(
         "WarmasterAcceptance",
         "Final acceptance authority over governor reports",

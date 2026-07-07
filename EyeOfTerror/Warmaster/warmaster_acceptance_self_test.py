@@ -23,59 +23,66 @@ def write_json(path: Path, payload: dict[str, object]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def write_acceptance_fixture(root: Path, suffix: str, result_payload: dict[str, object]) -> tuple[Path, Path, str]:
+    mission_dir = root / "missions" / f"mission-{suffix}"
+    run_dir = root / "runs" / suffix
+    mission_id = mission_dir.name
+    order = commander_order(
+        mission_id,
+        to="Ceraxia",
+        user_request="Создай маленький проверяемый CLI проект.",
+        commander_intent="Проверить, что финал бригадира проходит приемку Вармастера.",
+        primary_goal="Получить структурированный финальный отчет и решение приемки.",
+        success_conditions=[
+            "governor_report создан",
+            "acceptance_review создан",
+            "needs_revision не считается пользовательским финалом",
+        ],
+    )
+    validate_protocol_payload(order, expected_type="commander_order")
+    write_json(mission_dir / "mission.json", {"mission_id": mission_id, "status": "assigned", "assigned_governor": "Ceraxia"})
+    write_json(mission_dir / "commander_order.json", order)
+    write_json(run_dir / "mission_ref.json", {"mission_id": mission_id, "mission_dir": str(mission_dir), "assigned_governor": "Ceraxia"})
+    write_json(
+        run_dir / "status.json",
+        {
+            "task_id": suffix,
+            "steps": [{"step_id": "finalize", "worker": "SealwrightFinalis"}],
+        },
+    )
+    write_json(
+        run_dir / "oversight.json",
+        {
+            "revision_policy": {
+                "source_step": "finalize",
+                "final_steps": ["finalize"],
+                "allowed_steps": ["finalize"],
+                "requires_downstream_rerun": True,
+            }
+        },
+    )
+    ledger = TaskLedger.create(run_dir / "task_ledger.json", suffix, "Acceptance live smoke", "Ceraxia")
+    ledger.set_result(result_payload)
+    ledger.set_status("completed")
+    return mission_dir, run_dir, mission_id
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
-        mission_dir = root / "missions" / "mission-acceptance-live-smoke"
-        run_dir = root / "runs" / "acceptance-live-smoke"
-        mission_id = mission_dir.name
-        order = commander_order(
-            mission_id,
-            to="Ceraxia",
-            user_request="Создай маленький проверяемый CLI проект.",
-            commander_intent="Проверить, что финал бригадира проходит приемку Вармастера.",
-            primary_goal="Получить структурированный финальный отчет и решение приемки.",
-            success_conditions=[
-                "governor_report создан",
-                "acceptance_review создан",
-                "needs_revision не считается пользовательским финалом",
-            ],
-        )
-        validate_protocol_payload(order, expected_type="commander_order")
-        write_json(mission_dir / "mission.json", {"mission_id": mission_id, "status": "assigned", "assigned_governor": "Ceraxia"})
-        write_json(mission_dir / "commander_order.json", order)
-        write_json(run_dir / "mission_ref.json", {"mission_id": mission_id, "mission_dir": str(mission_dir), "assigned_governor": "Ceraxia"})
-        write_json(
-            run_dir / "status.json",
-            {
-                "task_id": "acceptance-live-smoke",
-                "steps": [{"step_id": "finalize", "worker": "SealwrightFinalis"}],
-            },
-        )
-        write_json(
-            run_dir / "oversight.json",
-            {
-                "revision_policy": {
-                    "source_step": "finalize",
-                    "final_steps": ["finalize"],
-                    "allowed_steps": ["finalize"],
-                    "requires_downstream_rerun": True,
-                }
-            },
-        )
-        ledger = TaskLedger.create(run_dir / "task_ledger.json", "acceptance-live-smoke", "Acceptance live smoke", "Ceraxia")
-        ledger.set_result(
+        mission_dir, run_dir, _mission_id = write_acceptance_fixture(
+            root,
+            "acceptance-live-smoke",
             {
                 "ok": True,
                 "final_step": "finalize",
                 "artifacts": [],
-                "workspace_root": str(run_dir / "work"),
+                "workspace_root": str(root / "runs" / "acceptance-live-smoke" / "work"),
                 "status": "ready",
                 "summary": "Минимальный финальный отчет готов для приемки.",
                 "revision_plan": {"required": False, "steps": []},
-            }
+            },
         )
-        ledger.set_status("completed")
         result = record_warmaster_acceptance(run_dir)
         review = result.get("acceptance_review") if isinstance(result.get("acceptance_review"), dict) else {}
         if not review:
@@ -91,6 +98,42 @@ def main() -> int:
             revision_plan = ledger_after.get("result", {}).get("revision_plan", {}) if isinstance(ledger_after.get("result"), dict) else {}
             if not revision_plan.get("required"):
                 raise AssertionError("rejected result did not create internal revision_plan")
+        revision_mission_dir, revision_run_dir, _ = write_acceptance_fixture(
+            root,
+            "acceptance-needs-revision",
+            {
+                "ok": False,
+                "final_step": "finalize",
+                "artifacts": [],
+                "workspace_root": str(root / "runs" / "acceptance-needs-revision" / "work"),
+                "status": "needs_revision",
+                "summary": "Бригадир требует внутреннюю доработку.",
+                "revision_plan": {
+                    "required": True,
+                    "steps": [
+                        {
+                            "step_id": "finalize",
+                            "worker": "SealwrightFinalis",
+                            "reason": "Финальный пакет неполный.",
+                            "source": "governor_review",
+                            "priority": "blocker",
+                        }
+                    ],
+                },
+            },
+        )
+        revision_result = record_warmaster_acceptance(revision_run_dir)
+        revision_review = revision_result.get("acceptance_review") if isinstance(revision_result.get("acceptance_review"), dict) else {}
+        validate_protocol_payload(revision_review, expected_type="acceptance_review")
+        if revision_review.get("accepted") or revision_review.get("escalate_to_user"):
+            raise AssertionError(f"needs_revision must stay internal: {revision_result}")
+        if (revision_mission_dir / "final_response.json").exists():
+            raise AssertionError("needs_revision incorrectly wrote final_response.json")
+        if not list((revision_mission_dir / "revision_orders").glob("revision_order-*.json")):
+            raise AssertionError("needs_revision did not write revision_order")
+        revision_mission = json.loads((revision_mission_dir / "mission.json").read_text(encoding="utf-8"))
+        if revision_mission.get("status") != "revision":
+            raise AssertionError(f"needs_revision did not move mission to revision: {revision_mission}")
         print("[ok] Warmaster live acceptance")
         return 0
 
