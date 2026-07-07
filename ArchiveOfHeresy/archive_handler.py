@@ -81,7 +81,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if self.path.startswith("/archive/chat/messages"):
+        if self.path.startswith("/archive/mobile/chat/messages") or self.path.startswith("/archive/chat/messages"):
             if not require_auth(self, allow_mobile=True):
                 return
             session_id = "default"
@@ -431,7 +431,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/archive/client/"):
             self.path = "/archive/mobile/" + self.path[len("/archive/client/") :]
 
-        if self.path == "/archive/chat/completions":
+        if self.path in {"/archive/mobile/chat/completions", "/archive/chat/completions"}:
             if not require_auth(self, allow_mobile=True):
                 return
             try:

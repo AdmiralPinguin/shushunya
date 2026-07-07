@@ -2490,7 +2490,7 @@ public class MainActivity extends Activity {
         }
 
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        URL url = new URL(trimSlash(baseUrl) + "/archive/chat/completions");
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/completions");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(12000);
@@ -2841,7 +2841,7 @@ public class MainActivity extends Activity {
     private void loadServerChatHistory() {
         new Thread(() -> {
             try {
-                URL url = new URL(trimSlash(baseUrl) + "/archive/chat/messages?session_id=" + SERVER_CHAT_SESSION_ID + "&limit=" + CHAT_HISTORY_LIMIT);
+                URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/messages?session_id=" + SERVER_CHAT_SESSION_ID + "&limit=" + CHAT_HISTORY_LIMIT);
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("GET");
                 conn.setConnectTimeout(12000);
