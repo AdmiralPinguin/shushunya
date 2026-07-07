@@ -24,6 +24,49 @@ from .runtime_state import ACTIVE_RUNS, ACTIVE_RUNS_LOCK
 from .views import display_events_for, event_display, executable_client_action, orchestration_view_fields
 
 
+def _read_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _read_jsonl(path: Path, limit: int = 200) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    events: list[dict[str, Any]] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            events.append(payload)
+    return events[-max(0, limit) :]
+
+
+def mission_ref_for_run(run_dir: Path) -> dict[str, Any]:
+    return _read_json(run_dir / "mission_ref.json")
+
+
+def mission_progress_events_for_run(run_dir: Path, limit: int = 200) -> list[dict[str, Any]]:
+    ref = mission_ref_for_run(run_dir)
+    raw_mission_dir = str(ref.get("mission_dir") or "")
+    if not raw_mission_dir:
+        return []
+    mission_dir = Path(raw_mission_dir)
+    return _read_jsonl(mission_dir / "progress_events.jsonl", limit=limit)
+
+
 def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]:
     planned_steps = status.get("steps", [])
     ledger_steps = ledger.get("steps", [])
@@ -174,6 +217,8 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         "oversight_errors": oversight_errors,
         "oversight_summary": run_oversight_summary(run_dir),
         "final_manifest_summary": final_manifest_summary(result),
+        "mission_ref": mission_ref_for_run(run_dir),
+        "mission_progress_events": mission_progress_events_for_run(run_dir),
         "progress": run_progress(status, ledger),
         "last_preflight": last_run_preflight(ledger),
     }
@@ -465,6 +510,24 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
             "detail": _short_text(summary.get("goal") or ledger.get("goal"), 1400),
         }
     ]
+    mission_events = summary.get("mission_progress_events") if isinstance(summary.get("mission_progress_events"), list) else []
+    for event in mission_events:
+        if not isinstance(event, dict):
+            continue
+        entries.append(
+            {
+                "kind": "mission_progress",
+                "severity": _status_severity(str(event.get("status") or "")),
+                "at": str(event.get("created_at") or ""),
+                "actor": str(event.get("actor") or ""),
+                "role": str(event.get("role") or ""),
+                "phase": str(event.get("phase") or ""),
+                "status": str(event.get("status") or ""),
+                "headline": str(event.get("title") or ""),
+                "detail": str(event.get("body") or ""),
+                "mission_id": str(event.get("mission_id") or ""),
+            }
+        )
     for step in step_states:
         if not isinstance(step, dict):
             continue
