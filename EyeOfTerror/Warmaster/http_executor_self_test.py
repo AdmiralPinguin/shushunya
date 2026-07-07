@@ -36,6 +36,33 @@ def patch_dispatch_ports(run_dir: Path, ports_by_worker: dict[str, int]) -> None
             write_json(dispatch_path, packet)
 
 
+def dispatch_packet(step_id: str, worker: str, port: int, request: dict, mission_id: str = "mission-http-executor-test") -> dict:
+    order = worker_order(
+        mission_id,
+        step_id=step_id,
+        sender="TestGovernor",
+        to=worker,
+        task=str(request.get("task") or request.get("task_id") or step_id),
+        expected_output="worker step result",
+        input_artifacts=request.get("input_artifacts") if isinstance(request.get("input_artifacts"), list) else [],
+        quality_requirements=[],
+    )
+    enriched_request = dict(request)
+    enriched_request.setdefault("task", order["task"])
+    enriched_request.setdefault("expected_output", order["expected_output"])
+    enriched_request.setdefault("input_artifacts", order["input_artifacts"])
+    enriched_request.setdefault("quality_requirements", order["quality_requirements"])
+    enriched_request.setdefault("revision_context", order["revision_context"])
+    enriched_request["worker_order"] = order
+    return {
+        "step_id": step_id,
+        "worker": worker,
+        "port": port,
+        "worker_order": order,
+        "request": enriched_request,
+    }
+
+
 class CaptureRunHandler(BaseHTTPRequestHandler):
     captured_payload: dict | None = None
 
@@ -135,6 +162,19 @@ def main() -> int:
         raise AssertionError("ready terminal payload should complete a run")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
+        legacy_run = root / "legacy-dispatch-run"
+        legacy_dispatch = legacy_run / "dispatch"
+        write_json(
+            legacy_run / "status.json",
+            {"steps": [{"step_id": "legacy_step", "worker": "LegacyWorker", "port": 9}], "dispatch_dir": str(legacy_dispatch)},
+        )
+        write_json(
+            legacy_dispatch / "legacy_step.json",
+            {"step_id": "legacy_step", "worker": "LegacyWorker", "port": 9, "request": {"task_id": "legacy-http-test"}},
+        )
+        legacy_summary = execute_run(legacy_run, timeout_sec=1)
+        if legacy_summary.get("ok") or "worker_order is required" not in legacy_summary.get("preflight_failures", [{}])[0].get("error", ""):
+            raise AssertionError(f"HTTP executor accepted legacy dispatch without worker_order: {legacy_summary}")
         work = root / "work"
         source = work / "test" / "source_map.json"
         source.parent.mkdir(parents=True, exist_ok=True)
@@ -173,15 +213,15 @@ def main() -> int:
             )
             write_json(
                 dispatch_dir / "fact_extraction.json",
-                {
-                    "step_id": "fact_extraction",
-                    "worker": "NoosphericExtractor",
-                    "port": server.server_port,
-                    "request": {
+                dispatch_packet(
+                    "fact_extraction",
+                    "NoosphericExtractor",
+                    server.server_port,
+                    {
                         "task_id": "http-test",
                         "step": {"expected_artifacts": ["/work/test/direct_event_notes.json"]},
                     },
-                },
+                ),
             )
             summary = execute_run(run_dir, timeout_sec=60)
             if not summary.get("ok"):
@@ -260,12 +300,7 @@ def main() -> int:
                 )
                 write_json(
                     failing_dispatch_dir / "fail_step.json",
-                    {
-                        "step_id": "fail_step",
-                        "worker": "FailingWorker",
-                        "port": failing_server.server_port,
-                        "request": {"task_id": "failing-http-test"},
-                    },
+                    dispatch_packet("fail_step", "FailingWorker", failing_server.server_port, {"task_id": "failing-http-test"}),
                 )
                 failed_summary = execute_run(failing_run, timeout_sec=30)
                 if failed_summary.get("ok"):
@@ -300,12 +335,13 @@ def main() -> int:
                 )
                 write_json(
                     protocol_dispatch_dir / "protocol_step.json",
-                    {
-                        "step_id": "protocol_step",
-                        "worker": "ProtocolWorker",
-                        "port": protocol_server.server_port,
-                        "request": {"task_id": "protocol-report-test"},
-                    },
+                    dispatch_packet(
+                        "protocol_step",
+                        "ProtocolWorker",
+                        protocol_server.server_port,
+                        {"task_id": "protocol-report-test"},
+                        mission_id="mission-protocol-executor",
+                    ),
                 )
                 protocol_summary = execute_run(protocol_run, timeout_sec=30)
                 if not protocol_summary.get("ok"):
@@ -330,22 +366,13 @@ def main() -> int:
             try:
                 write_json(
                     capture_dispatch,
-                    {
-                        "step_id": "capture_step",
-                        "worker": "CaptureWorker",
-                        "port": capture_server.server_port,
-                        "worker_order": worker_order(
-                            "mission-capture-test",
-                            step_id="capture_step",
-                            sender="TestGovernor",
-                            to="CaptureWorker",
-                            task="Capture the protocol order",
-                            expected_output="captured payload",
-                            input_artifacts=[],
-                            quality_requirements=["preserve revision context"],
-                        ),
-                        "request": {"task_id": "capture-test"},
-                    },
+                    dispatch_packet(
+                        "capture_step",
+                        "CaptureWorker",
+                        capture_server.server_port,
+                        {"task_id": "capture-test", "task": "Capture the protocol order"},
+                        mission_id="mission-capture-test",
+                    ),
                 )
                 captured = run_step(
                     capture_dispatch,

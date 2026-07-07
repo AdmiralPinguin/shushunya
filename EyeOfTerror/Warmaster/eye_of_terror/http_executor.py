@@ -12,7 +12,7 @@ from EyeOfTerror.common_protocol import validate_protocol_payload
 from .local_executor import ordered_dispatch_paths, revision_contexts_from_result
 from .ledger import TaskLedger
 from .mission_control import record_worker_execution_started, record_worker_protocol_report, worker_report_from_payload
-from .pipeline import dispatch_packet_with_worker_order, write_json_atomic
+from .pipeline import dispatch_packet_with_worker_order, require_dispatch_worker_order, write_json_atomic
 
 
 @dataclass
@@ -72,6 +72,11 @@ def preflight_workers(run_dir: Path, host: str, timeout_sec: int, step_ids: list
         worker = str(packet.get("worker") or "")
         port = int(packet.get("port") or 0)
         try:
+            require_dispatch_worker_order(packet, expected_step_id=str(packet.get("step_id") or dispatch_path.stem), expected_worker=worker)
+        except Exception as exc:  # noqa: BLE001 - preflight should reject non-protocol dispatch packets.
+            failures.append({"worker": worker, "port": port, "error": str(exc)})
+            continue
+        try:
             payload = get_json(f"http://{host}:{port}/health", min(timeout_sec, 10))
             if not payload.get("ok"):
                 failures.append({"worker": worker, "port": port, "error": str(payload.get("error") or "health returned ok=false")})
@@ -122,6 +127,11 @@ def run_step(dispatch_path: Path, host: str, timeout_sec: int, revision_context:
     step_id = str(packet.get("step_id") or dispatch_path.stem)
     worker = str(packet.get("worker") or "")
     port = int(packet.get("port") or 0)
+    try:
+        require_dispatch_worker_order(packet, expected_step_id=step_id, expected_worker=worker)
+    except Exception as exc:  # noqa: BLE001 - executor should record protocol violations as step failures.
+        payload = {"ok": False, "status": "failed", "error": f"dispatch worker_order invalid: {exc}", "error_code": "invalid_worker_order"}
+        return HttpStepResult(step_id, worker, port, False, payload, str(exc))
     if revision_context:
         packet = dispatch_packet_with_worker_order(packet, revision_context=revision_context)
     else:

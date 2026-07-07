@@ -123,6 +123,27 @@ def dispatch_packet_with_worker_order(packet: dict[str, Any], revision_context: 
     return enriched
 
 
+def require_dispatch_worker_order(packet: dict[str, Any], expected_step_id: str = "", expected_worker: str = "") -> dict[str, Any]:
+    order = packet.get("worker_order") if isinstance(packet.get("worker_order"), dict) else {}
+    if not order:
+        raise ValueError("dispatch worker_order is required")
+    validate_protocol_payload(order, expected_type="worker_order")
+    step_id = str(order.get("step_id") or "")
+    if expected_step_id and step_id != expected_step_id:
+        raise ValueError(f"dispatch worker_order step_id mismatch: expected {expected_step_id}, got {step_id or 'missing'}")
+    worker = str(order.get("to") or "")
+    if expected_worker and worker != expected_worker:
+        raise ValueError(f"dispatch worker_order worker mismatch: expected {expected_worker}, got {worker or 'missing'}")
+    request = packet.get("request") if isinstance(packet.get("request"), dict) else {}
+    request_order = request.get("worker_order") if isinstance(request.get("worker_order"), dict) else {}
+    if not request_order:
+        raise ValueError("dispatch request.worker_order is required")
+    validate_protocol_payload(request_order, expected_type="worker_order")
+    if request_order != order:
+        raise ValueError("dispatch request.worker_order must match dispatch worker_order")
+    return order
+
+
 def build_dispatch_packets(contract: TaskContract, oversight: dict[str, Any] | None = None, mission_id: str | None = None) -> list[DispatchPacket]:
     packets: list[DispatchPacket] = []
     contract_payload = contract.to_dict()

@@ -2,9 +2,15 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from EyeOfTerror.common_protocol import worker_order
 from eye_of_terror import local_executor
 from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction
 from eye_of_terror.local_executor import execute_run, revision_contexts_from_result, terminal_payload_allows_completion
@@ -14,6 +20,32 @@ from eye_of_terror.pipeline import write_pipeline_run
 def write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def dispatch_packet(step_id: str, worker: str, request: dict, mission_id: str = "mission-local-executor-test") -> dict:
+    order = worker_order(
+        mission_id,
+        step_id=step_id,
+        sender="TestGovernor",
+        to=worker,
+        task=str(request.get("task") or request.get("task_id") or step_id),
+        expected_output="worker step result",
+        input_artifacts=request.get("input_artifacts") if isinstance(request.get("input_artifacts"), list) else [],
+        quality_requirements=[],
+    )
+    enriched_request = dict(request)
+    enriched_request.setdefault("task", order["task"])
+    enriched_request.setdefault("expected_output", order["expected_output"])
+    enriched_request.setdefault("input_artifacts", order["input_artifacts"])
+    enriched_request.setdefault("quality_requirements", order["quality_requirements"])
+    enriched_request.setdefault("revision_context", order["revision_context"])
+    enriched_request["worker_order"] = order
+    return {
+        "step_id": step_id,
+        "worker": worker,
+        "worker_order": order,
+        "request": enriched_request,
+    }
 
 
 def main() -> int:
@@ -53,6 +85,29 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
+        legacy_run = root / "legacy-dispatch-run"
+        legacy_dispatch = legacy_run / "dispatch"
+        write_json(
+            legacy_run / "contract.json",
+            {"task_id": "legacy-local", "goal": "test legacy dispatch rejection", "assigned_governor": "IskandarKhayon"},
+        )
+        write_json(
+            legacy_run / "status.json",
+            {
+                "task_id": "legacy-local",
+                "governor": "IskandarKhayon",
+                "steps": [{"step_id": "legacy_step", "worker": "Lexmechanic"}],
+                "dispatch_dir": str(legacy_dispatch),
+            },
+        )
+        write_json(
+            legacy_dispatch / "legacy_step.json",
+            {"step_id": "legacy_step", "worker": "Lexmechanic", "request": {"task_id": "legacy-local:legacy_step"}},
+        )
+        legacy_summary = execute_run(repo_root, legacy_run, root / "legacy-work", timeout_sec=30)
+        legacy_payload = legacy_summary.get("steps", [{}])[0].get("payload", {})
+        if legacy_summary.get("ok") or legacy_payload.get("error_code") != "invalid_worker_order":
+            raise AssertionError(f"local executor accepted legacy dispatch without worker_order: {legacy_summary}")
         missing_input_run = root / "missing-input-run"
         missing_input_dispatch = missing_input_run / "dispatch"
         write_json(
@@ -78,15 +133,15 @@ def main() -> int:
         )
         write_json(
             missing_input_dispatch / "fact_extraction.json",
-            {
-                "step_id": "fact_extraction",
-                "worker": "NoosphericExtractor",
-                "request": {
+            dispatch_packet(
+                "fact_extraction",
+                "NoosphericExtractor",
+                {
                     "task_id": "missing-input-local:fact_extraction",
                     "input_artifacts": ["/work/test/missing.json"],
                     "step": {"expected_artifacts": ["/work/test/direct_event_notes.json"]},
                 },
-            },
+            ),
         )
         missing_summary = execute_run(repo_root, missing_input_run, root / "missing-work", timeout_sec=30)
         if missing_summary.get("ok") or missing_summary.get("steps", [{}])[0].get("payload", {}).get("error") != "input artifact preflight failed":
@@ -121,10 +176,10 @@ def main() -> int:
         )
         write_json(
             bad_quality_dispatch / "fact_extraction.json",
-            {
-                "step_id": "fact_extraction",
-                "worker": "NoosphericExtractor",
-                "request": {
+            dispatch_packet(
+                "fact_extraction",
+                "NoosphericExtractor",
+                {
                     "task_id": "bad-quality-local:fact_extraction",
                     "input_artifacts": ["/work/test/source_map.json"],
                     "step": {"step_id": "fact_extraction", "expected_artifacts": ["/work/test/direct_event_notes.json"]},
@@ -147,7 +202,7 @@ def main() -> int:
                         },
                     },
                 },
-            },
+            ),
         )
         bad_quality_summary = execute_run(repo_root, bad_quality_run, root / "bad-quality-work", timeout_sec=30)
         if (
@@ -200,15 +255,15 @@ def main() -> int:
         )
         write_json(
             timeout_dispatch / "source_discovery.json",
-            {
-                "step_id": "source_discovery",
-                "worker": "Lexmechanic",
-                "request": {
+            dispatch_packet(
+                "source_discovery",
+                "Lexmechanic",
+                {
                     "task_id": "timeout-local:source_discovery",
                     "contract": {"goal": "Собери историю неизвестной битвы."},
                     "step": {"expected_artifacts": ["/work/test/source_map.json"]},
                 },
-            },
+            ),
         )
         timeout_summary = execute_run(repo_root, timeout_run, root / "timeout-work", timeout_sec=0)
         timeout_payload = timeout_summary.get("steps", [{}])[0].get("payload", {})
@@ -267,11 +322,7 @@ print(json.dumps({"ok": True, "status": "completed", "summary": "flaky worker re
             )
             write_json(
                 flaky_dispatch / "flaky_step.json",
-                {
-                    "step_id": "flaky_step",
-                    "worker": "FlakyWorker",
-                    "request": {"task_id": "flaky-local:flaky_step"},
-                },
+                dispatch_packet("flaky_step", "FlakyWorker", {"task_id": "flaky-local:flaky_step"}),
             )
             flaky_summary = execute_run(flaky_repo, flaky_run, root / "flaky-work", timeout_sec=1, timeout_retries=1)
             if not flaky_summary.get("ok") or flaky_summary.get("steps", [{}])[0].get("returncode") != 0:

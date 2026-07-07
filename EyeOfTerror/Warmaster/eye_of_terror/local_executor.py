@@ -13,11 +13,12 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from EyeOfTerror.common_protocol import validate_protocol_payload
 from EyeOfTerror.model_brain import attach_model_brain, request_model_decision
 
 from .ledger import TaskLedger
 from .mission_control import record_worker_execution_started, record_worker_protocol_report, worker_report_from_payload
-from .pipeline import dispatch_packet_with_worker_order, write_json_atomic
+from .pipeline import dispatch_packet_with_worker_order, require_dispatch_worker_order, write_json_atomic
 
 
 WORKER_COMMANDS = {
@@ -217,6 +218,11 @@ def run_step(
         return StepResult(dispatch_path.stem, "", 2, False, payload, "", payload["error"])
     worker = str(packet.get("worker") or "")
     step_id = str(packet.get("step_id") or dispatch_path.stem)
+    try:
+        require_dispatch_worker_order(packet, expected_step_id=step_id, expected_worker=worker)
+    except Exception as exc:  # noqa: BLE001 - executor should record protocol violations as step failures.
+        payload = {"ok": False, "worker": worker, "status": "failed", "error": f"dispatch worker_order invalid: {exc}", "error_code": "invalid_worker_order"}
+        return StepResult(step_id, worker, 2, False, payload, "", payload["error"])
     packet = dispatch_packet_with_worker_order(packet, revision_context=revision_context)
     request = packet.get("request") if isinstance(packet.get("request"), dict) else packet
     artifact_errors = input_artifact_errors(request, workspace_root)
@@ -412,7 +418,16 @@ def execute_run(
         try:
             packet = load_json(dispatch_path)
             order = packet.get("worker_order") if isinstance(packet.get("worker_order"), dict) else {}
-            report = worker_report_from_payload(str(order.get("mission_id") or f"mission-{contract.get('task_id') or run_dir.name}"), result.step_id, result.worker, result.payload, result.ok)
+            raw_report = result.payload.get("worker_report") if isinstance(result.payload.get("worker_report"), dict) else {}
+            report = {}
+            if raw_report:
+                try:
+                    validate_protocol_payload(raw_report, expected_type="worker_report")
+                    report = raw_report
+                except Exception as exc:  # noqa: BLE001 - fall back so malformed workers still leave a protocol trace.
+                    step_details["worker_report_validation_error"] = str(exc)
+            if not report:
+                report = worker_report_from_payload(str(order.get("mission_id") or f"mission-{contract.get('task_id') or run_dir.name}"), result.step_id, result.worker, result.payload, result.ok)
             record_worker_protocol_report(run_dir, report)
             step_details["worker_report"] = report
         except Exception as exc:  # noqa: BLE001 - protocol reporting must not hide the worker result.
