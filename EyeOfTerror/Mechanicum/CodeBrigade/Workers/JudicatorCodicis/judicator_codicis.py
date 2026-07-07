@@ -12,6 +12,7 @@ if str(WORKERS_ROOT) not in sys.path:
 
 from code_review import run_code_review  # noqa: E402
 from common import codewright_core  # noqa: E402
+from common.worker_protocol import strict_worker_request_from_payload  # noqa: E402
 
 
 WORKER_NAME = "JudicatorCodicis"
@@ -33,7 +34,7 @@ def main() -> int:
     parser.add_argument("--workspace-root", default="runtime/mechanicum-work")
     args = parser.parse_args()
     payload = json.loads(Path(args.request_json).read_text(encoding="utf-8"))
-    result = run(payload.get("request") if isinstance(payload.get("request"), dict) else payload, Path(args.workspace_root))
+    result = run(strict_worker_request_from_payload(payload, WORKER_NAME), Path(args.workspace_root))
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("ok") or result.get("status") in {"blocked", "needs_revision", "passed_with_warnings"} else 1
 
