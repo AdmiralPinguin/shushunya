@@ -5,6 +5,7 @@ import json
 import sys
 import tempfile
 import threading
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -87,6 +88,16 @@ def _main() -> int:
         or direct_command != direct_order
     ):
         raise AssertionError(f"Moriana task_from_payload did not stay protocol-first: task={direct_task!r} command={direct_command}")
+    try:
+        task_from_payload({"task": "сырой обход бригадира"})
+    except ValueError as exc:
+        if "commander_order is required" not in str(exc):
+            raise AssertionError(f"bad direct task rejection: {exc}") from exc
+    else:
+        raise AssertionError("Moriana accepted direct task input without commander_order")
+    legacy_task, legacy_command = task_from_payload({"task": "diagnostic direct task", "allow_legacy_direct_task": True})
+    if legacy_task != "diagnostic direct task" or legacy_command:
+        raise AssertionError(f"Moriana legacy diagnostic opt-in drifted: {legacy_task!r} {legacy_command}")
     with tempfile.TemporaryDirectory(prefix="moriana-service-self-test-") as tmp:
         run_root = Path(tmp) / "runs"
         server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(run_root))
@@ -108,14 +119,42 @@ def _main() -> int:
                 or "POST /runs/{run_id}/apply_revision" not in capabilities.get("endpoints", [])
             ):
                 raise AssertionError(f"bad capabilities payload: {capabilities}")
-            image_plan = request_json(base, "POST", "/plan", {"task": "нарисуй картинку 512x512", "task_id": "moriana-http-image"})
+            try:
+                request_json(base, "POST", "/plan", {"task": "нарисуй картинку 512x512", "task_id": "moriana-raw-reject"})
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+                rejected = json.loads(exc.read().decode("utf-8"))
+                if "commander_order is required" not in str(rejected.get("error", "")):
+                    raise AssertionError(f"bad raw task rejection: {rejected}")
+            else:
+                raise AssertionError("Moriana /plan accepted raw task without commander_order")
+            image_plan = request_json(
+                base,
+                "POST",
+                "/plan",
+                {
+                    "task": "нарисуй картинку 512x512",
+                    "task_id": "moriana-http-image",
+                    "commander_order": moriana_command("нарисуй картинку 512x512", "moriana-http-image"),
+                },
+            )
             if (
                 not image_plan.get("ok")
                 or image_plan.get("contract", {}).get("assigned_governor") != "Moriana"
                 or image_plan.get("contract", {}).get("worker_plan", [])[0].get("worker") != "Promptwright"
             ):
                 raise AssertionError(f"bad image plan payload: {image_plan}")
-            comic_plan = request_json(base, "POST", "/plan", {"task": "сделай комикс 3 панели про кузню", "task_id": "moriana-http-comic"})
+            comic_plan = request_json(
+                base,
+                "POST",
+                "/plan",
+                {
+                    "task": "сделай комикс 3 панели про кузню",
+                    "task_id": "moriana-http-comic",
+                    "commander_order": moriana_command("сделай комикс 3 панели про кузню", "moriana-http-comic"),
+                },
+            )
             if (
                 not comic_plan.get("ok")
                 or comic_plan.get("contract", {}).get("worker_plan", [])[0].get("worker") != "ScenarioScribe"
@@ -133,7 +172,16 @@ def _main() -> int:
                 or str(protocol_only_plan.get("actions", {}).get("next_action", {}).get("body", {}).get("task") or "").startswith("ПРИКАЗ ВАРМАСТЕРА")
             ):
                 raise AssertionError(f"Moriana /plan did not use commander_order as authority: {protocol_only_plan}")
-            prepared = request_json(base, "POST", "/prepare_run", {"task": "сделай комикс 3 панели про кузню", "task_id": "moriana-http-comic-run"})
+            prepared = request_json(
+                base,
+                "POST",
+                "/prepare_run",
+                {
+                    "task": "сделай комикс 3 панели про кузню",
+                    "task_id": "moriana-http-comic-run",
+                    "commander_order": moriana_command("сделай комикс 3 панели про кузню", "moriana-http-comic-run"),
+                },
+            )
             run_dir = Path(str(prepared.get("run_dir") or ""))
             if (
                 not prepared.get("ok")
@@ -189,6 +237,7 @@ def _main() -> int:
                 {
                     "task": "нарисуй HTTP smoke картинку 512x512",
                     "task_id": "moriana-http-exec-image",
+                    "commander_order": moriana_command("нарисуй HTTP smoke картинку 512x512", "moriana-http-exec-image"),
                     "execute": True,
                     "test_artifact_mode": "good",
                 },
@@ -242,6 +291,7 @@ def _main() -> int:
                 {
                     "task": "нарисуй HTTP smoke картинку для apply revision 512x512",
                     "task_id": "moriana-http-revision-image",
+                    "commander_order": moriana_command("нарисуй HTTP smoke картинку для apply revision 512x512", "moriana-http-revision-image"),
                     "execute": True,
                 },
             )

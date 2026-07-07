@@ -515,9 +515,13 @@ def task_from_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     command = payload.get("commander_order") if isinstance(payload.get("commander_order"), dict) else {}
     if command:
         validate_protocol_payload(command, expected_type="commander_order")
+        task = str(payload.get("task") or payload.get("request") or "").strip()
+        if not task:
+            task = task_text_from_commander_order(command)
+        return task, command
+    if not bool(payload.get("allow_legacy_direct_task")):
+        raise ValueError("commander_order is required; direct governor task input requires allow_legacy_direct_task=true")
     task = str(payload.get("task") or payload.get("request") or "").strip()
-    if not task and command:
-        task = task_text_from_commander_order(command)
     return task, command
 
 
@@ -622,18 +626,20 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:
             try:
                 payload = payload_from(self)
-                task, command = task_from_payload(payload)
-                task_id = str(payload.get("task_id") or "").strip() or None
                 parsed = urlparse(self.path)
                 path = parsed.path.rstrip("/") or "/"
                 store = MorianaRunStore(default_run_root)
                 if path == "/plan":
+                    task, command = task_from_payload(payload)
+                    task_id = str(payload.get("task_id") or "").strip() or None
                     plan_payload = plan_image_task(task, task_id=task_id).to_dict()
                     if command:
                         plan_payload["governor_plan"] = protocol_governor_plan(plan_payload.get("contract", {}), command)
                     response(self, 200, plan_payload)
                     return
                 if path == "/prepare_run":
+                    task, command = task_from_payload(payload)
+                    task_id = str(payload.get("task_id") or "").strip() or None
                     if not task:
                         raise ValueError("task is required")
                     planned = plan_image_task(task, task_id=task_id)
@@ -641,6 +647,7 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                     response(self, 200, prepare_run(task, planned.contract.task_id, run_dir, command=command))
                     return
                 if path == "/runs":
+                    task, _command = task_from_payload(payload)
                     response(self, 200, create_or_execute_run(default_run_root, {**payload, "task": task}))
                     return
                 parts = [part for part in path.split("/") if part]

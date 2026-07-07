@@ -69,6 +69,16 @@ def main() -> int:
         or direct_command != direct_order
     ):
         raise AssertionError(f"Ceraxia task_from_payload did not stay protocol-first: task={direct_task!r} command={direct_command}")
+    try:
+        task_from_payload({"task": "сырой обход бригадира"})
+    except ValueError as exc:
+        if "commander_order is required" not in str(exc):
+            raise AssertionError(f"bad direct task rejection: {exc}") from exc
+    else:
+        raise AssertionError("Ceraxia accepted direct task input without commander_order")
+    legacy_task, legacy_command = task_from_payload({"task": "diagnostic direct task", "allow_legacy_direct_task": True})
+    if legacy_task != "diagnostic direct task" or legacy_command:
+        raise AssertionError(f"Ceraxia legacy diagnostic opt-in drifted: {legacy_task!r} {legacy_command}")
     contract_workers = [
         step.worker
         for step in build_code_task_contract("почини python приложение", task_id="ceraxia-service-test").worker_plan
@@ -181,7 +191,24 @@ def main() -> int:
                 or capabilities.get("model_brain", {}).get("kind") != "eye_of_terror_model_brain"
             ):
                 raise AssertionError(f"bad capabilities: {capabilities}")
-            plan = request_json(base + "/plan", {"task": "почини python приложение", "task_id": "ceraxia-http-test"})
+            try:
+                request_json(base + "/plan", {"task": "почини python приложение", "task_id": "ceraxia-raw-reject"})
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+                rejected = json.loads(exc.read().decode("utf-8"))
+                if "commander_order is required" not in rejected.get("error", ""):
+                    raise AssertionError(f"bad raw task rejection: {rejected}")
+            else:
+                raise AssertionError("Ceraxia /plan accepted raw task without commander_order")
+            plan = request_json(
+                base + "/plan",
+                {
+                    "task": "почини python приложение",
+                    "task_id": "ceraxia-http-test",
+                    "commander_order": ceraxia_command("почини python приложение", "ceraxia-http-test"),
+                },
+            )
             if (
                 not plan.get("ok")
                 or plan.get("contract", {}).get("assigned_governor") != "Ceraxia"
@@ -215,6 +242,7 @@ def main() -> int:
                 {
                     "task": "почини python приложение",
                     "task_id": "ceraxia-callable-test",
+                    "commander_order": ceraxia_command("почини python приложение", "ceraxia-callable-test"),
                     "repo_path": str(root / "sample-repo"),
                     "constraints": {"allowed_commands": ["python -m unittest discover"]},
                 },
@@ -233,7 +261,12 @@ def main() -> int:
             run_dir = root / "runs" / "custom-run"
             prepared = request_json(
                 base + "/prepare_run",
-                {"task": "почини python приложение", "task_id": "ceraxia-http-test", "run_dir": str(run_dir)},
+                {
+                    "task": "почини python приложение",
+                    "task_id": "ceraxia-http-test",
+                    "run_dir": str(run_dir),
+                    "commander_order": ceraxia_command("почини python приложение", "ceraxia-http-test"),
+                },
             )
             if (
                 not prepared.get("ok")
@@ -277,7 +310,12 @@ def main() -> int:
             try:
                 request_json(
                     base + "/prepare_run",
-                    {"task": "почини python приложение", "task_id": "ceraxia-escape-test", "run_dir": str(root / "escape")},
+                    {
+                        "task": "почини python приложение",
+                        "task_id": "ceraxia-escape-test",
+                        "run_dir": str(root / "escape"),
+                        "commander_order": ceraxia_command("почини python приложение", "ceraxia-escape-test"),
+                    },
                 )
             except urllib.error.HTTPError as exc:
                 if exc.code != 400:

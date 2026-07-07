@@ -76,9 +76,13 @@ def task_from_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     command = payload.get("commander_order") if isinstance(payload.get("commander_order"), dict) else {}
     if command:
         validate_protocol_payload(command, expected_type="commander_order")
+        task = str(payload.get("task") or payload.get("message") or "").strip()
+        if not task:
+            task = task_text_from_commander_order(command)
+        return task, command
+    if not bool(payload.get("allow_legacy_direct_task")):
+        raise ValueError("commander_order is required; direct governor task input requires allow_legacy_direct_task=true")
     task = str(payload.get("task") or payload.get("message") or "").strip()
-    if not task and command:
-        task = task_text_from_commander_order(command)
     return task, command
 
 

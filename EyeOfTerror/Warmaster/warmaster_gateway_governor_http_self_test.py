@@ -13,6 +13,7 @@ import eye_of_terror.warmaster_gateway as warmaster_gateway
 from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction
 from eye_of_terror.inner_circle.iskandar_service import make_handler as make_iskandar_handler
 from eye_of_terror.pipeline import write_pipeline_run
+from EyeOfTerror.common_protocol import commander_order, validate_protocol_payload
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -87,6 +88,23 @@ def service_governor(port: int) -> Any:
     return ServiceGovernor(port)
 
 
+def iskandar_command(task: str, task_id: str) -> dict[str, Any]:
+    order = commander_order(
+        f"mission-{task_id}",
+        to="IskandarKhayon",
+        user_request=task,
+        commander_intent="Проверить HTTP-подготовку бригадира через приказ Вармастера.",
+        primary_goal=task,
+        success_conditions=[
+            "governor HTTP service receives commander_order",
+            "prepared run package preserves mission protocol artifacts",
+        ],
+        constraints=["Do not use direct raw governor task input."],
+    )
+    validate_protocol_payload(order, expected_type="commander_order")
+    return order
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         run_root = Path(temp_dir)
@@ -99,6 +117,7 @@ def main() -> int:
                 "warmaster-governor-http-focused-test",
                 run_root,
                 service_governor(iskandar_server.server_port),
+                commander_order=iskandar_command("Собери все известное о событиях Скалатракса.", "warmaster-governor-http-focused-test"),
             )
             run_dir = Path(str(prepared.get("run_dir") or ""))
             if (
@@ -125,6 +144,10 @@ def main() -> int:
                         f"warmaster-governor-{suffix}-focused-test",
                         run_root,
                         bad_governor,
+                        commander_order=iskandar_command(
+                            "Собери все известное о событиях Скалатракса.",
+                            f"warmaster-governor-{suffix}-focused-test",
+                        ),
                     )
                     if (
                         bad_prepared.get("error_code") != "governor_prepare_invalid_run"
@@ -144,6 +167,10 @@ def main() -> int:
                     "warmaster-governor-missing-workers-focused-test",
                     run_root,
                     service_governor(iskandar_server.server_port),
+                    commander_order=iskandar_command(
+                        "Собери все известное о событиях Скалатракса.",
+                        "warmaster-governor-missing-workers-focused-test",
+                    ),
                 )
                 if (
                     missing_workers.get("error_code") != "governor_workers_missing"

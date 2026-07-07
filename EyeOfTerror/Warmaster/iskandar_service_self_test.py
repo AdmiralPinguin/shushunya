@@ -74,6 +74,16 @@ def main() -> int:
         or direct_command != direct_order
     ):
         raise AssertionError(f"Iskandar task_from_payload did not stay protocol-first: task={direct_task!r} command={direct_command}")
+    try:
+        task_from_payload({"task": "сырой обход бригадира"})
+    except ValueError as exc:
+        if "commander_order is required" not in str(exc):
+            raise AssertionError(f"bad direct task rejection: {exc}") from exc
+    else:
+        raise AssertionError("Iskandar accepted direct task input without commander_order")
+    legacy_task, legacy_command = task_from_payload({"task": "diagnostic direct task", "allow_legacy_direct_task": True})
+    if legacy_task != "diagnostic direct task" or legacy_command:
+        raise AssertionError(f"Iskandar legacy diagnostic opt-in drifted: {legacy_task!r} {legacy_command}")
     contract_workers = [
         step.worker
         for step in build_research_writing_contract("Собери события Скалатракса", task_id="iskandar-service-test").worker_plan
@@ -151,7 +161,24 @@ def main() -> int:
                 or "step_quality_matrix" not in capabilities.get("capabilities", [])
             ):
                 raise AssertionError(f"capabilities did not expose pipeline summary: {capabilities}")
-            plan = request_json(base + "/plan", {"task": "Собери события Скалатракса", "task_id": "iskandar-http-test"})
+            try:
+                request_json(base + "/plan", {"task": "Собери события Скалатракса", "task_id": "iskandar-raw-reject"})
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+                rejected = json.loads(exc.read().decode("utf-8"))
+                if "commander_order is required" not in rejected.get("error", ""):
+                    raise AssertionError(f"bad raw task rejection: {rejected}")
+            else:
+                raise AssertionError("Iskandar /plan accepted raw task without commander_order")
+            plan = request_json(
+                base + "/plan",
+                {
+                    "task": "Собери события Скалатракса",
+                    "task_id": "iskandar-http-test",
+                    "commander_order": iskandar_command("Собери события Скалатракса", "iskandar-http-test"),
+                },
+            )
             if (
                 not plan.get("ok")
                 or plan["contract"]["assigned_governor"] != "IskandarKhayon"
@@ -185,7 +212,12 @@ def main() -> int:
             run_dir = root / "runs" / "custom-run"
             prepared = request_json(
                 base + "/prepare_run",
-                {"task": "Собери события Скалатракса", "task_id": "iskandar-http-test", "run_dir": str(run_dir)},
+                {
+                    "task": "Собери события Скалатракса",
+                    "task_id": "iskandar-http-test",
+                    "run_dir": str(run_dir),
+                    "commander_order": iskandar_command("Собери события Скалатракса", "iskandar-http-test"),
+                },
             )
             if (
                 not prepared.get("ok")
@@ -236,7 +268,12 @@ def main() -> int:
             try:
                 request_json(
                     base + "/prepare_run",
-                    {"task": "Собери события Скалатракса", "task_id": "iskandar-escape-test", "run_dir": str(root / "escape")},
+                    {
+                        "task": "Собери события Скалатракса",
+                        "task_id": "iskandar-escape-test",
+                        "run_dir": str(root / "escape"),
+                        "commander_order": iskandar_command("Собери события Скалатракса", "iskandar-escape-test"),
+                    },
             )
             except urllib.error.HTTPError as exc:
                 if exc.code != 400:
