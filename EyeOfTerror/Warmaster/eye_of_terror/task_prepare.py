@@ -34,6 +34,32 @@ from .views import payload_with_task_view
 from EyeOfTerror.common_protocol import governor_plan_from_contract, validate_protocol_payload
 
 
+def commander_order_required_payload(
+    task_id: str | None,
+    governor_transport: str,
+    governor_host: str,
+    message: str,
+    include_brigade_health: bool = False,
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "gateway": "WarmasterGateway",
+        "error": "commander_order is required for strict mission protocol",
+        "error_code": "commander_order_required",
+        "task_id": task_id or "",
+        "protocol_mode": "strict_commander_order",
+        "actions": task_preflight_actions(
+            False,
+            "commander_order_required",
+            task_id or "",
+            include_brigade_health,
+            governor_transport,
+            governor_host,
+            message,
+        ),
+    }
+
+
 def mission_id_from_commander(task_id: str | None, commander_order: dict[str, Any] | None = None) -> str:
     if isinstance(commander_order, dict) and str(commander_order.get("mission_id") or "").strip():
         return str(commander_order.get("mission_id") or "").strip()
@@ -84,7 +110,10 @@ def prepare_task_via_governor_service(
     host: str = "127.0.0.1",
     port: int | None = None,
     commander_order: dict[str, Any] | None = None,
+    require_commander_order: bool = False,
 ) -> dict[str, Any]:
+    if require_commander_order and not commander_order:
+        return commander_order_required_payload(task_id, "http", host, message)
     host = validate_service_host(host)
     service_port = int(port or governor.port)
     base = f"http://{host}:{service_port}"
@@ -256,6 +285,7 @@ def prepare_task_via_governor_service(
         "gateway": "WarmasterGateway",
         "governor": governor.name,
         "governor_transport": "http",
+        "protocol_mode": "commander_order" if commander_order else "legacy_direct_task",
         "task_id": service_task_id,
         "run_dir": str(run_dir),
         "status": prepared.get("status", {}),
@@ -325,7 +355,10 @@ def prepare_task(
     governor_host: str = "127.0.0.1",
     forced_governor: str | None = None,
     commander_order: dict[str, Any] | None = None,
+    require_commander_order: bool = False,
 ) -> dict[str, Any]:
+    if require_commander_order and not commander_order:
+        return commander_order_required_payload(task_id, governor_transport, governor_host, message)
     if task_id is not None and not valid_task_id(task_id):
         return {
             "ok": False,
@@ -381,6 +414,7 @@ def prepare_task(
             governor_ref,
             host=governor_host,
             commander_order=commander_order,
+            require_commander_order=require_commander_order,
         )
     if governor_transport != "local":
         return {
@@ -461,6 +495,7 @@ def prepare_task(
         "ok": status["ok"],
         "gateway": "WarmasterGateway",
         "governor": governor,
+        "protocol_mode": "commander_order" if commander_order else "legacy_direct_task",
         "task_id": plan.contract.task_id,
         "run_dir": str(run_dir),
         "status": status,
@@ -478,7 +513,10 @@ def preflight_task(
     include_brigade_health: bool = False,
     forced_governor: str | None = None,
     commander_order: dict[str, Any] | None = None,
+    require_commander_order: bool = False,
 ) -> dict[str, Any]:
+    if require_commander_order and not commander_order:
+        return commander_order_required_payload(task_id, governor_transport, governor_host, message, include_brigade_health)
     if task_id is not None and not valid_task_id(task_id):
         return {
             "ok": False,
@@ -611,6 +649,7 @@ def preflight_task(
         "gateway": "WarmasterGateway",
         "governor": governor_ref.name,
         "governor_transport": governor_transport,
+        "protocol_mode": "commander_order" if commander_order else "legacy_direct_task",
         "task_id": resolved_task_id,
         "route": route.to_dict(),
         "contract_summary": contract_summary(contract),

@@ -189,6 +189,7 @@ def orchestrate_prepare_task(
     include_brigade_health: bool = False,
     forced_governor: str | None = None,
     commander_order: dict[str, Any] | None = None,
+    require_commander_order: bool = False,
 ) -> dict[str, Any]:
     if run_mode not in {"local", "http"}:
         raise ValueError("run_mode must be local or http")
@@ -202,6 +203,7 @@ def orchestrate_prepare_task(
         include_brigade_health=include_brigade_health,
         forced_governor=forced_governor,
         commander_order=commander_order,
+        require_commander_order=require_commander_order,
     )
     task_preflight_actions = task_preflight.get("actions") if isinstance(task_preflight.get("actions"), dict) else {}
     trace.append({"stage": "task_preflight", "ok": bool(task_preflight.get("ok")), "next_action": task_preflight_actions.get("next_action", {})})
@@ -224,6 +226,7 @@ def orchestrate_prepare_task(
         governor_host=governor_host,
         forced_governor=forced_governor,
         commander_order=commander_order,
+        require_commander_order=require_commander_order,
     )
     task_actions = task.get("actions") if isinstance(task.get("actions"), dict) else {}
     trace.append({"stage": "task", "ok": bool(task.get("ok")), "task_id": str(task.get("task_id") or ""), "next_action": task_actions.get("next_action", {})})
@@ -336,6 +339,7 @@ def orchestrate_run_task(
         include_brigade_health=include_brigade_health,
         forced_governor=str(command.get("to") or "") or None,
         commander_order=command,
+        require_commander_order=True,
     )
     trace = list(prepared.get("trace") if isinstance(prepared.get("trace"), list) else [])
     trace.insert(
