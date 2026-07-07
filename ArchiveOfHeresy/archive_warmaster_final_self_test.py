@@ -117,6 +117,22 @@ def main() -> int:
                 "detail": "Карточка для вкладки Цераксии.",
             }
         ],
+        "brigade_tabs": [
+            {
+                "key": "ceraxia",
+                "label": "Цераксия",
+                "governor": "Ceraxia",
+                "status": "running",
+                "active": True,
+                "activity_cards": [
+                    {
+                        "kind": "progress_event",
+                        "headline": "Собираю план работ",
+                        "detail": "Карточка для вкладки Цераксии.",
+                    }
+                ],
+            }
+        ],
     }
     agent_task = ArchiveHandler.warmaster_run_as_agent_task(
         None,
@@ -130,6 +146,7 @@ def main() -> int:
         or agent_task.get("progress_events") != activity_payload["progress_events"]
         or agent_task.get("activity_cards") != activity_payload["activity_cards"]
         or agent_task.get("protocol_activity_cards") != activity_payload["protocol_activity_cards"]
+        or agent_task.get("brigade_tabs") != activity_payload["brigade_tabs"]
     ):
         raise AssertionError(f"Warmaster activity was not kept as brigade-tab payload: {agent_task}")
     journal_accepted = final_message_from_orchestration(
@@ -282,6 +299,7 @@ def main() -> int:
         mobile_payload.get("progress_events") != activity_payload["progress_events"]
         or mobile_payload.get("activity_cards") != activity_payload["activity_cards"]
         or mobile_payload.get("protocol_activity_cards") != activity_payload["protocol_activity_cards"]
+        or mobile_payload.get("brigade_tabs") != activity_payload["brigade_tabs"]
         or mobile_payload.get("activity_log")
     ):
         raise AssertionError(f"mobile brigade activity was not preserved separately: {mobile_payload}")

@@ -36,6 +36,17 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _read_json_dir(directory: Path, limit: int = 200) -> list[dict[str, Any]]:
+    if not directory.exists():
+        return []
+    payloads: list[dict[str, Any]] = []
+    for path in sorted(directory.glob("*.json"))[-max(0, limit) :]:
+        payload = _read_json(path)
+        if payload:
+            payloads.append(payload)
+    return payloads
+
+
 def _read_jsonl(path: Path, limit: int = 200) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -77,6 +88,11 @@ def mission_protocol_payloads_for_run(run_dir: Path) -> dict[str, dict[str, Any]
         "mission_state": _read_json(mission_dir / "mission_state.json"),
         "commander_order": _read_json(mission_dir / "commander_order.json"),
         "governor_plan": _read_json(mission_dir / "governor_plan.json"),
+        "worker_orders": _read_json_dir(mission_dir / "worker_orders", limit=1000),
+        "worker_reports": _read_json_dir(mission_dir / "worker_reports", limit=1000),
+        "governor_reports": _read_json_dir(mission_dir / "governor_reports", limit=1000),
+        "acceptance_reviews": _read_json_dir(mission_dir / "acceptance_reviews", limit=1000),
+        "revision_orders": _read_json_dir(mission_dir / "revision_orders", limit=1000),
         "final_response": _read_json(mission_dir / "final_response.json"),
     }
 
@@ -439,12 +455,73 @@ WORKER_ACTIVITY_LABELS = {
 }
 
 
+GOVERNOR_ACTIVITY_LABELS = {
+    "Warmaster": "Вармастер",
+    "IskandarKhayon": "Искандар",
+    "Iskandar": "Искандар",
+    "Scriptorium": "Искандар",
+    "Ceraxia": "Цераксия",
+    "CeraxiaTheRed": "Цераксия",
+    "Mechanicum": "Цераксия",
+    "Moriana": "Мориана",
+    "Pictorium": "Мориана",
+    "AshurKai": "Ашур-Кай",
+    "Administratum": "Ашур-Кай",
+}
+
+
+WORKER_GOVERNOR_HINTS = {
+    "CorpusIngestor": "IskandarKhayon",
+    "Lexmechanic": "IskandarKhayon",
+    "AuspexBrowser": "IskandarKhayon",
+    "OcularisRenderium": "IskandarKhayon",
+    "NoosphericExtractor": "IskandarKhayon",
+    "Chronologis": "IskandarKhayon",
+    "ScriptoriumArchitect": "IskandarKhayon",
+    "ScriptoriumDaemon": "IskandarKhayon",
+    "ReductorVerifier": "IskandarKhayon",
+    "FabricatorFinalis": "IskandarKhayon",
+    "CogitatorCodewright": "Ceraxia",
+    "LogisRepository": "Ceraxia",
+    "MagosStrategos": "Ceraxia",
+    "FerrumPatchwright": "Ceraxia",
+    "OrdinatusVerifier": "Ceraxia",
+    "JudicatorCodicis": "Ceraxia",
+    "SealwrightFinalis": "Ceraxia",
+    "Promptwright": "Moriana",
+    "Canvaswright": "Moriana",
+    "Compositionwright": "Moriana",
+    "CharacterSheetwright": "Moriana",
+    "ForgeRunner": "Moriana",
+}
+
+
 def _step_label(step_id: str) -> str:
     return STEP_ACTIVITY_LABELS.get(step_id, step_id.replace("_", " ") or "шаг")
 
 
 def _worker_label(worker: str) -> str:
     return WORKER_ACTIVITY_LABELS.get(worker, worker or "воркер")
+
+
+def _governor_label(governor: str) -> str:
+    clean = str(governor or "").strip()
+    return GOVERNOR_ACTIVITY_LABELS.get(clean, clean or "Бригада")
+
+
+def _governor_key(governor: str) -> str:
+    clean = str(governor or "").strip()
+    if clean in {"IskandarKhayon", "Iskandar", "Scriptorium"}:
+        return "iskandar"
+    if clean in {"Ceraxia", "CeraxiaTheRed", "Mechanicum"}:
+        return "ceraxia"
+    if clean in {"Moriana", "Pictorium"}:
+        return "moriana"
+    if clean in {"AshurKai", "Administratum"}:
+        return "ashur_kai"
+    if clean == "Warmaster":
+        return "warmaster"
+    return re.sub(r"[^a-z0-9_]+", "_", clean.lower()).strip("_") or "brigade"
 
 
 def _extract_ints(text: str) -> list[int]:
@@ -622,20 +699,138 @@ def _final_report_detail(status: str, result: dict[str, Any], revision_plan: dic
 
 
 def _progress_event_activity_card(event: dict[str, Any]) -> dict[str, Any]:
+    actor = str(event.get("actor") or "")
+    role = str(event.get("role") or "")
+    phase = str(event.get("phase") or "")
+    status = str(event.get("status") or "")
+    title = str(event.get("title") or "")
+    body = str(event.get("body") or "")
     return {
         "kind": "progress_event",
         "source": "mission_protocol",
-        "severity": _status_severity(str(event.get("status") or "")),
+        "severity": _status_severity(status),
         "at": str(event.get("created_at") or ""),
-        "actor": str(event.get("actor") or ""),
-        "role": str(event.get("role") or ""),
-        "phase": str(event.get("phase") or ""),
-        "status": str(event.get("status") or ""),
-        "headline": str(event.get("title") or ""),
-        "detail": str(event.get("body") or ""),
+        "actor": actor,
+        "role": role,
+        "phase": phase,
+        "status": status,
+        "headline": title,
+        "detail": body,
+        "card_title": title,
+        "card_body": body,
+        "display_title": title,
+        "display_body": body,
         "mission_id": str(event.get("mission_id") or ""),
         "protocol_type": str(event.get("type") or ""),
     }
+
+
+def _worker_governor_map(protocol: dict[str, Any]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for order in protocol.get("worker_orders", []) if isinstance(protocol.get("worker_orders"), list) else []:
+        if not isinstance(order, dict):
+            continue
+        worker = str(order.get("to") or "").strip()
+        governor = str(order.get("from") or "").strip()
+        if worker and governor:
+            mapping[worker] = governor
+    plan = protocol.get("governor_plan") if isinstance(protocol.get("governor_plan"), dict) else {}
+    plan_governor = str(plan.get("governor") or "").strip()
+    for step in plan.get("work_plan", []) if isinstance(plan.get("work_plan"), list) else []:
+        if not isinstance(step, dict):
+            continue
+        worker = str(step.get("worker") or "").strip()
+        if worker and plan_governor:
+            mapping.setdefault(worker, plan_governor)
+    for worker, governor in WORKER_GOVERNOR_HINTS.items():
+        mapping.setdefault(worker, governor)
+    return mapping
+
+
+def _card_governor(card: dict[str, Any], fallback_governor: str, worker_governors: dict[str, str]) -> str:
+    role = str(card.get("role") or "").strip()
+    actor = str(card.get("actor") or "").strip()
+    worker = str(card.get("worker") or "").strip()
+    if role == "commander" or actor == "Warmaster":
+        return "Warmaster"
+    if role == "governor" and actor:
+        return actor
+    if role == "worker" and actor:
+        return worker_governors.get(actor, WORKER_GOVERNOR_HINTS.get(actor, fallback_governor))
+    if worker:
+        return worker_governors.get(worker, WORKER_GOVERNOR_HINTS.get(worker, fallback_governor))
+    return fallback_governor
+
+
+def _brigade_tabs(
+    protocol_cards: list[dict[str, Any]],
+    summary_cards: list[dict[str, Any]],
+    mission_events: list[dict[str, Any]],
+    summary: dict[str, Any],
+    ledger: dict[str, Any],
+) -> list[dict[str, Any]]:
+    protocol = summary.get("mission_protocol") if isinstance(summary.get("mission_protocol"), dict) else {}
+    worker_governors = _worker_governor_map(protocol)
+    fallback_governor = str(summary.get("governor") or ledger.get("governor") or "")
+    events_by_index = {
+        index: event
+        for index, event in enumerate(mission_events)
+        if isinstance(event, dict)
+    }
+    tabs: dict[str, dict[str, Any]] = {}
+
+    def ensure_tab(governor: str) -> dict[str, Any]:
+        key = _governor_key(governor)
+        tab = tabs.get(key)
+        if tab is None:
+            tab = {
+                "key": key,
+                "label": _governor_label(governor),
+                "governor": governor,
+                "status": "idle",
+                "active": False,
+                "card_count": 0,
+                "progress_events": [],
+                "activity_cards": [],
+                "latest_card": {},
+            }
+            tabs[key] = tab
+        return tab
+
+    for index, card in enumerate(protocol_cards):
+        if not isinstance(card, dict):
+            continue
+        governor = _card_governor(card, fallback_governor, worker_governors)
+        tab = ensure_tab(governor)
+        event = events_by_index.get(index, {})
+        tab["activity_cards"].append(card)
+        if event:
+            tab["progress_events"].append(event)
+        tab["latest_card"] = card
+        status = str(card.get("status") or "").strip()
+        if status:
+            tab["status"] = status
+        tab["active"] = status in {"started", "running"} or str(card.get("phase") or "") in {"planning", "executing", "reviewing", "revising", "finalizing"}
+
+    if summary_cards:
+        governor = fallback_governor or str((protocol.get("commander_order") or {}).get("to") if isinstance(protocol.get("commander_order"), dict) else "")
+        tab = ensure_tab(governor)
+        for card in summary_cards:
+            if isinstance(card, dict):
+                tab["activity_cards"].append(card)
+                tab["latest_card"] = card
+        if tab["status"] == "idle":
+            tab["status"] = str(summary.get("status") or ledger.get("status") or "unknown")
+
+    ordered = sorted(
+        tabs.values(),
+        key=lambda item: (0 if item.get("key") != "warmaster" else 1, str(item.get("label") or "")),
+    )
+    for tab in ordered:
+        cards = tab.get("activity_cards") if isinstance(tab.get("activity_cards"), list) else []
+        tab["card_count"] = len(cards)
+        tab["empty"] = len(cards) == 0
+    return ordered
 
 
 def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]:
@@ -716,6 +911,7 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
         }
     )
     entries = protocol_cards + summary_cards
+    brigade_tabs = _brigade_tabs(protocol_cards, summary_cards, mission_events, summary, ledger)
     return {
         "kind": "governor_activity_report",
         "task_id": task_id,
@@ -723,6 +919,7 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
         "status": status,
         "source": "mission_protocol_progress_events",
         "chat_independent": True,
+        "brigade_tabs": brigade_tabs,
         "progress_events": mission_events,
         "protocol_activity_cards": protocol_cards,
         "summary_activity_cards": summary_cards,
