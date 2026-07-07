@@ -719,13 +719,15 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             final_message = self.warmaster_final_message(orchestration)
             active = bool(orchestration.get("active"))
             task = self.warmaster_run_as_agent_task(summary, active=active, final_text=final_message, activity=activity)
-            terminal = not active and str(summary.get("status") or "").lower() not in {"running", "queued", "cancelling", ""}
+            terminal_status = str(summary.get("status") or "").lower()
+            terminal = not active and terminal_status not in {"running", "queued", "cancelling", ""}
             final_event = None
             if terminal:
                 final_event = {
                     "type": "final",
-                    "ok": str(summary.get("status") or "").lower() == "completed",
-                    "cancelled": str(summary.get("status") or "").lower() == "cancelled",
+                    "ok": terminal_status == "completed" and bool(final_message),
+                    "cancelled": terminal_status == "cancelled",
+                    "status": terminal_status,
                     "message": final_message,
                 }
                 if final_message:
@@ -737,6 +739,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                         dedupe_key=f"warmaster:{task_id}:final",
                     )
             payload = {
+                **task,
                 "ok": True,
                 "backend": "warmaster",
                 "task_id": task_id,
@@ -750,8 +753,8 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "protocol_activity_cards": protocol_cards,
                 "summary_activity_cards": summary_cards,
                 "governor_activity": activity,
-                "final": final_event,
-                **task,
+                "final": final_message,
+                "final_event": final_event,
                 "warmaster": orchestration,
             }
             write_json(self, status, payload)

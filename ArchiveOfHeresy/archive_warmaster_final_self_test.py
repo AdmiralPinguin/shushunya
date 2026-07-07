@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import archive_handler
 from archive_handler import ArchiveHandler
 import task_journal
 from task_journal import deliver_final_to_chat, final_message_from_orchestration
@@ -8,6 +9,26 @@ from task_journal import deliver_final_to_chat, final_message_from_orchestration
 
 def final_message(payload: dict[str, object]) -> str:
     return ArchiveHandler.warmaster_final_message(None, payload)
+
+
+class FakeArchiveHandler:
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    def warmaster_activity_from_payload(self, payload):
+        return ArchiveHandler.warmaster_activity_from_payload(self, payload)
+
+    def warmaster_activity_entry_as_agent_event(self, entry, index, total):
+        return ArchiveHandler.warmaster_activity_entry_as_agent_event(self, entry, index, total)
+
+    def warmaster_event_as_agent_event(self, event, index, total):
+        return ArchiveHandler.warmaster_event_as_agent_event(self, event, index, total)
+
+    def warmaster_final_message(self, orchestration):
+        return ArchiveHandler.warmaster_final_message(self, orchestration)
+
+    def warmaster_run_as_agent_task(self, run, active=False, final_text="", activity=None):
+        return ArchiveHandler.warmaster_run_as_agent_task(self, run, active=active, final_text=final_text, activity=activity)
 
 
 def main() -> int:
@@ -211,6 +232,94 @@ def main() -> int:
     )
     if running:
         raise AssertionError(f"running diagnostic leaked to chat final message: {running!r}")
+    captured = []
+    delivered.clear()
+    original_proxy = archive_handler.proxy_json_url
+    original_write = archive_handler.write_json
+    original_archive_append = archive_handler.append_chat_message
+    archive_handler.proxy_json_url = lambda *_args, **_kwargs: (
+        200,
+        {
+            "active": False,
+            "snapshot": {
+                "summary": {
+                    "status": "completed",
+                    "task_id": "mobile-final-event",
+                    "goal": "проверить разделение финала и активности",
+                    "mission_protocol": {
+                        "final_response": {
+                            "type": "final_response",
+                            "answer": "Мобильный финал из final_response.",
+                        }
+                    },
+                }
+            },
+            "governor_activity": activity_payload,
+        },
+    )
+    archive_handler.write_json = lambda _handler, status, payload: captured.append({"status": status, "payload": payload})
+    archive_handler.append_chat_message = lambda *args, **kwargs: delivered.append({"args": args, "kwargs": kwargs})
+    fake_handler = FakeArchiveHandler("/archive/mobile/agent/task?task_id=mobile-final-event")
+    try:
+        ArchiveHandler.mobile_agent_task(fake_handler)
+    finally:
+        archive_handler.proxy_json_url = original_proxy
+        archive_handler.write_json = original_write
+        archive_handler.append_chat_message = original_archive_append
+    if len(captured) != 1:
+        raise AssertionError(f"mobile_agent_task did not write exactly one payload: {captured}")
+    mobile_payload = captured[0]["payload"]
+    if mobile_payload.get("final") != "Мобильный финал из final_response.":
+        raise AssertionError(f"mobile final text was not preserved: {mobile_payload}")
+    final_event = mobile_payload.get("final_event") if isinstance(mobile_payload.get("final_event"), dict) else {}
+    if (
+        final_event.get("type") != "final"
+        or final_event.get("ok") is not True
+        or final_event.get("message") != "Мобильный финал из final_response."
+    ):
+        raise AssertionError(f"mobile final_event was not preserved as structured terminal event: {mobile_payload}")
+    if (
+        mobile_payload.get("progress_events") != activity_payload["progress_events"]
+        or mobile_payload.get("activity_cards") != activity_payload["activity_cards"]
+        or mobile_payload.get("protocol_activity_cards") != activity_payload["protocol_activity_cards"]
+        or mobile_payload.get("activity_log")
+    ):
+        raise AssertionError(f"mobile brigade activity was not preserved separately: {mobile_payload}")
+    if len(delivered) != 1 or delivered[0]["args"][1:3] != ("assistant", "Мобильный финал из final_response."):
+        raise AssertionError(f"mobile final delivery did not append the accepted final once: {delivered}")
+    captured.clear()
+    delivered.clear()
+    archive_handler.proxy_json_url = lambda *_args, **_kwargs: (
+        200,
+        {
+            "active": False,
+            "snapshot": {
+                "summary": {
+                    "status": "completed",
+                    "task_id": "mobile-no-protocol-final",
+                    "goal": "completed без protocol final_response",
+                    "mission_protocol": {},
+                }
+            },
+            "governor_activity": activity_payload,
+            "final": {"deliverable": "legacy fallback must not become final"},
+        },
+    )
+    archive_handler.write_json = lambda _handler, status, payload: captured.append({"status": status, "payload": payload})
+    archive_handler.append_chat_message = lambda *args, **kwargs: delivered.append({"args": args, "kwargs": kwargs})
+    fake_handler = FakeArchiveHandler("/archive/mobile/agent/task?task_id=mobile-no-protocol-final")
+    try:
+        ArchiveHandler.mobile_agent_task(fake_handler)
+    finally:
+        archive_handler.proxy_json_url = original_proxy
+        archive_handler.write_json = original_write
+        archive_handler.append_chat_message = original_archive_append
+    no_final_payload = captured[0]["payload"]
+    no_final_event = no_final_payload.get("final_event") if isinstance(no_final_payload.get("final_event"), dict) else {}
+    if no_final_payload.get("final") or no_final_event.get("ok") is not False or no_final_event.get("message"):
+        raise AssertionError(f"mobile completed run without final_response looked like user final: {no_final_payload}")
+    if delivered:
+        raise AssertionError(f"mobile completed run without final_response was delivered to chat: {delivered}")
     print("[ok] Archive Warmaster final-message gate")
     return 0
 
