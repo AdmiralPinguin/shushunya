@@ -623,6 +623,9 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         progress_events = activity.get("progress_events") if isinstance(activity.get("progress_events"), list) else []
         protocol_cards = activity.get("protocol_activity_cards") if isinstance(activity.get("protocol_activity_cards"), list) else []
         summary_cards = activity.get("summary_activity_cards") if isinstance(activity.get("summary_activity_cards"), list) else []
+        mission_state = run.get("mission_state") if isinstance(run.get("mission_state"), dict) else {}
+        if not mission_state:
+            mission_state = activity.get("mission_state") if isinstance(activity.get("mission_state"), dict) else {}
         if activity_entries:
             last_entry = activity_entries[-1] if isinstance(activity_entries[-1], dict) else {}
             current_step = str(last_entry.get("headline") or current_step).strip()
@@ -634,6 +637,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             "cancelled": cancelled,
             "success": success,
             "status": status,
+            "mission_state": mission_state,
             "governor": str(run.get("governor") or ""),
             "current_step": current_step,
             "progress": progress,
@@ -719,6 +723,9 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             progress_events = activity.get("progress_events") if isinstance(activity.get("progress_events"), list) else []
             protocol_cards = activity.get("protocol_activity_cards") if isinstance(activity.get("protocol_activity_cards"), list) else []
             summary_cards = activity.get("summary_activity_cards") if isinstance(activity.get("summary_activity_cards"), list) else []
+            mission_state = orchestration.get("mission_state") if isinstance(orchestration.get("mission_state"), dict) else {}
+            if not mission_state:
+                mission_state = activity.get("mission_state") if isinstance(activity.get("mission_state"), dict) else {}
             display_events = orchestration.get("display_events") if isinstance(orchestration.get("display_events"), list) else []
             raw_events = snapshot.get("events") if isinstance(snapshot.get("events"), list) else []
             if activity_entries:
@@ -759,6 +766,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "backend": "warmaster",
                 "task_id": task_id,
                 "running": active,
+                "mission_state": mission_state,
                 "events": events,
                 "activity_entries": activity_entries,
                 "activity_cards": activity_cards,
@@ -1082,11 +1090,13 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         progress_events = activity.get("progress_events") if isinstance(activity.get("progress_events"), list) else []
         protocol_cards = activity.get("protocol_activity_cards") if isinstance(activity.get("protocol_activity_cards"), list) else []
         summary_cards = activity.get("summary_activity_cards") if isinstance(activity.get("summary_activity_cards"), list) else []
+        mission_state = activity.get("mission_state") if isinstance(activity.get("mission_state"), dict) else {}
         accepted = self.warmaster_acceptance_message(resolved_task_id or task_id)
         response["ok"] = self.warmaster_loop_started_or_active(loop_status, loop_response) if loop_status else 200 <= status < 300
         response["backend"] = "warmaster"
         response["task_id"] = resolved_task_id or task_id
         response["message"] = accepted
+        response["mission_state"] = mission_state
         response["activity_log"] = ""
         response["progress_events"] = progress_events
         response["protocol_activity_cards"] = protocol_cards

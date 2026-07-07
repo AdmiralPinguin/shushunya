@@ -919,6 +919,9 @@ def main() -> int:
                 or orchestrated_state.get("next_action", {}).get("kind") != "start"
                 or orchestrated_state.get("client_action", {}).get("path") != "/runs/warmaster-orchestrate-test/start_http"
                 or orchestrated_state.get("snapshot", {}).get("summary", {}).get("task_id") != "warmaster-orchestrate-test"
+                or orchestrated_state.get("mission_state", {}).get("status") != "plan_review"
+                or orchestrated_state.get("mission_state", {}).get("mission_id") != orchestrated.get("mission_id")
+                or orchestrated_state.get("mission_state", {}).get("revision_is_internal") is not True
             ):
                 raise AssertionError(f"orchestration state did not expose ready-to-start decision: {orchestrated_state}")
             orchestrated_activity = request_json(base + "/runs/warmaster-orchestrate-test/activity")
@@ -929,6 +932,7 @@ def main() -> int:
                 or orchestrated_activity.get("activity_log")
                 or orchestrated_activity.get("governor_activity", {}).get("log_text")
                 or orchestrated_activity.get("activity_cards", [{}])[0].get("source") != "mission_protocol"
+                or orchestrated_activity.get("mission_state", {}).get("status") != "plan_review"
             ):
                 raise AssertionError(f"command-protocol activity did not expose structured progress cards: {orchestrated_activity}")
             orchestrated_start = request_json(

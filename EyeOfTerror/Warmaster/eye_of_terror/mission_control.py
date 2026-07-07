@@ -763,6 +763,49 @@ def _count_by_key(items: list[dict[str, Any]], key: str) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def mission_next_owner(status: str) -> str:
+    if status in {"completed", "failed", "cancelled"}:
+        return "none"
+    if status == "blocked":
+        return "user_or_operator"
+    if status in {"created", "intake", "assigned", "warmaster_acceptance"}:
+        return "Warmaster"
+    return "governor"
+
+
+def mission_user_visible_state(status: str) -> str:
+    if status == "completed":
+        return "final_ready"
+    if status == "failed":
+        return "failed"
+    if status == "cancelled":
+        return "cancelled"
+    if status == "blocked":
+        return "needs_user_or_operator_decision"
+    if status in {"executing", "governor_review", "warmaster_acceptance", "revision"}:
+        return "working"
+    return "accepted"
+
+
+def mission_state_projection(mission_id: str, mission: dict[str, Any], intake: dict[str, Any], command: dict[str, Any]) -> dict[str, Any]:
+    status = str(mission.get("status") or intake.get("status") or "created")
+    return {
+        "kind": "mission_state",
+        "mission_id": mission_id,
+        "task_id": str(mission.get("task_id") or ""),
+        "status": status,
+        "run_status": "",
+        "mission_status": status,
+        "phase": status,
+        "active": False,
+        "assigned_governor": str(mission.get("assigned_governor") or command.get("to") or ""),
+        "next_owner": mission_next_owner(status),
+        "user_visible_state": mission_user_visible_state(status),
+        "revision_is_internal": True,
+        "source": "mission_protocol",
+    }
+
+
 def mission_protocol_summary(mission_dir: Path) -> dict[str, Any]:
     worker_orders = _read_json_dir(mission_dir / "worker_orders", limit=1000)
     worker_reports = _read_json_dir(mission_dir / "worker_reports", limit=1000)
@@ -793,13 +836,18 @@ def mission_state(warmaster_root: Path, mission_id: str, event_limit: int = 100)
     if not mission_dir.exists():
         raise FileNotFoundError(mission_id)
     progress_events = _read_events(mission_dir / "progress_events.jsonl", limit=event_limit)
+    mission = _read_json(mission_dir / "mission.json")
+    intake = _read_json(mission_dir / "mission_intake.json")
+    command = _read_json(mission_dir / "commander_order.json")
+    state = mission_state_projection(mission_id, mission, intake, command)
     return {
         "ok": True,
         "mission_id": mission_id,
         "mission_dir": str(mission_dir),
-        "mission": _read_json(mission_dir / "mission.json"),
-        "mission_intake": _read_json(mission_dir / "mission_intake.json"),
-        "commander_order": _read_json(mission_dir / "commander_order.json"),
+        "mission_state": state,
+        "mission": mission,
+        "mission_intake": intake,
+        "commander_order": command,
         "governor_plan": _read_json(mission_dir / "governor_plan.json"),
         "route": _read_json(mission_dir / "route.json"),
         "commander_error": _read_json(mission_dir / "commander_error.json"),

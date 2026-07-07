@@ -526,6 +526,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                             "activity_cards": activity_cards,
                             "activity_log": "",
                             "protocol_summary": protocol_summary,
+                            "mission_state": snapshot.get("mission_state", {}),
                             "summary": summary,
                             "active": bool(snapshot.get("active")),
                         },

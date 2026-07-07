@@ -21,6 +21,8 @@ LIFECYCLE_STATUSES = {
     "cancelled",
 }
 
+TERMINAL_LIFECYCLE_STATUSES = {"completed", "failed", "cancelled"}
+
 PROGRESS_PHASES = {
     "intake",
     "assigned",

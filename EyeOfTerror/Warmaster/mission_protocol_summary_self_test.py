@@ -14,7 +14,7 @@ if str(WARM_ROOT) not in sys.path:
     sys.path.insert(0, str(WARM_ROOT))
 
 from EyeOfTerror.common_protocol import append_progress_event, commander_order, progress_event
-from eye_of_terror.mission_control import mission_protocol_summary
+from eye_of_terror.mission_control import mission_protocol_summary, mission_state
 
 
 def write_json(path: Path, payload: dict[str, object]) -> None:
@@ -24,8 +24,31 @@ def write_json(path: Path, payload: dict[str, object]) -> None:
 
 def main() -> int:
     with TemporaryDirectory() as tmp:
-        mission_dir = Path(tmp) / "mission-summary-self-test"
+        mission_dir = Path(tmp) / "missions" / "mission-summary-self-test"
         mission_dir.mkdir(parents=True)
+        write_json(
+            mission_dir / "mission.json",
+            {
+                "mission_id": "mission-summary-self-test",
+                "task_id": "summary-self-test",
+                "status": "plan_review",
+                "assigned_governor": "IskandarKhayon",
+                "source_channel": "self_test",
+            },
+        )
+        write_json(
+            mission_dir / "mission_intake.json",
+            {
+                "type": "mission_intake",
+                "protocol_version": 1,
+                "mission_id": "mission-summary-self-test",
+                "created_at": "2026-01-01T00:00:00Z",
+                "source_channel": "self_test",
+                "user_id": "",
+                "user_request": "Собери источники.",
+                "status": "intake",
+            },
+        )
         write_json(
             mission_dir / "commander_order.json",
             commander_order(
@@ -72,6 +95,15 @@ def main() -> int:
         latest = summary.get("latest_progress_event") if isinstance(summary.get("latest_progress_event"), dict) else {}
         if latest.get("actor") != "IskandarKhayon":
             raise AssertionError(f"latest progress event is wrong: {latest}")
+        state = mission_state(Path(tmp), "mission-summary-self-test")
+        canonical = state.get("mission_state") if isinstance(state.get("mission_state"), dict) else {}
+        if (
+            canonical.get("status") != "plan_review"
+            or canonical.get("assigned_governor") != "IskandarKhayon"
+            or canonical.get("user_visible_state") != "accepted"
+            or canonical.get("revision_is_internal") is not True
+        ):
+            raise AssertionError(f"mission_state projection is wrong: {canonical}")
     print("[ok] Warmaster mission protocol summary")
     return 0
 

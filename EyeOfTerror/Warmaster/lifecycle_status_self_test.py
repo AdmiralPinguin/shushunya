@@ -46,6 +46,14 @@ def main() -> int:
         legacy_summary = run_summary(legacy_run)
         if legacy_summary.get("lifecycle_status") != "executing":
             raise AssertionError(f"legacy run status was not normalized: {legacy_summary}")
+        legacy_state = legacy_summary.get("mission_state") if isinstance(legacy_summary.get("mission_state"), dict) else {}
+        if (
+            legacy_state.get("kind") != "mission_state"
+            or legacy_state.get("status") != "executing"
+            or legacy_state.get("source") != "legacy_run_summary"
+            or legacy_state.get("user_visible_state") != "working"
+        ):
+            raise AssertionError(f"legacy mission_state was not normalized: {legacy_state}")
 
         mission_dir = root / "missions" / "mission-revision"
         write_json(mission_dir / "mission.json", {"mission_id": "mission-revision", "status": "revision"})
@@ -66,6 +74,14 @@ def main() -> int:
             raise AssertionError(f"mission lifecycle did not override legacy status: {mission_summary}")
         if mission_summary.get("mission_status") != "revision":
             raise AssertionError(f"mission_status missing: {mission_summary}")
+        mission_state = mission_summary.get("mission_state") if isinstance(mission_summary.get("mission_state"), dict) else {}
+        if (
+            mission_state.get("mission_id") != "mission-revision"
+            or mission_state.get("status") != "revision"
+            or mission_state.get("next_owner") != "governor"
+            or mission_state.get("revision_is_internal") is not True
+        ):
+            raise AssertionError(f"mission_state did not expose canonical lifecycle: {mission_state}")
     print("[ok] Warmaster lifecycle status")
     return 0
 

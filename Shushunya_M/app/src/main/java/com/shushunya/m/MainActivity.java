@@ -1546,6 +1546,26 @@ public class MainActivity extends Activity {
     }
 
     private String agentTaskStatusLabel(JSONObject task) {
+        JSONObject missionState = task == null ? null : task.optJSONObject("mission_state");
+        String visibleState = missionState == null ? "" : missionState.optString("user_visible_state", "").trim();
+        if ("final_ready".equals(visibleState)) {
+            return "Готово";
+        }
+        if ("working".equals(visibleState)) {
+            return "В работе";
+        }
+        if ("accepted".equals(visibleState)) {
+            return "Принято";
+        }
+        if ("needs_user_or_operator_decision".equals(visibleState)) {
+            return "Нужен выбор";
+        }
+        if ("cancelled".equals(visibleState)) {
+            return "Остановлено";
+        }
+        if ("failed".equals(visibleState)) {
+            return "Ошибка";
+        }
         if (task.optBoolean("running", false)) {
             return "В работе";
         }
@@ -1598,7 +1618,9 @@ public class MainActivity extends Activity {
         String taskId = task.optString("task_id", "").trim();
         String currentStep = task.optString("current_step", "").trim();
         String statusLabel = agentTaskStatusLabel(task);
-        int statusColor = agentSeverityColor("", task.optString("status", ""));
+        JSONObject missionState = task.optJSONObject("mission_state");
+        String canonicalStatus = missionState == null ? "" : missionState.optString("status", "").trim();
+        int statusColor = agentSeverityColor("", canonicalStatus.isEmpty() ? task.optString("status", "") : canonicalStatus);
 
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);

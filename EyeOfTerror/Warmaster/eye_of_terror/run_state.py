@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from EyeOfTerror.common_protocol import LIFECYCLE_STATUSES
+from EyeOfTerror.common_protocol import LIFECYCLE_STATUSES, TERMINAL_LIFECYCLE_STATUSES
 
 from .actions import run_actions
 from .artifacts import artifact_status, final_manifest_summary, final_package
@@ -238,6 +238,60 @@ def lifecycle_status_for(summary_status: str, mission: dict[str, Any]) -> str:
     return RUN_STATUS_TO_LIFECYCLE.get(normalized, "created")
 
 
+def _mission_user_visible_state(lifecycle_status: str, active: bool = False) -> str:
+    if lifecycle_status == "completed":
+        return "final_ready"
+    if lifecycle_status == "cancelled":
+        return "cancelled"
+    if lifecycle_status == "failed":
+        return "failed"
+    if lifecycle_status == "blocked":
+        return "needs_user_or_operator_decision"
+    if active or lifecycle_status in {"executing", "governor_review", "warmaster_acceptance", "revision"}:
+        return "working"
+    return "accepted"
+
+
+def _mission_next_owner(lifecycle_status: str, active: bool = False) -> str:
+    if lifecycle_status in {"created", "intake", "assigned", "warmaster_acceptance"}:
+        return "Warmaster"
+    if lifecycle_status in {"planning", "plan_review", "executing", "governor_review", "revision"} or active:
+        return "governor"
+    if lifecycle_status == "blocked":
+        return "user_or_operator"
+    if lifecycle_status in TERMINAL_LIFECYCLE_STATUSES:
+        return "none"
+    return "Warmaster"
+
+
+def mission_state_view(summary: dict[str, Any], active: bool = False, phase: str = "") -> dict[str, Any]:
+    protocol = summary.get("mission_protocol") if isinstance(summary.get("mission_protocol"), dict) else {}
+    mission = protocol.get("mission") if isinstance(protocol.get("mission"), dict) else {}
+    mission_ref = summary.get("mission_ref") if isinstance(summary.get("mission_ref"), dict) else {}
+    command = protocol.get("commander_order") if isinstance(protocol.get("commander_order"), dict) else {}
+    mission_id = str(mission.get("mission_id") or mission_ref.get("mission_id") or command.get("mission_id") or "")
+    task_id = str(summary.get("task_id") or mission.get("task_id") or "")
+    lifecycle_status = str(summary.get("lifecycle_status") or "").strip()
+    if lifecycle_status not in LIFECYCLE_STATUSES:
+        lifecycle_status = lifecycle_status_for(str(summary.get("status") or ""), mission)
+    assigned_governor = str(mission.get("assigned_governor") or mission_ref.get("assigned_governor") or command.get("to") or summary.get("governor") or "")
+    return {
+        "kind": "mission_state",
+        "mission_id": mission_id,
+        "task_id": task_id,
+        "status": lifecycle_status,
+        "run_status": str(summary.get("status") or ""),
+        "mission_status": str(summary.get("mission_status") or mission.get("status") or ""),
+        "phase": phase or lifecycle_status,
+        "active": bool(active),
+        "assigned_governor": assigned_governor,
+        "next_owner": _mission_next_owner(lifecycle_status, active=active),
+        "user_visible_state": _mission_user_visible_state(lifecycle_status, active=active),
+        "revision_is_internal": True,
+        "source": "mission_protocol" if mission_id else "legacy_run_summary",
+    }
+
+
 def run_summary(run_dir: Path) -> dict[str, Any]:
     status_path = run_dir / "status.json"
     ledger_path = run_dir / "task_ledger.json"
@@ -275,6 +329,7 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         "progress": run_progress(status, ledger),
         "last_preflight": last_run_preflight(ledger),
     }
+    summary["mission_state"] = mission_state_view(summary)
     summary["actions"] = run_actions(
         str(summary["status"]),
         revision_plan,
@@ -829,11 +884,15 @@ def run_snapshot(run_dir: Path, event_limit: int | None = None, events_after: in
     task_id = run_dir.name
     with ACTIVE_RUNS_LOCK:
         active = task_id in ACTIVE_RUNS
+    summary = run_summary(run_dir)
+    state_view = mission_state_view(summary, active=active)
+    summary["mission_state"] = state_view
     payload: dict[str, Any] = {
         "ok": True,
         "task_id": task_id,
-        "summary": run_summary(run_dir),
+        "summary": summary,
         "active": active,
+        "mission_state": state_view,
     }
     events_payload = run_events(run_dir, limit=event_limit, after=events_after)
     payload["events"] = events_payload.get("events", [])
@@ -875,11 +934,16 @@ def orchestration_state(run_dir: Path, event_limit: int | None = 20, events_afte
         final_max_bytes=max_bytes,
         task_id=run_dir.name,
     )
+    state_view = mission_state_view(summary, active=bool(snapshot.get("active")), phase=str(view.get("phase") or ""))
+    if isinstance(snapshot.get("summary"), dict):
+        snapshot["summary"]["mission_state"] = state_view
+    snapshot["mission_state"] = state_view
     return {
         "ok": True,
         "task_id": run_dir.name,
         "phase": view["phase"],
         "status": view["status"],
+        "mission_state": state_view,
         "active": view["active"],
         "decision": view["decision"],
         "display": view["display"],

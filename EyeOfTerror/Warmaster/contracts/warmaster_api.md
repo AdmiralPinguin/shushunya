@@ -230,8 +230,14 @@ clients. It wraps the run snapshot with an orchestration `phase` such as
 includes the bounded final package when the run has completed. Its `decision`
 object exposes booleans such as `can_poll`, `can_start`, `can_resume`,
 `can_execute_revision`, `can_inspect_final`, and `can_inspect_diagnostics` so
-clients do not need to reimplement phase parsing. Its `display` object exposes
-compact chat/UI fields such as `headline`, `detail`, `severity`, progress
+clients do not need to reimplement phase parsing. Its `mission_state` object is
+the canonical lifecycle view for clients and diagnostics: it contains
+`mission_id`, `task_id`, normalized lifecycle `status`, raw `run_status`,
+`mission_status`, current `phase`, `active`, `assigned_governor`, `next_owner`,
+`user_visible_state`, and `revision_is_internal=true`. Older top-level
+`status`, `phase`, `active`, and mobile `running/success/cancelled` fields are
+compatibility fields; new UI should prefer `mission_state`. Its `display`
+object exposes compact chat/UI fields such as `headline`, `detail`, `severity`, progress
 counts, next step/worker, and final deliverable path so clients do not need to
 parse the full run summary for common status rendering. The response also
 copies bounded `display_events` to the top level for task-detail history views.
@@ -340,7 +346,8 @@ Clients should use:
   brigade tabs when the UI needs structured `progress_events`,
   `protocol_activity_cards`, `summary_activity_cards`, and `activity_cards`
   without fetching final artifacts or mixing the report with Shushunya's chat
-  response.
+  response. The response also includes the same canonical `mission_state` as the
+  orchestration view.
 - `/runs/{task_id}/steps/{step_id}` for one normalized step state from
   `summary.progress.step_states`. The response includes the standard run detail
   client-view fields.
