@@ -134,6 +134,27 @@ class PlanningRoleServiceTests(unittest.TestCase):
         self.assertIn("task_triage", response["outputs"])
         self.assertIn("security", response["outputs"]["task_triage"]["task_kinds"])
 
+    def test_worker_order_task_is_authoritative_over_payload_task(self) -> None:
+        order = self.planning_order()
+        result = run_role_plan(
+            "TaskTriage",
+            {
+                "worker_order": order,
+                "payload": {
+                    "task": "raw payload override must be ignored",
+                    "goal": "raw goal override must be ignored",
+                    "message": "raw message override must be ignored",
+                    "repo_path": "/repo",
+                },
+            },
+        )
+        triage = result["outputs"]["task_triage"]
+        self.assertIn("security", triage["task_kinds"])
+        self.assertIn("api_compatibility", triage["task_kinds"])
+        self.assertIn("test_repair", triage["task_kinds"])
+        self.assertEqual(triage["risk_level"], "high")
+        validate_protocol_payload(result["worker_report"], expected_type="worker_report")
+
     def test_capabilities_match_service_contract(self) -> None:
         capabilities = role_capabilities("RiskScribe")
         self.assertEqual(capabilities["role"], "RiskScribe")

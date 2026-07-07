@@ -85,8 +85,9 @@ def normalize_role_request(role_name: str, request: dict[str, Any]) -> dict[str,
     payload = request.get("payload") if isinstance(request.get("payload"), dict) else {}
     if order:
         payload = dict(payload)
-        if not str(payload.get("task") or payload.get("goal") or payload.get("message") or "").strip():
-            payload["task"] = str(order.get("task") or "")
+        payload["task"] = str(order.get("task") or "")
+        payload.pop("goal", None)
+        payload.pop("message", None)
         revision_context = order.get("revision_context") if isinstance(order.get("revision_context"), dict) else {}
         if revision_context.get("repo_path") and not payload.get("repo_path"):
             payload["repo_path"] = str(revision_context.get("repo_path") or "")
