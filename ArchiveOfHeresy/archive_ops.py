@@ -236,7 +236,6 @@ def run_mobile_chat_payload(payload):
         temperature = float(payload.get("temperature") or 0.4)
 
         request_messages = messages_for_chat_context(session_id, system_prompt, text, image_data_url=image_data_url)
-        request_messages.insert(0, workflow_role_guard_message(payload.get("workflow_intent")))
         append_chat_message(
             session_id,
             "user",
@@ -775,29 +774,6 @@ def messages_for_chat_context(session_id, system_prompt, user_text, image_data_u
     return messages
 
 
-def workflow_role_guard_message(workflow_intent=None):
-    intent = workflow_intent if isinstance(workflow_intent, dict) else {}
-    started = bool(intent.get("workflow_started"))
-    task_id = str(intent.get("task_id") or "").strip()
-    kind = str(intent.get("kind") or "chat").strip() or "chat"
-    reason = str(intent.get("reason") or "").strip()
-    return {
-        "role": "system",
-        "content": (
-            "ArchiveOfHeresy operational workflow state. This is a hard transport contract, not persona style.\n"
-            f"workflow_started={str(started).lower()}\n"
-            f"workflow_kind={kind}\n"
-            f"task_id={task_id or 'none'}\n"
-            f"reason={reason or 'none'}\n\n"
-            "Rules:\n"
-            "- The chat voice is not the executor of long-running work.\n"
-            "- Do not say that you started, are doing, are searching, are reading archives, or will continue a task unless workflow_started=true and task_id is not none.\n"
-            "- If the user asks to start or continue substantial external/agent work and workflow_started=false, say plainly that no server workflow has been launched and ask for a Warmaster task confirmation.\n"
-            "- If workflow_started=true, mention the task_id and tell the user that progress is in the brigade monitor and the main chat receives only final output or a user-decision request."
-        ),
-    }
-
-
 def prompt_diagnostics(
     prepared_messages,
     client_messages,
@@ -815,7 +791,6 @@ def prompt_diagnostics(
         "archive_system_prompt": 0,
         "persona": 0,
         "focus": 0,
-        "workflow": 0,
         "magos": 0,
         "administratum": 0,
         "direct_vector": 0,
@@ -828,8 +803,6 @@ def prompt_diagnostics(
         if content.startswith("ArchiveOfHeresy identity context"):
             counters["archive_system_prompt"] += 1
             counters["persona"] += 1
-        elif content.startswith("ArchiveOfHeresy operational workflow state"):
-            counters["workflow"] += 1
         elif content.startswith("Ты Шушуня:"):
             counters["archive_system_prompt"] += 1
         elif content.startswith("Активный focus-файл ArchiveOfHeresy"):

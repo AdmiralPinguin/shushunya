@@ -974,14 +974,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         if len(lower) < 16:
             return False
         task_markers = (
-            "мне нужно",
-            "я хочу",
-            "хочу ",
             "задача такая",
             "задача:",
             "задача ",
             "собери ",
-            "собрал ",
             "собрать ",
             "найди ",
             "найти ",
@@ -1001,10 +997,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             "источник",
             "источники",
             "книг",
-            "книжк",
             "кодекс",
-            "упоминани",
-            "лор",
             "файл",
             "проект",
             "репо",
@@ -1020,23 +1013,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
 
     def mobile_chat_is_task_confirmation(self, text):
         lower = re.sub(r"[\s.!?,:;]+", " ", str(text or "").strip().lower()).strip()
-        if not lower or len(lower) > 140:
-            return False
-        blockers = (
-            "не начинай",
-            "не надо",
-            "стоп",
-            "погоди",
-            "подожди",
-            "обсудим",
-            "расскажи",
-            "объясни",
-            "почему",
-            "что думаешь",
-            "как думаешь",
-            "?",
-        )
-        if any(blocker in lower for blocker in blockers):
+        if not lower or len(lower) > 80:
             return False
         confirmations = {
             "давай",
@@ -1051,24 +1028,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             "запускай",
             "делай",
         }
-        if lower in confirmations:
-            return True
-        continuation_markers = (
-            "начинай",
-            "приступай",
-            "погнали",
-            "запускай",
-            "стартуй",
-            "работай",
-            "работать",
-            "делай",
-            "делать",
-            "занимайся",
-            "продолжай",
-            "продолжать",
-            "начинать",
-        )
-        return any(re.search(rf"\b{re.escape(marker)}\b", lower) for marker in continuation_markers)
+        return lower in confirmations
 
     def mobile_chat_contextual_task(self, history, task_index, task_text):
         context = []
@@ -1110,26 +1070,6 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         if self.mobile_chat_is_task_confirmation(text):
             return self.mobile_chat_last_task_request(session_id)
         return ""
-
-    def mobile_chat_workflow_intent(self, session_id, text, image_data_url=""):
-        if image_data_url:
-            return {
-                "kind": "chat",
-                "workflow_started": False,
-                "task": "",
-                "reason": "image messages stay in chat unless explicitly sent through a workflow endpoint",
-            }
-        explicit = self.mobile_chat_explicit_warmaster_task(text)
-        if explicit:
-            return {"kind": "warmaster_start", "workflow_started": False, "task": explicit, "reason": "explicit Warmaster command"}
-        if self.mobile_chat_looks_like_task(text):
-            return {"kind": "warmaster_start", "workflow_started": False, "task": str(text or "").strip(), "reason": "message is a substantial task request"}
-        if self.mobile_chat_is_task_confirmation(text):
-            contextual = self.mobile_chat_last_task_request(session_id)
-            if contextual:
-                return {"kind": "warmaster_start", "workflow_started": False, "task": contextual, "reason": "short confirmation of the last substantial user task"}
-            return {"kind": "chat", "workflow_started": False, "task": "", "reason": "short start/continue phrase without a recoverable prior task"}
-        return {"kind": "chat", "workflow_started": False, "task": "", "reason": "ordinary chat message"}
 
     def run_mobile_warmaster_payload(self, payload):
         session_id = shared_chat_session_id(payload.get("session_id") or SHARED_CHAT_SESSION_ID)
@@ -1209,64 +1149,16 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         payload["session_id"] = session_id
         payload["memory_namespace"] = shared_memory_namespace(payload.get("memory_namespace"))
         payload["client_source"] = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
-        workflow_intent = self.mobile_chat_workflow_intent(session_id, text, image_data_url)
-        if workflow_intent.get("kind") == "warmaster_start" and str(workflow_intent.get("task") or "").strip():
-            payload["warmaster_task"] = str(workflow_intent.get("task") or "").strip()
-            payload["workflow_intent"] = workflow_intent
+        warmaster_task = "" if image_data_url else self.mobile_chat_warmaster_task(session_id, text)
+        if warmaster_task:
+            payload["warmaster_task"] = warmaster_task
             job_id = create_mobile_job("warmaster", payload)
             run_mobile_job(job_id, lambda payload=payload: self.run_mobile_warmaster_payload(payload))
             write_json(self, 202, {"ok": True, "job_id": job_id, "type": "warmaster", "session_id": session_id, "status": "queued"})
             return
-        payload["workflow_intent"] = workflow_intent
         job_id = create_mobile_job("chat", payload)
         run_mobile_job(job_id, lambda payload=payload: run_mobile_chat_payload(payload))
         write_json(self, 202, {"ok": True, "job_id": job_id, "type": "chat", "session_id": session_id, "status": "queued"})
-
-    def mobile_chat_warmaster_completion_payload(self, message, task_id, job_id, finish_reason="warmaster_queued"):
-        return {
-            "id": f"warmaster-{task_id}",
-            "object": "chat.completion",
-            "model": "warmaster",
-            "choices": [
-                {
-                    "index": 0,
-                    "finish_reason": finish_reason,
-                    "message": {"role": "assistant", "content": message},
-                }
-            ],
-            "warmaster": {
-                "ok": True,
-                "backend": "warmaster",
-                "task_id": task_id,
-                "job_id": job_id,
-                "status": "queued",
-            },
-        }
-
-    def stream_static_mobile_chat_completion(self, message, task_id, job_id):
-        self.send_response(202)
-        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("X-Accel-Buffering", "no")
-        self.end_headers()
-        chunk = {
-            "id": f"warmaster-{task_id}",
-            "object": "chat.completion.chunk",
-            "model": "warmaster",
-            "warmaster": {"task_id": task_id, "job_id": job_id, "status": "queued"},
-            "choices": [{"index": 0, "delta": {"content": message}, "finish_reason": None}],
-        }
-        done = {
-            "id": f"warmaster-{task_id}",
-            "object": "chat.completion.chunk",
-            "model": "warmaster",
-            "warmaster": {"task_id": task_id, "job_id": job_id, "status": "queued"},
-            "choices": [{"index": 0, "delta": {}, "finish_reason": "warmaster_queued"}],
-        }
-        self.wfile.write(f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode("utf-8"))
-        self.wfile.write(f"data: {json.dumps(done, ensure_ascii=False)}\n\n".encode("utf-8"))
-        self.wfile.write(b"data: [DONE]\n\n")
-        self.wfile.flush()
 
     def mobile_translate_start(self):
         try:
@@ -1439,35 +1331,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             max_tokens = int(payload.get("max_tokens") or 2048)
             temperature = float(payload.get("temperature") or 0.4)
 
-            workflow_intent = self.mobile_chat_workflow_intent(session_id, text, image_data_url)
-            if workflow_intent.get("kind") == "warmaster_start" and str(workflow_intent.get("task") or "").strip():
-                task_id = str(payload.get("task_id") or f"client-{uuid.uuid4().hex[:12]}").strip()
-                payload["stream"] = False
-                payload["session_id"] = session_id
-                payload["memory_namespace"] = memory_namespace
-                payload["client_source"] = client_source
-                payload["task_id"] = task_id
-                payload["warmaster_task"] = str(workflow_intent.get("task") or "").strip()
-                payload["workflow_intent"] = {
-                    **workflow_intent,
-                    "workflow_started": True,
-                    "task_id": task_id,
-                    "reason": f"{workflow_intent.get('reason')}; queued by mobile chat completions",
-                }
-                job_id = create_mobile_job("warmaster", payload)
-                run_mobile_job(job_id, lambda payload=payload: self.run_mobile_warmaster_payload(payload))
-                message = (
-                    f"Вармастер-пайплайн поставлен в очередь: task_id={task_id}. "
-                    "Ход работы будет во вкладке Бригады, а в основной чат вернется финальный результат или запрос решения."
-                )
-                if stream:
-                    self.stream_static_mobile_chat_completion(message, task_id, job_id)
-                else:
-                    write_json(self, 202, self.mobile_chat_warmaster_completion_payload(message, task_id, job_id))
-                return
-
             request_messages = messages_for_chat_context(session_id, system_prompt, text, image_data_url=image_data_url)
-            request_messages.insert(0, workflow_role_guard_message(workflow_intent))
             append_chat_message(
                 session_id,
                 "user",
@@ -1569,7 +1433,6 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "session_id": session_id,
                     "text": text,
                     "has_image": bool(image_data_url),
-                    "workflow_intent": workflow_intent,
                     "stream": stream,
                     "max_tokens": max_tokens,
                     "temperature": temperature,
