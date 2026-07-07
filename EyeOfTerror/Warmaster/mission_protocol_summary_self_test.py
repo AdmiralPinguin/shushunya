@@ -14,7 +14,7 @@ if str(WARM_ROOT) not in sys.path:
     sys.path.insert(0, str(WARM_ROOT))
 
 from EyeOfTerror.common_protocol import append_progress_event, commander_order, progress_event
-from eye_of_terror.mission_control import mission_protocol_summary, mission_state
+from eye_of_terror.mission_control import mission_protocol_summary, mission_state, record_mission_state
 
 
 def write_json(path: Path, payload: dict[str, object]) -> None:
@@ -60,6 +60,9 @@ def main() -> int:
                 success_conditions=["progress events are visible"],
             ),
         )
+        durable = record_mission_state(mission_dir, "plan_review")
+        if durable.get("status") != "plan_review" or durable.get("source") != "mission_protocol":
+            raise AssertionError(f"durable mission_state was not recorded: {durable}")
         events_path = mission_dir / "progress_events.jsonl"
         append_progress_event(
             events_path,
@@ -86,6 +89,8 @@ def main() -> int:
             ),
         )
         summary = mission_protocol_summary(mission_dir)
+        if summary.get("has_mission_state") is not True:
+            raise AssertionError(f"mission_state.json is not reflected in protocol summary: {summary}")
         if summary.get("progress_event_count") != 2:
             raise AssertionError(f"progress event count missing: {summary}")
         if summary.get("progress_event_roles") != {"commander": 1, "governor": 1}:
@@ -102,6 +107,7 @@ def main() -> int:
             or canonical.get("assigned_governor") != "IskandarKhayon"
             or canonical.get("user_visible_state") != "accepted"
             or canonical.get("revision_is_internal") is not True
+            or state.get("durable_mission_state", {}).get("status") != "plan_review"
         ):
             raise AssertionError(f"mission_state projection is wrong: {canonical}")
     print("[ok] Warmaster mission protocol summary")

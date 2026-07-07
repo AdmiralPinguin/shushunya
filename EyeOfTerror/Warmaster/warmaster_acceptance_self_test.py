@@ -130,6 +130,9 @@ def main() -> int:
             raise AssertionError("accepted result did not write final_response.json")
         final_response = json.loads(final_response_path.read_text(encoding="utf-8"))
         validate_protocol_payload(final_response, expected_type="final_response")
+        final_state = json.loads((mission_dir / "mission_state.json").read_text(encoding="utf-8"))
+        if final_state.get("status") != "completed" or final_state.get("user_visible_state") != "final_ready":
+            raise AssertionError(f"accepted result did not write completed mission_state: {final_state}")
         summary_final = run_summary(run_dir).get("mission_protocol", {}).get("final_response", {})
         if summary_final.get("answer") != final_response.get("answer"):
             raise AssertionError(f"run_summary did not expose final_response: {summary_final}")
@@ -169,6 +172,13 @@ def main() -> int:
         revision_mission = json.loads((revision_mission_dir / "mission.json").read_text(encoding="utf-8"))
         if revision_mission.get("status") != "revision":
             raise AssertionError(f"needs_revision did not move mission to revision: {revision_mission}")
+        revision_state = json.loads((revision_mission_dir / "mission_state.json").read_text(encoding="utf-8"))
+        if (
+            revision_state.get("status") != "revision"
+            or revision_state.get("user_visible_state") != "working"
+            or revision_state.get("revision_is_internal") is not True
+        ):
+            raise AssertionError(f"needs_revision did not write internal revision mission_state: {revision_state}")
         revision_summary = run_summary(revision_run_dir)
         if revision_summary.get("status") != "needs_revision":
             raise AssertionError(f"internal revision should not be exposed as failed: {revision_summary}")

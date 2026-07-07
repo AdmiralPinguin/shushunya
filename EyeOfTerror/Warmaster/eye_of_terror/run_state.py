@@ -74,6 +74,7 @@ def mission_protocol_payloads_for_run(run_dir: Path) -> dict[str, dict[str, Any]
         return {}
     return {
         "mission": _read_json(mission_dir / "mission.json"),
+        "mission_state": _read_json(mission_dir / "mission_state.json"),
         "commander_order": _read_json(mission_dir / "commander_order.json"),
         "governor_plan": _read_json(mission_dir / "governor_plan.json"),
         "final_response": _read_json(mission_dir / "final_response.json"),
@@ -267,31 +268,32 @@ def _mission_next_owner(lifecycle_status: str, active: bool = False) -> str:
 def mission_state_view(summary: dict[str, Any], active: bool = False, phase: str = "") -> dict[str, Any]:
     protocol = summary.get("mission_protocol") if isinstance(summary.get("mission_protocol"), dict) else {}
     mission = protocol.get("mission") if isinstance(protocol.get("mission"), dict) else {}
+    durable_state = protocol.get("mission_state") if isinstance(protocol.get("mission_state"), dict) else {}
     mission_ref = summary.get("mission_ref") if isinstance(summary.get("mission_ref"), dict) else {}
     command = protocol.get("commander_order") if isinstance(protocol.get("commander_order"), dict) else {}
-    mission_id = str(mission.get("mission_id") or mission_ref.get("mission_id") or command.get("mission_id") or "")
-    task_id = str(summary.get("task_id") or mission.get("task_id") or "")
-    lifecycle_status = str(summary.get("lifecycle_status") or "").strip()
+    mission_id = str(durable_state.get("mission_id") or mission.get("mission_id") or mission_ref.get("mission_id") or command.get("mission_id") or "")
+    task_id = str(durable_state.get("task_id") or summary.get("task_id") or mission.get("task_id") or "")
+    lifecycle_status = str(durable_state.get("status") or summary.get("lifecycle_status") or "").strip()
     if lifecycle_status not in LIFECYCLE_STATUSES:
         lifecycle_status = lifecycle_status_for(str(summary.get("status") or ""), mission)
     revision_plan = summary.get("revision_plan") if isinstance(summary.get("revision_plan"), dict) else {}
     if lifecycle_status == "failed" and bool(revision_plan.get("required")):
         lifecycle_status = "revision"
-    assigned_governor = str(mission.get("assigned_governor") or mission_ref.get("assigned_governor") or command.get("to") or summary.get("governor") or "")
+    assigned_governor = str(durable_state.get("assigned_governor") or mission.get("assigned_governor") or mission_ref.get("assigned_governor") or command.get("to") or summary.get("governor") or "")
     return {
         "kind": "mission_state",
         "mission_id": mission_id,
         "task_id": task_id,
         "status": lifecycle_status,
         "run_status": str(summary.get("status") or ""),
-        "mission_status": str(summary.get("mission_status") or mission.get("status") or ""),
+        "mission_status": str(durable_state.get("mission_status") or summary.get("mission_status") or mission.get("status") or ""),
         "phase": phase or lifecycle_status,
         "active": bool(active),
         "assigned_governor": assigned_governor,
         "next_owner": _mission_next_owner(lifecycle_status, active=active),
         "user_visible_state": _mission_user_visible_state(lifecycle_status, active=active),
         "revision_is_internal": True,
-        "source": "mission_protocol" if mission_id else "legacy_run_summary",
+        "source": "durable_mission_state" if durable_state else ("mission_protocol" if mission_id else "legacy_run_summary"),
     }
 
 

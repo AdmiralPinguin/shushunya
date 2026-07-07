@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from EyeOfTerror.common_protocol import (
+    LIFECYCLE_STATUSES,
     acceptance_review,
     append_progress_event,
     commander_order,
@@ -68,6 +69,35 @@ def _next_numbered_path(directory: Path, prefix: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     existing = sorted(directory.glob(f"{prefix}-*.json"))
     return directory / f"{prefix}-{len(existing) + 1:03d}.json"
+
+
+def _mission_identity(mission_dir: Path, mission: dict[str, Any]) -> str:
+    return str(mission.get("mission_id") or mission_dir.name)
+
+
+def record_mission_state(
+    mission_dir: Path,
+    status: str,
+    *,
+    run_status: str = "",
+    active: bool = False,
+    phase: str = "",
+) -> dict[str, Any]:
+    if status not in LIFECYCLE_STATUSES:
+        raise ValueError(f"unknown mission lifecycle status: {status}")
+    mission = _read_json(mission_dir / "mission.json")
+    mission_id = _mission_identity(mission_dir, mission)
+    mission["mission_id"] = mission_id
+    mission["status"] = status
+    _write_json(mission_dir / "mission.json", mission)
+    intake = _read_json(mission_dir / "mission_intake.json")
+    command = _read_json(mission_dir / "commander_order.json")
+    state = mission_state_projection(mission_id, mission, intake, command)
+    state["run_status"] = run_status
+    state["phase"] = phase or status
+    state["active"] = bool(active)
+    _write_json(mission_dir / "mission_state.json", state)
+    return state
 
 
 def commander_order_prompt_payload(message: str, route: dict[str, Any], mission_id: str) -> dict[str, Any]:
@@ -176,8 +206,19 @@ def open_mission(warmaster_root: Path, message: str, task_id: str | None, source
     commander = build_commander_order(message, mission_id)
     if not commander.get("ok"):
         mission_dir.mkdir(parents=True, exist_ok=True)
+        _write_json(
+            mission_dir / "mission.json",
+            {
+                "mission_id": mission_id,
+                "task_id": task_id or "",
+                "status": "failed",
+                "assigned_governor": "",
+                "source_channel": source_channel,
+            },
+        )
         _write_json(mission_dir / "mission_intake.json", intake)
         _write_json(mission_dir / "commander_error.json", commander)
+        record_mission_state(mission_dir, "failed")
         append_progress_event(
             mission_dir / "progress_events.jsonl",
             progress_event(
@@ -203,6 +244,7 @@ def open_mission(warmaster_root: Path, message: str, task_id: str | None, source
     _write_json(mission_dir / "mission_intake.json", intake)
     _write_json(mission_dir / "commander_order.json", order)
     _write_json(mission_dir / "route.json", commander.get("route", {}))
+    record_mission_state(mission_dir, "assigned")
     append_progress_event(
         mission_dir / "progress_events.jsonl",
         progress_event(
@@ -241,8 +283,7 @@ def record_governor_plan(run_dir: Path, mission_id: str, mission_dir: Path) -> d
     _write_json(_next_numbered_path(mission_dir / "governor_plans", "governor_plan"), plan)
     mission = _read_json(mission_dir / "mission.json")
     if mission:
-        mission["status"] = "planning"
-        _write_json(mission_dir / "mission.json", mission)
+        record_mission_state(mission_dir, "planning")
     append_progress_event(
         mission_dir / "progress_events.jsonl",
         progress_event(
@@ -327,8 +368,7 @@ def record_worker_orders(run_dir: Path, mission_id: str, mission_dir: Path) -> d
         )
     mission = _read_json(mission_dir / "mission.json")
     if mission and count:
-        mission["status"] = "plan_review"
-        _write_json(mission_dir / "mission.json", mission)
+        record_mission_state(mission_dir, "plan_review")
     return {"ok": count > 0, "count": count}
 
 
@@ -345,8 +385,7 @@ def record_worker_execution_started(run_dir: Path, packet: dict[str, Any]) -> No
     worker = str(order.get("to") or packet.get("worker") or "Worker")
     mission = _read_json(mission_dir / "mission.json")
     if mission:
-        mission["status"] = "executing"
-        _write_json(mission_dir / "mission.json", mission)
+        record_mission_state(mission_dir, "executing", active=True)
     append_progress_event(
         mission_dir / "progress_events.jsonl",
         progress_event(
@@ -468,12 +507,12 @@ def record_worker_protocol_report(run_dir: Path, report: dict[str, Any]) -> None
     mission = _read_json(mission_dir / "mission.json")
     if mission:
         if report.get("status") == "failed":
-            mission["status"] = "failed"
+            status = "failed"
         elif report.get("status") in {"blocked", "needs_revision"}:
-            mission["status"] = "revision" if report.get("status") == "needs_revision" else "blocked"
+            status = "revision" if report.get("status") == "needs_revision" else "blocked"
         else:
-            mission["status"] = "executing"
-        _write_json(mission_dir / "mission.json", mission)
+            status = "executing"
+        record_mission_state(mission_dir, status, active=status in {"executing", "revision"})
     phase = "executing"
     event_status = "done"
     if report.get("status") in {"blocked", "needs_revision"}:
@@ -641,8 +680,7 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
     report = governor_report_from_run(run_dir, mission_id)
     mission = _read_json(mission_dir / "mission.json")
     if mission:
-        mission["status"] = "governor_review"
-        _write_json(mission_dir / "mission.json", mission)
+        record_mission_state(mission_dir, "governor_review", active=True)
     _write_json(_next_numbered_path(mission_dir / "governor_reports", "governor_report"), report)
     append_progress_event(
         mission_dir / "progress_events.jsonl",
@@ -660,24 +698,21 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
     review = decision["acceptance_review"]
     mission = _read_json(mission_dir / "mission.json")
     if mission:
-        mission["status"] = "warmaster_acceptance"
-        _write_json(mission_dir / "mission.json", mission)
+        record_mission_state(mission_dir, "warmaster_acceptance", active=True)
     _write_json(_next_numbered_path(mission_dir / "acceptance_reviews", "acceptance_review"), review)
     ledger.record_event("warmaster_acceptance_recorded", {"accepted": bool(review.get("accepted")), "status": review.get("status"), "reason": review.get("reason")})
     if review.get("accepted"):
         final = final_response(mission_id, "completed", str(report.get("user_facing_answer") or report.get("summary") or "Задача выполнена."), artifacts=report.get("deliverables") if isinstance(report.get("deliverables"), list) else [])
         validate_protocol_payload(final, expected_type="final_response")
         _write_json(mission_dir / "final_response.json", final)
-        mission["status"] = "completed"
-        _write_json(mission_dir / "mission.json", mission)
+        record_mission_state(mission_dir, "completed")
         append_progress_event(
             mission_dir / "progress_events.jsonl",
             progress_event(mission_id, "Warmaster", "commander", "completed", "done", "Финал принят", str(review.get("reason") or "Результат принят.")),
         )
         return {"ok": True, "accepted": True, "governor_report": report, "acceptance_review": review, "decision": decision}
     if review.get("escalate_to_user"):
-        mission["status"] = "blocked"
-        _write_json(mission_dir / "mission.json", mission)
+        record_mission_state(mission_dir, "blocked")
         ledger.force_status("blocked", reason=str(review.get("reason") or "Warmaster acceptance requires user escalation."))
         append_progress_event(
             mission_dir / "progress_events.jsonl",
@@ -706,8 +741,7 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
     )
     ledger.set_result(updated_result)
     ledger.force_status("needs_revision", reason="Warmaster rejected completed run and ordered internal revision.")
-    mission["status"] = "revision"
-    _write_json(mission_dir / "mission.json", mission)
+    record_mission_state(mission_dir, "revision", active=True)
     append_progress_event(
         mission_dir / "progress_events.jsonl",
         progress_event(mission_id, "Warmaster", "commander", "revising", "running", "Назначена ревизия", str(review.get("reason") or "")),
@@ -789,6 +823,8 @@ def mission_user_visible_state(status: str) -> str:
 
 def mission_state_projection(mission_id: str, mission: dict[str, Any], intake: dict[str, Any], command: dict[str, Any]) -> dict[str, Any]:
     status = str(mission.get("status") or intake.get("status") or "created")
+    if status not in LIFECYCLE_STATUSES:
+        status = "created"
     return {
         "kind": "mission_state",
         "mission_id": mission_id,
@@ -814,6 +850,7 @@ def mission_protocol_summary(mission_dir: Path) -> dict[str, Any]:
     revision_orders = _read_json_dir(mission_dir / "revision_orders", limit=1000)
     progress_events = _read_events(mission_dir / "progress_events.jsonl", limit=10000)
     return {
+        "has_mission_state": bool(_read_json(mission_dir / "mission_state.json")),
         "has_mission_intake": bool(_read_json(mission_dir / "mission_intake.json")),
         "has_commander_order": bool(_read_json(mission_dir / "commander_order.json")),
         "has_governor_plan": bool(_read_json(mission_dir / "governor_plan.json")),
@@ -839,13 +876,14 @@ def mission_state(warmaster_root: Path, mission_id: str, event_limit: int = 100)
     mission = _read_json(mission_dir / "mission.json")
     intake = _read_json(mission_dir / "mission_intake.json")
     command = _read_json(mission_dir / "commander_order.json")
-    state = mission_state_projection(mission_id, mission, intake, command)
+    state = _read_json(mission_dir / "mission_state.json") or mission_state_projection(mission_id, mission, intake, command)
     return {
         "ok": True,
         "mission_id": mission_id,
         "mission_dir": str(mission_dir),
         "mission_state": state,
         "mission": mission,
+        "durable_mission_state": _read_json(mission_dir / "mission_state.json"),
         "mission_intake": intake,
         "commander_order": command,
         "governor_plan": _read_json(mission_dir / "governor_plan.json"),
