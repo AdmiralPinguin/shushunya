@@ -819,6 +819,120 @@ def _read_json_dir(directory: Path, limit: int = 100) -> list[dict[str, Any]]:
     return items[-max(0, limit) :]
 
 
+def _audit_protocol_file(path: Path, expected_type: str, mission_id: str, errors: list[str]) -> dict[str, Any]:
+    payload = _read_json(path)
+    if not payload:
+        return {}
+    try:
+        validate_protocol_payload(payload, expected_type=expected_type)
+    except Exception as exc:  # noqa: BLE001 - audit must report all protocol validation failures.
+        errors.append(f"{path.name}: {exc}")
+        return payload
+    payload_mission_id = str(payload.get("mission_id") or "")
+    if payload_mission_id != mission_id:
+        errors.append(f"{path.name}: mission_id mismatch {payload_mission_id!r} != {mission_id!r}")
+    return payload
+
+
+def _audit_protocol_dir(directory: Path, expected_type: str, mission_id: str, errors: list[str]) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    if not directory.exists():
+        return payloads
+    for path in sorted(directory.glob("*.json")):
+        payload = _audit_protocol_file(path, expected_type, mission_id, errors)
+        if payload:
+            payloads.append(payload)
+    return payloads
+
+
+def _audit_progress_events(path: Path, mission_id: str, errors: list[str]) -> list[dict[str, Any]]:
+    events = _read_events(path, limit=10000)
+    for index, event in enumerate(events, start=1):
+        try:
+            validate_protocol_payload(event, expected_type="progress_event")
+        except Exception as exc:  # noqa: BLE001 - audit must keep scanning.
+            errors.append(f"progress_events.jsonl:{index}: {exc}")
+            continue
+        event_mission_id = str(event.get("mission_id") or "")
+        if event_mission_id != mission_id:
+            errors.append(f"progress_events.jsonl:{index}: mission_id mismatch {event_mission_id!r} != {mission_id!r}")
+    return events
+
+
+def mission_protocol_audit(mission_dir: Path) -> dict[str, Any]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    mission = _read_json(mission_dir / "mission.json")
+    mission_id = str(mission.get("mission_id") or mission_dir.name)
+    if not mission:
+        errors.append("mission.json is missing")
+    elif mission_id != mission_dir.name:
+        warnings.append(f"mission.json mission_id differs from directory name: {mission_id!r} != {mission_dir.name!r}")
+    state = _read_json(mission_dir / "mission_state.json")
+    if not state:
+        errors.append("mission_state.json is missing")
+    elif state.get("kind") != "mission_state":
+        errors.append("mission_state.json kind must be mission_state")
+    elif str(state.get("mission_id") or "") != mission_id:
+        errors.append("mission_state.json mission_id mismatch")
+    status = str((state or mission).get("status") or mission.get("status") or "created")
+    commander_error = _read_json(mission_dir / "commander_error.json")
+    intake = _audit_protocol_file(mission_dir / "mission_intake.json", "mission_intake", mission_id, errors)
+    command = _audit_protocol_file(mission_dir / "commander_order.json", "commander_order", mission_id, errors)
+    if not intake:
+        errors.append("mission_intake.json is missing or invalid")
+    if not command and not commander_error:
+        errors.append("commander_order.json is missing")
+    plan = _audit_protocol_file(mission_dir / "governor_plan.json", "governor_plan", mission_id, errors)
+    governor_report_payload = _audit_protocol_file(mission_dir / "governor_report.json", "governor_report", mission_id, errors)
+    acceptance_payload = _audit_protocol_file(mission_dir / "acceptance_review.json", "acceptance_review", mission_id, errors)
+    revision_payload = _audit_protocol_file(mission_dir / "revision_order.json", "revision_order", mission_id, errors)
+    final_payload = _audit_protocol_file(mission_dir / "final_response.json", "final_response", mission_id, errors)
+    worker_orders = _audit_protocol_dir(mission_dir / "worker_orders", "worker_order", mission_id, errors)
+    worker_reports = _audit_protocol_dir(mission_dir / "worker_reports", "worker_report", mission_id, errors)
+    governor_reports = _audit_protocol_dir(mission_dir / "governor_reports", "governor_report", mission_id, errors)
+    acceptance_reviews = _audit_protocol_dir(mission_dir / "acceptance_reviews", "acceptance_review", mission_id, errors)
+    revision_orders = _audit_protocol_dir(mission_dir / "revision_orders", "revision_order", mission_id, errors)
+    events = _audit_progress_events(mission_dir / "progress_events.jsonl", mission_id, errors)
+    if not events:
+        errors.append("progress_events.jsonl has no visible protocol events")
+    if status in {"planning", "plan_review", "executing", "governor_review", "warmaster_acceptance", "revision", "completed"}:
+        if not plan:
+            errors.append(f"governor_plan.json is required for mission status {status}")
+        if not worker_orders:
+            warnings.append(f"worker_orders are empty for mission status {status}")
+    if status in {"governor_review", "warmaster_acceptance", "revision", "completed"} and not governor_report_payload and not governor_reports:
+        errors.append(f"governor_report is required for mission status {status}")
+    if status in {"warmaster_acceptance", "revision", "completed"} and not acceptance_payload and not acceptance_reviews:
+        errors.append(f"acceptance_review is required for mission status {status}")
+    if status == "revision" and not revision_payload and not revision_orders:
+        errors.append("revision_order is required for mission status revision")
+    if status == "completed":
+        if not final_payload:
+            errors.append("final_response.json is required for completed mission")
+        accepted_reviews = [item for item in [acceptance_payload, *acceptance_reviews] if isinstance(item, dict) and item.get("accepted") is True]
+        if not accepted_reviews:
+            errors.append("completed mission requires accepted acceptance_review")
+    if any(isinstance(item, dict) and item.get("status") == "needs_revision" for item in [governor_report_payload, *governor_reports]):
+        if not revision_payload and not revision_orders:
+            errors.append("governor_report.status=needs_revision must produce revision_order")
+    return {
+        "ok": not errors,
+        "mission_id": mission_id,
+        "status": status,
+        "errors": errors,
+        "warnings": warnings,
+        "counts": {
+            "progress_events": len(events),
+            "worker_orders": len(worker_orders),
+            "worker_reports": len(worker_reports),
+            "governor_reports": len(governor_reports) + (1 if governor_report_payload else 0),
+            "acceptance_reviews": len(acceptance_reviews) + (1 if acceptance_payload else 0),
+            "revision_orders": len(revision_orders) + (1 if revision_payload else 0),
+        },
+    }
+
+
 def _count_by_key(items: list[dict[str, Any]], key: str) -> dict[str, int]:
     counts: dict[str, int] = {}
     for item in items:
@@ -881,7 +995,11 @@ def mission_protocol_summary(mission_dir: Path) -> dict[str, Any]:
     acceptance_reviews = _read_json_dir(mission_dir / "acceptance_reviews", limit=1000)
     revision_orders = _read_json_dir(mission_dir / "revision_orders", limit=1000)
     progress_events = _read_events(mission_dir / "progress_events.jsonl", limit=10000)
+    audit = mission_protocol_audit(mission_dir)
     return {
+        "protocol_audit_ok": bool(audit.get("ok")),
+        "protocol_audit_error_count": len(audit.get("errors") if isinstance(audit.get("errors"), list) else []),
+        "protocol_audit_warning_count": len(audit.get("warnings") if isinstance(audit.get("warnings"), list) else []),
         "has_mission_state": bool(_read_json(mission_dir / "mission_state.json")),
         "has_mission_intake": bool(_read_json(mission_dir / "mission_intake.json")),
         "has_commander_order": bool(_read_json(mission_dir / "commander_order.json")),
@@ -900,6 +1018,7 @@ def mission_protocol_summary(mission_dir: Path) -> dict[str, Any]:
         "has_acceptance_review": bool(_read_json(mission_dir / "acceptance_review.json")),
         "has_revision_order": bool(_read_json(mission_dir / "revision_order.json")),
         "has_final_response": bool(_read_json(mission_dir / "final_response.json")),
+        "protocol_audit": audit,
     }
 
 
@@ -948,6 +1067,7 @@ def mission_state(warmaster_root: Path, mission_id: str, event_limit: int = 100)
             if bool(event.get("visible_to_user", True))
         ],
         "protocol_summary": mission_protocol_summary(mission_dir),
+        "protocol_audit": mission_protocol_audit(mission_dir),
     }
 
 

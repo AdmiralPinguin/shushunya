@@ -83,6 +83,8 @@ def mission_protocol_payloads_for_run(run_dir: Path) -> dict[str, dict[str, Any]
     mission_dir = mission_dir_for_run(run_dir)
     if mission_dir is None:
         return {}
+    from .mission_control import mission_protocol_audit, mission_protocol_summary
+
     return {
         "mission": _read_json(mission_dir / "mission.json"),
         "mission_state": _read_json(mission_dir / "mission_state.json"),
@@ -94,6 +96,8 @@ def mission_protocol_payloads_for_run(run_dir: Path) -> dict[str, dict[str, Any]
         "acceptance_reviews": _read_json_dir(mission_dir / "acceptance_reviews", limit=1000),
         "revision_orders": _read_json_dir(mission_dir / "revision_orders", limit=1000),
         "final_response": _read_json(mission_dir / "final_response.json"),
+        "protocol_summary": mission_protocol_summary(mission_dir),
+        "protocol_audit": mission_protocol_audit(mission_dir),
     }
 
 
