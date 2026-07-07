@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "commander_order",
+  "type": "object",
+  "required": ["type", "protocol_version", "mission_id", "created_at", "from", "to", "user_request", "commander_intent", "primary_goal", "success_conditions", "reporting_policy"],
+  "properties": {
+    "type": { "const": "commander_order" },
+    "protocol_version": { "const": 1 },
+    "mission_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string" },
+    "from": { "const": "Warmaster" },
+    "to": { "type": "string", "minLength": 1 },
+    "supporting_governors": { "type": "array", "items": { "type": "string" } },
+    "user_request": { "type": "string", "minLength": 1 },
+    "commander_intent": { "type": "string", "minLength": 1 },
+    "primary_goal": { "type": "string", "minLength": 1 },
+    "success_conditions": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "constraints": { "type": "array", "items": { "type": "string" } },
+    "escalate_to_user_if": { "type": "array", "items": { "type": "string" } },
+    "reporting_policy": {
+      "type": "object",
+      "required": ["progress_events_required", "final_report_required", "revision_is_internal"],
+      "properties": {
+        "progress_events_required": { "type": "boolean" },
+        "final_report_required": { "type": "boolean" },
+        "revision_is_internal": { "const": true }
+      }
+    }
+  },
+  "additionalProperties": true
+}

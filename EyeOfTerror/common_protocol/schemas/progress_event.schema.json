@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "progress_event",
+  "type": "object",
+  "required": ["type", "protocol_version", "mission_id", "created_at", "actor", "role", "phase", "status", "title", "body", "visible_to_user"],
+  "properties": {
+    "type": { "const": "progress_event" },
+    "protocol_version": { "const": 1 },
+    "mission_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string" },
+    "actor": { "type": "string", "minLength": 1 },
+    "role": { "type": "string", "minLength": 1 },
+    "phase": { "enum": ["intake", "assigned", "planning", "executing", "reviewing", "revising", "finalizing", "blocked", "completed", "failed"] },
+    "status": { "enum": ["started", "running", "done", "blocked", "failed"] },
+    "title": { "type": "string", "minLength": 1 },
+    "body": { "type": "string", "minLength": 1 },
+    "visible_to_user": { "type": "boolean" }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "mission_intake",
+  "type": "object",
+  "required": ["type", "protocol_version", "mission_id", "created_at", "source_channel", "user_request", "status"],
+  "properties": {
+    "type": { "const": "mission_intake" },
+    "protocol_version": { "const": 1 },
+    "mission_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string" },
+    "source_channel": { "type": "string" },
+    "user_id": { "type": "string" },
+    "user_request": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["created", "intake", "assigned", "planning", "plan_review", "executing", "governor_review", "warmaster_acceptance", "revision", "blocked", "completed", "failed", "cancelled"] }
+  },
+  "additionalProperties": true
+}

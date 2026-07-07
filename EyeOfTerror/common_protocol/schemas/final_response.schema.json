@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "final_response",
+  "type": "object",
+  "required": ["type", "protocol_version", "mission_id", "created_at", "status", "accepted_by", "answer", "artifacts"],
+  "properties": {
+    "type": { "const": "final_response" },
+    "protocol_version": { "const": 1 },
+    "mission_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string" },
+    "status": { "type": "string", "minLength": 1 },
+    "accepted_by": { "type": "string", "minLength": 1 },
+    "answer": { "type": "string", "minLength": 1 },
+    "artifacts": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}

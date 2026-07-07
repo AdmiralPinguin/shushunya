@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "acceptance_review",
+  "type": "object",
+  "required": ["type", "protocol_version", "mission_id", "created_at", "reviewer", "status", "accepted", "reason", "required_revision", "escalate_to_user"],
+  "properties": {
+    "type": { "const": "acceptance_review" },
+    "protocol_version": { "const": 1 },
+    "mission_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string" },
+    "reviewer": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["accepted", "revision_required", "blocked", "failed"] },
+    "accepted": { "type": "boolean" },
+    "reason": { "type": "string", "minLength": 1 },
+    "required_revision": { "type": "object" },
+    "escalate_to_user": { "type": "boolean" }
+  },
+  "additionalProperties": true
+}

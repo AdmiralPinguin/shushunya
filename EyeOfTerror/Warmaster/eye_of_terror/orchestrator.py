@@ -18,6 +18,7 @@ from .gateway_util import resolve_run_child_path, validate_service_host
 from .http_executor import execute_run as execute_http_run, preflight_workers as preflight_http_workers
 from .ledger import TaskLedger
 from .local_executor import WORKER_COMMANDS, execute_run as execute_local_run, input_artifact_errors, ordered_dispatch_paths
+from .mission_control import link_run_to_mission, open_mission
 from .run_package import load_json_file, load_json_object, load_ledger_dict, run_oversight, sandbox_artifact_file_status
 from .run_state import list_runs, orchestration_state, run_progress, run_snapshot, run_summary
 from .run_validation import revision_plan_summary, run_oversight_summary, validate_oversight_against_run, validate_revision_plan
@@ -296,8 +297,28 @@ def orchestrate_run_task(
     reuse_existing: bool = True,
 ) -> dict[str, Any]:
     prepare_timeout_sec = max(1, min(int(timeout_sec), 7200))
+    warmaster_root = Path(__file__).resolve().parents[1]
+    mission = open_mission(warmaster_root, message, task_id, source_channel="main_chat")
+    if not mission.get("ok"):
+        return {
+            "ok": False,
+            "phase": "commander_intake",
+            "task_id": task_id or "",
+            "mission_id": str(mission.get("mission_id") or ""),
+            "mission": mission,
+            "error": str(mission.get("error") or "Warmaster commander intake failed"),
+            "error_code": str(mission.get("error_code") or "commander_intake_failed"),
+            "next_action": {
+                "kind": "inspect_commander_intake",
+                "method": "GET",
+                "endpoint": "GET /missions/{mission_id}",
+                "body": {},
+                "reason": "Warmaster could not form a commander order",
+            },
+        }
+    governor_message = str(mission.get("governor_task") or message)
     prepared = orchestrate_prepare_task(
-        message,
+        governor_message,
         task_id,
         run_root,
         governor_transport=governor_transport,
@@ -308,6 +329,15 @@ def orchestrate_run_task(
         include_brigade_health=include_brigade_health,
     )
     trace = list(prepared.get("trace") if isinstance(prepared.get("trace"), list) else [])
+    trace.insert(
+        0,
+        {
+            "stage": "commander_intake",
+            "ok": True,
+            "mission_id": str(mission.get("mission_id") or ""),
+            "assigned_governor": str((mission.get("commander_order") or {}).get("to") or ""),
+        },
+    )
     run_task_id = str(prepared.get("task_id") or task_id or "")
     if not prepared.get("ok"):
         task_preflight = prepared.get("task_preflight") if isinstance(prepared.get("task_preflight"), dict) else {}
@@ -381,10 +411,18 @@ def orchestrate_run_task(
         }
     if not auto_start:
         state = orchestration_state(run_root / run_task_id, event_limit=5, events_after=0)
+        if run_task_id:
+            link_run_to_mission(run_root / run_task_id, mission)
         return {
             "ok": True,
             "phase": "ready_to_start",
             "task_id": run_task_id,
+            "mission_id": str(mission.get("mission_id") or ""),
+            "mission": {
+                "mission_id": str(mission.get("mission_id") or ""),
+                "assigned_governor": str((mission.get("commander_order") or {}).get("to") or ""),
+                "mission_dir": str(mission.get("mission_dir") or ""),
+            },
             "trace": trace,
             "prepare": prepared,
             "next_action": prepared.get("next_action") if isinstance(prepared.get("next_action"), dict) else {},
@@ -402,6 +440,8 @@ def orchestrate_run_task(
         timeout_sec=prepare_timeout_sec,
         force=force,
     )
+    if run_task_id:
+        link_run_to_mission(run_root / run_task_id, mission)
     trace.append(
         {
             "stage": "orchestrate_start",
@@ -416,6 +456,12 @@ def orchestrate_run_task(
         "ok": bool(started.get("ok")),
         "phase": "started" if started.get("ok") else "start_failed",
         "task_id": run_task_id,
+        "mission_id": str(mission.get("mission_id") or ""),
+        "mission": {
+            "mission_id": str(mission.get("mission_id") or ""),
+            "assigned_governor": str((mission.get("commander_order") or {}).get("to") or ""),
+            "mission_dir": str(mission.get("mission_dir") or ""),
+        },
         "run_mode": run_mode,
         "trace": trace,
         "prepare": prepared,

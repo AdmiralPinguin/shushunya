@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker_order",
+  "type": "object",
+  "required": ["type", "protocol_version", "mission_id", "created_at", "step_id", "from", "to", "task", "input_artifacts", "expected_output", "quality_requirements", "revision_context"],
+  "properties": {
+    "type": { "const": "worker_order" },
+    "protocol_version": { "const": 1 },
+    "mission_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string" },
+    "step_id": { "type": "string", "minLength": 1 },
+    "from": { "type": "string", "minLength": 1 },
+    "to": { "type": "string", "minLength": 1 },
+    "task": { "type": "string", "minLength": 1 },
+    "input_artifacts": { "type": "array", "items": { "type": "string" } },
+    "expected_output": { "type": "string", "minLength": 1 },
+    "quality_requirements": { "type": "array", "items": { "type": "string" } },
+    "revision_context": { "type": "object" }
+  },
+  "additionalProperties": true
+}

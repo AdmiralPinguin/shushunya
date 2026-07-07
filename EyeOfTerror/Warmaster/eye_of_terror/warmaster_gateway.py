@@ -32,6 +32,7 @@ from .local_executor import WORKER_COMMANDS, execute_run as execute_local_run, i
 from .pipeline import write_pipeline_run
 from .registry import worker_refs
 from .routing import route_message
+from .mission_control import list_missions, mission_state
 from .orchestrator import (
     cancel_http_worker_tasks,
     execute_run_cycle,
@@ -358,6 +359,22 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                 response(self, 200, all_run_events(run_root, limit=limit, after=after))
                 return
             parts = [part for part in parsed.path.split("/") if part]
+            warmaster_root = Path(__file__).resolve().parents[1]
+            if parts == ["missions"]:
+                query = parse_qs(parsed.query)
+                limit = parse_limit(query.get("limit", ["50"])[0], default=50)
+                response(self, 200, {"ok": True, "missions": list_missions(warmaster_root, limit=limit)})
+                return
+            if len(parts) == 2 and parts[0] == "missions":
+                query = parse_qs(parsed.query)
+                event_limit = parse_limit(query.get("event_limit", ["100"])[0], default=100)
+                try:
+                    payload = mission_state(warmaster_root, parts[1], event_limit=event_limit)
+                except FileNotFoundError:
+                    response(self, 404, {"ok": False, "error": "mission not found", "mission_id": parts[1]})
+                    return
+                response(self, 200, payload)
+                return
             if parts == ["campaigns"]:
                 response(self, 200, {"ok": True, "campaigns": list_campaigns(run_root)})
                 return
