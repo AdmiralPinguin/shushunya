@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from EyeOfTerror.common_protocol import worker_order
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.CharacterSheetwright.worker import build_character_sheet
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.LayoutFinalis.worker import build_layout_manifest
 from EyeOfTerror.Pictorium.Brigades.Comics.Workers.Panelwright.worker import build_panel_packages
@@ -86,6 +87,45 @@ def requested_image_count(task: str, default: int = 3) -> int:
     return default
 
 
+def mission_id_for_run(run_id: str) -> str:
+    normalized = str(run_id or "").strip()
+    return normalized if normalized.startswith("mission-") else f"mission-{normalized or 'moriana-run'}"
+
+
+def moriana_worker_payload(
+    run_id: str,
+    *,
+    worker: str,
+    step_id: str,
+    task: str,
+    expected_output: str,
+    input_artifacts: list[str] | None = None,
+    quality_requirements: list[str] | None = None,
+    revision_context: dict[str, Any] | None = None,
+    **fields: Any,
+) -> dict[str, Any]:
+    payload = {
+        "worker_order": worker_order(
+            mission_id=mission_id_for_run(run_id),
+            step_id=step_id,
+            sender="Moriana",
+            to=worker,
+            task=task,
+            expected_output=expected_output,
+            input_artifacts=input_artifacts or [],
+            quality_requirements=quality_requirements
+            or [
+                "return a protocol worker_report",
+                "do not answer the user directly",
+                "surface blockers as structured fields",
+            ],
+            revision_context=revision_context or {},
+        )
+    }
+    payload.update(fields)
+    return payload
+
+
 def next_attempt(store: MorianaRunStore, run_id: str) -> int:
     attempts = [int(item.get("attempt") or 0) for item in store.artifacts(run_id) if isinstance(item.get("attempt"), int)]
     status_attempt = int(store.status(run_id).get("attempt_count") or 0)
@@ -108,13 +148,45 @@ def execute_image_run(
 ) -> dict[str, Any]:
     run_dir = store.run_dir(run_id)
     store.set_status(run_id, "planning", "Image Brigade is preparing executable package", attempt_count=1)
-    plan = prepare_image_plan({"request": task, "use_memory": False, "use_thinker": False})
+    plan = prepare_image_plan(
+        moriana_worker_payload(
+            run_id,
+            worker="Promptwright",
+            step_id="image_plan",
+            task=task,
+            expected_output="/work/pictorium/image_plan.json",
+            use_memory=False,
+            use_thinker=False,
+        )
+    )
     register_json_artifact(store, run_id, step="image_plan", payload=plan, artifact_type="prompt", created_by="Promptwright", attempt=1, subdir="prompts")
     job_spec = plan.get("job_spec") if isinstance(plan.get("job_spec"), dict) else {}
-    resources = inspect_resources({"job_spec": job_spec})
+    resources = inspect_resources(
+        moriana_worker_payload(
+            run_id,
+            worker="ModelQuartermaster",
+            step_id="resource_report",
+            task="Inspect local image-model resources for the prepared job specification.",
+            expected_output="/work/pictorium/resource_report.json",
+            input_artifacts=["/work/pictorium/image_plan.json"],
+            job_spec=job_spec,
+        )
+    )
     register_json_artifact(store, run_id, step="resource_report", payload=resources, artifact_type="resource_report", created_by="ModelQuartermaster", attempt=1, subdir="parameters")
     forge_db_path = run_dir / "forge.sqlite3"
-    dispatch = prepare_dispatch({"job_spec": job_spec, "submit": submit, "db_path": str(forge_db_path)})
+    dispatch = prepare_dispatch(
+        moriana_worker_payload(
+            run_id,
+            worker="ForgeDispatcher",
+            step_id="forge_dispatch",
+            task="Prepare or submit the Forge runtime job for the approved image specification.",
+            expected_output="/work/pictorium/forge_dispatch.json",
+            input_artifacts=["/work/pictorium/image_plan.json", "/work/pictorium/resource_report.json"],
+            job_spec=job_spec,
+            submit=submit,
+            db_path=str(forge_db_path),
+        )
+    )
     register_json_artifact(store, run_id, step="forge_dispatch", payload=dispatch, artifact_type="dispatch", created_by="ForgeDispatcher", attempt=1)
     store.set_status(run_id, "generating", "Forge dispatch package prepared", attempt_count=1)
 
@@ -152,7 +224,19 @@ def execute_image_run(
         artifact_path = str(synthetic_path)
 
     store.set_status(run_id, "checking", "ImageVerifier is checking generated artifact", attempt_count=1)
-    verification = verify_image({"artifact_path": artifact_path, "job_spec": job_spec, "job_record": dispatch.get("job_record")})
+    verification = verify_image(
+        moriana_worker_payload(
+            run_id,
+            worker="ImageVerifier",
+            step_id="image_verification",
+            task="Verify the generated image artifact against the requested job specification.",
+            expected_output="/work/pictorium/image_verification.json",
+            input_artifacts=[artifact_path] if artifact_path else [],
+            artifact_path=artifact_path,
+            job_spec=job_spec,
+            job_record=dispatch.get("job_record"),
+        )
+    )
     blockers = [*blockers_from(forge_monitor), *blockers_from(verification)]
     register_json_artifact(store, run_id, step="image_verification", payload=verification, artifact_type="verification", created_by="ImageVerifier", attempt=1, status="accepted" if not blockers else "rejected", rejection_reason="; ".join(str(item.get("code") or "") for item in blockers))
     accepted_artifact_id = ""
@@ -171,14 +255,41 @@ def execute_image_run(
         if not blockers:
             accepted_artifact_id = str(image_record["artifact_id"])
 
-    final = build_final_manifest({"plan": plan, "resources": resources, "dispatch": dispatch, "verification": verification, "artifacts": [artifact_path] if artifact_path else []})
+    final = build_final_manifest(
+        moriana_worker_payload(
+            run_id,
+            worker="ArtifactFinalis",
+            step_id="finalize",
+            task="Build the final image manifest for Moriana's review.",
+            expected_output="/work/pictorium/final_manifest.json",
+            input_artifacts=[artifact_path] if artifact_path else [],
+            plan=plan,
+            resources=resources,
+            dispatch=dispatch,
+            verification=verification,
+            artifacts=[artifact_path] if artifact_path else [],
+        )
+    )
     if blockers and test_artifact_mode == "bad_then_good" and max_revision_cycles > 0:
         store.set_status(run_id, "revising", "verification rejected attempt 1; running focused revision", attempt_count=2)
         store.write_revision(run_id, 1, blockers, "regenerate_image_with_verified_dimensions")
         width, height = job_spec_dimensions(job_spec)
         revised_path = run_dir / "artifacts" / "image_attempt_02.png"
         make_synthetic_image(revised_path, width, height, (104, 94, 82))
-        verification = verify_image({"artifact_path": str(revised_path), "job_spec": job_spec, "job_record": dispatch.get("job_record")})
+        verification = verify_image(
+            moriana_worker_payload(
+                run_id,
+                worker="ImageVerifier",
+                step_id="image_verification_attempt_02",
+                task="Verify the revised image artifact against the requested job specification.",
+                expected_output="/work/pictorium/image_verification.json",
+                input_artifacts=[str(revised_path)],
+                revision_context={"revision_of": artifact_path, "reason": "bad_then_good synthetic revision"},
+                artifact_path=str(revised_path),
+                job_spec=job_spec,
+                job_record=dispatch.get("job_record"),
+            )
+        )
         blockers = blockers_from(verification)
         register_json_artifact(store, run_id, step="image_verification", payload=verification, artifact_type="verification", created_by="ImageVerifier", attempt=2, status="accepted" if not blockers else "rejected")
         image_record = store.register_artifact(
@@ -193,7 +304,22 @@ def execute_image_run(
             metadata={"job_spec": job_spec, "revision_of": artifact_path},
         )
         accepted_artifact_id = str(image_record["artifact_id"]) if not blockers else ""
-        final = build_final_manifest({"plan": plan, "resources": resources, "dispatch": dispatch, "verification": verification, "artifacts": [str(revised_path)]})
+        final = build_final_manifest(
+            moriana_worker_payload(
+                run_id,
+                worker="ArtifactFinalis",
+                step_id="finalize_attempt_02",
+                task="Build the final image manifest after focused revision.",
+                expected_output="/work/pictorium/final_manifest.json",
+                input_artifacts=[str(revised_path)],
+                revision_context={"revision_of": artifact_path, "reason": "bad_then_good synthetic revision"},
+                plan=plan,
+                resources=resources,
+                dispatch=dispatch,
+                verification=verification,
+                artifacts=[str(revised_path)],
+            )
+        )
 
     register_json_artifact(store, run_id, step="finalize", payload=final, artifact_type="final", created_by="ArtifactFinalis", attempt=2 if test_artifact_mode == "bad_then_good" else 1, status="final" if final.get("final_manifest", {}).get("status") == "ready" else "rejected")
     final_payload = dict(final.get("final_manifest") if isinstance(final.get("final_manifest"), dict) else {})
@@ -339,13 +465,50 @@ def execute_revision_run(
         "rerun_steps": decision.get("rerun_steps", []),
         "downstream_steps": decision.get("downstream_steps", []),
     }
-    plan = prepare_image_plan({"request": f"{task}\nRevision: {decision.get('reason')}", "use_memory": False, "use_thinker": False})
+    revision_task = f"{task}\nRevision: {decision.get('reason')}"
+    revision_context = {"decision": decision, "attempt": attempt}
+    plan = prepare_image_plan(
+        moriana_worker_payload(
+            run_id,
+            worker="Promptwright",
+            step_id=f"image_plan_attempt_{attempt:02d}",
+            task=revision_task,
+            expected_output="/work/pictorium/image_plan.json",
+            revision_context=revision_context,
+            use_memory=False,
+            use_thinker=False,
+        )
+    )
     register_json_artifact(store, run_id, step="image_plan", payload=plan, artifact_type="prompt", created_by="Promptwright", attempt=attempt, subdir="prompts")
     job_spec = plan.get("job_spec") if isinstance(plan.get("job_spec"), dict) else {}
-    resources = inspect_resources({"job_spec": job_spec})
+    resources = inspect_resources(
+        moriana_worker_payload(
+            run_id,
+            worker="ModelQuartermaster",
+            step_id=f"resource_report_attempt_{attempt:02d}",
+            task="Inspect local image-model resources for the revised job specification.",
+            expected_output="/work/pictorium/resource_report.json",
+            input_artifacts=["/work/pictorium/image_plan.json"],
+            revision_context=revision_context,
+            job_spec=job_spec,
+        )
+    )
     register_json_artifact(store, run_id, step="resource_report", payload=resources, artifact_type="resource_report", created_by="ModelQuartermaster", attempt=attempt, subdir="parameters")
     forge_db_path = run_dir / "forge.sqlite3"
-    dispatch = prepare_dispatch({"job_spec": job_spec, "submit": submit, "db_path": str(forge_db_path)})
+    dispatch = prepare_dispatch(
+        moriana_worker_payload(
+            run_id,
+            worker="ForgeDispatcher",
+            step_id=f"forge_dispatch_attempt_{attempt:02d}",
+            task="Prepare or submit the Forge runtime job for the revised image specification.",
+            expected_output="/work/pictorium/forge_dispatch.json",
+            input_artifacts=["/work/pictorium/image_plan.json", "/work/pictorium/resource_report.json"],
+            revision_context=revision_context,
+            job_spec=job_spec,
+            submit=submit,
+            db_path=str(forge_db_path),
+        )
+    )
     register_json_artifact(store, run_id, step="forge_dispatch", payload=dispatch, artifact_type="dispatch", created_by="ForgeDispatcher", attempt=attempt)
     store.set_status(run_id, "generating", "Revision generation package prepared", attempt_count=attempt)
 
@@ -380,7 +543,20 @@ def execute_revision_run(
         artifact_path = str(synthetic_path)
 
     store.set_status(run_id, "checking", "ImageVerifier is checking revised artifact", attempt_count=attempt)
-    verification = verify_image({"artifact_path": artifact_path, "job_spec": job_spec, "job_record": dispatch.get("job_record")})
+    verification = verify_image(
+        moriana_worker_payload(
+            run_id,
+            worker="ImageVerifier",
+            step_id=f"image_verification_attempt_{attempt:02d}",
+            task="Verify the revised image artifact against the requested job specification.",
+            expected_output="/work/pictorium/image_verification.json",
+            input_artifacts=[artifact_path] if artifact_path else [],
+            revision_context=revision_context,
+            artifact_path=artifact_path,
+            job_spec=job_spec,
+            job_record=dispatch.get("job_record"),
+        )
+    )
     blockers = [*blockers_from(resources), *blockers_from(dispatch), *blockers_from(forge_monitor), *blockers_from(verification)]
     register_json_artifact(
         store,
@@ -408,7 +584,22 @@ def execute_revision_run(
         )
         if not blockers:
             accepted_artifact_id = str(image_record["artifact_id"])
-    final = build_final_manifest({"plan": plan, "resources": resources, "dispatch": dispatch, "verification": verification, "artifacts": [artifact_path] if artifact_path else []})
+    final = build_final_manifest(
+        moriana_worker_payload(
+            run_id,
+            worker="ArtifactFinalis",
+            step_id=f"finalize_attempt_{attempt:02d}",
+            task="Build the final image manifest for the revised run.",
+            expected_output="/work/pictorium/final_manifest.json",
+            input_artifacts=[artifact_path] if artifact_path else [],
+            revision_context=revision_context,
+            plan=plan,
+            resources=resources,
+            dispatch=dispatch,
+            verification=verification,
+            artifacts=[artifact_path] if artifact_path else [],
+        )
+    )
     register_json_artifact(store, run_id, step="finalize", payload=final, artifact_type="final", created_by="ArtifactFinalis", attempt=attempt, status="final" if final.get("final_manifest", {}).get("status") == "ready" else "rejected")
     final_payload = dict(final.get("final_manifest") if isinstance(final.get("final_manifest"), dict) else {})
     final_payload.setdefault("kind", "pictorium_image_final_manifest")
@@ -468,7 +659,17 @@ def execute_existing_image_artifact_run(
 ) -> dict[str, Any]:
     run_dir = store.run_dir(run_id)
     store.set_status(run_id, "checking", "ImageVerifier is checking supplied live artifact", attempt_count=1)
-    spec = job_spec or prepare_image_plan({"request": task, "use_memory": False, "use_thinker": False}).get("job_spec", {})
+    spec = job_spec or prepare_image_plan(
+        moriana_worker_payload(
+            run_id,
+            worker="Promptwright",
+            step_id="external_artifact_image_plan",
+            task=task,
+            expected_output="/work/pictorium/image_plan.json",
+            use_memory=False,
+            use_thinker=False,
+        )
+    ).get("job_spec", {})
     plan = {
         "ok": True,
         "worker": "Promptwright",
@@ -478,7 +679,19 @@ def execute_existing_image_artifact_run(
     }
     register_json_artifact(store, run_id, step="image_plan", payload=plan, artifact_type="prompt", created_by="Promptwright", attempt=1, subdir="prompts")
     artifact = Path(artifact_path)
-    verification = verify_image({"artifact_path": str(artifact), "job_spec": spec, "job_record": {}})
+    verification = verify_image(
+        moriana_worker_payload(
+            run_id,
+            worker="ImageVerifier",
+            step_id="external_artifact_verification",
+            task="Verify the supplied live artifact against the requested job specification.",
+            expected_output="/work/pictorium/image_verification.json",
+            input_artifacts=[str(artifact)],
+            artifact_path=str(artifact),
+            job_spec=spec,
+            job_record={},
+        )
+    )
     blockers = blockers_from(verification)
     register_json_artifact(
         store,
@@ -505,7 +718,21 @@ def execute_existing_image_artifact_run(
             metadata={"job_spec": spec, "live_artifact": True},
         )
         accepted_artifact_id = str(image_record["artifact_id"]) if not blockers else ""
-    final = build_final_manifest({"plan": plan, "resources": {}, "dispatch": {}, "verification": verification, "artifacts": [str(artifact)] if artifact.exists() else []})
+    final = build_final_manifest(
+        moriana_worker_payload(
+            run_id,
+            worker="ArtifactFinalis",
+            step_id="external_artifact_finalize",
+            task="Build the final manifest for the supplied live artifact.",
+            expected_output="/work/pictorium/final_manifest.json",
+            input_artifacts=[str(artifact)] if artifact.exists() else [],
+            plan=plan,
+            resources={},
+            dispatch={},
+            verification=verification,
+            artifacts=[str(artifact)] if artifact.exists() else [],
+        )
+    )
     final_payload = dict(final.get("final_manifest") if isinstance(final.get("final_manifest"), dict) else {})
     final_payload.setdefault("kind", "pictorium_image_final_manifest")
     final_payload["run_id"] = run_id
@@ -553,13 +780,52 @@ def execute_image_series_run(
     for index in range(1, count + 1):
         step_prefix = f"series_{index:02d}"
         image_task = f"{task}. Image {index} of {count}. Keep style and subject continuity across the series."
-        plan = prepare_image_plan({"request": image_task, "use_memory": False, "use_thinker": False})
+        revision_context = {"series_index": index, "series_count": count, "revision_decision": revision_decision or {}, "attempt": attempt}
+        plan = prepare_image_plan(
+            moriana_worker_payload(
+                run_id,
+                worker="Promptwright",
+                step_id=f"{step_prefix}_image_plan_attempt_{attempt:02d}",
+                task=image_task,
+                expected_output=f"/work/pictorium/series/{index:02d}/image_plan.json",
+                revision_context=revision_context,
+                use_memory=False,
+                use_thinker=False,
+            )
+        )
         register_json_artifact(store, run_id, step=f"{step_prefix}_image_plan", payload=plan, artifact_type="prompt", created_by="Promptwright", attempt=attempt, subdir="prompts")
         job_spec = plan.get("job_spec") if isinstance(plan.get("job_spec"), dict) else {}
-        resources = inspect_resources({"job_spec": job_spec})
+        resources = inspect_resources(
+            moriana_worker_payload(
+                run_id,
+                worker="ModelQuartermaster",
+                step_id=f"{step_prefix}_resource_report_attempt_{attempt:02d}",
+                task=f"Inspect local image-model resources for series image {index} of {count}.",
+                expected_output=f"/work/pictorium/series/{index:02d}/resource_report.json",
+                input_artifacts=[f"/work/pictorium/series/{index:02d}/image_plan.json"],
+                revision_context=revision_context,
+                job_spec=job_spec,
+            )
+        )
         register_json_artifact(store, run_id, step=f"{step_prefix}_resource_report", payload=resources, artifact_type="resource_report", created_by="ModelQuartermaster", attempt=attempt, subdir="parameters")
         forge_db_path = run_dir / "forge.sqlite3"
-        dispatch = prepare_dispatch({"job_spec": job_spec, "submit": submit, "db_path": str(forge_db_path)})
+        dispatch = prepare_dispatch(
+            moriana_worker_payload(
+                run_id,
+                worker="ForgeDispatcher",
+                step_id=f"{step_prefix}_forge_dispatch_attempt_{attempt:02d}",
+                task=f"Prepare or submit Forge runtime job for series image {index} of {count}.",
+                expected_output=f"/work/pictorium/series/{index:02d}/forge_dispatch.json",
+                input_artifacts=[
+                    f"/work/pictorium/series/{index:02d}/image_plan.json",
+                    f"/work/pictorium/series/{index:02d}/resource_report.json",
+                ],
+                revision_context=revision_context,
+                job_spec=job_spec,
+                submit=submit,
+                db_path=str(forge_db_path),
+            )
+        )
         register_json_artifact(store, run_id, step=f"{step_prefix}_forge_dispatch", payload=dispatch, artifact_type="dispatch", created_by="ForgeDispatcher", attempt=attempt)
         store.set_status(run_id, "generating", f"Series image {index}/{count} dispatch package prepared", attempt_count=attempt)
         artifact_path = ""
@@ -592,7 +858,20 @@ def execute_image_series_run(
             make_synthetic_image(synthetic_path, width, height, (60 + index * 12, 70 + index * 8, 90 + index * 5))
             artifact_path = str(synthetic_path)
         store.set_status(run_id, "checking", f"ImageVerifier is checking series image {index}/{count}", attempt_count=attempt)
-        verification = verify_image({"artifact_path": artifact_path, "job_spec": job_spec, "job_record": dispatch.get("job_record")})
+        verification = verify_image(
+            moriana_worker_payload(
+                run_id,
+                worker="ImageVerifier",
+                step_id=f"{step_prefix}_image_verification_attempt_{attempt:02d}",
+                task=f"Verify series image {index} of {count} against the requested job specification.",
+                expected_output=f"/work/pictorium/series/{index:02d}/image_verification.json",
+                input_artifacts=[artifact_path] if artifact_path else [],
+                revision_context=revision_context,
+                artifact_path=artifact_path,
+                job_spec=job_spec,
+                job_record=dispatch.get("job_record"),
+            )
+        )
         blockers = [*blockers_from(resources), *blockers_from(dispatch), *blockers_from(forge_monitor), *blockers_from(verification)]
         all_blockers.extend({"series_index": index, **blocker} for blocker in blockers)
         register_json_artifact(
@@ -685,21 +964,60 @@ def execute_comic_run(
 ) -> dict[str, Any]:
     run_dir = store.run_dir(run_id)
     store.set_status(run_id, "planning", "Comics Brigade is preparing scenario and storyboard", attempt_count=attempt)
-    scenario = build_scenario({"request": task})
+    revision_context = {"revision_decision": revision_decision or {}, "attempt": attempt}
+    scenario = build_scenario(
+        moriana_worker_payload(
+            run_id,
+            worker="ScenarioScribe",
+            step_id=f"scenario_attempt_{attempt:02d}",
+            task=task,
+            expected_output="/work/pictorium/scenario.json",
+            revision_context=revision_context,
+        )
+    )
     register_json_artifact(store, run_id, step="scenario", payload=scenario, artifact_type="plan", created_by="ScenarioScribe", attempt=attempt)
-    storyboard = build_storyboard({"scenario": scenario.get("scenario", {})})
+    storyboard = build_storyboard(
+        moriana_worker_payload(
+            run_id,
+            worker="StoryboardArchitect",
+            step_id=f"storyboard_attempt_{attempt:02d}",
+            task="Turn the approved comic scenario into a panel storyboard.",
+            expected_output="/work/pictorium/storyboard.json",
+            input_artifacts=["/work/pictorium/scenario.json"],
+            revision_context=revision_context,
+            scenario=scenario.get("scenario", {}),
+        )
+    )
     register_json_artifact(store, run_id, step="storyboard", payload=storyboard, artifact_type="plan", created_by="StoryboardArchitect", attempt=attempt)
-    character_sheet = build_character_sheet({"scenario": scenario.get("scenario", {})})
+    character_sheet = build_character_sheet(
+        moriana_worker_payload(
+            run_id,
+            worker="CharacterSheetwright",
+            step_id=f"character_sheet_attempt_{attempt:02d}",
+            task="Build the character and visual continuity sheet for the comic.",
+            expected_output="/work/pictorium/character_sheet.json",
+            input_artifacts=["/work/pictorium/scenario.json"],
+            revision_context=revision_context,
+            scenario=scenario.get("scenario", {}),
+        )
+    )
     register_json_artifact(store, run_id, step="character_sheet", payload=character_sheet, artifact_type="character_sheet", created_by="CharacterSheetwright", attempt=attempt)
     store.set_status(run_id, "generating", "Panelwright is building panel generation packages", attempt_count=attempt)
     panels = build_panel_packages(
-        {
-            "storyboard": storyboard.get("storyboard", {}),
-            "character_sheet": character_sheet.get("character_sheet", {}),
-            "source_task": task,
-            "submit": submit,
-            "db_path": str(run_dir / "forge.sqlite3"),
-        }
+        moriana_worker_payload(
+            run_id,
+            worker="Panelwright",
+            step_id=f"panel_generation_attempt_{attempt:02d}",
+            task="Build executable image-generation packages for every storyboard panel.",
+            expected_output="/work/pictorium/panel_generation.json",
+            input_artifacts=["/work/pictorium/storyboard.json", "/work/pictorium/character_sheet.json"],
+            revision_context=revision_context,
+            storyboard=storyboard.get("storyboard", {}),
+            character_sheet=character_sheet.get("character_sheet", {}),
+            source_task=task,
+            submit=submit,
+            db_path=str(run_dir / "forge.sqlite3"),
+        )
     )
     register_json_artifact(store, run_id, step="panel_generation", payload=panels, artifact_type="comic_panel", created_by="Panelwright", attempt=attempt)
     panel_artifacts: list[dict[str, Any]] = []
@@ -743,7 +1061,20 @@ def execute_comic_run(
                 panel_art_blockers.extend({"panel_id": panel_id, **blocker} for blocker in monitor_blockers)
                 continue
             for artifact_index, artifact_path in enumerate(paths, start=1):
-                verification = verify_image({"artifact_path": str(artifact_path), "job_spec": job_spec, "job_record": job_record or {}})
+                verification = verify_image(
+                    moriana_worker_payload(
+                        run_id,
+                        worker="ImageVerifier",
+                        step_id=f"panel_{index:02d}_image_verification_attempt_{attempt:02d}",
+                        task=f"Verify generated comic panel {panel_id}.",
+                        expected_output=f"/work/pictorium/comics/{panel_id}/image_verification.json",
+                        input_artifacts=[str(artifact_path)],
+                        revision_context={"panel_id": panel_id, **revision_context},
+                        artifact_path=str(artifact_path),
+                        job_spec=job_spec,
+                        job_record=job_record or {},
+                    )
+                )
                 verification_blockers = [*monitor_blockers, *blockers_from(verification)]
                 register_json_artifact(
                     store,
@@ -798,12 +1129,24 @@ def execute_comic_run(
             panel_artifacts.append(record)
     store.set_status(run_id, "checking", "LayoutFinalis is checking layout and blockers", attempt_count=attempt)
     layout = build_layout_manifest(
-        {
-            "scenario": scenario.get("scenario", {}),
-            "storyboard": storyboard.get("storyboard", {}),
-            "character_sheet": character_sheet,
-            "panels": panels,
-        }
+        moriana_worker_payload(
+            run_id,
+            worker="LayoutFinalis",
+            step_id=f"layout_attempt_{attempt:02d}",
+            task="Review comic layout, panel continuity, generated artifacts, and final delivery readiness.",
+            expected_output="/work/pictorium/comic_final_manifest.json",
+            input_artifacts=[
+                "/work/pictorium/scenario.json",
+                "/work/pictorium/storyboard.json",
+                "/work/pictorium/character_sheet.json",
+                "/work/pictorium/panel_generation.json",
+            ],
+            revision_context=revision_context,
+            scenario=scenario.get("scenario", {}),
+            storyboard=storyboard.get("storyboard", {}),
+            character_sheet=character_sheet,
+            panels=panels,
+        )
     )
     blockers = [*blockers_from(layout), *panel_art_blockers]
     register_json_artifact(store, run_id, step="layout", payload=layout, artifact_type="layout", created_by="LayoutFinalis", attempt=attempt, status="accepted" if not blockers else "rejected")

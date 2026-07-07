@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from EyeOfTerror.common_protocol import worker_order
 from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import (
     execution_packet,
     guidance_blockers,
@@ -16,6 +17,20 @@ from EyeOfTerror.Pictorium.Brigades.Image.Workers.Promptwright.worker import pre
 
 
 WORKER = "CharacterSheetwright"
+
+
+def child_order(parent_order: dict[str, Any], *, to: str, step_id: str, task: str, expected_output: str) -> dict[str, Any]:
+    return worker_order(
+        mission_id=str(parent_order.get("mission_id") or ""),
+        step_id=step_id,
+        sender=WORKER,
+        to=to,
+        task=task,
+        expected_output=expected_output,
+        input_artifacts=[],
+        quality_requirements=["return a shared worker_report to the calling comics worker"],
+        revision_context={"parent_step_id": str(parent_order.get("step_id") or "")},
+    )
 
 
 def worker_contract() -> dict[str, Any]:
@@ -44,9 +59,16 @@ def build_character_sheet(payload: dict[str, Any] | None) -> dict[str, Any]:
         f"character sheet for comic continuity, {request}, front view, side view, head close-up, "
         "costume and silhouette reference, plain background, no text labels"
     )
+    parent_order = data.get("worker_order") if isinstance(data.get("worker_order"), dict) else {}
     image_plan = prepare_image_plan(
         {
-            "request": sheet_request,
+            "worker_order": child_order(
+                parent_order,
+                to="Promptwright",
+                step_id="character_sheet_image_planning",
+                task=sheet_request,
+                expected_output="/work/pictorium/character_sheet_image_plan.json",
+            ),
             "mode": "character_sheet",
             "variants": 4,
             "use_memory": False,

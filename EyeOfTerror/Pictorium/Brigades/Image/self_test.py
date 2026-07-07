@@ -74,6 +74,13 @@ def assert_worker_report(payload: dict[str, object], worker: str, step_id: str) 
 
 
 def _main() -> int:
+    try:
+        prepare_image_plan({"request": "raw image request without worker_order", "use_memory": False, "use_thinker": False})
+    except ValueError as exc:
+        if "worker_order is required" not in str(exc):
+            raise AssertionError(f"Promptwright rejected raw payload with the wrong error: {exc}") from exc
+    else:
+        raise AssertionError("Promptwright accepted raw payload without worker_order")
     plan = prepare_image_plan(
         {
             **order_payload("Promptwright", "image_planning", "smoke test image 512x512", "/work/pictorium/image_plan.json"),

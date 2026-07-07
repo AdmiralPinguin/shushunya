@@ -2,12 +2,20 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import unittest
 import urllib.request
 from urllib.error import HTTPError
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+LOCAL_ROOT = Path(__file__).resolve().parent
+for path in (PROJECT_ROOT, LOCAL_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from EyeOfTerror.common_protocol import validate_protocol_payload, worker_order
 import planning_brigade
@@ -53,10 +61,11 @@ class PlanningRoleServiceTests(unittest.TestCase):
         context: dict[str, Any] = {"payload": payload}
         trace: list[dict[str, Any]] = []
         for role_name in ROLE_ORDER:
-            result = run_role_plan(role_name, {"payload": payload, "context": context})
+            result = run_role_plan(role_name, {"worker_order": self.planning_order(role_name, role_name.lower()), "payload": payload, "context": context})
             self.assertEqual(result["status"], "completed", result)
             self.assertTrue(result["read_only"], result)
-            self.assertEqual(result["protocol_mode"], "legacy_plan", result)
+            self.assertEqual(result["protocol_mode"], "worker_order", result)
+            validate_protocol_payload(result["worker_report"], expected_type="worker_report")
             outputs = result["outputs"]
             context.update(outputs)
             trace.append({"role": role_name, "outputs": result["output_artifacts"]})
@@ -68,15 +77,24 @@ class PlanningRoleServiceTests(unittest.TestCase):
         self.assertEqual(context["repo_survey_request"], packet["repo_survey_request"])
         self.assertEqual(context["planning_review_gate"]["decision"], packet["planning_review_gate"]["decision"])
 
-    def test_task_triage_http_service_exposes_plan_endpoint(self) -> None:
+    def test_task_triage_http_service_exposes_work_endpoint(self) -> None:
         server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler("TaskTriage"))
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
             host, port = server.server_address
+            with self.assertRaises(HTTPError) as missing_order:
+                post_json(f"http://{host}:{port}/work", {"payload": {"task": "raw bypass"}})
+            self.assertEqual(missing_order.exception.code, 400)
+            with self.assertRaises(HTTPError) as removed_plan:
+                post_json(
+                    f"http://{host}:{port}/plan",
+                    {"worker_order": self.planning_order(), "payload": {"task": "добавь pytest для `app.py`", "repo_path": "/repo"}},
+                )
+            self.assertEqual(removed_plan.exception.code, 404)
             response = post_json(
-                f"http://{host}:{port}/plan",
-                {"payload": {"task": "добавь pytest для `app.py`", "repo_path": "/repo"}},
+                f"http://{host}:{port}/work",
+                {"worker_order": self.planning_order(), "payload": {"repo_path": "/repo"}},
             )
         finally:
             server.shutdown()
@@ -84,7 +102,8 @@ class PlanningRoleServiceTests(unittest.TestCase):
             thread.join(timeout=5)
         self.assertEqual(response["status"], "completed", response)
         self.assertEqual(response["role"], "TaskTriage")
-        self.assertEqual(response["protocol_mode"], "legacy_plan")
+        self.assertEqual(response["protocol_mode"], "worker_order")
+        validate_protocol_payload(response["worker_report"], expected_type="worker_report")
         self.assertIn("task_triage", response["outputs"])
         self.assertIn("problem_statement", response["outputs"])
 
@@ -119,8 +138,9 @@ class PlanningRoleServiceTests(unittest.TestCase):
         capabilities = role_capabilities("RiskScribe")
         self.assertEqual(capabilities["role"], "RiskScribe")
         self.assertIn("POST /work", capabilities["endpoints"])
-        self.assertIn("POST /plan", capabilities["endpoints"])
+        self.assertNotIn("POST /plan", capabilities["endpoints"])
         self.assertEqual(capabilities["protocol"]["strict_endpoint"], "POST /work")
+        self.assertNotIn("legacy_endpoint", capabilities["protocol"])
         self.assertEqual(capabilities["service_contract"]["port"], 7115)
         self.assertFalse(capabilities["service_contract"]["may_mutate_source"])
 
@@ -133,7 +153,8 @@ class PlanningRoleServiceTests(unittest.TestCase):
         self.assertTrue(manifest["ports_unique"])
         self.assertTrue(manifest["read_only"])
         by_role = {service["role"]: service for service in manifest["services"]}
-        self.assertEqual(by_role["TaskTriage"]["plan_url"], "http://127.0.0.1:7111/plan")
+        self.assertEqual(by_role["TaskTriage"]["work_url"], "http://127.0.0.1:7111/work")
+        self.assertNotIn("plan_url", by_role["TaskTriage"])
         self.assertEqual(by_role["RiskScribe"]["handoff_to"], "Ceraxia")
         for role in ROLE_ORDER:
             self.assertIn("role_service.py", " ".join(by_role[role]["command"]))

@@ -15,7 +15,7 @@ if str(WARMMASTER_ROOT) not in sys.path:
 
 from PIL import Image
 
-from EyeOfTerror.common_protocol import commander_order, validate_protocol_payload
+from EyeOfTerror.common_protocol import commander_order, validate_protocol_payload, worker_order
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ArtifactFinalis.worker import build_final_manifest
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ForgeDispatcher.worker import prepare_dispatch
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ImageVerifier.worker import verify_image
@@ -48,6 +48,32 @@ def load_json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def image_worker_payload(
+    *,
+    worker: str,
+    step_id: str,
+    task: str,
+    expected_output: str,
+    **fields: object,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "worker_order": worker_order(
+            mission_id="mission-moriana-e2e-image",
+            step_id=step_id,
+            sender="Moriana",
+            to=worker,
+            task=task,
+            expected_output=expected_output,
+            quality_requirements=[
+                "return a protocol worker_report",
+                "do not answer the user directly",
+            ],
+        )
+    }
+    payload.update(fields)
+    return payload
+
+
 def _main() -> int:
     task = "нарисуй картинку тестового механикум-алтаря stable diffusion 512x512"
     with tempfile.TemporaryDirectory(prefix="moriana-e2e-") as tmp:
@@ -74,23 +100,64 @@ def _main() -> int:
         if dispatch_workers != ["Promptwright", "ModelQuartermaster", "ForgeDispatcher", "ImageVerifier", "ArtifactFinalis"]:
             raise AssertionError(f"bad dispatch order: {dispatch_workers}")
 
-        plan = prepare_image_plan({"request": task, "use_memory": False, "use_thinker": False})
-        resources = inspect_resources({"job_spec": plan["job_spec"]})
-        dispatch = prepare_dispatch({"job_spec": plan["job_spec"], "submit": True, "db_path": str(root / "forge.sqlite3")})
+        plan = prepare_image_plan(
+            image_worker_payload(
+                worker="Promptwright",
+                step_id="image_plan",
+                task=task,
+                expected_output="/work/pictorium/image_plan.json",
+                use_memory=False,
+                use_thinker=False,
+            )
+        )
+        resources = inspect_resources(
+            image_worker_payload(
+                worker="ModelQuartermaster",
+                step_id="resource_report",
+                task="Inspect model resources for the prepared image job.",
+                expected_output="/work/pictorium/resource_report.json",
+                job_spec=plan["job_spec"],
+            )
+        )
+        dispatch = prepare_dispatch(
+            image_worker_payload(
+                worker="ForgeDispatcher",
+                step_id="forge_dispatch",
+                task="Submit the prepared image job to the Forge runtime queue.",
+                expected_output="/work/pictorium/forge_dispatch.json",
+                job_spec=plan["job_spec"],
+                submit=True,
+                db_path=str(root / "forge.sqlite3"),
+            )
+        )
         if not dispatch.get("ok") or not dispatch.get("job_record"):
             raise AssertionError(f"Forge dispatch did not submit queued job: {dispatch}")
 
         artifact_path = root / "artifact.png"
         Image.new("RGB", (512, 512), (80, 72, 64)).save(artifact_path)
-        verification = verify_image({"artifact_path": str(artifact_path), "job_spec": plan["job_spec"], "job_record": dispatch["job_record"]})
+        verification = verify_image(
+            image_worker_payload(
+                worker="ImageVerifier",
+                step_id="image_verification",
+                task="Verify the generated test artifact.",
+                expected_output="/work/pictorium/image_verification.json",
+                artifact_path=str(artifact_path),
+                job_spec=plan["job_spec"],
+                job_record=dispatch["job_record"],
+            )
+        )
         final = build_final_manifest(
-            {
-                "plan": plan,
-                "resources": resources,
-                "dispatch": dispatch,
-                "verification": verification,
-                "artifacts": [str(artifact_path)],
-            }
+            image_worker_payload(
+                worker="ArtifactFinalis",
+                step_id="finalize",
+                task="Build the final image manifest for the e2e test.",
+                expected_output="/work/pictorium/final_manifest.json",
+                plan=plan,
+                resources=resources,
+                dispatch=dispatch,
+                verification=verification,
+                artifacts=[str(artifact_path)],
+            )
         )
         if not final.get("ok") or final.get("final_manifest", {}).get("status") != "ready":
             raise AssertionError(f"final image manifest is not ready: {final}")

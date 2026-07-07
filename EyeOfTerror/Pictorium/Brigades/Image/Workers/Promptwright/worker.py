@@ -27,7 +27,7 @@ def worker_contract() -> dict[str, Any]:
         name=WORKER,
         role="image intent parser and Forge job/project planner",
         capabilities=["txt2img_plan", "project_plan", "prompt_normalization"],
-        inputs=["request|task|contract.goal", "mode", "preferred_engine", "use_memory", "use_thinker"],
+        inputs=["worker_order.task", "mode", "preferred_engine", "use_memory", "use_thinker"],
         outputs=["job_spec|project_spec", "plan_kind", "artifact"],
     )
 

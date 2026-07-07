@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from EyeOfTerror.common_protocol import worker_order
 from EyeOfTerror.Pictorium.Brigades.Comics.worker_api import (
     execution_packet,
     guidance_blockers,
@@ -19,6 +20,26 @@ from EyeOfTerror.Pictorium.Brigades.Image.Workers.Promptwright.worker import pre
 
 
 WORKER = "Panelwright"
+
+
+def child_order(parent_order: dict[str, Any], *, to: str, step_id: str, task: str, expected_output: str) -> dict[str, Any]:
+    return worker_order(
+        mission_id=str(parent_order.get("mission_id") or ""),
+        step_id=step_id,
+        sender=WORKER,
+        to=to,
+        task=task,
+        expected_output=expected_output,
+        input_artifacts=[],
+        quality_requirements=["return a shared worker_report to the calling comics worker"],
+        revision_context={"parent_step_id": str(parent_order.get("step_id") or "")},
+    )
+
+
+def safe_panel_step_id(panel: dict[str, Any], suffix: str) -> str:
+    raw = str(panel.get("id") or panel.get("order") or "panel").strip().lower()
+    safe = re.sub(r"[^a-z0-9_.-]+", "-", raw).strip("-") or "panel"
+    return f"{safe}_{suffix}"
 
 
 def _explicit_dimensions(text: str) -> tuple[int, int] | None:
@@ -78,20 +99,48 @@ def build_panel_packages(payload: dict[str, Any] | None) -> dict[str, Any]:
     submit = bool(data.get("submit", False))
     db_path = data.get("db_path")
     constraints = panel_runtime_constraints(data)
+    parent_order = data.get("worker_order") if isinstance(data.get("worker_order"), dict) else {}
     panel_packages = []
     blockers: list[dict[str, Any]] = guidance_blockers(guidance, worker=WORKER, step="panel_generation")
     for panel in panels:
         request = str(panel.get("image_request") or panel.get("caption") or panel.get("id") or "").strip()
         request = constrained_panel_request(request, constraints)
         plan_payload = {
-            "request": request,
+            "worker_order": child_order(
+                parent_order,
+                to="Promptwright",
+                step_id=safe_panel_step_id(panel, "image_plan"),
+                task=request,
+                expected_output="/work/pictorium/panel_image_plan.json",
+            ),
             "preferred_engine": constraints.get("preferred_engine"),
             "use_memory": False,
             "use_thinker": False,
         }
         image_plan = prepare_image_plan(plan_payload)
-        resources = inspect_resources({"job_spec": image_plan.get("job_spec", {})})
-        dispatch_payload = {"job_spec": image_plan.get("job_spec", {}), "submit": submit}
+        resources = inspect_resources(
+            {
+                "worker_order": child_order(
+                    parent_order,
+                    to="ModelQuartermaster",
+                    step_id=safe_panel_step_id(panel, "resource_readiness"),
+                    task=f"inspect resources for {request}",
+                    expected_output="/work/pictorium/panel_resource_report.json",
+                ),
+                "job_spec": image_plan.get("job_spec", {}),
+            }
+        )
+        dispatch_payload = {
+            "worker_order": child_order(
+                parent_order,
+                to="ForgeDispatcher",
+                step_id=safe_panel_step_id(panel, "forge_dispatch"),
+                task=f"validate forge dispatch for {request}",
+                expected_output="/work/pictorium/panel_forge_jobs.json",
+            ),
+            "job_spec": image_plan.get("job_spec", {}),
+            "submit": submit,
+        }
         if db_path:
             dispatch_payload["db_path"] = db_path
         dispatch = prepare_dispatch(dispatch_payload)

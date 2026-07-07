@@ -14,7 +14,7 @@
   "shared_endpoints": [
     "GET /health",
     "GET /capabilities",
-    "POST /plan"
+    "POST /work"
   ],
   "services": [
     {

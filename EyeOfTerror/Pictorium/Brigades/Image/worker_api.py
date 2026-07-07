@@ -46,16 +46,17 @@ def response(worker: str, payload: dict[str, Any], *, ok: bool = True) -> dict[s
             result.setdefault("worker_order", order)
             result.setdefault("worker_report", worker_report_from_response(worker, order, result, ok=ok))
         else:
-            result.setdefault("protocol_mode", "legacy_payload")
+            raise ValueError("worker_order is required for Pictorium worker execution")
     return result
 
 
 def require_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     if payload is None:
-        _push_payload({})
-        return {}
+        raise ValueError("worker_order is required for Pictorium worker execution")
     if not isinstance(payload, dict):
         raise TypeError("worker payload must be a JSON object")
+    if not worker_order_from_payload(payload):
+        raise ValueError("worker_order is required for Pictorium worker execution")
     _push_payload(payload)
     return payload
 
@@ -71,11 +72,7 @@ def task_text(payload: dict[str, Any]) -> str:
     order = worker_order_from_payload(payload)
     if order:
         return str(order.get("task") or "").strip()
-    text = str(payload.get("request") or payload.get("task") or "").strip()
-    if text:
-        return text
-    contract = payload.get("contract") if isinstance(payload.get("contract"), dict) else {}
-    return str(contract.get("goal") or "").strip()
+    raise ValueError("worker_order is required for Pictorium worker execution")
 
 
 def model_dump(value: Any) -> Any:

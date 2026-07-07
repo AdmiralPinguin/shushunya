@@ -109,7 +109,7 @@ def worker_order_from_request(request: dict[str, Any]) -> dict[str, Any]:
 def attach_worker_protocol(role_name: str, request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     order = worker_order_from_request(request)
     if not order:
-        return {**result, "protocol_mode": "legacy_plan"}
+        raise ValueError("worker_order is required for PlanningBrigade role execution")
     if str(order.get("to") or "").strip() != role_name:
         raise ValueError(f"worker_order.to={order.get('to')!r} cannot be handled by {role_name}")
     output_artifacts = result.get("output_artifacts") if isinstance(result.get("output_artifacts"), list) else []
@@ -137,6 +137,8 @@ def attach_worker_protocol(role_name: str, request: dict[str, Any], result: dict
 def run_role_plan(role_name: str, request: dict[str, Any]) -> dict[str, Any]:
     if role_name not in ROLE_MODULES:
         raise ValueError(f"unsupported PlanningBrigade role: {role_name}")
+    if not worker_order_from_request(request):
+        raise ValueError("worker_order is required for PlanningBrigade role execution")
     normalized = normalize_role_request(role_name, request)
     helpers = planning_helpers()
     module = ROLE_MODULES[role_name]
@@ -174,8 +176,8 @@ def role_capabilities(role_name: str) -> dict[str, Any]:
         "contract_version": CONTRACT_VERSION,
         "role": role_name,
         "role_order": ROLE_ORDER,
-        "endpoints": ["GET /health", "GET /capabilities", "POST /work", "POST /plan"],
-        "protocol": {"strict_endpoint": "POST /work", "legacy_endpoint": "POST /plan", "input": "worker_order", "output": "worker_report"},
+        "endpoints": ["GET /health", "GET /capabilities", "POST /work"],
+        "protocol": {"strict_endpoint": "POST /work", "input": "worker_order", "output": "worker_report"},
         "role_contract": role_contract_for(role_name),
         "service_contract": service_contract_for(role_name),
     }
@@ -221,7 +223,7 @@ def make_handler(role_name: str) -> type[BaseHTTPRequestHandler]:
             write_response(self, 404, {"ok": False, "error": "unknown endpoint"})
 
         def do_POST(self) -> None:
-            if self.path not in {"/plan", "/work"}:
+            if self.path != "/work":
                 write_response(self, 404, {"ok": False, "error": "unknown endpoint"})
                 return
             try:
@@ -229,8 +231,8 @@ def make_handler(role_name: str) -> type[BaseHTTPRequestHandler]:
                 request = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
                 if not isinstance(request, dict):
                     raise ValueError("request body must be a JSON object")
-                if self.path == "/work" and not worker_order_from_request(request):
-                    raise ValueError("worker_order is required for POST /work")
+                if not worker_order_from_request(request):
+                    raise ValueError("worker_order is required for PlanningBrigade role execution")
                 result = run_role_plan(role_name, request)
             except Exception as exc:  # pragma: no cover - exercised through HTTP failure paths manually
                 write_response(self, 400, {"ok": False, "error": str(exc), "role": role_name})
@@ -253,10 +255,10 @@ def main() -> int:
     parser.add_argument("--role", choices=ROLE_ORDER, required=True)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=0)
-    parser.add_argument("--plan-json", type=Path, help="Run one /plan request from a JSON file instead of serving HTTP.")
+    parser.add_argument("--work-json", type=Path, help="Run one /work request from a JSON file instead of serving HTTP.")
     args = parser.parse_args()
-    if args.plan_json:
-        print(json.dumps(run_role_plan(args.role, load_json(args.plan_json)), ensure_ascii=False, indent=2))
+    if args.work_json:
+        print(json.dumps(run_role_plan(args.role, load_json(args.work_json)), ensure_ascii=False, indent=2))
         return 0
     port = args.port or int(service_contract_for(args.role).get("port") or 0)
     if port <= 0:

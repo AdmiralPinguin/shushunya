@@ -38,7 +38,7 @@ def service_specs(host: str = "127.0.0.1") -> list[dict[str, Any]]:
                 "base_url": f"http://{host}:{port}",
                 "health_url": f"http://{host}:{port}/health",
                 "capabilities_url": f"http://{host}:{port}/capabilities",
-                "plan_url": f"http://{host}:{port}/plan",
+                "work_url": f"http://{host}:{port}/work",
                 "command": [
                     sys.executable,
                     str(ROOT / "role_service.py"),
