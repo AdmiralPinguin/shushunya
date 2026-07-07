@@ -11,6 +11,35 @@ def final_message(payload: dict[str, object]) -> str:
     return ArchiveHandler.warmaster_final_message(None, payload)
 
 
+def accepted_review() -> dict[str, object]:
+    return {
+        "type": "acceptance_review",
+        "reviewer": "Warmaster",
+        "accepted": True,
+        "status": "accepted",
+    }
+
+
+def accepted_protocol(answer: str) -> dict[str, object]:
+    return {
+        "acceptance_review": accepted_review(),
+        "final_response": {
+            "type": "final_response",
+            "answer": answer,
+        },
+    }
+
+
+def accepted_protocol_history(answer: str) -> dict[str, object]:
+    return {
+        "acceptance_reviews": [accepted_review()],
+        "final_response": {
+            "type": "final_response",
+            "answer": answer,
+        },
+    }
+
+
 class FakeArchiveHandler:
     def __init__(self, path: str) -> None:
         self.path = path
@@ -37,12 +66,7 @@ def main() -> int:
             "status": "completed",
             "summary": {
                 "status": "completed",
-                "mission_protocol": {
-                    "final_response": {
-                        "type": "final_response",
-                        "answer": "Принятый Вармастером финальный ответ.",
-                    }
-                },
+                "mission_protocol": accepted_protocol("Принятый Вармастером финальный ответ."),
             },
             "display": {"detail": "служебный completed detail"},
             "final": {"deliverable": "fallback deliverable"},
@@ -50,6 +74,22 @@ def main() -> int:
     )
     if accepted != "Принятый Вармастером финальный ответ.":
         raise AssertionError(f"accepted final_response was not preferred: {accepted!r}")
+    unaccepted_final = final_message(
+        {
+            "status": "completed",
+            "summary": {
+                "status": "completed",
+                "mission_protocol": {
+                    "final_response": {
+                        "type": "final_response",
+                        "answer": "Финал без приемки не должен уйти в чат.",
+                    }
+                },
+            },
+        }
+    )
+    if unaccepted_final:
+        raise AssertionError(f"final_response without accepted acceptance_review reached chat: {unaccepted_final!r}")
     legacy_fallback = final_message(
         {
             "status": "completed",
@@ -155,12 +195,7 @@ def main() -> int:
             "snapshot": {
                 "summary": {
                     "status": "completed",
-                    "mission_protocol": {
-                        "final_response": {
-                            "type": "final_response",
-                            "answer": "Финал для доставки из фонового журнала.",
-                        }
-                    },
+                    "mission_protocol": accepted_protocol_history("Финал для доставки из фонового журнала."),
                 }
             },
             "display": {"detail": "служебный completed detail"},
@@ -174,17 +209,12 @@ def main() -> int:
     original_append = task_journal.append_chat_message
     task_journal.fetch_orchestration = lambda task_id: {
         "status": "completed",
-        "snapshot": {
-            "summary": {
-                "status": "completed",
-                "mission_protocol": {
-                    "final_response": {
-                        "type": "final_response",
-                        "answer": f"Доставленный финал {task_id}.",
-                    }
-                },
-            }
-        },
+            "snapshot": {
+                "summary": {
+                    "status": "completed",
+                    "mission_protocol": accepted_protocol(f"Доставленный финал {task_id}."),
+                }
+            },
     }
     task_journal.append_chat_message = lambda *args, **kwargs: delivered.append({"args": args, "kwargs": kwargs})
     try:
@@ -263,12 +293,7 @@ def main() -> int:
                     "status": "completed",
                     "task_id": "mobile-final-event",
                     "goal": "проверить разделение финала и активности",
-                    "mission_protocol": {
-                        "final_response": {
-                            "type": "final_response",
-                            "answer": "Мобильный финал из final_response.",
-                        }
-                    },
+                    "mission_protocol": accepted_protocol("Мобильный финал из final_response."),
                 }
             },
             "governor_activity": activity_payload,

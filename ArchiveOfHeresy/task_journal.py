@@ -76,6 +76,24 @@ def _orchestration_summary(orchestration):
     return snapshot.get("summary") if isinstance(snapshot.get("summary"), dict) else {}
 
 
+def _latest_acceptance_review(protocol):
+    review = protocol.get("acceptance_review") if isinstance(protocol.get("acceptance_review"), dict) else {}
+    reviews = protocol.get("acceptance_reviews") if isinstance(protocol.get("acceptance_reviews"), list) else []
+    valid_reviews = [item for item in reviews if isinstance(item, dict)]
+    if valid_reviews:
+        review = valid_reviews[-1]
+    return review if isinstance(review, dict) else {}
+
+
+def _warmaster_accepted_protocol_final(protocol):
+    review = _latest_acceptance_review(protocol)
+    return (
+        str(review.get("type") or "") == "acceptance_review"
+        and str(review.get("reviewer") or "") == "Warmaster"
+        and review.get("accepted") is True
+    )
+
+
 def final_response_message_from_orchestration(orchestration):
     status = str(orchestration.get("status") or "").strip().lower()
     summary = _orchestration_summary(orchestration)
@@ -84,6 +102,8 @@ def final_response_message_from_orchestration(orchestration):
     if status != "completed":
         return ""
     protocol = summary.get("mission_protocol") if isinstance(summary.get("mission_protocol"), dict) else {}
+    if not _warmaster_accepted_protocol_final(protocol):
+        return ""
     final_response = protocol.get("final_response") if isinstance(protocol.get("final_response"), dict) else {}
     if str(final_response.get("type") or "") != "final_response":
         return ""
