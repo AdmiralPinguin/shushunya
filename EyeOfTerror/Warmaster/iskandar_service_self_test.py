@@ -67,7 +67,12 @@ def protocol_only_order(task_id: str) -> dict:
 def main() -> int:
     direct_order = protocol_only_order("iskandar-protocol-direct")
     direct_task, direct_command = task_from_payload({"commander_order": direct_order})
-    if direct_task != direct_order["primary_goal"] or direct_task.startswith("ПРИКАЗ ВАРМАСТЕРА") or direct_command != direct_order:
+    if (
+        not direct_task.startswith(str(direct_order["primary_goal"]))
+        or direct_task.startswith("ПРИКАЗ ВАРМАСТЕРА")
+        or "Do not use raw user_request as the transport task." not in direct_task
+        or direct_command != direct_order
+    ):
         raise AssertionError(f"Iskandar task_from_payload did not stay protocol-first: task={direct_task!r} command={direct_command}")
     contract_workers = [
         step.worker

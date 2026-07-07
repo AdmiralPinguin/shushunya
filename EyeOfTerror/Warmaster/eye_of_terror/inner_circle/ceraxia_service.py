@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 from EyeOfTerror.model_brain import model_contract, request_model_decision
 from EyeOfTerror.common_protocol import governor_plan_from_contract, validate_protocol_payload
 
+from ..command_text import task_text_from_commander_order
 from ..contracts import build_code_task_contract, code_worker_plan
 from ..pipeline import write_pipeline_run
 from .ceraxia import executable_client_action, oversight_plan, patch_contract_capabilities, payload_with_plan_view, plan_code_task
@@ -77,7 +78,7 @@ def task_from_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         validate_protocol_payload(command, expected_type="commander_order")
     task = str(payload.get("task") or payload.get("message") or "").strip()
     if not task and command:
-        task = str(command.get("primary_goal") or command.get("commander_intent") or "").strip()
+        task = task_text_from_commander_order(command)
     return task, command
 
 

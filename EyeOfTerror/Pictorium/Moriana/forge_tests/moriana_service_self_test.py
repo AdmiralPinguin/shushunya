@@ -80,7 +80,12 @@ def protocol_only_order(task_id: str) -> dict[str, object]:
 def _main() -> int:
     direct_order = protocol_only_order("moriana-protocol-direct")
     direct_task, direct_command = task_from_payload({"commander_order": direct_order})
-    if direct_task != direct_order["primary_goal"] or direct_task.startswith("ПРИКАЗ ВАРМАСТЕРА") or direct_command != direct_order:
+    if (
+        not direct_task.startswith(str(direct_order["primary_goal"]))
+        or direct_task.startswith("ПРИКАЗ ВАРМАСТЕРА")
+        or "Do not use raw user_request as the transport task." not in direct_task
+        or direct_command != direct_order
+    ):
         raise AssertionError(f"Moriana task_from_payload did not stay protocol-first: task={direct_task!r} command={direct_command}")
     with tempfile.TemporaryDirectory(prefix="moriana-service-self-test-") as tmp:
         run_root = Path(tmp) / "runs"
@@ -173,7 +178,8 @@ def _main() -> int:
             if (
                 not protocol_only_run.get("ok")
                 or str(protocol_only_run.get("status", {}).get("task") or "").startswith("ПРИКАЗ ВАРМАСТЕРА")
-                or protocol_only_run.get("status", {}).get("task") != "нарисуй протокольную картинку 512x512"
+                or not str(protocol_only_run.get("status", {}).get("task") or "").startswith("нарисуй протокольную картинку 512x512")
+                or "Do not use raw user_request as the transport task." not in str(protocol_only_run.get("status", {}).get("task") or "")
             ):
                 raise AssertionError(f"Moriana /runs did not use commander_order as authority: {protocol_only_run}")
             executed = request_json(

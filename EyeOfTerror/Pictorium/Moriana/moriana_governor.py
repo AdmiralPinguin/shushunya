@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from EyeOfTerror.Warmaster.eye_of_terror.brigade import contract_required_workers, worker_availability
+from EyeOfTerror.Warmaster.eye_of_terror.command_text import task_text_from_commander_order
 from EyeOfTerror.Warmaster.eye_of_terror.contracts import (
     TaskContract,
     build_comics_generation_contract,
@@ -415,7 +416,7 @@ def create_or_execute_run(run_root: Path, payload: dict[str, Any]) -> dict[str, 
         validate_protocol_payload(command, expected_type="commander_order")
     task = str(payload.get("task") or payload.get("request") or "").strip()
     if not task and command:
-        task = str(command.get("primary_goal") or command.get("commander_intent") or "").strip()
+        task = task_text_from_commander_order(command)
     if not task:
         raise ValueError("task is required")
     plan = plan_image_task(task, task_id=str(payload.get("task_id") or "").strip() or None)
@@ -516,7 +517,7 @@ def task_from_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         validate_protocol_payload(command, expected_type="commander_order")
     task = str(payload.get("task") or payload.get("request") or "").strip()
     if not task and command:
-        task = str(command.get("primary_goal") or command.get("commander_intent") or "").strip()
+        task = task_text_from_commander_order(command)
     return task, command
 
 
