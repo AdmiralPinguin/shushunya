@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from EyeOfTerror.common_protocol import LIFECYCLE_STATUSES
+
 from .actions import run_actions
 from .artifacts import artifact_status, final_manifest_summary, final_package
 from .gateway_util import validate_service_host
@@ -71,6 +73,7 @@ def mission_protocol_payloads_for_run(run_dir: Path) -> dict[str, dict[str, Any]
     if mission_dir is None:
         return {}
     return {
+        "mission": _read_json(mission_dir / "mission.json"),
         "commander_order": _read_json(mission_dir / "commander_order.json"),
         "governor_plan": _read_json(mission_dir / "governor_plan.json"),
         "final_response": _read_json(mission_dir / "final_response.json"),
@@ -208,6 +211,33 @@ def run_progress(status: dict[str, Any], ledger: dict[str, Any]) -> dict[str, An
     }
 
 
+RUN_STATUS_TO_LIFECYCLE = {
+    "created": "created",
+    "queued": "assigned",
+    "ready": "plan_review",
+    "ready_to_start": "plan_review",
+    "running": "executing",
+    "cancelling": "cancelled",
+    "cancelled": "cancelled",
+    "completed": "completed",
+    "failed": "failed",
+    "corrupt": "failed",
+    "interrupted": "failed",
+    "blocked": "blocked",
+    "preflight_failed": "failed",
+    "needs_revision": "revision",
+    "revision": "revision",
+}
+
+
+def lifecycle_status_for(summary_status: str, mission: dict[str, Any]) -> str:
+    mission_status = str(mission.get("status") or "").strip()
+    if mission_status in LIFECYCLE_STATUSES:
+        return mission_status
+    normalized = str(summary_status or "").strip().lower()
+    return RUN_STATUS_TO_LIFECYCLE.get(normalized, "created")
+
+
 def run_summary(run_dir: Path) -> dict[str, Any]:
     status_path = run_dir / "status.json"
     ledger_path = run_dir / "task_ledger.json"
@@ -218,10 +248,15 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
     revision_plan_errors = validate_revision_plan(run_dir, revision_plan)
     package_errors = run_package_action_errors(run_dir)
     oversight_errors = run_oversight_validation_errors(run_dir, status)
+    mission_protocol = mission_protocol_payloads_for_run(run_dir)
+    mission = mission_protocol.get("mission") if isinstance(mission_protocol.get("mission"), dict) else {}
+    summary_status = "corrupt" if (ledger_error and ledger_path.exists()) or status_error else ledger.get("status") or status.get("status") or "unknown"
     summary = {
         "task_id": ledger.get("task_id") or status.get("task_id") or run_dir.name,
         "run_dir": str(run_dir),
-        "status": "corrupt" if (ledger_error and ledger_path.exists()) or status_error else ledger.get("status") or status.get("status") or "unknown",
+        "status": summary_status,
+        "lifecycle_status": lifecycle_status_for(str(summary_status), mission),
+        "mission_status": str(mission.get("status") or ""),
         "goal": ledger.get("goal") or "",
         "governor": ledger.get("governor") or status.get("governor") or "",
         "created_at": ledger.get("created_at") or "",
@@ -235,7 +270,7 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         "oversight_summary": run_oversight_summary(run_dir),
         "final_manifest_summary": final_manifest_summary(result),
         "mission_ref": mission_ref_for_run(run_dir),
-        "mission_protocol": mission_protocol_payloads_for_run(run_dir),
+        "mission_protocol": mission_protocol,
         "mission_progress_events": mission_progress_events_for_run(run_dir),
         "progress": run_progress(status, ledger),
         "last_preflight": last_run_preflight(ledger),
