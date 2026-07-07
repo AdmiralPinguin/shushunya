@@ -10,7 +10,7 @@ from .artifacts import artifact_status
 from .command_text import task_text_from_commander_order
 from .gateway_util import valid_task_id, validate_service_host
 from .ledger import TaskLedger, now_iso
-from .mission_control import link_run_to_mission, open_mission
+from .mission_control import link_run_to_mission, mission_protocol_audit, open_mission
 from .orchestrator import cancel_http_worker_tasks, research_loop_run
 from .routing import route_message
 from .run_package import load_ledger_dict
@@ -443,7 +443,13 @@ def dependencies_completed(state: dict[str, Any], subrun: dict[str, Any]) -> boo
     subruns = state.get("subruns") if isinstance(state.get("subruns"), dict) else {}
     for dependency in subrun.get("depends_on", []) if isinstance(subrun.get("depends_on"), list) else []:
         dependency_state = subruns.get(str(dependency)) if isinstance(subruns, dict) else {}
-        if not isinstance(dependency_state, dict) or dependency_state.get("status") != "completed":
+        protocol_completion = dependency_state.get("protocol_completion") if isinstance(dependency_state, dict) else {}
+        if (
+            not isinstance(dependency_state, dict)
+            or dependency_state.get("status") != "completed"
+            or not isinstance(protocol_completion, dict)
+            or protocol_completion.get("ok") is not True
+        ):
             return False
     return True
 
@@ -469,6 +475,53 @@ def run_artifact_names(summary: dict[str, Any]) -> set[str]:
     return names
 
 
+def subrun_protocol_completion(run_root: Path, task_id: str) -> dict[str, Any]:
+    run_dir = run_root / task_id
+    ref = read_json_object(run_dir / "mission_ref.json") if (run_dir / "mission_ref.json").exists() else {}
+    mission_id = str(ref.get("mission_id") or "")
+    mission_dir_text = str(ref.get("mission_dir") or "")
+    if not mission_id or not mission_dir_text:
+        return {
+            "ok": False,
+            "mission_id": mission_id,
+            "mission_dir": mission_dir_text,
+            "errors": ["mission_ref.json must include mission_id and mission_dir"],
+        }
+    mission_dir = Path(mission_dir_text)
+    if not mission_dir.exists():
+        return {
+            "ok": False,
+            "mission_id": mission_id,
+            "mission_dir": mission_dir_text,
+            "errors": ["mission_dir does not exist"],
+        }
+    audit = mission_protocol_audit(mission_dir)
+    mission = read_json_object(mission_dir / "mission.json") if (mission_dir / "mission.json").exists() else {}
+    acceptance = read_json_object(mission_dir / "acceptance_review.json") if (mission_dir / "acceptance_review.json").exists() else {}
+    final = read_json_object(mission_dir / "final_response.json") if (mission_dir / "final_response.json").exists() else {}
+    errors = list(audit.get("errors") if isinstance(audit.get("errors"), list) else [])
+    if mission.get("status") != "completed":
+        errors.append(f"mission status must be completed, got {mission.get('status') or 'missing'}")
+    if acceptance.get("type") != "acceptance_review" or acceptance.get("accepted") is not True:
+        errors.append("accepted acceptance_review.json is required")
+    if acceptance and acceptance.get("reviewer") != "Warmaster":
+        errors.append("acceptance_review reviewer must be Warmaster")
+    if final.get("type") != "final_response" or not str(final.get("answer") or "").strip():
+        errors.append("final_response.json with answer is required")
+    return {
+        "ok": not errors and bool(audit.get("ok")),
+        "mission_id": mission_id,
+        "mission_dir": mission_dir_text,
+        "mission_status": str(mission.get("status") or ""),
+        "accepted": acceptance.get("accepted") is True,
+        "reviewer": str(acceptance.get("reviewer") or ""),
+        "has_final_response": bool(final),
+        "audit_ok": bool(audit.get("ok")),
+        "audit_error_count": len(audit.get("errors") if isinstance(audit.get("errors"), list) else []),
+        "errors": errors,
+    }
+
+
 def create_handoff(run_root: Path, campaign_id: str, plan: dict[str, Any], state: dict[str, Any], handoff_id: str) -> dict[str, Any]:
     handoff_plan = next(
         (item for item in plan.get("handoffs", []) if isinstance(item, dict) and item.get("id") == handoff_id),
@@ -481,6 +534,7 @@ def create_handoff(run_root: Path, campaign_id: str, plan: dict[str, Any], state
     source_state = state.get("subruns", {}).get(source_id, {}) if isinstance(state.get("subruns"), dict) else {}
     source_task_id = str(source_state.get("task_id") or "")
     source_summary = run_summary(run_root / source_task_id)
+    source_protocol = subrun_protocol_completion(run_root, source_task_id) if source_task_id else {"ok": False, "errors": ["source task_id is missing"]}
     available_names = run_artifact_names(source_summary)
     required_names = [str(item) for item in handoff_plan.get("required_artifacts", []) if isinstance(item, str)]
     missing = [name for name in required_names if name not in available_names]
@@ -492,6 +546,7 @@ def create_handoff(run_root: Path, campaign_id: str, plan: dict[str, Any], state
         "to_subrun": target_id,
         "source_task_id": source_task_id,
         "source_status": source_summary.get("status"),
+        "source_protocol_completion": source_protocol,
         "source_goal": source_summary.get("goal"),
         "source_final_manifest_summary": source_summary.get("final_manifest_summary", {}),
         "source_result": source_summary.get("result", {}),
@@ -504,7 +559,7 @@ def create_handoff(run_root: Path, campaign_id: str, plan: dict[str, Any], state
             "target must preserve original task acceptance criteria unless explicitly blocked",
         ],
         "acceptance_criteria": handoff_plan.get("acceptance_criteria", []),
-        "status": "ready" if not missing and source_summary.get("status") == "completed" else "incomplete",
+        "status": "ready" if not missing and source_summary.get("status") == "completed" and source_protocol.get("ok") is True else "incomplete",
         "created_at": now_iso(),
     }
     handoff_path = campaign_dir(run_root, campaign_id) / "handoffs" / f"{handoff_id}.json"
@@ -519,6 +574,7 @@ def create_handoff(run_root: Path, campaign_id: str, plan: dict[str, Any], state
             "path": str(handoff_path),
             "checks": [
                 {"name": "source_completed", "ok": source_summary.get("status") == "completed"},
+                {"name": "source_protocol_completed", "ok": source_protocol.get("ok") is True, "errors": source_protocol.get("errors", [])},
                 {"name": "required_artifacts_available", "ok": not missing, "missing": missing},
             ],
         }
@@ -534,7 +590,17 @@ def final_review(run_root: Path, campaign_id: str, plan: dict[str, Any], state: 
     for subrun in plan.get("subruns", []) if isinstance(plan.get("subruns"), list) else []:
         subrun_id = str(subrun.get("id") or "")
         item_state = subrun_states.get(subrun_id, {}) if isinstance(subrun_states, dict) else {}
+        task_id = str(item_state.get("task_id") or subrun.get("task_id") or "")
+        protocol_completion = subrun_protocol_completion(run_root, task_id) if task_id else {"ok": False, "errors": ["task_id is missing"]}
         checks.append({"name": f"subrun_completed:{subrun_id}", "ok": item_state.get("status") == "completed", "status": item_state.get("status", "")})
+        checks.append(
+            {
+                "name": f"subrun_protocol_completed:{subrun_id}",
+                "ok": protocol_completion.get("ok") is True,
+                "mission_id": protocol_completion.get("mission_id", ""),
+                "errors": protocol_completion.get("errors", []),
+            }
+        )
         for handoff_id in subrun.get("requires_handoffs", []) if isinstance(subrun.get("requires_handoffs"), list) else []:
             task_text = str(subrun.get("task") or "")
             handoff_state = handoff_states.get(str(handoff_id), {}) if isinstance(handoff_states, dict) else {}
@@ -589,6 +655,7 @@ def refresh_campaign_state(run_root: Path, campaign_id: str) -> dict[str, Any]:
             any_created = True
             summary = run_summary(run_dir)
             status = str(summary.get("status") or "unknown")
+            protocol_completion = subrun_protocol_completion(run_root, task_id) if status == "completed" else {}
             sub_state.update(
                 {
                     "id": subrun_id,
@@ -601,9 +668,13 @@ def refresh_campaign_state(run_root: Path, campaign_id: str) -> dict[str, Any]:
                     "run_dir": str(run_dir),
                     "last_run_status": status,
                     "run_summary": summary,
+                    "protocol_completion": protocol_completion,
                 }
             )
             if status == "completed":
+                if protocol_completion.get("ok") is not True:
+                    all_completed = False
+                    continue
                 for handoff_id in item.get("produces_handoffs", []) if isinstance(item.get("produces_handoffs"), list) else []:
                     handoff_state = state.get("handoffs", {}).get(str(handoff_id), {}) if isinstance(state.get("handoffs"), dict) else {}
                     if handoff_state.get("status") != "ready":
@@ -788,6 +859,9 @@ def next_ready_subrun(plan: dict[str, Any], state: dict[str, Any]) -> dict[str, 
             continue
         subrun_id = str(subrun.get("id") or "")
         sub_state = state.get("subruns", {}).get(subrun_id, {}) if isinstance(state.get("subruns"), dict) else {}
+        protocol_completion = sub_state.get("protocol_completion") if isinstance(sub_state, dict) else {}
+        if sub_state.get("status") == "completed" and isinstance(protocol_completion, dict) and protocol_completion.get("ok") is not True:
+            return subrun
         if sub_state.get("status") == "completed":
             continue
         if dependencies_completed(state, subrun) and required_handoffs_ready(state, subrun):

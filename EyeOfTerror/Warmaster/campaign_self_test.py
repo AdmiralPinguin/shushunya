@@ -21,6 +21,7 @@ from eye_of_terror.campaigns import (
     validate_campaign_plan,
 )
 from eye_of_terror.ledger import TaskLedger
+from eye_of_terror.mission_control import record_warmaster_acceptance
 from eye_of_terror.warmaster_gateway import make_handler
 
 
@@ -152,10 +153,22 @@ def main() -> int:
             raise AssertionError(f"research subrun mission_ref missing: {research_created}")
 
         make_completed_research_run(run_root, "campaign-self-test-research")
+        pre_acceptance_state = campaign_state(run_root, "campaign-self-test")
+        pre_acceptance_handoff = pre_acceptance_state.get("state", {}).get("handoffs", {}).get("research_to_implementation", {})
+        if pre_acceptance_handoff.get("status") == "ready":
+            raise AssertionError(f"handoff became ready before Warmaster acceptance: {pre_acceptance_state}")
+        pre_acceptance_subrun = pre_acceptance_state.get("state", {}).get("subruns", {}).get("research", {})
+        if pre_acceptance_subrun.get("protocol_completion", {}).get("ok") is True:
+            raise AssertionError(f"subrun protocol completed before Warmaster acceptance: {pre_acceptance_subrun}")
+        research_acceptance = record_warmaster_acceptance(run_root / "campaign-self-test-research")
+        if not research_acceptance.get("accepted"):
+            raise AssertionError(f"research acceptance failed: {research_acceptance}")
         refreshed = campaign_state(run_root, "campaign-self-test")
         handoff = refreshed.get("state", {}).get("handoffs", {}).get("research_to_implementation", {})
         if handoff.get("status") != "ready" or not Path(str(handoff.get("path") or "")).exists():
             raise AssertionError(f"handoff was not created: {refreshed}")
+        if handoff.get("checks", [{}])[1].get("name") != "source_protocol_completed":
+            raise AssertionError(f"handoff did not record source protocol check: {handoff}")
 
         code_created = create_subrun(run_root, "campaign-self-test", "implementation")
         code_ledger = json.loads((run_root / "campaign-self-test-code" / "task_ledger.json").read_text(encoding="utf-8"))
@@ -165,6 +178,12 @@ def main() -> int:
         if code_ref.get("mission_id") != code_created.get("mission", {}).get("mission_id"):
             raise AssertionError(f"implementation subrun mission_ref missing: {code_created}")
         make_completed_code_run(run_root, "campaign-self-test-code")
+        before_code_acceptance = campaign_state(run_root, "campaign-self-test")
+        if before_code_acceptance.get("state", {}).get("status") == "completed":
+            raise AssertionError(f"campaign completed before implementation Warmaster acceptance: {before_code_acceptance}")
+        code_acceptance = record_warmaster_acceptance(run_root / "campaign-self-test-code")
+        if not code_acceptance.get("accepted"):
+            raise AssertionError(f"implementation acceptance failed: {code_acceptance}")
         final_state = campaign_state(run_root, "campaign-self-test")
         if final_state.get("state", {}).get("status") != "completed":
             raise AssertionError(f"campaign final review should complete: {final_state}")
