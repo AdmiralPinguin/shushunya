@@ -262,8 +262,9 @@ class VectorMemory:
             return 0
 
         entries = []
-        request_messages = record.get("request", {}).get("messages", [])
-        user_text = latest_user_message(request_messages)
+        request = record.get("request", {})
+        # Mobile chat-session records carry the user text in request["text"], not messages.
+        user_text = latest_user_message(request.get("messages", [])) or str(request.get("text") or "").strip()
         assistant_text = str((record.get("assistant_message") or {}).get("content") or "").strip()
         if user_text:
             entries.append(("user", user_text))

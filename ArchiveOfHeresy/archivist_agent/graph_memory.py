@@ -170,7 +170,9 @@ class GraphMemory:
             return {"status": "skipped", "reason": "turn_not_ok"}
         if record.get("conversation_id") == "archive-librarian":
             return {"status": "skipped", "reason": "archive_librarian"}
-        user_text = latest_user_message(record.get("request", {}).get("messages", []))
+        request = record.get("request", {})
+        # Mobile chat-session records carry the user text in request["text"], not messages.
+        user_text = latest_user_message(request.get("messages", [])) or str(request.get("text") or "").strip()
         assistant_text = str((record.get("assistant_message") or {}).get("content") or "").strip()
         message_count = int(bool(user_text)) + int(bool(assistant_text))
         if not message_count:
@@ -260,7 +262,7 @@ class GraphMemory:
                     "turn_id": row.get("id"),
                     "conversation_id": row.get("conversation_id"),
                     "created_at": row.get("created_at"),
-                    "user": latest_user_message(request.get("messages", [])),
+                    "user": latest_user_message(request.get("messages", [])) or str(request.get("text") or "").strip(),
                     "assistant": trim_text(response_assistant_message(response), 1600),
                 }
             )

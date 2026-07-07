@@ -15,6 +15,10 @@ MAGOS_MODEL = os.environ.get(
     os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"),
 )
 MAGOS_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_MAGOS_CONTEXT_CHARS", "6000"))
+# Minimum token/chargram overlap between the curated memory_context and the raw
+# retrieved layers. Below this the context is an ungrounded paraphrase of the
+# query (the model "curated" facts that are not in memory) and must be dropped.
+MAGOS_GROUNDING_MIN_OVERLAP = float(os.environ.get("ARCHIVE_MAGOS_GROUNDING_MIN_OVERLAP", "0.2"))
 MAGOS_MIN_WIKI_SCORE = float(os.environ.get("ARCHIVE_MAGOS_MIN_WIKI_SCORE", "0.35"))
 MAGOS_MIN_VECTOR_SCORE = float(os.environ.get("ARCHIVE_MAGOS_MIN_VECTOR_SCORE", "0.32"))
 MAGOS_MIN_GRAPH_SCORE = float(os.environ.get("ARCHIVE_MAGOS_MIN_GRAPH_SCORE", "0.12"))
@@ -38,9 +42,11 @@ MAGOS_TASK_PROMPT = os.environ.get(
     "Сначала оцени существующие focus-файлы. Если один из них подходит текущему запросу, выбери его. "
     "Если тема полностью новая или старый focus будет мешать, выбери создание нового пустого focus. "
     "Затем собери memory_context: только факты, решения, статусы, связи и ограничения, которые помогут ответу. "
-    "Используй focus, wiki, vector и graph данные только при прямой релевантности текущему запросу. "
+    "memory_context разрешено собирать ТОЛЬКО из содержимого полей wiki_context, vector_context, graph_context и focus_candidates. "
+    "Запрещено пересказывать или переформулировать сам query, запрещены мета-описания вида 'пользователь спрашивает о...'. "
+    "Не добавляй ничего из собственных знаний: если про сущность из query в этих полях ничего нет, значит в памяти про неё пусто. "
     "Если связь слабая, косвенная или сомнительная, не добавляй этот фрагмент в memory_context. "
-    "Лучше вернуть пустой memory_context, чем подмешать шум. "
+    "Лучше вернуть memory_context пустой строкой, чем подмешать шум. "
     "Новый пустой focus должен иметь короткий title, importance 1..5 и reason.",
 )
 
@@ -154,6 +160,28 @@ class Magos:
             )
 
             memory_context = trim_text(decision.get("memory_context"), MAGOS_CONTEXT_CHARS)
+            if memory_context:
+                grounding_sources = " ".join(
+                    filter(
+                        None,
+                        [
+                            wiki_context,
+                            vector_context,
+                            graph_context,
+                            json.dumps(focus_candidates, ensure_ascii=False) if focus_candidates else "",
+                        ],
+                    )
+                ).strip()
+                grounding = token_overlap(memory_context, grounding_sources) if grounding_sources else 0.0
+                if grounding < MAGOS_GROUNDING_MIN_OVERLAP:
+                    self.last_result["memory_context_dropped"] = f"ungrounded:{grounding:.2f}"
+                    self.last_result["memory_context_chars"] = 0
+                    print(
+                        f"Magos dropped ungrounded memory_context (overlap {grounding:.2f}): "
+                        + memory_context[:160].replace("\n", " "),
+                        flush=True,
+                    )
+                    memory_context = ""
             if not memory_context:
                 return None
             return {
@@ -196,6 +224,8 @@ class Magos:
             return ""
         candidates = []
         for page in index.get("pages", []):
+            if str(page.get("kind") or "").strip().lower() == "persona":
+                continue  # identity pages are always injected separately, not knowledge
             path = self.wiki_root / page.get("path", "")
             if not path.exists():
                 continue
