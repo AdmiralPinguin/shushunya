@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import artifact_status
+from .command_text import task_text_from_commander_order
 from .gateway_util import valid_task_id, validate_service_host
 from .ledger import TaskLedger, now_iso
 from .mission_control import link_run_to_mission, open_mission
@@ -713,6 +714,26 @@ def create_subrun(run_root: Path, campaign_id: str, subrun_id: str, governor_tra
             "error_code": str(mission.get("error_code") or "commander_intake_failed"),
         }
     command = mission.get("commander_order") if isinstance(mission.get("commander_order"), dict) else {}
+    handoff_constraints: list[str] = []
+    for handoff_id in subrun.get("requires_handoffs", []) if isinstance(subrun.get("requires_handoffs"), list) else []:
+        handoff_state = state.get("handoffs", {}).get(str(handoff_id), {}) if isinstance(state.get("handoffs"), dict) else {}
+        handoff_path = str(handoff_state.get("path") or "").strip()
+        if handoff_path:
+            handoff_constraints.append(f"Use campaign handoff {handoff_id}: {handoff_path}")
+    if handoff_constraints:
+        constraints = command.get("constraints") if isinstance(command.get("constraints"), list) else []
+        known = {item for item in constraints if isinstance(item, str)}
+        for item in handoff_constraints:
+            if item not in known:
+                constraints.append(item)
+                known.add(item)
+        command["constraints"] = constraints
+        mission["commander_order"] = command
+        mission["governor_task"] = task_text_from_commander_order(command)
+        mission_dir_text = str(mission.get("mission_dir") or "").strip()
+        if mission_dir_text:
+            mission_dir = Path(mission_dir_text)
+            write_json(mission_dir / "commander_order.json", command)
     expected_governor = str(subrun.get("governor") or "").strip()
     assigned_governor = str(command.get("to") or "").strip()
     if expected_governor and assigned_governor != expected_governor:

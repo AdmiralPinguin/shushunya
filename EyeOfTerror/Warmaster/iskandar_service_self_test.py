@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from eye_of_terror.contracts import build_research_writing_contract
-from eye_of_terror.inner_circle.iskandar_service import make_handler, oversight_template, pipeline_summary, required_workers, resolve_run_dir
+from eye_of_terror.inner_circle.iskandar_service import make_handler, oversight_template, pipeline_summary, required_workers, resolve_run_dir, task_from_payload
 from EyeOfTerror.common_protocol import commander_order, validate_protocol_payload
 
 
@@ -50,7 +50,25 @@ def iskandar_command(task: str, task_id: str) -> dict:
     return order
 
 
+def protocol_only_order(task_id: str) -> dict:
+    order = commander_order(
+        f"mission-{task_id}",
+        to="IskandarKhayon",
+        user_request="ПРИКАЗ ВАРМАСТЕРА\nИсходный сырой запрос не должен стать task.",
+        commander_intent="Передать Искандару нормализованную исследовательскую задачу.",
+        primary_goal="Собери события Скалатракса",
+        success_conditions=["governor receives primary_goal as task compatibility text"],
+        constraints=["Do not use raw user_request as the transport task."],
+    )
+    validate_protocol_payload(order, expected_type="commander_order")
+    return order
+
+
 def main() -> int:
+    direct_order = protocol_only_order("iskandar-protocol-direct")
+    direct_task, direct_command = task_from_payload({"commander_order": direct_order})
+    if direct_task != direct_order["primary_goal"] or direct_task.startswith("ПРИКАЗ ВАРМАСТЕРА") or direct_command != direct_order:
+        raise AssertionError(f"Iskandar task_from_payload did not stay protocol-first: task={direct_task!r} command={direct_command}")
     contract_workers = [
         step.worker
         for step in build_research_writing_contract("Собери события Скалатракса", task_id="iskandar-service-test").worker_plan
@@ -149,6 +167,16 @@ def main() -> int:
                 or plan.get("model_brain", {}).get("status") != "answered"
             ):
                 raise AssertionError(f"bad plan: {plan}")
+            protocol_only_plan = request_json(
+                base + "/plan",
+                {"task_id": "iskandar-protocol-only-plan", "commander_order": protocol_only_order("iskandar-protocol-only-plan")},
+            )
+            if (
+                not protocol_only_plan.get("ok")
+                or protocol_only_plan.get("governor_plan", {}).get("understanding") != "Собери события Скалатракса"
+                or str(protocol_only_plan.get("actions", {}).get("next_action", {}).get("body", {}).get("task") or "").startswith("ПРИКАЗ ВАРМАСТЕРА")
+            ):
+                raise AssertionError(f"Iskandar /plan did not use commander_order as authority: {protocol_only_plan}")
             run_dir = root / "runs" / "custom-run"
             prepared = request_json(
                 base + "/prepare_run",

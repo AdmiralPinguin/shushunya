@@ -22,6 +22,7 @@ from EyeOfTerror.common_protocol import (
 )
 from EyeOfTerror.model_brain import request_model_decision
 
+from .command_text import task_text_from_commander_order
 from .ledger import TaskLedger
 from .routing import route_message
 
@@ -180,22 +181,7 @@ def build_commander_order(message: str, mission_id: str) -> dict[str, Any]:
 
 
 def governor_task_from_order(order: dict[str, Any]) -> str:
-    success = "\n".join(f"- {item}" for item in order.get("success_conditions", []) if isinstance(item, str))
-    constraints = "\n".join(f"- {item}" for item in order.get("constraints", []) if isinstance(item, str))
-    escalation = "\n".join(f"- {item}" for item in order.get("escalate_to_user_if", []) if isinstance(item, str))
-    return (
-        "ПРИКАЗ ВАРМАСТЕРА\n"
-        f"Mission ID: {order['mission_id']}\n"
-        f"Назначенный бригадир: {order['to']}\n\n"
-        f"Исходный запрос пользователя:\n{order['user_request']}\n\n"
-        f"Замысел командующего:\n{order['commander_intent']}\n\n"
-        f"Главная цель:\n{order['primary_goal']}\n\n"
-        f"Условия приемки Вармастером:\n{success or '- Выполнить исходную задачу и явно проверить качество.'}\n\n"
-        f"Ограничения:\n{constraints or '- Не сдавать внутреннюю ревизию как финал пользователю.'}\n\n"
-        f"Эскалация пользователю допускается только если:\n{escalation or '- Нужен реальный выбор пользователя или внешний доступ.'}\n\n"
-        "Твоя зона ответственности: составить доменный план, управлять воркерами, ревизировать результат внутри отдела "
-        "и вернуть Вармастеру структурированный финальный отчет. Не отвечай пользователю напрямую."
-    )
+    return task_text_from_commander_order(order)
 
 
 def open_mission(warmaster_root: Path, message: str, task_id: str | None, source_channel: str = "main_chat") -> dict[str, Any]:

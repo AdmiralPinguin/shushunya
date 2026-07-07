@@ -19,6 +19,7 @@ from .brigade import (
     required_workers_from_capabilities,
     worker_availability,
 )
+from .command_text import task_text_from_commander_order
 from .contracts import validate_task_contract_payload
 from .gateway_util import post_json, valid_task_id, validate_service_host
 from .governors import governor_by_name
@@ -67,10 +68,12 @@ def mission_id_from_commander(task_id: str | None, commander_order: dict[str, An
 
 
 def governor_payload_for(message: str, task_id: str | None, commander_order: dict[str, Any] | None = None) -> dict[str, Any]:
-    payload = {"task": message, "task_id": task_id or ""}
     if commander_order:
         validate_protocol_payload(commander_order, expected_type="commander_order")
+        payload = {"task": task_text_from_commander_order(commander_order), "task_id": task_id or ""}
         payload["commander_order"] = commander_order
+        return payload
+    payload = {"task": message, "task_id": task_id or ""}
     return payload
 
 

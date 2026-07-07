@@ -16,7 +16,7 @@ WARMMASTER_ROOT = PROJECT_ROOT / "EyeOfTerror" / "Warmaster"
 if str(WARMMASTER_ROOT) not in sys.path:
     sys.path.insert(0, str(WARMMASTER_ROOT))
 
-from EyeOfTerror.Pictorium.Moriana.moriana_governor import make_handler
+from EyeOfTerror.Pictorium.Moriana.moriana_governor import make_handler, task_from_payload
 from EyeOfTerror.Pictorium.testing.fake_model_server import fake_pictorium_model
 from EyeOfTerror.common_protocol import commander_order, validate_protocol_payload
 
@@ -63,7 +63,25 @@ def moriana_command(task: str, task_id: str) -> dict[str, object]:
     return order
 
 
+def protocol_only_order(task_id: str) -> dict[str, object]:
+    order = commander_order(
+        f"mission-{task_id}",
+        to="Moriana",
+        user_request="ПРИКАЗ ВАРМАСТЕРА\nСырой визуальный запрос не должен стать task.",
+        commander_intent="Передать Мориане нормализованную визуальную задачу.",
+        primary_goal="нарисуй протокольную картинку 512x512",
+        success_conditions=["governor receives primary_goal as task compatibility text"],
+        constraints=["Do not use raw user_request as the transport task."],
+    )
+    validate_protocol_payload(order, expected_type="commander_order")
+    return order
+
+
 def _main() -> int:
+    direct_order = protocol_only_order("moriana-protocol-direct")
+    direct_task, direct_command = task_from_payload({"commander_order": direct_order})
+    if direct_task != direct_order["primary_goal"] or direct_task.startswith("ПРИКАЗ ВАРМАСТЕРА") or direct_command != direct_order:
+        raise AssertionError(f"Moriana task_from_payload did not stay protocol-first: task={direct_task!r} command={direct_command}")
     with tempfile.TemporaryDirectory(prefix="moriana-service-self-test-") as tmp:
         run_root = Path(tmp) / "runs"
         server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(run_root))
@@ -98,6 +116,18 @@ def _main() -> int:
                 or comic_plan.get("contract", {}).get("worker_plan", [])[0].get("worker") != "ScenarioScribe"
             ):
                 raise AssertionError(f"bad comic plan payload: {comic_plan}")
+            protocol_only_plan = request_json(
+                base,
+                "POST",
+                "/plan",
+                {"task_id": "moriana-http-protocol-only-plan", "commander_order": protocol_only_order("moriana-http-protocol-only-plan")},
+            )
+            if (
+                not protocol_only_plan.get("ok")
+                or protocol_only_plan.get("governor_plan", {}).get("understanding") != "нарисуй протокольную картинку 512x512"
+                or str(protocol_only_plan.get("actions", {}).get("next_action", {}).get("body", {}).get("task") or "").startswith("ПРИКАЗ ВАРМАСТЕРА")
+            ):
+                raise AssertionError(f"Moriana /plan did not use commander_order as authority: {protocol_only_plan}")
             prepared = request_json(base, "POST", "/prepare_run", {"task": "сделай комикс 3 панели про кузню", "task_id": "moriana-http-comic-run"})
             run_dir = Path(str(prepared.get("run_dir") or ""))
             if (
@@ -134,6 +164,18 @@ def _main() -> int:
                     "Moriana /prepare_run did not preserve commander_order mission_id: "
                     f"prepared={protocol_prepared} plan={protocol_plan} dispatch={protocol_dispatch}"
                 )
+            protocol_only_run = request_json(
+                base,
+                "POST",
+                "/runs",
+                {"task_id": "moriana-http-protocol-only-run", "commander_order": protocol_only_order("moriana-http-protocol-only-run")},
+            )
+            if (
+                not protocol_only_run.get("ok")
+                or str(protocol_only_run.get("status", {}).get("task") or "").startswith("ПРИКАЗ ВАРМАСТЕРА")
+                or protocol_only_run.get("status", {}).get("task") != "нарисуй протокольную картинку 512x512"
+            ):
+                raise AssertionError(f"Moriana /runs did not use commander_order as authority: {protocol_only_run}")
             executed = request_json(
                 base,
                 "POST",

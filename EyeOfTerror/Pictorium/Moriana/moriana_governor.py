@@ -415,7 +415,7 @@ def create_or_execute_run(run_root: Path, payload: dict[str, Any]) -> dict[str, 
         validate_protocol_payload(command, expected_type="commander_order")
     task = str(payload.get("task") or payload.get("request") or "").strip()
     if not task and command:
-        task = str(command.get("primary_goal") or command.get("commander_intent") or command.get("user_request") or "").strip()
+        task = str(command.get("primary_goal") or command.get("commander_intent") or "").strip()
     if not task:
         raise ValueError("task is required")
     plan = plan_image_task(task, task_id=str(payload.get("task_id") or "").strip() or None)
@@ -516,13 +516,7 @@ def task_from_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         validate_protocol_payload(command, expected_type="commander_order")
     task = str(payload.get("task") or payload.get("request") or "").strip()
     if not task and command:
-        task = (
-            "ПРИКАЗ ВАРМАСТЕРА\n"
-            f"Mission ID: {command.get('mission_id')}\n"
-            f"Исходный запрос пользователя:\n{command.get('user_request')}\n\n"
-            f"Замысел командующего:\n{command.get('commander_intent')}\n\n"
-            f"Главная цель:\n{command.get('primary_goal')}\n"
-        ).strip()
+        task = str(command.get("primary_goal") or command.get("commander_intent") or "").strip()
     return task, command
 
 

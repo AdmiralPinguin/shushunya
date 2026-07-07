@@ -14,7 +14,8 @@ if str(WARM_ROOT) not in sys.path:
 
 from EyeOfTerror.common_protocol import commander_order
 import eye_of_terror.task_prepare as task_prepare_module
-from eye_of_terror.task_prepare import prepare_task, preflight_task
+from eye_of_terror.mission_control import governor_task_from_order
+from eye_of_terror.task_prepare import governor_payload_for, prepare_task, preflight_task
 
 
 def main() -> int:
@@ -26,6 +27,9 @@ def main() -> int:
         primary_goal="Подготовить исследовательский план через бригадира.",
         success_conditions=["подготовка использует commander_order", "legacy direct task не считается strict-протоколом"],
     )
+    governor_task = governor_task_from_order(order)
+    if governor_task != order.get("primary_goal") or governor_task.startswith("ПРИКАЗ ВАРМАСТЕРА"):
+        raise AssertionError(f"governor_task_from_order did not stay compact protocol transport text: {governor_task!r}")
     with TemporaryDirectory() as tmp:
         run_root = Path(tmp)
         missing_preflight = preflight_task(
@@ -48,6 +52,17 @@ def main() -> int:
         )
         if missing_prepare.get("error_code") != "commander_order_required":
             raise AssertionError(f"strict prepare did not require commander_order: {missing_prepare}")
+        governor_payload = governor_payload_for(
+            "ПРИКАЗ ВАРМАСТЕРА\nИсходный запрос пользователя:\nсырой текст не должен быть задачей",
+            "strict-protocol-test",
+            commander_order=order,
+        )
+        if (
+            governor_payload.get("task") != order.get("primary_goal")
+            or str(governor_payload.get("task") or "").startswith("ПРИКАЗ ВАРМАСТЕРА")
+            or governor_payload.get("commander_order") != order
+        ):
+            raise AssertionError(f"governor payload did not stay commander_order-first: {governor_payload}")
         original_route_message = task_prepare_module.route_message
         task_prepare_module.route_message = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("forced commander path must not call route_message"))
         try:
