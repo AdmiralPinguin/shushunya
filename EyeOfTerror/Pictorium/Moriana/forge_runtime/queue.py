@@ -13,7 +13,19 @@ import uuid
 from pathlib import Path
 
 import psutil
-from PIL import Image
+
+try:
+    from PIL import Image
+except ModuleNotFoundError:  # Pillow lives in the forge venv; planners import this module without it
+
+    class _PillowMissing:
+        def __getattr__(self, name):
+            raise ModuleNotFoundError("Pillow is required for forge image processing but is not installed in this interpreter")
+
+        def open(self, *args, **kwargs):  # noqa: A003 - mirrors PIL.Image.open
+            raise ModuleNotFoundError("Pillow is required for forge image processing but is not installed in this interpreter")
+
+    Image = _PillowMissing()
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:

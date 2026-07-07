@@ -25,7 +25,6 @@ from .gateway_util import post_json, valid_task_id, validate_service_host
 from .governors import governor_by_name
 from .inner_circle.ceraxia import plan_code_task
 from .inner_circle.iskandar import plan_research_writing as plan_lore_reconstruction
-from EyeOfTerror.Pictorium.Moriana.moriana_governor import plan_image_task
 from .ledger import TaskLedger
 from .oversight_guard import compact_oversight_summary
 from .pipeline import write_pipeline_run
@@ -33,6 +32,14 @@ from .routing import route_message
 from .run_validation import plan_oversight_errors, verify_prepared_run_package
 from .views import payload_with_task_view
 from EyeOfTerror.common_protocol import governor_plan_from_contract, validate_protocol_payload
+
+
+def plan_image_task(task_text, task_id=None):
+    # Lazy import: moriana_governor pulls the whole forge stack (Pillow, pydantic, ...),
+    # which lives in the forge venv. Warmaster task planning must import without it.
+    from EyeOfTerror.Pictorium.Moriana.moriana_governor import plan_image_task as moriana_plan_image_task
+
+    return moriana_plan_image_task(task_text, task_id=task_id)
 
 
 def commander_order_required_payload(
