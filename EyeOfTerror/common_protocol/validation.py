@@ -51,6 +51,7 @@ def validate_protocol_payload(payload: dict[str, Any], expected_type: str | None
         raise ProtocolValidationError(f"unknown protocol type: {payload_type or '<missing>'}")
     if payload.get("protocol_version") != PROTOCOL_VERSION:
         raise ProtocolValidationError(f"{payload_type}.protocol_version must be {PROTOCOL_VERSION}")
+    _require_string(payload, "created_at")
     missing = sorted(field for field in REQUIRED_FIELDS[payload_type] if field not in payload)
     if missing:
         raise ProtocolValidationError(f"{payload_type} missing fields: {missing}")
