@@ -47,6 +47,10 @@ def main() -> int:
                 "commander_order": {"to": "IskandarKhayon"},
             },
         )
+        governor_plan = read_json(mission_dir / "governor_plan.json")
+        validate_protocol_payload(governor_plan, expected_type="governor_plan")
+        if governor_plan.get("governor") != "IskandarKhayon" or not governor_plan.get("work_plan"):
+            raise AssertionError(f"bad governor_plan: {governor_plan}")
         synced = read_json(run_dir / "dispatch" / "source_discovery.json")
         synced_order = synced.get("worker_order") if isinstance(synced.get("worker_order"), dict) else {}
         if synced_order.get("mission_id") != mission_dir.name:

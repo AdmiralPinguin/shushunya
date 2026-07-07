@@ -11,6 +11,7 @@ from EyeOfTerror.common_protocol import (
     append_progress_event,
     commander_order,
     final_response,
+    governor_plan,
     governor_report,
     mission_intake,
     progress_event,
@@ -222,6 +223,59 @@ def open_mission(warmaster_root: Path, message: str, task_id: str | None, source
     }
 
 
+def governor_plan_from_contract(mission_id: str, contract: dict[str, Any]) -> dict[str, Any]:
+    worker_plan = contract.get("worker_plan") if isinstance(contract.get("worker_plan"), list) else []
+    work_plan: list[dict[str, Any]] = []
+    for step in worker_plan:
+        if not isinstance(step, dict):
+            continue
+        work_plan.append(
+            {
+                "step_id": str(step.get("step_id") or ""),
+                "worker": str(step.get("worker") or ""),
+                "goal": str(step.get("purpose") or ""),
+                "depends_on": step.get("depends_on") if isinstance(step.get("depends_on"), list) else [],
+                "expected_artifacts": step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else [],
+            }
+        )
+    plan = governor_plan(
+        mission_id,
+        governor=str(contract.get("assigned_governor") or ""),
+        understanding=str(contract.get("goal") or ""),
+        work_plan=work_plan,
+        quality_gates=[str(item) for item in contract.get("quality_gates", [])] if isinstance(contract.get("quality_gates"), list) else [],
+        expected_deliverables=[str(item) for item in contract.get("required_artifacts", [])] if isinstance(contract.get("required_artifacts"), list) else [],
+    )
+    validate_protocol_payload(plan, expected_type="governor_plan")
+    return plan
+
+
+def record_governor_plan(run_dir: Path, mission_id: str, mission_dir: Path) -> dict[str, Any]:
+    contract = _read_json(run_dir / "contract.json")
+    if not contract:
+        return {"ok": False, "error": "contract.json is missing"}
+    plan = governor_plan_from_contract(mission_id, contract)
+    _write_json(mission_dir / "governor_plan.json", plan)
+    _write_json(_next_numbered_path(mission_dir / "governor_plans", "governor_plan"), plan)
+    mission = _read_json(mission_dir / "mission.json")
+    if mission:
+        mission["status"] = "planning"
+        _write_json(mission_dir / "mission.json", mission)
+    append_progress_event(
+        mission_dir / "progress_events.jsonl",
+        progress_event(
+            mission_id,
+            actor=str(plan.get("governor") or "Governor"),
+            role="governor",
+            phase="planning",
+            status="done",
+            title="Бригадир составил план",
+            body=f"Шагов: {len(plan.get('work_plan') if isinstance(plan.get('work_plan'), list) else [])}. Цель: {plan.get('understanding')}",
+        ),
+    )
+    return {"ok": True, "governor_plan": plan}
+
+
 def link_run_to_mission(run_dir: Path, mission: dict[str, Any]) -> None:
     if not mission.get("ok"):
         return
@@ -235,6 +289,8 @@ def link_run_to_mission(run_dir: Path, mission: dict[str, Any]) -> None:
     }
     _write_json(run_dir / "mission_ref.json", payload)
     sync_dispatch_worker_orders(run_dir, payload["mission_id"])
+    if raw_mission_dir:
+        record_governor_plan(run_dir, payload["mission_id"], Path(raw_mission_dir))
 
 
 def sync_dispatch_worker_orders(run_dir: Path, mission_id: str) -> None:
@@ -574,7 +630,10 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
 def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
-    parsed = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
     return parsed if isinstance(parsed, dict) else {}
 
 
@@ -605,6 +664,7 @@ def mission_state(warmaster_root: Path, mission_id: str, event_limit: int = 100)
         "mission": _read_json(mission_dir / "mission.json"),
         "mission_intake": _read_json(mission_dir / "mission_intake.json"),
         "commander_order": _read_json(mission_dir / "commander_order.json"),
+        "governor_plan": _read_json(mission_dir / "governor_plan.json"),
         "route": _read_json(mission_dir / "route.json"),
         "commander_error": _read_json(mission_dir / "commander_error.json"),
         "progress_events": _read_events(mission_dir / "progress_events.jsonl", limit=event_limit),
