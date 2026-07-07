@@ -73,6 +73,7 @@ def mission_protocol_payloads_for_run(run_dir: Path) -> dict[str, dict[str, Any]
     return {
         "commander_order": _read_json(mission_dir / "commander_order.json"),
         "governor_plan": _read_json(mission_dir / "governor_plan.json"),
+        "final_response": _read_json(mission_dir / "final_response.json"),
     }
 
 

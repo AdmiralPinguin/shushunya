@@ -14,8 +14,10 @@ if str(WARM_ROOT) not in sys.path:
     sys.path.insert(0, str(WARM_ROOT))
 
 from EyeOfTerror.common_protocol import commander_order, validate_protocol_payload
+import eye_of_terror.mission_control as mission_control
 from eye_of_terror.ledger import TaskLedger
 from eye_of_terror.mission_control import record_warmaster_acceptance
+from eye_of_terror.run_state import run_summary
 
 
 def write_json(path: Path, payload: dict[str, object]) -> None:
@@ -83,21 +85,40 @@ def main() -> int:
                 "revision_plan": {"required": False, "steps": []},
             },
         )
-        result = record_warmaster_acceptance(run_dir)
+        original_model_decision = mission_control.request_model_decision
+        mission_control.request_model_decision = lambda *_args, **_kwargs: {
+            "ok": True,
+            "status": "answered",
+            "content": json.dumps(
+                {
+                    "accepted": True,
+                    "reason": "Финальный отчет соответствует приказу.",
+                    "escalate_to_user": False,
+                    "required_revision": {"order": "", "required_steps": []},
+                },
+                ensure_ascii=False,
+            ),
+        }
+        try:
+            result = record_warmaster_acceptance(run_dir)
+        finally:
+            mission_control.request_model_decision = original_model_decision
         review = result.get("acceptance_review") if isinstance(result.get("acceptance_review"), dict) else {}
         if not review:
             raise AssertionError(f"acceptance review missing: {result}")
         validate_protocol_payload(review, expected_type="acceptance_review")
         if not (mission_dir / "governor_reports").exists():
             raise AssertionError("governor report directory was not created")
-        if review.get("accepted"):
-            if not (mission_dir / "final_response.json").exists():
-                raise AssertionError("accepted result did not write final_response.json")
-        elif not review.get("escalate_to_user"):
-            ledger_after = TaskLedger.load(run_dir / "task_ledger.json").to_dict()
-            revision_plan = ledger_after.get("result", {}).get("revision_plan", {}) if isinstance(ledger_after.get("result"), dict) else {}
-            if not revision_plan.get("required"):
-                raise AssertionError("rejected result did not create internal revision_plan")
+        if not review.get("accepted"):
+            raise AssertionError(f"deterministic accepted path was not accepted: {result}")
+        final_response_path = mission_dir / "final_response.json"
+        if not final_response_path.exists():
+            raise AssertionError("accepted result did not write final_response.json")
+        final_response = json.loads(final_response_path.read_text(encoding="utf-8"))
+        validate_protocol_payload(final_response, expected_type="final_response")
+        summary_final = run_summary(run_dir).get("mission_protocol", {}).get("final_response", {})
+        if summary_final.get("answer") != final_response.get("answer"):
+            raise AssertionError(f"run_summary did not expose final_response: {summary_final}")
         revision_mission_dir, revision_run_dir, _ = write_acceptance_fixture(
             root,
             "acceptance-needs-revision",

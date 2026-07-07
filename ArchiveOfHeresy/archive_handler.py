@@ -574,6 +574,17 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         return self.warmaster_activity_from_payload(response)
 
     def warmaster_final_message(self, orchestration):
+        status = str(orchestration.get("status") or "").strip().lower()
+        summary = orchestration.get("summary") if isinstance(orchestration.get("summary"), dict) else {}
+        if not status:
+            status = str(summary.get("status") or "").strip().lower()
+        if status != "completed":
+            return ""
+        protocol = summary.get("mission_protocol") if isinstance(summary.get("mission_protocol"), dict) else {}
+        final_response = protocol.get("final_response") if isinstance(protocol.get("final_response"), dict) else {}
+        final_answer = str(final_response.get("answer") or "").strip()
+        if final_answer:
+            return final_answer
         final_payload = orchestration.get("final") if isinstance(orchestration.get("final"), dict) else {}
         files = final_payload.get("files") if isinstance(final_payload.get("files"), list) else []
         previews = []
@@ -586,13 +597,8 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 previews.append(text)
         if previews:
             return "\n\n".join(previews)
-        summary = orchestration.get("summary") if isinstance(orchestration.get("summary"), dict) else {}
-        display = orchestration.get("display") if isinstance(orchestration.get("display"), dict) else {}
         return str(
             final_payload.get("deliverable")
-            or display.get("detail")
-            or display.get("headline")
-            or summary.get("status")
             or ""
         ).strip()
 
