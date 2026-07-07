@@ -11,7 +11,7 @@ from EyeOfTerror.common_protocol import (
     append_progress_event,
     commander_order,
     final_response,
-    governor_plan,
+    governor_plan_from_contract,
     governor_report,
     mission_intake,
     progress_event,
@@ -223,38 +223,17 @@ def open_mission(warmaster_root: Path, message: str, task_id: str | None, source
     }
 
 
-def governor_plan_from_contract(mission_id: str, contract: dict[str, Any]) -> dict[str, Any]:
-    worker_plan = contract.get("worker_plan") if isinstance(contract.get("worker_plan"), list) else []
-    work_plan: list[dict[str, Any]] = []
-    for step in worker_plan:
-        if not isinstance(step, dict):
-            continue
-        work_plan.append(
-            {
-                "step_id": str(step.get("step_id") or ""),
-                "worker": str(step.get("worker") or ""),
-                "goal": str(step.get("purpose") or ""),
-                "depends_on": step.get("depends_on") if isinstance(step.get("depends_on"), list) else [],
-                "expected_artifacts": step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else [],
-            }
-        )
-    plan = governor_plan(
-        mission_id,
-        governor=str(contract.get("assigned_governor") or ""),
-        understanding=str(contract.get("goal") or ""),
-        work_plan=work_plan,
-        quality_gates=[str(item) for item in contract.get("quality_gates", [])] if isinstance(contract.get("quality_gates"), list) else [],
-        expected_deliverables=[str(item) for item in contract.get("required_artifacts", [])] if isinstance(contract.get("required_artifacts"), list) else [],
-    )
-    validate_protocol_payload(plan, expected_type="governor_plan")
-    return plan
-
-
 def record_governor_plan(run_dir: Path, mission_id: str, mission_dir: Path) -> dict[str, Any]:
-    contract = _read_json(run_dir / "contract.json")
-    if not contract:
-        return {"ok": False, "error": "contract.json is missing"}
-    plan = governor_plan_from_contract(mission_id, contract)
+    plan = _read_json(run_dir / "governor_plan.json")
+    if plan:
+        plan["mission_id"] = mission_id
+        validate_protocol_payload(plan, expected_type="governor_plan")
+    else:
+        contract = _read_json(run_dir / "contract.json")
+        if not contract:
+            return {"ok": False, "error": "contract.json is missing"}
+        plan = governor_plan_from_contract(mission_id, contract)
+        validate_protocol_payload(plan, expected_type="governor_plan")
     _write_json(mission_dir / "governor_plan.json", plan)
     _write_json(_next_numbered_path(mission_dir / "governor_plans", "governor_plan"), plan)
     mission = _read_json(mission_dir / "mission.json")
@@ -291,6 +270,7 @@ def link_run_to_mission(run_dir: Path, mission: dict[str, Any]) -> None:
     sync_dispatch_worker_orders(run_dir, payload["mission_id"])
     if raw_mission_dir:
         record_governor_plan(run_dir, payload["mission_id"], Path(raw_mission_dir))
+        record_worker_orders(run_dir, payload["mission_id"], Path(raw_mission_dir))
 
 
 def sync_dispatch_worker_orders(run_dir: Path, mission_id: str) -> None:
@@ -312,6 +292,41 @@ def sync_dispatch_worker_orders(run_dir: Path, mission_id: str) -> None:
             request["worker_order"] = request_order
             packet["request"] = request
         _write_json(dispatch_path, packet)
+
+
+def record_worker_orders(run_dir: Path, mission_id: str, mission_dir: Path) -> dict[str, Any]:
+    dispatch_dir = run_dir / "dispatch"
+    if not dispatch_dir.exists():
+        return {"ok": False, "error": "dispatch directory is missing", "count": 0}
+    count = 0
+    for dispatch_path in sorted(dispatch_dir.glob("*.json")):
+        packet = _read_json(dispatch_path)
+        order = packet.get("worker_order") if isinstance(packet.get("worker_order"), dict) else {}
+        if not order:
+            continue
+        order = dict(order)
+        order["mission_id"] = mission_id
+        validate_protocol_payload(order, expected_type="worker_order")
+        step_id = str(order.get("step_id") or dispatch_path.stem)
+        _write_json(mission_dir / "worker_orders" / f"worker_order-{step_id}.json", order)
+        count += 1
+        append_progress_event(
+            mission_dir / "progress_events.jsonl",
+            progress_event(
+                mission_id,
+                actor=str(order.get("from") or "Governor"),
+                role="governor",
+                phase="executing",
+                status="started",
+                title=f"Выдан приказ воркеру {order.get('to')}",
+                body=f"Шаг {step_id}: {order.get('task')}",
+            ),
+        )
+    mission = _read_json(mission_dir / "mission.json")
+    if mission and count:
+        mission["status"] = "plan_review"
+        _write_json(mission_dir / "mission.json", mission)
+    return {"ok": count > 0, "count": count}
 
 
 def mission_ref_for_run(run_dir: Path) -> dict[str, Any]:
@@ -418,6 +433,15 @@ def record_worker_protocol_report(run_dir: Path, report: dict[str, Any]) -> None
     validate_protocol_payload(report, expected_type="worker_report")
     step_id = str(report.get("step_id") or "step")
     _write_json(_next_numbered_path(mission_dir / "worker_reports", f"worker_report-{step_id}"), report)
+    mission = _read_json(mission_dir / "mission.json")
+    if mission:
+        if report.get("status") == "failed":
+            mission["status"] = "failed"
+        elif report.get("status") in {"blocked", "needs_revision"}:
+            mission["status"] = "revision" if report.get("status") == "needs_revision" else "blocked"
+        else:
+            mission["status"] = "executing"
+        _write_json(mission_dir / "mission.json", mission)
     phase = "executing"
     event_status = "done"
     if report.get("status") in {"blocked", "needs_revision"}:
@@ -558,6 +582,10 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
     ledger = TaskLedger.load(run_dir / "task_ledger.json")
     result = ledger.to_dict().get("result") if isinstance(ledger.to_dict().get("result"), dict) else {}
     report = governor_report_from_run(run_dir, mission_id)
+    mission = _read_json(mission_dir / "mission.json")
+    if mission:
+        mission["status"] = "governor_review"
+        _write_json(mission_dir / "mission.json", mission)
     _write_json(_next_numbered_path(mission_dir / "governor_reports", "governor_report"), report)
     append_progress_event(
         mission_dir / "progress_events.jsonl",
@@ -573,9 +601,12 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
     )
     decision = build_acceptance_review(command, report, result)
     review = decision["acceptance_review"]
+    mission = _read_json(mission_dir / "mission.json")
+    if mission:
+        mission["status"] = "warmaster_acceptance"
+        _write_json(mission_dir / "mission.json", mission)
     _write_json(_next_numbered_path(mission_dir / "acceptance_reviews", "acceptance_review"), review)
     ledger.record_event("warmaster_acceptance_recorded", {"accepted": bool(review.get("accepted")), "status": review.get("status"), "reason": review.get("reason")})
-    mission = _read_json(mission_dir / "mission.json")
     if review.get("accepted"):
         final = final_response(mission_id, "completed", str(report.get("user_facing_answer") or report.get("summary") or "Задача выполнена."), artifacts=report.get("deliverables") if isinstance(report.get("deliverables"), list) else [])
         validate_protocol_payload(final, expected_type="final_response")
@@ -653,10 +684,42 @@ def _read_events(path: Path, limit: int = 100) -> list[dict[str, Any]]:
     return events[-max(0, limit) :]
 
 
+def _read_json_dir(directory: Path, limit: int = 100) -> list[dict[str, Any]]:
+    if not directory.exists():
+        return []
+    items: list[dict[str, Any]] = []
+    for path in sorted(directory.glob("*.json")):
+        payload = _read_json(path)
+        if payload:
+            payload.setdefault("_path", str(path))
+            items.append(payload)
+    return items[-max(0, limit) :]
+
+
+def mission_protocol_summary(mission_dir: Path) -> dict[str, Any]:
+    worker_orders = _read_json_dir(mission_dir / "worker_orders", limit=1000)
+    worker_reports = _read_json_dir(mission_dir / "worker_reports", limit=1000)
+    governor_reports = _read_json_dir(mission_dir / "governor_reports", limit=1000)
+    acceptance_reviews = _read_json_dir(mission_dir / "acceptance_reviews", limit=1000)
+    revision_orders = _read_json_dir(mission_dir / "revision_orders", limit=1000)
+    return {
+        "has_mission_intake": bool(_read_json(mission_dir / "mission_intake.json")),
+        "has_commander_order": bool(_read_json(mission_dir / "commander_order.json")),
+        "has_governor_plan": bool(_read_json(mission_dir / "governor_plan.json")),
+        "worker_order_count": len(worker_orders),
+        "worker_report_count": len(worker_reports),
+        "governor_report_count": len(governor_reports),
+        "acceptance_review_count": len(acceptance_reviews),
+        "revision_order_count": len(revision_orders),
+        "has_final_response": bool(_read_json(mission_dir / "final_response.json")),
+    }
+
+
 def mission_state(warmaster_root: Path, mission_id: str, event_limit: int = 100) -> dict[str, Any]:
     mission_dir = mission_dir_for(warmaster_root, mission_id)
     if not mission_dir.exists():
         raise FileNotFoundError(mission_id)
+    progress_events = _read_events(mission_dir / "progress_events.jsonl", limit=event_limit)
     return {
         "ok": True,
         "mission_id": mission_id,
@@ -667,7 +730,27 @@ def mission_state(warmaster_root: Path, mission_id: str, event_limit: int = 100)
         "governor_plan": _read_json(mission_dir / "governor_plan.json"),
         "route": _read_json(mission_dir / "route.json"),
         "commander_error": _read_json(mission_dir / "commander_error.json"),
-        "progress_events": _read_events(mission_dir / "progress_events.jsonl", limit=event_limit),
+        "worker_orders": _read_json_dir(mission_dir / "worker_orders", limit=event_limit),
+        "worker_reports": _read_json_dir(mission_dir / "worker_reports", limit=event_limit),
+        "governor_reports": _read_json_dir(mission_dir / "governor_reports", limit=event_limit),
+        "acceptance_reviews": _read_json_dir(mission_dir / "acceptance_reviews", limit=event_limit),
+        "revision_orders": _read_json_dir(mission_dir / "revision_orders", limit=event_limit),
+        "final_response": _read_json(mission_dir / "final_response.json"),
+        "progress_events": progress_events,
+        "activity_cards": [
+            {
+                "actor": str(event.get("actor") or ""),
+                "role": str(event.get("role") or ""),
+                "phase": str(event.get("phase") or ""),
+                "status": str(event.get("status") or ""),
+                "title": str(event.get("title") or ""),
+                "body": str(event.get("body") or ""),
+                "created_at": str(event.get("created_at") or ""),
+            }
+            for event in progress_events
+            if bool(event.get("visible_to_user", True))
+        ],
+        "protocol_summary": mission_protocol_summary(mission_dir),
     }
 
 

@@ -120,6 +120,31 @@ def governor_plan(
     }
 
 
+def governor_plan_from_contract(mission_id: str, contract: dict[str, Any]) -> dict[str, Any]:
+    worker_plan = contract.get("worker_plan") if isinstance(contract.get("worker_plan"), list) else []
+    work_plan: list[dict[str, Any]] = []
+    for step in worker_plan:
+        if not isinstance(step, dict):
+            continue
+        work_plan.append(
+            {
+                "step_id": str(step.get("step_id") or "").strip(),
+                "worker": str(step.get("worker") or "").strip(),
+                "goal": str(step.get("purpose") or step.get("goal") or "").strip(),
+                "depends_on": _strings(step.get("depends_on") if isinstance(step.get("depends_on"), list) else []),
+                "expected_artifacts": _strings(step.get("expected_artifacts") if isinstance(step.get("expected_artifacts"), list) else []),
+            }
+        )
+    return governor_plan(
+        mission_id,
+        governor=str(contract.get("assigned_governor") or "").strip(),
+        understanding=str(contract.get("goal") or "").strip(),
+        work_plan=work_plan,
+        quality_gates=_strings(contract.get("quality_gates") if isinstance(contract.get("quality_gates"), list) else []),
+        expected_deliverables=_strings(contract.get("required_artifacts") if isinstance(contract.get("required_artifacts"), list) else []),
+    )
+
+
 def worker_order(
     mission_id: str,
     step_id: str,

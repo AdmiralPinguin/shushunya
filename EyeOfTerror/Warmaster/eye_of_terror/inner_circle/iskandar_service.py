@@ -12,6 +12,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from EyeOfTerror.model_brain import model_contract, request_model_decision
+from EyeOfTerror.common_protocol import governor_plan_from_contract, validate_protocol_payload
 
 from ..contracts import build_research_writing_contract, research_writing_worker_plan
 from .iskandar import executable_client_action, oversight_plan, payload_with_plan_view, plan_research_writing
@@ -67,6 +68,30 @@ def payload_from(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     payload = json.loads(handler.rfile.read(length).decode("utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("request body must be a JSON object")
+    return payload
+
+
+def task_from_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    command = payload.get("commander_order") if isinstance(payload.get("commander_order"), dict) else {}
+    if command:
+        validate_protocol_payload(command, expected_type="commander_order")
+    task = str(payload.get("task") or payload.get("message") or "").strip()
+    if not task and command:
+        task = (
+            "ПРИКАЗ ВАРМАСТЕРА\n"
+            f"Mission ID: {command.get('mission_id')}\n"
+            f"Исходный запрос пользователя:\n{command.get('user_request')}\n\n"
+            f"Замысел командующего:\n{command.get('commander_intent')}\n\n"
+            f"Главная цель:\n{command.get('primary_goal')}\n"
+        ).strip()
+    return task, command
+
+
+def protocol_governor_plan(plan_payload: dict[str, Any], command: dict[str, Any]) -> dict[str, Any]:
+    contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else {}
+    mission_id = str(command.get("mission_id") or f"mission-{contract.get('task_id') or 'unassigned'}")
+    payload = governor_plan_from_contract(mission_id, contract)
+    validate_protocol_payload(payload, expected_type="governor_plan")
     return payload
 
 
@@ -168,7 +193,7 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
             try:
                 payload = payload_from(self)
-                task = str(payload.get("task") or payload.get("message") or "").strip()
+                task, command = task_from_payload(payload)
                 if not task:
                     response(self, 400, {"ok": False, "error": "task is required"})
                     return
@@ -196,12 +221,16 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                     return
                 if self.path == "/plan":
                     plan_payload = payload_with_plan_view(plan.to_dict())
+                    plan_payload["governor_plan"] = protocol_governor_plan(plan_payload, command)
                     plan_payload["model_brain"] = model_decision
                     response(self, 200, plan_payload)
                     return
                 if self.path == "/prepare_run":
                     run_dir = resolve_run_dir(default_run_root, str(payload.get("run_dir") or ""), plan.contract.task_id)
                     status = write_pipeline_run(plan.contract, run_dir, oversight=oversight_plan(plan.contract))
+                    plan_payload = payload_with_plan_view(plan.to_dict())
+                    governor_plan_payload = protocol_governor_plan(plan_payload, command)
+                    (run_dir / "governor_plan.json").write_text(json.dumps(governor_plan_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
                     response(
                         self,
                         200,
@@ -209,6 +238,7 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                             "ok": status["ok"],
                             "governor": "IskandarKhayon",
                             "model_brain": model_decision,
+                            "governor_plan": governor_plan_payload,
                             "status": status,
                             "phase": "run_prepared" if status.get("ok") else "prepare_failed",
                             "decision": {

@@ -31,6 +31,38 @@ from .pipeline import write_pipeline_run
 from .routing import route_message
 from .run_validation import plan_oversight_errors, verify_prepared_run_package
 from .views import payload_with_task_view
+from EyeOfTerror.common_protocol import governor_plan_from_contract, validate_protocol_payload
+
+
+def mission_id_from_commander(task_id: str | None, commander_order: dict[str, Any] | None = None) -> str:
+    if isinstance(commander_order, dict) and str(commander_order.get("mission_id") or "").strip():
+        return str(commander_order.get("mission_id") or "").strip()
+    return f"mission-{task_id or 'unassigned'}"
+
+
+def governor_payload_for(message: str, task_id: str | None, commander_order: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = {"task": message, "task_id": task_id or ""}
+    if commander_order:
+        validate_protocol_payload(commander_order, expected_type="commander_order")
+        payload["commander_order"] = commander_order
+    return payload
+
+
+def attach_governor_plan_payload(payload: dict[str, Any], mission_id: str) -> dict[str, Any]:
+    contract = payload.get("contract") if isinstance(payload.get("contract"), dict) else {}
+    if not contract:
+        return payload
+    if mission_id == "mission-unassigned" and str(contract.get("task_id") or "").strip():
+        mission_id = f"mission-{str(contract.get('task_id') or '').strip()}"
+    plan = payload.get("governor_plan") if isinstance(payload.get("governor_plan"), dict) else None
+    if plan is None:
+        plan = governor_plan_from_contract(mission_id, contract)
+    else:
+        plan = dict(plan)
+        plan["mission_id"] = mission_id
+    validate_protocol_payload(plan, expected_type="governor_plan")
+    payload["governor_plan"] = plan
+    return payload
 
 
 def prepare_task_via_governor_service(
@@ -40,13 +72,15 @@ def prepare_task_via_governor_service(
     governor: Any,
     host: str = "127.0.0.1",
     port: int | None = None,
+    commander_order: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     host = validate_service_host(host)
     service_port = int(port or governor.port)
     base = f"http://{host}:{service_port}"
-    governor_payload = {"task": message, "task_id": task_id or ""}
+    governor_payload = governor_payload_for(message, task_id, commander_order=commander_order)
     try:
         plan = post_json(base + "/plan", governor_payload)
+        plan = attach_governor_plan_payload(plan, mission_id_from_commander(task_id, commander_order))
     except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
         return {
             "ok": False,
@@ -162,7 +196,7 @@ def prepare_task_via_governor_service(
     try:
         prepared = post_json(
             base + "/prepare_run",
-            {"task": message, "task_id": service_task_id, "run_dir": str(run_dir)},
+            {**governor_payload_for(message, service_task_id, commander_order=commander_order), "run_dir": str(run_dir)},
         )
     except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
         return {
@@ -188,6 +222,7 @@ def prepare_task_via_governor_service(
             "actions": task_preflight_actions(False, "governor_prepare_failed", service_task_id, governor_transport="http", governor_host=host, message=message),
         }
     planned_oversight = plan.get("oversight") if isinstance(plan.get("oversight"), dict) else {}
+    planned_governor_plan = plan.get("governor_plan") if isinstance(plan.get("governor_plan"), dict) else {}
     package_errors = verify_prepared_run_package(run_dir, contract, planned_oversight)
     if package_errors:
         cleanup = cleanup_unregistered_run_dir(run_root, run_dir)
@@ -203,6 +238,8 @@ def prepare_task_via_governor_service(
             "actions": task_preflight_actions(False, "governor_prepare_invalid_run", service_task_id, governor_transport="http", governor_host=host, message=message),
         }
     TaskLedger.create(run_dir / "task_ledger.json", service_task_id, str(contract.get("goal") or message), governor.name)
+    if planned_governor_plan:
+        (run_dir / "governor_plan.json").write_text(json.dumps(planned_governor_plan, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return {
         "ok": True,
         "gateway": "WarmasterGateway",
@@ -211,6 +248,7 @@ def prepare_task_via_governor_service(
         "task_id": service_task_id,
         "run_dir": str(run_dir),
         "status": prepared.get("status", {}),
+        "governor_plan": planned_governor_plan,
         "actions": created_task_actions(service_task_id),
     }
 
@@ -275,6 +313,7 @@ def prepare_task(
     governor_transport: str = "local",
     governor_host: str = "127.0.0.1",
     forced_governor: str | None = None,
+    commander_order: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if task_id is not None and not valid_task_id(task_id):
         return {
@@ -330,6 +369,7 @@ def prepare_task(
             run_root,
             governor_ref,
             host=governor_host,
+            commander_order=commander_order,
         )
     if governor_transport != "local":
         return {
@@ -390,6 +430,7 @@ def prepare_task(
             ),
         }
     plan_payload = plan.to_dict()
+    plan_payload = attach_governor_plan_payload(plan_payload, mission_id_from_commander(plan.contract.task_id, commander_order))
     oversight_errors = plan_oversight_errors(contract_payload, plan_payload)
     if oversight_errors:
         return {
@@ -404,6 +445,7 @@ def prepare_task(
     oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else None
     status = write_pipeline_run(plan.contract, run_dir, oversight=oversight)
     TaskLedger.create(run_dir / "task_ledger.json", plan.contract.task_id, plan.contract.goal, governor)
+    (run_dir / "governor_plan.json").write_text(json.dumps(plan_payload["governor_plan"], ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return {
         "ok": status["ok"],
         "gateway": "WarmasterGateway",
@@ -411,6 +453,7 @@ def prepare_task(
         "task_id": plan.contract.task_id,
         "run_dir": str(run_dir),
         "status": status,
+        "governor_plan": plan_payload["governor_plan"],
         "actions": created_task_actions(plan.contract.task_id),
     }
 
@@ -422,6 +465,8 @@ def preflight_task(
     governor_transport: str = "local",
     governor_host: str = "127.0.0.1",
     include_brigade_health: bool = False,
+    forced_governor: str | None = None,
+    commander_order: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if task_id is not None and not valid_task_id(task_id):
         return {
@@ -433,20 +478,24 @@ def preflight_task(
             "actions": task_preflight_actions(False, "invalid_task_id", task_id or "", include_brigade_health, governor_transport, governor_host, message),
         }
     route = route_message(message)
-    if not route.ok:
-        return route_failure_payload(route)
-    if route.requires_decomposition:
-        return {
-            "ok": False,
-            "gateway": "WarmasterGateway",
-            "error": "task requires multi-governor decomposition before a single run can be prepared",
-            "error_code": "multi_governor_decomposition_required",
-            "kind": route.kind,
-            "governor": route.governor,
-            "route": route.to_dict(),
-            "actions": task_preflight_actions(False, "multi_governor_decomposition_required", task_id or "", include_brigade_health, governor_transport, governor_host, message),
-        }
-    governor_ref = governor_by_name(route.governor)
+    if forced_governor:
+        governor_name = forced_governor.strip()
+    else:
+        if not route.ok:
+            return route_failure_payload(route)
+        if route.requires_decomposition:
+            return {
+                "ok": False,
+                "gateway": "WarmasterGateway",
+                "error": "task requires multi-governor decomposition before a single run can be prepared",
+                "error_code": "multi_governor_decomposition_required",
+                "kind": route.kind,
+                "governor": route.governor,
+                "route": route.to_dict(),
+                "actions": task_preflight_actions(False, "multi_governor_decomposition_required", task_id or "", include_brigade_health, governor_transport, governor_host, message),
+            }
+        governor_name = str(route.governor or "")
+    governor_ref = governor_by_name(governor_name)
     if governor_ref is None or not governor_ref.active():
         return {
             "ok": False,
@@ -495,7 +544,8 @@ def preflight_task(
                     ),
                 }
         try:
-            plan_payload = post_json(base + "/plan", {"task": message, "task_id": task_id or ""})
+            plan_payload = post_json(base + "/plan", governor_payload_for(message, task_id, commander_order=commander_order))
+            plan_payload = attach_governor_plan_payload(plan_payload, mission_id_from_commander(task_id, commander_order))
         except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
             return {
                 "ok": False,
@@ -515,6 +565,7 @@ def preflight_task(
         else:
             plan = plan_lore_reconstruction(message, task_id=task_id)
         plan_payload = plan.to_dict()
+        plan_payload = attach_governor_plan_payload(plan_payload, mission_id_from_commander(str(plan.contract.task_id), commander_order))
         contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else plan.contract.to_dict()
         oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else {}
     resolved_task_id = str(contract.get("task_id") or "").strip()
@@ -552,6 +603,7 @@ def preflight_task(
         "task_id": resolved_task_id,
         "route": route.to_dict(),
         "contract_summary": contract_summary(contract),
+        "governor_plan": plan_payload.get("governor_plan") if isinstance(plan_payload.get("governor_plan"), dict) else {},
         "governor_plan_actions": plan_payload.get("actions") if isinstance(plan_payload.get("actions"), dict) else {},
         "oversight_summary": compact_oversight_summary(oversight) if oversight else {},
         "oversight_validation": {"ok": not oversight_errors, "errors": oversight_errors},

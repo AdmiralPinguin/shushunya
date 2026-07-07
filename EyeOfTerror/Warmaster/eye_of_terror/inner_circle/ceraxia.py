@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import quote
 
 from ..contracts import TaskContract, build_code_task_contract, validate_task_contract_payload
+from EyeOfTerror.common_protocol import governor_plan_from_contract, validate_protocol_payload
 from ..pipeline import build_dispatch_packets, pipeline_status, write_pipeline_run
 from ..registry import worker_by_name
 
@@ -558,10 +559,13 @@ class CeraxiaPlan:
                     }
                 )
         ok = not missing_workers and not unavailable_workers and not validation_errors
+        protocol_plan = governor_plan_from_contract(f"mission-{self.contract.task_id}", contract)
+        validate_protocol_payload(protocol_plan, expected_type="governor_plan")
         return {
             "ok": ok,
             "governor": "Ceraxia",
             "contract": contract,
+            "governor_plan": protocol_plan,
             "validation": {"ok": not validation_errors, "errors": validation_errors},
             "pipeline": pipeline_status(self.contract, build_dispatch_packets(self.contract)),
             "task_profile": task_profile,

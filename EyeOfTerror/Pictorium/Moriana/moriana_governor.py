@@ -24,6 +24,7 @@ from EyeOfTerror.Warmaster.eye_of_terror.contracts import (
 )
 from EyeOfTerror.Warmaster.eye_of_terror.pipeline import build_dispatch_packets, pipeline_status, write_pipeline_run
 from EyeOfTerror.Warmaster.eye_of_terror.registry import worker_by_name
+from EyeOfTerror.common_protocol import governor_plan_from_contract, validate_protocol_payload
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ArtifactFinalis.worker import worker_contract as artifact_finalis_contract
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ForgeDispatcher.worker import worker_contract as forge_dispatcher_contract
 from EyeOfTerror.Pictorium.Brigades.Image.Workers.ImageVerifier.worker import worker_contract as image_verifier_contract
@@ -275,6 +276,7 @@ class MorianaPlan:
             "ok": ok,
             "governor": GOVERNOR,
             "contract": contract,
+            "governor_plan": protocol_governor_plan(contract, {}),
             "validation": {"ok": not validation_errors, "errors": validation_errors},
             "pipeline": pipeline,
             "resolved_workers": resolved_workers,
@@ -288,6 +290,13 @@ class MorianaPlan:
 
 def plan_image_task(task: str, task_id: str | None = None) -> MorianaPlan:
     return MorianaPlan(build_comics_generation_contract(task, task_id=task_id) if is_comics_task(task) else build_image_generation_contract(task, task_id=task_id))
+
+
+def protocol_governor_plan(contract: dict[str, Any], command: dict[str, Any]) -> dict[str, Any]:
+    mission_id = str(command.get("mission_id") or f"mission-{contract.get('task_id') or 'unassigned'}")
+    payload = governor_plan_from_contract(mission_id, contract)
+    validate_protocol_payload(payload, expected_type="governor_plan")
+    return payload
 
 
 def is_comics_task(task: str) -> bool:
@@ -391,6 +400,7 @@ def prepare_run(task: str, task_id: str | None, run_dir: Path) -> dict[str, Any]
     if not payload.get("ok"):
         return {"ok": False, "governor": GOVERNOR, "error": "plan is not ready", "plan": payload}
     status = write_pipeline_run(plan.contract, run_dir, oversight=payload["oversight"])
+    (run_dir / "governor_plan.json").write_text(json.dumps(payload["governor_plan"], ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     task_kind = "comic" if is_comics_task(task) else ("image_series" if is_image_series_task(task) else "image")
     runtime_status = MorianaRunStore(run_dir.parent).ensure_run(plan.contract.task_id, task, task_kind, payload)
     runtime_status.update(status)
@@ -494,6 +504,22 @@ def payload_from(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     return payload
 
 
+def task_from_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    command = payload.get("commander_order") if isinstance(payload.get("commander_order"), dict) else {}
+    if command:
+        validate_protocol_payload(command, expected_type="commander_order")
+    task = str(payload.get("task") or payload.get("request") or "").strip()
+    if not task and command:
+        task = (
+            "ПРИКАЗ ВАРМАСТЕРА\n"
+            f"Mission ID: {command.get('mission_id')}\n"
+            f"Исходный запрос пользователя:\n{command.get('user_request')}\n\n"
+            f"Замысел командующего:\n{command.get('commander_intent')}\n\n"
+            f"Главная цель:\n{command.get('primary_goal')}\n"
+        ).strip()
+    return task, command
+
+
 def filter_artifacts(artifacts: list[dict[str, Any]], query: dict[str, list[str]]) -> list[dict[str, Any]]:
     artifact_type = (query.get("type") or [""])[0]
     status = (query.get("status") or [""])[0]
@@ -595,13 +621,16 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:
             try:
                 payload = payload_from(self)
-                task = str(payload.get("task") or payload.get("request") or "").strip()
+                task, command = task_from_payload(payload)
                 task_id = str(payload.get("task_id") or "").strip() or None
                 parsed = urlparse(self.path)
                 path = parsed.path.rstrip("/") or "/"
                 store = MorianaRunStore(default_run_root)
                 if path == "/plan":
-                    response(self, 200, plan_image_task(task, task_id=task_id).to_dict())
+                    plan_payload = plan_image_task(task, task_id=task_id).to_dict()
+                    if command:
+                        plan_payload["governor_plan"] = protocol_governor_plan(plan_payload.get("contract", {}), command)
+                    response(self, 200, plan_payload)
                     return
                 if path == "/prepare_run":
                     if not task:
