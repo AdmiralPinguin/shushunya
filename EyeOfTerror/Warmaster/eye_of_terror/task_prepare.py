@@ -77,6 +77,13 @@ def governor_payload_for(message: str, task_id: str | None, commander_order: dic
     return payload
 
 
+def governor_task_text(message: str, commander_order: dict[str, Any] | None = None) -> str:
+    if commander_order:
+        validate_protocol_payload(commander_order, expected_type="commander_order")
+        return task_text_from_commander_order(commander_order)
+    return message
+
+
 def attach_governor_plan_payload(
     payload: dict[str, Any],
     mission_id: str,
@@ -466,12 +473,13 @@ def prepare_task(
             "error_code": "invalid_governor_transport",
             "actions": task_preflight_actions(False, "invalid_governor_transport", task_id or "", governor_transport=governor_transport, governor_host=governor_host, message=message),
         }
+    task_text = governor_task_text(message, commander_order)
     if governor == "Ceraxia":
-        plan = plan_code_task(message, task_id=task_id)
+        plan = plan_code_task(task_text, task_id=task_id)
     elif governor == "Moriana":
-        plan = plan_image_task(message, task_id=task_id)
+        plan = plan_image_task(task_text, task_id=task_id)
     else:
-        plan = plan_lore_reconstruction(message, task_id=task_id)
+        plan = plan_lore_reconstruction(task_text, task_id=task_id)
     run_dir = run_root / plan.contract.task_id
     if run_dir.exists():
         return {
@@ -653,12 +661,13 @@ def preflight_task(
         contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else {}
         oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else {}
     else:
+        task_text = governor_task_text(message, commander_order)
         if governor_ref.name == "Ceraxia":
-            plan = plan_code_task(message, task_id=task_id)
+            plan = plan_code_task(task_text, task_id=task_id)
         elif governor_ref.name == "Moriana":
-            plan = plan_image_task(message, task_id=task_id)
+            plan = plan_image_task(task_text, task_id=task_id)
         else:
-            plan = plan_lore_reconstruction(message, task_id=task_id)
+            plan = plan_lore_reconstruction(task_text, task_id=task_id)
         plan_payload = plan.to_dict()
         plan_payload = attach_governor_plan_payload(plan_payload, mission_id_from_commander(str(plan.contract.task_id), commander_order), commander_order)
         contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else plan.contract.to_dict()
