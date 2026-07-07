@@ -1810,7 +1810,7 @@ def main() -> int:
                 raise AssertionError(f"bad resume task response: {resume_task}")
             resume_ledger_path = Path(resume_task["run_dir"]) / "task_ledger.json"
             resume_ledger = TaskLedger.load(resume_ledger_path)
-            resume_ledger.set_status("interrupted")
+            resume_ledger.force_status("interrupted", "self-test resume fixture")
             resume_summary = request_json(base + "/runs/warmaster-resume-test/summary")
             resume_actions = resume_summary.get("summary", {}).get("actions", {})
             if (
@@ -1873,7 +1873,7 @@ def main() -> int:
                     }
                 },
             )
-            partial_ledger.set_status("interrupted")
+            partial_ledger.force_status("interrupted", "self-test partial resume fixture")
             partial_summary = request_json(base + "/runs/warmaster-partial-resume-test/summary")
             partial_source_state = next(
                 (
@@ -2376,7 +2376,7 @@ def main() -> int:
             if not bulk_task.get("ok"):
                 raise AssertionError(f"bad bulk recovery task response: {bulk_task}")
             bulk_ledger_path = Path(bulk_task["run_dir"]) / "task_ledger.json"
-            TaskLedger.load(bulk_ledger_path).set_status("interrupted")
+            TaskLedger.load(bulk_ledger_path).force_status("interrupted", "self-test bulk recovery fixture")
             recovery_with_bulk = request_json(base + "/recovery")
             bulk_recovery = next(
                 (item for item in recovery_with_bulk.get("recovery", {}).get("candidates", []) if item.get("task_id") == "warmaster-bulk-recovery-test"),
