@@ -705,7 +705,7 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
         }
     )
     ledger.set_result(updated_result)
-    ledger.force_status("failed", reason="Warmaster rejected completed run and ordered revision.")
+    ledger.force_status("needs_revision", reason="Warmaster rejected completed run and ordered internal revision.")
     mission["status"] = "revision"
     _write_json(mission_dir / "mission.json", mission)
     append_progress_event(

@@ -53,6 +53,20 @@ def write_acceptance_fixture(root: Path, suffix: str, result_payload: dict[str, 
         },
     )
     write_json(
+        run_dir / "dispatch" / "finalize.json",
+        {
+            "step_id": "finalize",
+            "worker": "SealwrightFinalis",
+            "depends_on": [],
+            "request": {
+                "task_id": f"{suffix}:finalize",
+                "worker": "SealwrightFinalis",
+                "input_artifacts": [],
+                "quality_expectations": {},
+            },
+        },
+    )
+    write_json(
         run_dir / "oversight.json",
         {
             "revision_policy": {
@@ -155,6 +169,12 @@ def main() -> int:
         revision_mission = json.loads((revision_mission_dir / "mission.json").read_text(encoding="utf-8"))
         if revision_mission.get("status") != "revision":
             raise AssertionError(f"needs_revision did not move mission to revision: {revision_mission}")
+        revision_summary = run_summary(revision_run_dir)
+        if revision_summary.get("status") != "needs_revision":
+            raise AssertionError(f"internal revision should not be exposed as failed: {revision_summary}")
+        actions = revision_summary.get("actions") if isinstance(revision_summary.get("actions"), dict) else {}
+        if not actions.get("can_execute_revision"):
+            raise AssertionError(f"revision run is not directly actionable: {actions}")
         print("[ok] Warmaster live acceptance")
         return 0
 
