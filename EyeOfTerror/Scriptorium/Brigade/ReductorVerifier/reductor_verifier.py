@@ -1010,6 +1010,7 @@ def model_review_payload(
     warnings: list[dict[str, str]],
     comprehensive_metrics: dict[str, Any],
     quality_gates: dict[str, Any],
+    coverage_events_for_model: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "task_id": request.get("task_id"),
@@ -1018,6 +1019,7 @@ def model_review_payload(
         "quality_expectations": quality_expectation_summary(request),
         "hard_findings": findings,
         "hard_warnings": warnings,
+        "required_events_to_verify": coverage_events_for_model or [],
         "metrics": {
             "source_count": len(source_map.get("sources", [])) if isinstance(source_map.get("sources"), list) else 0,
             "event_note_count": len(notes.get("events", [])) if isinstance(notes.get("events"), list) else 0,
@@ -1158,6 +1160,9 @@ def review_artifacts(
         if not isinstance(note, dict) or not note.get("evidence_snapshots"):
             findings.append({"severity": "blocker", "message": f"Required event lacks fetched source evidence: {event_id}"})
     required_events = required_review_events(source_map, notes, timeline) if timeline_active else []
+    # Events whose literal markers didn't match are judged by the model critic
+    # (the draft may phrase or translate them differently), not blocked here.
+    coverage_events_for_model: list[dict[str, Any]] = []
     for event in required_events:
         event_id = str(event.get("event_id") or "")
         label = required_event_label(event)
@@ -1165,10 +1170,17 @@ def review_artifacts(
         if event_id:
             if event_id not in timeline_event_ids:
                 findings.append({"severity": "blocker", "message": f"Missing required direct event in timeline: {label}"})
-            elif markers and not text_contains_markers(reconstruction, markers):
-                findings.append({"severity": "blocker", "message": f"Draft does not visibly cover required event: {label}"})
             elif not note_by_event_id.get(event_id, {}).get("evidence_snapshots"):
                 findings.append({"severity": "blocker", "message": f"Required event lacks fetched source evidence: {label}"})
+            elif markers and not text_contains_markers(reconstruction, markers):
+                coverage_events_for_model.append(
+                    {
+                        "event_id": event_id,
+                        "label": label,
+                        "summary": str(event.get("summary") or ""),
+                        "wording_hints": markers,
+                    }
+                )
 
     source_mix = source_mix_metrics(source_map)
     if not source_mix["has_primary_or_official"]:
@@ -1209,12 +1221,16 @@ def review_artifacts(
     model_guidance = request_required_scriptorium_guidance(
         "ReductorVerifier",
         request,
-        model_review_payload(request, source_map, notes, timeline, reconstruction, coverage, findings, warnings, comprehensive_metrics, quality_gates),
+        model_review_payload(request, source_map, notes, timeline, reconstruction, coverage, findings, warnings, comprehensive_metrics, quality_gates, coverage_events_for_model),
         (
             "You are an independent Scriptorium critic. Check whether the draft actually satisfies the user's "
             "research/writing task, whether chronology is complete, whether unsupported invention exists, and "
-            "whether the revision plan points to the right upstream workers. Return JSON with status, blockers, "
-            "warnings, and evidence_notes. Do not waive hard source/evidence blockers."
+            "whether the revision plan points to the right upstream workers. required_events_to_verify lists key "
+            "events whose coverage you must judge yourself: read reconstruction_preview and decide for each whether "
+            "the draft genuinely tells that event in ANY language or wording (wording_hints are only hints, not "
+            "required phrases). For each event truly absent from the draft, add a blocker with the exact message "
+            "'Draft does not visibly cover required event: <label>'; if all are covered, do not block for coverage. "
+            "Return JSON with status, blockers, warnings, and evidence_notes. Do not waive hard source/evidence blockers."
         ),
         request_guidance,
     )

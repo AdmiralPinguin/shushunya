@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -852,14 +853,46 @@ def model_guidance_section(decision: dict[str, Any]) -> list[str]:
     ]
 
 
+def model_draft_is_grounded(replacement: str, reconstruction: str) -> tuple[bool, str]:
+    """Accept the model's rewritten document only if it keeps the evidence
+    contract of the mechanical draft: same section headings, every Evidence
+    trace preserved, and no invented claim ids — the critic verifies exactly
+    these downstream, so a rewrite that loses them is unusable."""
+    if len(replacement) < 500:
+        return False, "model draft too short"
+    trace_re = re.compile(r"Evidence trace:\s*([\w.-]+)")
+    known = set(trace_re.findall(reconstruction))
+    cited = set(trace_re.findall(replacement))
+    invented = sorted(cited - known)
+    if invented:
+        return False, f"model draft cites unknown claim ids: {', '.join(invented[:5])}"
+    dropped = sorted(known - cited)
+    if dropped:
+        return False, f"model draft dropped evidence traces: {', '.join(dropped[:8])}"
+    missing_sections = [
+        line.strip()
+        for line in reconstruction.splitlines()
+        if line.startswith("## ") and line.strip() not in replacement
+    ]
+    if missing_sections:
+        return False, f"model draft dropped sections: {', '.join(missing_sections[:5])}"
+    return True, ""
+
+
 def apply_model_guidance(reconstruction: str, coverage_report: str, decision: dict[str, Any]) -> tuple[str, str]:
     if not decision.get("ok"):
         return reconstruction, coverage_report
     parsed = parsed_model_content(decision)
     replacement = str(parsed.get("reconstruction_ru_markdown") or parsed.get("draft_markdown") or "").strip()
-    if replacement and "## Что еще надо проверить" in replacement:
+    grounded, ground_reason = model_draft_is_grounded(replacement, reconstruction) if replacement else (False, "no rewritten document returned")
+    if grounded:
+        if "## Что еще надо проверить" not in replacement:
+            tail_at = reconstruction.find("## Что еще надо проверить")
+            if tail_at >= 0:
+                replacement = replacement.rstrip() + "\n\n" + reconstruction[tail_at:].rstrip()
         reconstruction = replacement.rstrip() + "\n"
     else:
+        print(f"ScriptoriumDaemon: model draft rejected ({ground_reason}), keeping mechanical draft", flush=True)
         section = model_guidance_section(decision)
         if section:
             reconstruction = reconstruction.rstrip() + "\n\n" + "\n".join(section).rstrip() + "\n"
@@ -935,9 +968,18 @@ def run(
         request,
         model_payload(request, source_map, notes, timeline, reconstruction, coverage_report, research_corpus, synthesis_plan, structure_map),
         (
-            "You are the Scriptorium writer. Improve the Russian output only from supplied research_corpus, "
-            "synthesis_plan, output_mode, timeline/structure, evidence excerpts, and gaps. Do not invent unsupported sections. Return JSON with optional "
-            "reconstruction_ru_markdown or appendix_markdown plus warnings."
+            "You are the Scriptorium writer. The mechanically assembled draft_reconstruction_preview is only raw material — "
+            "you must REWRITE it into a finished document a human will actually read. Return JSON with the key "
+            "reconstruction_ru_markdown containing the COMPLETE document text (not a plan, not instructions, not file paths — "
+            "the actual full markdown). Hard contract (the rewrite is discarded if violated): keep EVERY '## ...' section "
+            "heading from draft_reconstruction_preview with the exact same wording, and keep EVERY '> Evidence trace: ...' "
+            "line exactly as it appears, each under the prose it supports — do not drop, rename or invent any. Within that "
+            "skeleton: write in Russian; connected readable prose in chronological order following timeline; every stated "
+            "fact comes only from the supplied claims/events (translate their content to Russian, do not copy English "
+            "sentences verbatim); rewrite raw junk fragments (website navigation, copyright/legal boilerplate, broken "
+            "excerpts) into an honest one-line note of what the source fragment is, keeping its Evidence trace; keep "
+            "conflicting versions side by side, marked. Also return warnings (list of strings) if something important "
+            "could not be grounded."
         ),
         request_guidance,
     )
