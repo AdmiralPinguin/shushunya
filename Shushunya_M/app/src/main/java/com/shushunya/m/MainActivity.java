@@ -107,6 +107,9 @@ public class MainActivity extends Activity {
     private final Handler main = new Handler(Looper.getMainLooper());
     private Button reportsButton;
     private boolean reportsPollScheduled;
+    private String lastAgentTasksJson = "";
+    private String lastChatHistoryJson = "";
+    private boolean brigadePollScheduled;
     private LinearLayout messageList;
     private LinearLayout inputPanel;
     private LinearLayout composer;
@@ -1138,14 +1141,30 @@ public class MainActivity extends Activity {
                 JSONArray tasks = payload.optJSONArray("tasks");
                 main.post(() -> renderAgentTaskHistory(tasks));
             } catch (Exception exc) {
+                // Quiet failure: the auto-poller retries in seconds; spamming
+                // the feed with warning bubbles is worse than a stale view.
                 main.post(() -> {
                     if (agentStatus != null) {
                         agentStatus.setText("Монитор бригад сейчас не обновился.");
                     }
-                    addAgentMessage(false, "! Монитор бригад сейчас не обновился. Это не останавливает задачи на ПК.", true);
                 });
             }
         }).start();
+    }
+
+    private void scheduleBrigadePoll() {
+        if (brigadePollScheduled) {
+            return;
+        }
+        brigadePollScheduled = true;
+        main.postDelayed(() -> {
+            brigadePollScheduled = false;
+            if (!appInForeground || !TAB_AGENT.equals(currentTab)) {
+                return;  // poll only while the Brigades tab is actually watched
+            }
+            refreshBrigadeMonitor();
+            scheduleBrigadePoll();
+        }, 5000);
     }
 
     private void refreshAgentState() {
@@ -1336,6 +1355,13 @@ public class MainActivity extends Activity {
         if (agentMessageList == null) {
             return;
         }
+        // Rebuild only when the payload actually changed: a full removeAllViews
+        // on every poll made the whole tab blink.
+        String key = tasks == null ? "" : tasks.toString();
+        if (key.equals(lastAgentTasksJson)) {
+            return;
+        }
+        lastAgentTasksJson = key;
         agentMessageList.removeAllViews();
         agentLiveBubble = null;
         if (tasks == null || tasks.length() == 0) {
@@ -2046,6 +2072,8 @@ public class MainActivity extends Activity {
             inputPanel.animate().translationY(0f).setDuration(120).start();
             scrollView.setPadding(0, 0, 0, 0);
             updateAgentKeyboardLift();
+            refreshBrigadeMonitor();
+            scheduleBrigadePoll();
         } else {
             inputPanel.animate().translationY(0f).setDuration(120).start();
             scrollView.setPadding(0, 0, 0, 0);
@@ -2924,7 +2952,12 @@ public class MainActivity extends Activity {
                 if (history == null || history.length() == 0) {
                     return;
                 }
+                String historyKey = history.toString();
                 main.post(() -> {
+                    if (historyKey.equals(lastChatHistoryJson)) {
+                        return;  // nothing changed: a rebuild would just blink
+                    }
+                    lastChatHistoryJson = historyKey;
                     messageList.removeAllViews();
                     for (int i = 0; i < history.length(); i++) {
                         JSONObject item = history.optJSONObject(i);

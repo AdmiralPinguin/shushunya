@@ -396,6 +396,40 @@ def record_worker_orders(run_dir: Path, mission_id: str, mission_dir: Path) -> d
     return {"ok": count > 0, "count": count}
 
 
+def step_narration(mission_dir: Path, order: dict[str, Any], worker: str, step_id: str) -> str:
+    """One live, mission-specific line about what this step is doing right now,
+    written by the model — the static pipeline task texts are identical for
+    every mission and read like boilerplate in the brigade monitor."""
+    commander = _read_json(mission_dir / "commander_order.json")
+    decision = request_model_decision(
+        "StepNarrator",
+        "Live brigade activity narration",
+        {
+            "user_request": str(commander.get("user_request") or ""),
+            "primary_goal": str(commander.get("primary_goal") or ""),
+            "worker": worker,
+            "step_id": step_id,
+            "step_task": str(order.get("task") or ""),
+            "expected_output": str(order.get("expected_output") or ""),
+        },
+        layer="worker",
+        instructions=(
+            "Return one strict JSON object: {\"status_line\": \"...\"}. "
+            "status_line — одна короткая живая фраза ПО-РУССКИ от первого лица в мужском роде о том, что этот шаг "
+            "делает прямо сейчас ДЛЯ ЭТОЙ конкретной задачи владельца (например: 'Ищу выдержки о битве при Скалатраксе "
+            "в Lexicanum и Fandom'). Конкретика задачи обязательна, никаких общих формулировок."
+        ),
+    )
+    try:
+        if decision.get("ok"):
+            line = str(_extract_json_object(str(decision.get("content") or "")).get("status_line") or "").strip()
+            if line:
+                return line[:200]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+    return ""
+
+
 def record_worker_execution_started(run_dir: Path, packet: dict[str, Any]) -> None:
     ref = mission_ref_for_run(run_dir)
     mission_dir = mission_dir_from_ref(ref)
@@ -410,6 +444,7 @@ def record_worker_execution_started(run_dir: Path, packet: dict[str, Any]) -> No
     mission = _read_json(mission_dir / "mission.json")
     if mission:
         record_mission_state(mission_dir, "executing", active=True)
+    narration = step_narration(mission_dir, order, worker, step_id)
     append_progress_event(
         mission_dir / "progress_events.jsonl",
         progress_event(
@@ -418,8 +453,8 @@ def record_worker_execution_started(run_dir: Path, packet: dict[str, Any]) -> No
             role="worker",
             phase="executing",
             status="running",
-            title=f"Воркер начал шаг {step_id}",
-            body=str(order.get("task") or packet.get("purpose") or ""),
+            title=narration or f"{worker}: шаг {step_id}",
+            body=(f"{narration}\n\n" if narration else "") + str(order.get("task") or packet.get("purpose") or ""),
         ),
     )
 
