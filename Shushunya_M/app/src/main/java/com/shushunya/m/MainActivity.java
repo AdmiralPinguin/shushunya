@@ -189,6 +189,10 @@ public class MainActivity extends Activity {
         if (TAB_CHAT.equals(currentTab)) {
             loadServerChatHistory();
         }
+        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager != null) {
+            manager.cancel(1002);  // the in-app badge takes over while foreground
+        }
         pollPendingReports();
     }
 
@@ -2892,12 +2896,10 @@ public class MainActivity extends Activity {
     }
 
     private void pollPendingReports() {
-        if (!appInForeground) {
-            reportsPollScheduled = false;
-            return;
-        }
         new Thread(() -> {
             int count = 0;
+            int maxReportId = 0;
+            StringBuilder topics = new StringBuilder();
             try {
                 URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/reports/pending");
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -2908,21 +2910,81 @@ public class MainActivity extends Activity {
                 if (conn.getResponseCode() >= 200 && conn.getResponseCode() < 300) {
                     JSONObject payload = new JSONObject(readAll(conn.getInputStream()));
                     count = payload.optInt("count", 0);
+                    JSONArray items = payload.optJSONArray("topics");
+                    for (int i = 0; items != null && i < items.length(); i++) {
+                        JSONObject item = items.optJSONObject(i);
+                        if (item == null) {
+                            continue;
+                        }
+                        maxReportId = Math.max(maxReportId, item.optInt("id", 0));
+                        String topic = item.optString("topic", "").trim();
+                        if (!topic.isEmpty()) {
+                            if (topics.length() > 0) {
+                                topics.append("; ");
+                            }
+                            topics.append(topic);
+                        }
+                    }
                 }
             } catch (Exception ignored) {
             }
             int finalCount = count;
+            int finalMaxId = maxReportId;
+            String finalTopics = topics.toString();
             main.post(() -> {
                 updateReportsBadge(finalCount);
-                if (appInForeground && !reportsPollScheduled) {
+                if (!appInForeground && finalCount > 0) {
+                    maybeShowReportsNotification(finalCount, finalMaxId, finalTopics);
+                }
+                if (!reportsPollScheduled) {
                     reportsPollScheduled = true;
                     main.postDelayed(() -> {
                         reportsPollScheduled = false;
                         pollPendingReports();
-                    }, 30000);
+                    }, appInForeground ? 30000 : 120000);
                 }
             });
         }).start();
+    }
+
+    private void maybeShowReportsNotification(int count, int maxReportId, String topics) {
+        if (maxReportId <= 0) {
+            return;
+        }
+        int lastNotified = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("last_reports_notified_id", 0);
+        if (maxReportId <= lastNotified) {
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+                this,
+                8,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        String body = topics.isEmpty() ? ("Докладов в очереди: " + count) : topics;
+        body = TextUtils.ellipsize(body, new android.text.TextPaint(), 420, TextUtils.TruncateAt.END).toString();
+        android.app.Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? new android.app.Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
+                : new android.app.Notification.Builder(this);
+        builder.setSmallIcon(android.R.drawable.stat_notify_chat)
+                .setContentTitle("Шушуня хочет что-то сказать (" + count + ")")
+                .setContentText(body)
+                .setStyle(new android.app.Notification.BigTextStyle().bigText(body))
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true);
+        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager != null) {
+            manager.notify(1002, builder.build());
+            getSharedPreferences(PREFS, MODE_PRIVATE)
+                    .edit()
+                    .putInt("last_reports_notified_id", maxReportId)
+                    .apply();
+        }
     }
 
     private void updateReportsBadge(int count) {
