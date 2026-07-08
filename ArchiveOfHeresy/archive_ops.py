@@ -26,9 +26,9 @@ from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_use
 from turn_protocol import (
     build_turn_decision_request,
     capability_contract_message,
-    mission_order_to_warmaster_message,
     normalize_turn_decision,
     turn_capability_manifest,
+    warmaster_request_to_message,
 )
 from pending_reports import (
     enqueue_report,

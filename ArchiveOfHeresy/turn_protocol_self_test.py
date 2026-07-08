@@ -8,9 +8,9 @@ from archive_ops import prompt_diagnostics
 from turn_protocol import (
     build_turn_decision_request,
     capability_contract_message,
-    mission_order_to_warmaster_message,
     normalize_turn_decision,
     turn_capability_manifest,
+    warmaster_request_to_message,
 )
 
 
@@ -23,12 +23,15 @@ def main() -> int:
     manifest = turn_capability_manifest()
     actions = {item["action"] for item in manifest["capabilities"]}
     require(
-        {"answer_in_chat", "ask_clarification", "issue_mission_order", "create_administratum_task"} <= actions,
+        {"answer_in_chat", "ask_clarification", "request_warmaster_mission", "create_administratum_task"} <= actions,
         f"capability manifest is incomplete: {actions}",
     )
     require("delegate_to_warmaster" not in actions, "Warmaster must not be exposed as a black-box delegation action")
-    mission_capability = next(item for item in manifest["capabilities"] if item["action"] == "issue_mission_order")
-    require(mission_capability.get("available_governors"), "mission order capability must expose available governors")
+    mission_capability = next(item for item in manifest["capabilities"] if item["action"] == "request_warmaster_mission")
+    manifest_text = repr(manifest)
+    for forbidden in ("target_governor", "IskandarKhayon", "Ceraxia", "Moriana"):
+        require(forbidden not in manifest_text, f"Shushunya capability manifest must not choose Warmaster internals: {forbidden}")
+    require(mission_capability.get("warmaster_capability_areas"), "Warmaster request capability must expose high-level areas")
 
     request = build_turn_decision_request(
         model="test-model",
@@ -38,30 +41,32 @@ def main() -> int:
     )
     system = request["messages"][0]["content"]
     require("Choose exactly one action" in system, "turn controller does not require one action")
+    require("Shushunya is male" in system, "turn controller must preserve male Shushunya voice in protocol replies")
     require("Do not use keyword rules" in system, "turn controller allows keyword routing")
-    require("issue_mission_order" in system, "turn controller does not expose mission-order action")
+    require("request_warmaster_mission" in system, "turn controller does not expose Warmaster request action")
     require("delegate_to_warmaster" not in system, "turn controller still exposes black-box Warmaster delegation")
+    require("target_governor" not in system, "turn controller still asks Shushunya to select a governor")
+    require("IskandarKhayon" not in system and "Ceraxia" not in system and "Moriana" not in system, "turn controller leaks concrete brigadiers")
     require("missing essential input" in system, "turn controller does not require clarification for missing critical inputs")
     require(request.get("response_format") == {"type": "json_object"}, "turn controller must request JSON object output")
     require(request.get("chat_template_kwargs", {}).get("enable_thinking") is False, "turn controller must request content JSON, not hidden thinking")
 
-    valid_order = {
+    valid_request = {
         "user_request": "Собери отчет по Скалатраксу.",
-        "target_governor": "IskandarKhayon",
-        "department": "Scriptorium",
-        "task_kind": "lore_reconstruction",
-        "why_this_governor": "Нужна реконструкция лора и источников.",
-        "primary_goal": "Полная хронология событий Скалатракса.",
+        "capability_area": "research",
+        "why_warmaster_needed": "Нужна бригада, источники, проверка и финальная приемка.",
+        "expected_outcome": "Полная хронология событий Скалатракса.",
         "success_conditions": ["Есть хронология", "Есть список источников"],
     }
-    decision = normalize_turn_decision({"action": "issue_mission_order", "mission_order": valid_order, "confidence": 0.9})
-    require(decision["action"] == "issue_mission_order", f"valid mission order was not preserved: {decision}")
-    require(decision["mission_order"]["target_governor"] == "IskandarKhayon", "mission order lost target governor")
-    message = mission_order_to_warmaster_message(decision["mission_order"])
-    require("Целевой бригадир: IskandarKhayon" in message, "Warmaster transport text must preserve selected governor")
-    require("Почему этот бригадир" in message, "Warmaster transport text must preserve governor rationale")
-    invalid = normalize_turn_decision({"action": "issue_mission_order", "mission_order": {"user_request": "x"}})
-    require(invalid["action"] == "ask_clarification", f"missing task should not delegate: {invalid}")
+    decision = normalize_turn_decision({"action": "request_warmaster_mission", "warmaster_request": valid_request, "confidence": 0.9})
+    require(decision["action"] == "request_warmaster_mission", f"valid Warmaster request was not preserved: {decision}")
+    require(decision["warmaster_request"]["capability_area"] == "research", "Warmaster request lost high-level area")
+    message = warmaster_request_to_message(decision["warmaster_request"])
+    require("Шушуня не выбирает бригадира" in message, "Warmaster transport text must reserve assignment for Warmaster")
+    require("Область задачи: research" in message, "Warmaster transport text must preserve high-level area")
+    require("Целевой бригадир" not in message, "Warmaster transport text must not contain selected governor")
+    invalid = normalize_turn_decision({"action": "request_warmaster_mission", "warmaster_request": {"user_request": "x", "expected_outcome": ""}})
+    require(invalid["action"] == "ask_clarification", f"missing task should not request Warmaster: {invalid}")
 
     contract = capability_contract_message(manifest, {"action": "answer_in_chat"})
     require("ArchiveOfHeresy capability contract" in contract["content"], "capability contract message has wrong marker")
@@ -70,6 +75,8 @@ def main() -> int:
 
     mobile_start_source = inspect.getsource(ArchiveHandler.mobile_chat_start)
     require("decide_chat_turn_action" in mobile_start_source, "mobile chat start must use LLM turn protocol")
+    require("request_warmaster_mission" in mobile_start_source, "mobile chat start must use Warmaster request action")
+    require("issue_mission_order" not in mobile_start_source, "mobile chat start still uses old mission-order action")
     require("mobile_chat_warmaster_task" not in mobile_start_source, "mobile chat start still uses legacy keyword Warmaster routing")
     require("mobile_chat_looks_like_task" not in mobile_start_source, "mobile chat start still uses task keyword routing")
     require("mobile_chat_is_task_confirmation" not in mobile_start_source, "mobile chat start still uses confirmation keyword routing")

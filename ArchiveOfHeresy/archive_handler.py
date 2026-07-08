@@ -1207,8 +1207,8 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             "request": turn.get("request"),
             "response": turn.get("response"),
         }
-        if decision.get("action") == "issue_mission_order":
-            payload["warmaster_task"] = mission_order_to_warmaster_message(decision.get("mission_order") if isinstance(decision.get("mission_order"), dict) else {})
+        if decision.get("action") == "request_warmaster_mission":
+            payload["warmaster_task"] = warmaster_request_to_message(decision.get("warmaster_request") if isinstance(decision.get("warmaster_request"), dict) else {})
             job_id = create_mobile_job("warmaster", payload)
             run_mobile_job(job_id, lambda payload=payload: self.run_mobile_warmaster_payload(payload))
             write_json(self, 202, {"ok": True, "job_id": job_id, "type": "warmaster", "session_id": session_id, "status": "queued"})
@@ -1437,14 +1437,14 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 return
             decision = turn.get("decision") if isinstance(turn.get("decision"), dict) else {"action": "answer_in_chat"}
             turn_capabilities = turn.get("capabilities") if isinstance(turn.get("capabilities"), dict) else {}
-            if decision.get("action") == "issue_mission_order":
+            if decision.get("action") == "request_warmaster_mission":
                 task_id = str(payload.get("task_id") or f"client-{uuid.uuid4().hex[:12]}").strip()
                 payload["stream"] = False
                 payload["session_id"] = session_id
                 payload["memory_namespace"] = memory_namespace
                 payload["client_source"] = client_source
                 payload["task_id"] = task_id
-                payload["warmaster_task"] = mission_order_to_warmaster_message(decision.get("mission_order") if isinstance(decision.get("mission_order"), dict) else {})
+                payload["warmaster_task"] = warmaster_request_to_message(decision.get("warmaster_request") if isinstance(decision.get("warmaster_request"), dict) else {})
                 payload["turn_decision"] = decision
                 payload["turn_capabilities"] = turn_capabilities
                 payload["turn_protocol"] = {"request": turn.get("request"), "response": turn.get("response")}

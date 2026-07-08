@@ -200,10 +200,10 @@ def run_entry_text(run, event):
     step_note = f", шаги {completed}/{planned}" if planned else ""
     status = str(run.get("status") or "").lower()
     if event == "started":
-        return f"Шушуня начала задачу бригады {task_id} (губернатор {governor}): {goal}"
+        return f"Шушуня начал задачу бригады {task_id} (губернатор {governor}): {goal}"
     if event == "blocked":
         return f"Задача бригады {task_id} остановлена и ждёт решения владельца (губернатор {governor}{step_note}): {goal}"
-    outcome = {"completed": "успешно выполнила", "failed": "провалила", "cancelled": "отменила"}.get(status, f"завершила со статусом {status}")
+    outcome = {"completed": "успешно выполнил", "failed": "провалил", "cancelled": "отменил"}.get(status, f"завершил со статусом {status}")
     return f"Шушуня {outcome} задачу бригады {task_id} (губернатор {governor}{step_note}): {goal}"
 
 

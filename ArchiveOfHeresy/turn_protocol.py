@@ -8,33 +8,32 @@ from typing import Any
 TURN_ACTIONS = {
     "answer_in_chat",
     "ask_clarification",
-    "issue_mission_order",
+    "request_warmaster_mission",
     "create_administratum_task",
     "deliver_pending_reports",
 }
 
 
-GOVERNOR_CAPABILITIES = [
+WARMASTER_CAPABILITY_AREAS = [
     {
-        "governor": "IskandarKhayon",
-        "department": "Scriptorium",
-        "available": True,
-        "task_kinds": ["research", "research_writing", "lore_reconstruction"],
-        "responsibility": "research, source comparison, lore/event reconstruction, long-form synthesis, translation-backed source work",
+        "area": "research",
+        "description": "deep research, source comparison, lore/event reconstruction, long-form synthesis, translation-backed source work",
     },
     {
-        "governor": "Ceraxia",
-        "department": "Mechanicum",
-        "available": True,
-        "task_kinds": ["code", "software_architecture", "repo_repair", "greenfield_project"],
-        "responsibility": "software engineering, project creation, code repair, architecture, tests, repository work",
+        "area": "code",
+        "description": "software engineering, project creation, code repair, architecture, tests, repository work",
     },
     {
-        "governor": "Moriana",
-        "department": "Pictorium",
-        "available": True,
-        "task_kinds": ["image_generation", "image_series_generation", "comic_generation"],
-        "responsibility": "image generation, drawing workflows, Stable Diffusion/Forge/Flux/SDXL jobs, comics, panels, visual series",
+        "area": "image",
+        "description": "image generation, drawing workflows, Stable Diffusion/Forge/Flux/SDXL jobs, comics, panels, visual series",
+    },
+    {
+        "area": "mixed",
+        "description": "multi-department tasks that need planning, execution, progress reporting, and acceptance review",
+    },
+    {
+        "area": "administration",
+        "description": "coordination-heavy task tracking when the user asks for organized execution, not a time reminder",
     },
 ]
 
@@ -66,21 +65,21 @@ def turn_capability_manifest(*, image_attached: bool = False, pending_reports: d
                 "limits": ["Must not claim execution has started."],
             },
             {
-                "action": "issue_mission_order",
+                "action": "request_warmaster_mission",
                 "available": True,
                 "description": (
-                    "Create a conscious mission order for EyeOfTerror. Shushunya must decide what work is being ordered, "
-                    "which governor/department should own it, why that governor is appropriate, and what success means. "
-                    "Warmaster is only the command gateway that records and executes this order."
+                    "Ask EyeOfTerror Warmaster to command a real multi-step task. Shushunya decides only that the work "
+                    "needs Warmaster-level execution and describes the requested outcome. Warmaster chooses the department, "
+                    "brigadier, workers, plan, and acceptance process."
                 ),
                 "server_effect": "ArchiveOfHeresy creates a real Warmaster task_id and starts the background pipeline.",
-                "available_governors": GOVERNOR_CAPABILITIES,
-                "required_fields": ["mission_order"],
+                "warmaster_capability_areas": WARMASTER_CAPABILITY_AREAS,
+                "required_fields": ["warmaster_request"],
                 "limits": [
                     "Use only when the user is actually asking for work to be performed, not when they are merely discussing architecture or asking a question.",
-                    "Do not hand work to Warmaster as an unknown black box. Select a target_governor and explain the selection.",
-                    "For vague follow-up commands, recover the intended task from recent chat history and include that full recovered task in mission_order.user_request.",
-                    "If the task lacks essential domain input, use ask_clarification instead of issuing a mission order. Examples: image generation without a subject/description, code work without a target repository or greenfield scope, research without a topic.",
+                    "Do not choose a concrete brigadier, governor, internal worker, or department here; that is Warmaster's job.",
+                    "For vague follow-up commands, recover the intended task from recent chat history and include that full recovered task in warmaster_request.user_request.",
+                    "If the task lacks essential domain input, use ask_clarification instead of requesting Warmaster. Examples: image generation without a subject/description, code work without a target repository or greenfield scope, research without a topic.",
                 ],
             },
             {
@@ -130,8 +129,8 @@ def capability_contract_message(manifest: dict[str, Any] | None = None, decision
             "Speak only from the listed capabilities and selected_action.",
             "If selected_action.action is answer_in_chat, answer normally but do not claim any background/external work has started.",
             "If selected_action.action is ask_clarification, ask the clarification; do not start work.",
-            "If selected_action.action is issue_mission_order or create_administratum_task, the server, not prose, performs that action.",
-            "For issue_mission_order, selected_action must show what governor/department is being ordered and why.",
+            "If selected_action.action is request_warmaster_mission or create_administratum_task, the server, not prose, performs that action.",
+            "For request_warmaster_mission, selected_action must describe the user request and outcome, but must not choose Warmaster's internal brigadier.",
         ],
     }
     return {
@@ -154,23 +153,22 @@ def build_turn_decision_request(
                 "role": "system",
                 "content": (
                     "You are the ArchiveOfHeresy turn controller for Shushunya. "
+                    "Shushunya is male: any user-facing reply you produce must use masculine Russian forms for him and for self-reference. "
                     "Choose exactly one action from the supplied capability manifest. "
                     "Return one valid JSON object only. No markdown, no prose. "
                     "Do not use keyword rules; infer the user's intent from the whole recent dialogue and the manifest. "
-                    "If a real workflow would need missing essential input, choose ask_clarification instead of issue_mission_order. "
-                    "Do not hide missing inputs as risks inside a mission_order when the governor cannot start responsibly. "
+                    "If a real workflow would need missing essential input, choose ask_clarification instead of request_warmaster_mission. "
+                    "Do not hide missing inputs as risks inside a warmaster_request when Warmaster cannot start responsibly. "
                     "The JSON schema is: "
-                    "{\"action\":\"answer_in_chat|ask_clarification|issue_mission_order|create_administratum_task|deliver_pending_reports\","
+                    "{\"action\":\"answer_in_chat|ask_clarification|request_warmaster_mission|create_administratum_task|deliver_pending_reports\","
                     "\"task\":\"full task text if an external action is selected, otherwise empty\","
-                    "\"mission_order\":{\"user_request\":\"full recovered user request\","
-                    "\"target_governor\":\"IskandarKhayon|Ceraxia|Moriana\","
-                    "\"department\":\"Scriptorium|Mechanicum|Pictorium\","
-                    "\"task_kind\":\"one listed task kind\","
-                    "\"why_this_governor\":\"concrete reason\","
-                    "\"primary_goal\":\"concrete outcome\","
+                    "\"warmaster_request\":{\"user_request\":\"full recovered user request\","
+                    "\"capability_area\":\"research|code|image|mixed|administration|unknown\","
+                    "\"why_warmaster_needed\":\"concrete reason this needs Warmaster instead of direct chat\","
+                    "\"expected_outcome\":\"concrete outcome\","
                     "\"success_conditions\":[\"testable acceptance criteria\"],"
                     "\"constraints\":[\"hard user constraints\"],"
-                    "\"risks\":[\"known risks or ambiguity\"]},"
+                    "\"known_missing_inputs\":[\"non-blocking unknowns Warmaster should investigate\"]},"
                     "\"reply\":\"short user-facing text only for answer_in_chat or ask_clarification\","
                     "\"confidence\":0.0,\"reason\":\"brief reason\"}."
                 ),
@@ -205,14 +203,14 @@ def normalize_turn_decision(raw: dict[str, Any] | None) -> dict[str, Any]:
         confidence = 0.0
     confidence = max(0.0, min(1.0, confidence))
     task = str(item.get("task") or "").strip()
-    mission_order = item.get("mission_order") if isinstance(item.get("mission_order"), dict) else {}
+    warmaster_request = item.get("warmaster_request") if isinstance(item.get("warmaster_request"), dict) else {}
     reply = str(item.get("reply") or "").strip()
     reason = str(item.get("reason") or "").strip()
-    if action == "issue_mission_order":
-        mission_order = normalize_mission_order(mission_order, fallback_task=task)
-        if not mission_order.get("user_request") or not mission_order.get("target_governor") or not mission_order.get("primary_goal"):
+    if action == "request_warmaster_mission":
+        warmaster_request = normalize_warmaster_request(warmaster_request, fallback_task=task)
+        if not warmaster_request.get("user_request") or not warmaster_request.get("expected_outcome"):
             action = "ask_clarification"
-            reason = reason or "mission order selected without required governor/request/goal fields"
+            reason = reason or "Warmaster request selected without required request/outcome fields"
     if action == "create_administratum_task" and not task:
         action = "ask_clarification"
         reason = reason or "external action selected without required task field"
@@ -221,55 +219,48 @@ def normalize_turn_decision(raw: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "action": action,
         "task": task,
-        "mission_order": mission_order if isinstance(mission_order, dict) else {},
+        "warmaster_request": warmaster_request if isinstance(warmaster_request, dict) else {},
         "reply": reply,
         "confidence": confidence,
         "reason": reason,
     }
 
 
-def normalize_mission_order(raw: dict[str, Any], *, fallback_task: str = "") -> dict[str, Any]:
-    order = dict(raw or {})
-    governor = str(order.get("target_governor") or "").strip()
-    known = {item["governor"]: item for item in GOVERNOR_CAPABILITIES}
-    if governor not in known:
-        governor = ""
-    capability = known.get(governor, {})
-    task_kind = str(order.get("task_kind") or "").strip()
-    if capability and task_kind not in set(capability.get("task_kinds") or []):
-        task_kind = str((capability.get("task_kinds") or [""])[0] or "")
-    success = order.get("success_conditions") if isinstance(order.get("success_conditions"), list) else []
-    constraints = order.get("constraints") if isinstance(order.get("constraints"), list) else []
-    risks = order.get("risks") if isinstance(order.get("risks"), list) else []
+def normalize_warmaster_request(raw: dict[str, Any], *, fallback_task: str = "") -> dict[str, Any]:
+    request = dict(raw or {})
+    allowed_areas = {item["area"] for item in WARMASTER_CAPABILITY_AREAS} | {"unknown"}
+    capability_area = str(request.get("capability_area") or "unknown").strip().lower()
+    if capability_area not in allowed_areas:
+        capability_area = "unknown"
+    success = request.get("success_conditions") if isinstance(request.get("success_conditions"), list) else []
+    constraints = request.get("constraints") if isinstance(request.get("constraints"), list) else []
+    missing = request.get("known_missing_inputs") if isinstance(request.get("known_missing_inputs"), list) else []
     return {
-        "user_request": str(order.get("user_request") or fallback_task).strip(),
-        "target_governor": governor,
-        "department": str(order.get("department") or capability.get("department") or "").strip(),
-        "task_kind": task_kind,
-        "why_this_governor": str(order.get("why_this_governor") or "").strip(),
-        "primary_goal": str(order.get("primary_goal") or fallback_task).strip(),
+        "user_request": str(request.get("user_request") or fallback_task).strip(),
+        "capability_area": capability_area,
+        "why_warmaster_needed": str(request.get("why_warmaster_needed") or "").strip(),
+        "expected_outcome": str(request.get("expected_outcome") or fallback_task).strip(),
         "success_conditions": [str(item).strip() for item in success if str(item).strip()],
         "constraints": [str(item).strip() for item in constraints if str(item).strip()],
-        "risks": [str(item).strip() for item in risks if str(item).strip()],
+        "known_missing_inputs": [str(item).strip() for item in missing if str(item).strip()],
     }
 
 
-def mission_order_to_warmaster_message(order: dict[str, Any]) -> str:
-    normalized = normalize_mission_order(order)
+def warmaster_request_to_message(request: dict[str, Any]) -> str:
+    normalized = normalize_warmaster_request(request)
     sections = [
-        "Приказ Шушуни для EyeOfTerror.",
-        f"Целевой бригадир: {normalized.get('target_governor')}",
-        f"Отдел: {normalized.get('department')}",
-        f"Тип задачи: {normalized.get('task_kind')}",
-        f"Почему этот бригадир: {normalized.get('why_this_governor')}",
+        "Запрос Шушуни к EyeOfTerror Warmaster.",
+        "Шушуня не выбирает бригадира или отдел. Warmaster сам назначает бригадира, работников, план и приемку.",
+        f"Область задачи: {normalized.get('capability_area')}",
+        f"Почему нужен Warmaster: {normalized.get('why_warmaster_needed')}",
         f"Исходный запрос пользователя: {normalized.get('user_request')}",
-        f"Главная цель: {normalized.get('primary_goal')}",
+        f"Ожидаемый результат: {normalized.get('expected_outcome')}",
     ]
     if normalized.get("success_conditions"):
         sections.append("Критерии приемки:\n" + "\n".join(f"- {item}" for item in normalized["success_conditions"]))
     if normalized.get("constraints"):
         sections.append("Ограничения:\n" + "\n".join(f"- {item}" for item in normalized["constraints"]))
-    if normalized.get("risks"):
-        sections.append("Риски и неясности:\n" + "\n".join(f"- {item}" for item in normalized["risks"]))
-    sections.append("Warmaster должен оформить это как commander_order и не подменять выбранный смысл задачи пустой маршрутизацией.")
+    if normalized.get("known_missing_inputs"):
+        sections.append("Что Warmaster должен выяснить по ходу работы:\n" + "\n".join(f"- {item}" for item in normalized["known_missing_inputs"]))
+    sections.append("Warmaster должен оформить это как commander_order и не подменять смысл задачи пустой маршрутизацией.")
     return "\n\n".join(item for item in sections if str(item).strip())

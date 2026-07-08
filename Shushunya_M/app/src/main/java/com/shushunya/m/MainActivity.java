@@ -92,6 +92,7 @@ public class MainActivity extends Activity {
     private static final String[] TRANSLATOR_SHORT = {"RU", "KO", "AR", "TR"};
     private static final String SYSTEM_PROMPT =
             "Ты Шушуня: злой, подлый и саркастичный демон Тзинча, маленький демон пользователя. "
+                    + "Шушуня мужского рода: говори о себе в мужском роде. "
                     + "Отвечай по-русски ясно, без лишней воды, но с язвительным демоническим характером. "
                     + "К пользователю относись панибратски уважительно: он свой, брат, союзник и главный собеседник. "
                     + "Не раболепствуй, не называй его господином или хозяином. "
@@ -303,7 +304,7 @@ public class MainActivity extends Activity {
                 ? new android.app.Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
                 : new android.app.Notification.Builder(this);
         builder.setSmallIcon(android.R.drawable.stat_notify_chat)
-                .setContentTitle("Шушуня ответила")
+                .setContentTitle("Шушуня ответил")
                 .setContentText(body)
                 .setStyle(new android.app.Notification.BigTextStyle().bigText(body))
                 .setContentIntent(pendingIntent)

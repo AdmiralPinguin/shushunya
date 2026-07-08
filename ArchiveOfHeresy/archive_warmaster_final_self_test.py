@@ -204,9 +204,9 @@ def main() -> int:
     )
     if journal_accepted != "Финал для доставки из фонового журнала.":
         raise AssertionError(f"journal final_response was not preferred: {journal_accepted!r}")
-    delivered = []
+    queued_reports = []
     original_fetch = task_journal.fetch_orchestration
-    original_append = task_journal.append_chat_message
+    original_enqueue = task_journal.enqueue_report
     task_journal.fetch_orchestration = lambda task_id: {
         "status": "completed",
             "snapshot": {
@@ -216,20 +216,22 @@ def main() -> int:
                 }
             },
     }
-    task_journal.append_chat_message = lambda *args, **kwargs: delivered.append({"args": args, "kwargs": kwargs})
+    task_journal.enqueue_report = lambda *args, **kwargs: queued_reports.append({"args": args, "kwargs": kwargs}) or 777
     try:
         if not deliver_final_to_chat("task-final-delivery"):
             raise AssertionError("deliver_final_to_chat returned false for completed final_response")
     finally:
         task_journal.fetch_orchestration = original_fetch
-        task_journal.append_chat_message = original_append
-    if len(delivered) != 1:
-        raise AssertionError(f"final delivery wrote unexpected messages: {delivered}")
-    if delivered[0]["args"][1:3] != ("assistant", "Доставленный финал task-final-delivery."):
-        raise AssertionError(f"final delivery wrote wrong chat payload: {delivered}")
-    if delivered[0]["kwargs"].get("dedupe_key") != "warmaster:task-final-delivery:final":
-        raise AssertionError(f"final delivery did not use stable dedupe key: {delivered}")
-    delivered.clear()
+        task_journal.enqueue_report = original_enqueue
+    if len(queued_reports) != 1:
+        raise AssertionError(f"final delivery queued unexpected reports: {queued_reports}")
+    if queued_reports[0]["args"][:3] != ("warmaster", "task_completed", "готово: task-final-delivery"):
+        raise AssertionError(f"final delivery queued wrong report header: {queued_reports}")
+    if "Доставленный финал task-final-delivery." not in queued_reports[0]["args"][3]:
+        raise AssertionError(f"final delivery queued wrong report body: {queued_reports}")
+    if queued_reports[0]["kwargs"].get("dedupe_key") != "warmaster:task-final-delivery:final":
+        raise AssertionError(f"final delivery did not use stable dedupe key: {queued_reports}")
+    queued_reports.clear()
     task_journal.fetch_orchestration = lambda task_id: {
         "status": "completed",
         "snapshot": {
@@ -240,15 +242,15 @@ def main() -> int:
         },
         "final": {"deliverable": f"Недопустимый legacy финал {task_id}."},
     }
-    task_journal.append_chat_message = lambda *args, **kwargs: delivered.append({"args": args, "kwargs": kwargs})
+    task_journal.enqueue_report = lambda *args, **kwargs: queued_reports.append({"args": args, "kwargs": kwargs}) or 777
     try:
         if deliver_final_to_chat("task-without-final-response"):
             raise AssertionError("deliver_final_to_chat accepted completed run without protocol final_response")
     finally:
         task_journal.fetch_orchestration = original_fetch
-        task_journal.append_chat_message = original_append
-    if delivered:
-        raise AssertionError(f"legacy final payload was delivered to chat: {delivered}")
+        task_journal.enqueue_report = original_enqueue
+    if queued_reports:
+        raise AssertionError(f"legacy final payload was queued for chat: {queued_reports}")
     revision = final_message(
         {
             "status": "revision",
@@ -280,7 +282,7 @@ def main() -> int:
     if running:
         raise AssertionError(f"running diagnostic leaked to chat final message: {running!r}")
     captured = []
-    delivered.clear()
+    delivered = []
     original_proxy = archive_handler.proxy_json_url
     original_write = archive_handler.write_json
     original_archive_append = archive_handler.append_chat_message
