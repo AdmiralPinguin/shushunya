@@ -57,6 +57,15 @@ STATE_LABELS = {
     "completed": "готова",
     "cancelled": "отменена",
     "interrupted": "прервана",
+    # mission-protocol phases (mission_status is more precise than run status)
+    "created": "принята, ещё НЕ выполняется",
+    "assigned": "принята, ещё НЕ выполняется",
+    "planning": "планируется, работа ещё НЕ идёт",
+    "plan_review": "план готов, ждёт запуска — работа ещё НЕ идёт",
+    "executing": "в работе",
+    "governor_review": "бригадир проверяет результат",
+    "warmaster_acceptance": "Warmaster принимает результат",
+    "revision": "на доработке у бригады",
 }
 CLASSES = ("срочно", "важно", "к слову", "фон", "unclassified")
 STATES = ("open", "mentioned", "conveyed", "closed")
@@ -448,7 +457,9 @@ def task_roster(limit: int = 10) -> dict:
     for run in runs:
         if not isinstance(run, dict):
             continue
-        status = str(run.get("status") or "").lower()
+        # mission_status carries the protocol phase (executing/plan_review/...),
+        # which is far more truthful than the coarse run status ("created").
+        status = str(run.get("mission_status") or run.get("lifecycle_status") or run.get("status") or "").lower()
         tasks.append(
             {
                 "task_id": str(run.get("task_id") or ""),
@@ -456,7 +467,7 @@ def task_roster(limit: int = 10) -> dict:
                 "governor": str(run.get("governor") or ""),
                 "state": status,
                 "state_label": STATE_LABELS.get(status, status or "неизвестно"),
-                "active": str(run.get("task_id") or "") in active_ids or status in {"running", "queued"},
+                "active": str(run.get("task_id") or "") in active_ids or status in {"running", "queued", "executing"},
             }
         )
     return {"ok": True, "tasks": tasks}

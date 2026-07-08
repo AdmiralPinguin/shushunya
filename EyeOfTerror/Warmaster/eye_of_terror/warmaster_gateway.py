@@ -1289,8 +1289,65 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
     return WarmasterHandler
 
 
+def orphan_run_watchdog(run_root: Path, interval_sec: float = 60.0, grace_sec: float = 120.0) -> None:
+    """Start research loops for runs that were prepared but never started.
+
+    Mission creation and loop start are two separate client calls; when planning
+    outlives the client's HTTP timeout, the client disconnects before sending
+    the start command and the run sits in plan_review forever. The watchdog
+    adopts such orphans instead of leaving them stuck.
+    """
+    import time as _time
+    from datetime import datetime, timezone
+
+    while True:
+        _time.sleep(interval_sec)
+        try:
+            for ledger_path in run_root.glob("*/task_ledger.json"):
+                try:
+                    ledger_data = json.loads(ledger_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if str(ledger_data.get("status") or "") != "created":
+                    continue
+                events = ledger_data.get("events") or []
+                if any(str(event.get("type") or "").startswith("research_loop") for event in events):
+                    continue
+                if not any(str(event.get("type") or "") == "run_preflight_recorded" for event in events):
+                    continue
+                try:
+                    updated = datetime.fromisoformat(str(ledger_data.get("updated_at")))
+                    age = (datetime.now(timezone.utc) - updated).total_seconds()
+                except (TypeError, ValueError):
+                    age = grace_sec + 1
+                if age < grace_sec:
+                    continue
+                task_id = str(ledger_data.get("task_id") or ledger_path.parent.name)
+                run_dir = ledger_path.parent
+                executor = lambda tid=task_id: research_loop_run(
+                    run_root,
+                    tid,
+                    run_mode="http",
+                    host="127.0.0.1",
+                    timeout_sec=1800,
+                    max_revision_cycles=3,
+                    allow_resume=True,
+                    claim_active=False,
+                )
+                record_research_loop_event(
+                    run_dir,
+                    "research_loop_background_requested",
+                    {"mode": "orphan_watchdog", "max_revision_cycles": 3, "allow_resume": True, "orphan_age_sec": int(age)},
+                )
+                if start_background(task_id, executor):
+                    print(f"orphan watchdog: adopted stuck run {task_id} (age {int(age)}s)", flush=True)
+        except Exception as exc:  # noqa: BLE001 - the watchdog must survive anything
+            print(f"orphan watchdog error: {exc}", flush=True)
+
+
 def serve(host: str, port: int, run_root: Path, recover_stale_on_start: bool = True, governor_transport: str = "local", governor_host: str = "127.0.0.1") -> None:
     prepare_run_root(run_root, recover_stale_on_start=recover_stale_on_start)
+    threading.Thread(target=orphan_run_watchdog, args=(run_root,), daemon=True, name="orphan-run-watchdog").start()
     server = ThreadingHTTPServer((host, port), make_handler(run_root, default_governor_transport=governor_transport, default_governor_host=governor_host))
     server.serve_forever()
 

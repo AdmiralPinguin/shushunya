@@ -1045,6 +1045,65 @@ def start_persona_mission_ack(session_id, task_id, task_text=""):
     ).start()
 
 
+WARMASTER_NON_TERMINAL_STATES = {
+    "created", "assigned", "queued", "running", "planning", "plan_review",
+    "executing", "governor_review", "warmaster_acceptance", "revision", "blocked", "interrupted",
+}
+
+
+def warmaster_duplicate_task_id(task_text):
+    """One topic — one mission. Before delegating a new mission, ask the model
+    whether the same job is already on Warmaster's board; if it is, the caller
+    resumes that run instead of spawning a duplicate."""
+    task_text = trim_chat_text(task_text)
+    if not task_text:
+        return ""
+    try:
+        _status, snapshot = proxy_json_url("GET", f"{WARMASTER_BASE_URL}/runs?limit=30", timeout=20)
+    except Exception as exc:  # noqa: BLE001 - Warmaster down: let normal delegation handle it
+        print(f"Duplicate-task check skipped (runs unavailable): {exc}", flush=True)
+        return ""
+    candidates = []
+    for run in snapshot.get("runs") or []:
+        if not isinstance(run, dict):
+            continue
+        state = str(run.get("mission_status") or run.get("status") or "").lower()
+        if state not in WARMASTER_NON_TERMINAL_STATES:
+            continue
+        candidates.append({"task_id": str(run.get("task_id") or ""), "state": state, "goal": str(run.get("goal") or "")[:400]})
+    if not candidates:
+        return ""
+    payload = {
+        "model": DEFAULT_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Ты диспетчер задач. Дана новая задача владельца и список задач, которые уже висят у бригад. "
+                    'Верни строгий JSON {"match_task_id":""} — id задачи, которая является ТЕМ ЖЕ самым поручением '
+                    "(та же тема и та же цель, даже если формулировка другая). Продолжение/повтор той же работы — это совпадение. "
+                    "Если новая задача про другое — верни пустую строку. Не выдумывай id."
+                ),
+            },
+            {"role": "user", "content": json.dumps({"new_task": task_text[:800], "existing": candidates}, ensure_ascii=False)},
+        ],
+        "temperature": 0,
+        "max_tokens": 100,
+        "response_format": {"type": "json_object"},
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    try:
+        _status, response = proxy_json("POST", "/v1/chat/completions", payload=payload, timeout=120)
+        content = str((((response.get("choices") or [{}])[0].get("message") or {}).get("content")) or "")
+        match = str(extract_json_object(content).get("match_task_id") or "").strip()
+    except Exception as exc:  # noqa: BLE001 - an unanswered judge must not block delegation
+        print(f"Duplicate-task check failed: {exc}", flush=True)
+        return ""
+    if match and any(c["task_id"] == match for c in candidates):
+        return match
+    return ""
+
+
 def decide_chat_turn_action(session_id, text, image_data_url="", model=None):
     user_text = trim_chat_text(text)
     manifest = turn_capability_manifest(image_attached=bool(image_data_url), pending_reports=pending_summary())

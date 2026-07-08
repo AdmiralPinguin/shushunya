@@ -1026,9 +1026,15 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             "governor_transport": str(payload.get("governor_transport") or "http"),
         }
         try:
-            status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=240)
-            response_status = response.get("status") if isinstance(response.get("status"), dict) else {}
-            resolved_task_id = str(response.get("task_id") or response_status.get("task_id") or task_id)
+            duplicate_id = warmaster_duplicate_task_id(task)
+            if duplicate_id:
+                # Same job already on the board: resume it, don't spawn a twin.
+                status, response = 200, {"ok": True, "task_id": duplicate_id, "resumed_existing": True}
+                resolved_task_id = duplicate_id
+            else:
+                status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=240)
+                response_status = response.get("status") if isinstance(response.get("status"), dict) else {}
+                resolved_task_id = str(response.get("task_id") or response_status.get("task_id") or task_id)
             loop_status = 0
             loop_response = {}
             if 200 <= status < 300 and resolved_task_id:
@@ -1226,9 +1232,15 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             "run_mode": str(payload.get("run_mode") or "http"),
             "governor_transport": str(payload.get("governor_transport") or "http"),
         }
-        status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=240)
-        response_status = response.get("status") if isinstance(response.get("status"), dict) else {}
-        resolved_task_id = str(response.get("task_id") or response_status.get("task_id") or task_id).strip()
+        duplicate_id = warmaster_duplicate_task_id(task)
+        if duplicate_id:
+            # Same job already on the board: resume it, don't spawn a twin.
+            status, response = 200, {"ok": True, "task_id": duplicate_id, "resumed_existing": True}
+            resolved_task_id = duplicate_id
+        else:
+            status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=240)
+            response_status = response.get("status") if isinstance(response.get("status"), dict) else {}
+            resolved_task_id = str(response.get("task_id") or response_status.get("task_id") or task_id).strip()
         loop_status = 0
         loop_response = {}
         if 200 <= status < 300 and resolved_task_id:
