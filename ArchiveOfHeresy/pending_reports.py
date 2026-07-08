@@ -9,8 +9,9 @@ prompt gets a topics-only note so Shushunya can mention that news exists
 without spilling the content uninvited.
 """
 import json
+import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from archive_config import SQLITE_PATH
 from archive_state import ARCHIVE_LOCK
@@ -63,8 +64,22 @@ def enqueue_report(source, kind, topic, body, dedupe_key=None):
             return int(cursor.lastrowid)
 
 
+REPORT_TTL_HOURS = float(os.environ.get("ARCHIVE_REPORT_TTL_HOURS", "24"))
+
+
+def _expire_stale(db):
+    """Unclaimed reports must not haunt the queue forever: after the TTL they
+    expire silently (they stay in the table for history, just not pending)."""
+    cutoff = (datetime.now().astimezone() - timedelta(hours=REPORT_TTL_HOURS)).isoformat(timespec="seconds")
+    db.execute(
+        "UPDATE pending_reports SET status = 'expired', delivered_at = ? WHERE status = 'pending' AND created_at < ?",
+        (now_iso(), cutoff),
+    )
+
+
 def pending_reports(limit=20):
     with _connect() as db:
+        _expire_stale(db)
         rows = db.execute(
             "SELECT * FROM pending_reports WHERE status = 'pending' ORDER BY id LIMIT ?",
             (max(1, min(int(limit), 100)),),

@@ -3194,12 +3194,19 @@ public class MainActivity extends Activity {
                     JSONObject payload = new JSONObject(readAll(conn.getInputStream()));
                     count = payload.optInt("count", 0);
                     JSONArray items = payload.optJSONArray("topics");
+                    int lastNotified = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("last_reports_notified_id", 0);
+                    int olderCount = 0;
                     for (int i = 0; items != null && i < items.length(); i++) {
                         JSONObject item = items.optJSONObject(i);
                         if (item == null) {
                             continue;
                         }
-                        maxReportId = Math.max(maxReportId, item.optInt("id", 0));
+                        int itemId = item.optInt("id", 0);
+                        maxReportId = Math.max(maxReportId, itemId);
+                        if (itemId <= lastNotified) {
+                            olderCount++;  // already announced once: do not re-list old topics
+                            continue;
+                        }
                         String topic = item.optString("topic", "").trim();
                         if (!topic.isEmpty()) {
                             if (topics.length() > 0) {
@@ -3207,6 +3214,9 @@ public class MainActivity extends Activity {
                             }
                             topics.append(topic);
                         }
+                    }
+                    if (olderCount > 0 && topics.length() > 0) {
+                        topics.append(" (+ ещё ").append(olderCount).append(" в очереди)");
                     }
                 }
             } catch (Exception ignored) {
