@@ -7,6 +7,7 @@ answers are also delivered to the shared chat once, while brigade progress stays
 out of the chat and remains available through Warmaster activity endpoints.
 """
 import json
+import re
 import threading
 import time
 import os
@@ -130,7 +131,7 @@ def deliver_final_to_chat(task_id, run=None):
         return False
     if not final_message:
         return False
-    goal = " ".join(str((run or {}).get("goal") or "").split())[:120] or task_id
+    goal = human_goal(run or {})[:120] or task_id
     body = f"Задача бригады выполнена и принята Warmaster'ом.\ntask: {goal}\nfinal ответ:\n{final_message[:4000]}"
     report_id = enqueue_report("warmaster", "task_completed", f"готово: {goal}", body, dedupe_key=f"warmaster:{task_id}:final")
     return bool(report_id)
@@ -142,7 +143,7 @@ def escalation_facts(task_id, run):
     judgement already happened in Warmaster's acceptance review."""
     facts = {
         "task_id": task_id,
-        "goal": " ".join(str(run.get("goal") or "").split())[:300],
+        "goal": human_goal(run),
         "governor": str(run.get("governor") or ""),
         "status": str(run.get("status") or "").lower(),
     }
@@ -153,6 +154,7 @@ def escalation_facts(task_id, run):
         return facts
     summary = _orchestration_summary(orchestration)
     protocol = summary.get("mission_protocol") if isinstance(summary.get("mission_protocol"), dict) else {}
+    facts["goal"] = human_goal(run, protocol)
     review = _latest_acceptance_review(protocol)
     if review:
         facts["warmaster_reason"] = str(review.get("reason") or "")
@@ -190,10 +192,31 @@ def deliver_escalation_to_chat(task_id, run, event_kind):
     return bool(report_id)
 
 
+def _user_request_from_protocol(protocol):
+    order = protocol.get("commander_order") if isinstance(protocol.get("commander_order"), dict) else {}
+    request = str(order.get("user_request") or "").strip()
+    if request:
+        return request
+    intake = protocol.get("mission_intake") if isinstance(protocol.get("mission_intake"), dict) else {}
+    return str(intake.get("user_request") or "").strip()
+
+
+def human_goal(run, protocol=None):
+    """The owner's own request, not the protocol wrapper: run goals (and even
+    commander_order.user_request) carry the 'Запрос Шушуни к EyeOfTerror
+    Warmaster...' boilerplate, and quoting it back at the owner reads like
+    machine garbage, so the wrapper is unwrapped wherever it comes from."""
+    request = _user_request_from_protocol(protocol or {}) or str(run.get("goal") or "")
+    match = re.search(r"Исходный запрос пользователя:\s*(.+?)(?:\n\n|$)", request, re.S)
+    if match:
+        request = match.group(1)
+    return " ".join(request.split())[:300]
+
+
 def run_entry_text(run, event):
     task_id = str(run.get("task_id") or "")
     governor = str(run.get("governor") or "").strip() or "неизвестный губернатор"
-    goal = " ".join(str(run.get("goal") or "").split())[:300]
+    goal = human_goal(run)
     progress = run.get("progress") if isinstance(run.get("progress"), dict) else {}
     planned = progress.get("planned_steps")
     completed = progress.get("completed_steps")
