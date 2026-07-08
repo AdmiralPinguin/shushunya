@@ -35,6 +35,8 @@ from pending_reports import (
     mark_delivered,
     pending_reports,
     pending_summary,
+    phone_announce,
+    judge_conveyed,
     pending_topics_note,
     reports_event_text,
 )
@@ -336,6 +338,7 @@ def run_mobile_chat_payload(payload):
         # without spilling the content uninvited.
         reports_message = None
         reports_to_deliver = []
+        vox_on_tongue = []
         if str(turn_decision.get("action") or "") == "deliver_pending_reports":
             reports_to_deliver = pending_reports()
             if reports_to_deliver:
@@ -343,10 +346,12 @@ def run_mobile_chat_payload(payload):
             else:
                 reports_message = {
                     "role": "system",
-                    "content": "Владелец спросил про новости, но очередь докладов пуста. Скажи честно, что новостей нет.",
+                    "content": "Владелец спросил про новости, но у Шушуни ничего не накопилось. Скажи честно, что сказать нечего.",
                 }
         elif not internal_flag(payload.get("system_event", False), default=False):
-            reports_message = pending_topics_note()
+            reports_message = pending_topics_note(context_text=text)
+            if reports_message:
+                vox_on_tongue = reports_message.get("on_tongue") or []
         mobile_payload = {
             "model": model,
             "user": session_id,
@@ -431,6 +436,7 @@ def run_mobile_chat_payload(payload):
             "administratum_result": administratum_result,
             "turn_decision": turn_decision,
             "turn_capabilities": turn_capabilities,
+            "vox_on_tongue": vox_on_tongue,
             "prompt_diagnostics": diagnostics,
             "model": model,
             "request": {
@@ -1239,7 +1245,8 @@ def prepare_messages(
     if administratum_message:
         prepared.append(administratum_message)
     if reports_message:
-        prepared.append(reports_message)
+        # Strip the Vox judge payload before it reaches the prompt.
+        prepared.append({"role": reports_message["role"], "content": reports_message["content"]})
     # Memory retrieval into the prompt now flows only through Magos's curated
     # memory_context (above). The old mechanical vector/graph auto-injection was
     # removed so nothing bypasses Magos's relevance filtering.
@@ -1666,6 +1673,11 @@ def update_focus_memory(record):
     except Exception as exc:
         write_memory_event(record, {"component": "librarian", "status": "error", "error": str(exc)})
         print(f"Librarian error namespace={namespace}: {exc}", flush=True)
+    # Vox conveyance judge: which on-tongue intents actually sounded in the
+    # answer become conveyed. Background, alongside the librarian.
+    on_tongue = record.get("vox_on_tongue") or []
+    if on_tongue and (record.get("assistant_message") or {}).get("content"):
+        judge_conveyed(record["assistant_message"]["content"], on_tongue)
 
 
 def maybe_abandon_magos_focus(record):

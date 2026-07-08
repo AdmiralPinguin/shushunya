@@ -1,146 +1,174 @@
-"""Outbox for Shushunya's proactive reports.
+"""Thin client over the Vox service — Shushunya's working memory of things not
+yet said to the owner.
 
-Proactive sources (Administratum reminders/summaries, Warmaster escalations,
-completed task finals) no longer barge into the shared chat. They are queued
-here; the app shows a "she wants to say something" indicator, and the reports
-are voiced only when the owner presses the button or asks in conversation
-(detected as a deliver_reports intent). While reports are pending, the chat
-prompt gets a topics-only note so Shushunya can mention that news exists
-without spilling the content uninvited.
+This module keeps its historical function names (call sites across the archive
+still use them), but the state, the speech-class brain, the "к слову" relevance
+and the conveyed/announced lifecycle all live in the Vox service now. Vox, not
+the transport, decides what to say and when; this file only forwards.
 """
 import json
-import sqlite3
-from datetime import datetime
+import os
+import urllib.request
 
-from archive_config import SQLITE_PATH
-from archive_state import ARCHIVE_LOCK
-
-
-def now_iso():
-    return datetime.now().astimezone().isoformat(timespec="seconds")
+VOX_BASE_URL = os.environ.get("ARCHIVE_VOX_BASE_URL", "http://127.0.0.1:7400").rstrip("/")
 
 
-def _connect():
-    db = sqlite3.connect(SQLITE_PATH, timeout=15)
-    db.row_factory = sqlite3.Row
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS pending_reports (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_at TEXT NOT NULL,
-            source TEXT NOT NULL,
-            kind TEXT NOT NULL,
-            topic TEXT NOT NULL,
-            body TEXT NOT NULL,
-            dedupe_key TEXT,
-            status TEXT NOT NULL DEFAULT 'pending',
-            delivered_at TEXT
-        )
-        """
-    )
-    return db
+def _get(path, timeout=30.0):
+    request = urllib.request.Request(VOX_BASE_URL + path, method="GET")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _post(path, payload, timeout=200.0):
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(VOX_BASE_URL + path, data=data, headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
 def enqueue_report(source, kind, topic, body, dedupe_key=None):
-    """Queue a proactive report instead of posting it into the chat."""
-    source = str(source or "unknown").strip()[:80]
-    kind = str(kind or "report").strip()[:80]
-    topic = " ".join(str(topic or "").split())[:200] or kind
-    body = str(body or "").strip()
-    if not body:
+    """Register an intent to speak. Vox classifies it (срочно/важно/к слову/фон),
+    writes the announce line, and embeds it for relevance — the source only
+    supplies facts."""
+    try:
+        result = _post("/intent", {"source": source, "kind": kind, "topic": topic, "body": body, "dedupe_key": dedupe_key})
+        return result.get("intent_id")
+    except Exception as exc:  # noqa: BLE001 - a down Vox must not break the caller
+        print(f"Vox enqueue failed: {exc}", flush=True)
         return None
-    dedupe_key = str(dedupe_key or "").strip()[:160] or None
-    with ARCHIVE_LOCK:
-        with _connect() as db:
-            if dedupe_key:
-                row = db.execute(
-                    "SELECT id FROM pending_reports WHERE dedupe_key = ? AND status = 'pending'",
-                    (dedupe_key,),
-                ).fetchone()
-                if row:
-                    # The same report is still unclaimed: refresh it in place
-                    # instead of piling up copies of the same news.
-                    db.execute(
-                        "UPDATE pending_reports SET created_at = ?, topic = ?, body = ? WHERE id = ?",
-                        (now_iso(), topic, body, int(row["id"])),
-                    )
-                    return int(row["id"])
-            cursor = db.execute(
-                "INSERT INTO pending_reports (created_at, source, kind, topic, body, dedupe_key) VALUES (?, ?, ?, ?, ?, ?)",
-                (now_iso(), source, kind, topic, body, dedupe_key),
-            )
-            return int(cursor.lastrowid)
 
 
 def pending_reports(limit=20):
-    with _connect() as db:
-        rows = db.execute(
-            "SELECT * FROM pending_reports WHERE status = 'pending' ORDER BY id LIMIT ?",
-            (max(1, min(int(limit), 100)),),
-        ).fetchall()
-    return [dict(row) for row in rows]
+    """Everything open, full bodies — used when the owner asks to hear it all."""
+    try:
+        return _get("/deliverable").get("intents") or []
+    except Exception as exc:  # noqa: BLE001
+        print(f"Vox deliverable failed: {exc}", flush=True)
+        return []
 
 
 def pending_summary():
-    """Indicator payload: count, topics, and a server-composed announce line —
-    the client is a dumb screen, what to announce is Shushunya's logic."""
-    reports = pending_reports()
-    announce = ""
-    if reports:
-        newest = reports[-1]
-        announce = str(newest.get("topic") or newest.get("kind") or "")
-        if len(reports) > 1:
-            announce += f" (и ещё {len(reports) - 1} в очереди)"
-    return {
-        "count": len(reports),
-        "announce": announce,
-        "topics": [{"id": r["id"], "kind": r["kind"], "topic": r["topic"], "created_at": r["created_at"]} for r in reports],
-    }
+    """Indicator payload: count + server-composed announce line + topics."""
+    try:
+        summary = _get("/summary")
+        return {"count": summary.get("count", 0), "announce": summary.get("announce", ""), "topics": summary.get("topics") or []}
+    except Exception as exc:  # noqa: BLE001
+        print(f"Vox summary failed: {exc}", flush=True)
+        return {"count": 0, "announce": "", "topics": []}
+
+
+def phone_announce():
+    """What the phone should buzz about right now. Vox decides which urgent
+    intents are still unannounced and marks them announced server-side, so the
+    phone keeps no state at all."""
+    try:
+        return _get("/announce")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Vox announce failed: {exc}", flush=True)
+        return {"ok": False, "notify": False, "notify_lines": [], "count": 0, "badge": ""}
 
 
 def mark_delivered(report_ids):
-    ids = [int(i) for i in report_ids or []]
-    if not ids:
+    """The owner heard these: judged conveyed in the dialogue."""
+    try:
+        return _post("/conveyed", {"conveyed_ids": [int(i) for i in report_ids or []]}, timeout=30).get("conveyed", 0)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Vox conveyed failed: {exc}", flush=True)
         return 0
-    placeholders = ",".join("?" for _ in ids)
-    with ARCHIVE_LOCK:
-        with _connect() as db:
-            cursor = db.execute(
-                f"UPDATE pending_reports SET status = 'delivered', delivered_at = ? WHERE id IN ({placeholders}) AND status = 'pending'",
-                (now_iso(), *ids),
-            )
-            return cursor.rowcount
 
 
 def reports_event_text(reports):
-    """Combined system-event text: Shushunya voices all queued reports at once."""
+    """Combined system-event text: Shushunya voices all open intents at once."""
     lines = [
         "[Накопленные доклады для владельца]",
         "Владелец разрешил доложить. Изложи доклады своим голосом, по порядку, ничего не выдумывая сверх текста.",
-        "Докладывай строго по-русски: если фрагменты доклада на английском или другом языке, переведи их.",
+        "Докладывай строго по-русски: если фрагменты доклада на другом языке, переведи их.",
         "Не создавай из этого новые задачи.",
         "",
     ]
     for index, report in enumerate(reports, 1):
-        lines.append(f"--- доклад {index} [{report['kind']}] от {report['created_at']}")
-        lines.append(str(report["body"]))
+        lines.append(f"--- доклад {index} [{report.get('kind')}] от {report.get('created_at')}")
+        lines.append(str(report.get("body") or ""))
         lines.append("")
     return "\n".join(lines).strip()
 
 
-def pending_topics_note():
-    """Topics-only system note for regular chat turns: she may mention that news
-    exists, but must not spill the content until the owner asks."""
-    summary = pending_summary()
-    if not summary["count"]:
+def pending_topics_note(context_text=""):
+    """The "on the tongue" note for an ordinary turn. Instead of dumping every
+    queued topic, it asks Vox what is on the tongue FOR THIS conversation:
+    urgent/important always, 'к слову' only when semantically close."""
+    try:
+        result = _post("/on-tongue", {"context": context_text}, timeout=90)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Vox on-tongue failed: {exc}", flush=True)
         return None
-    topics = "; ".join(f"[{t['kind']}] {t['topic']}" for t in summary["topics"][:10])
+    intents = result.get("intents") or []
+    if not intents:
+        return None
+    lines = []
+    for intent in intents:
+        speech_class = intent.get("class")
+        if speech_class == "срочно":
+            lines.append(f"- СРОЧНОЕ [{intent.get('topic')}]: {intent.get('body')}")
+        else:
+            lines.append(f"- [{speech_class}] {intent.get('topic')}")
+    urgent = any(intent.get("class") == "срочно" for intent in intents)
+    guidance = (
+        "У Шушуни есть что сказать владельцу. Срочное изложи в этом ответе прямо, своими словами. "
+        if urgent
+        else (
+            "У Шушуни есть что сказать владельцу. Если это уместно по ходу разговора, ввернёшь одной фразой; "
+            "если не к месту — промолчи, скажешь позже. Не пересказывай списком."
+        )
+    )
     return {
         "role": "system",
-        "content": (
-            f"У Шушуни есть {summary['count']} недоставленных докладов (темы: {topics}). "
-            "НЕ пересказывай их содержание. Если уместно, можешь одной короткой фразой упомянуть, "
-            "что есть новости и предложить рассказать. Если владелец прямо спрашивает про новости/доклады, "
-            "они будут доставлены отдельным сообщением — не выдумывай их содержание сам."
-        ),
+        "content": "[Vox — на языке у Шушуни]\n" + guidance + "\n" + "\n".join(lines),
+        # Carried on the message so the background judge can mark which of these
+        # actually sounded in the answer (conveyed); stripped before the prompt.
+        "on_tongue": intents,
     }
+
+
+def judge_conveyed(assistant_text, on_tongue):
+    """After the answer, decide which on-tongue intents actually sounded in it,
+    and mark those conveyed in Vox. One background LLM call — off the user's
+    wait, alongside the librarian; conveyance is judged, never assumed."""
+    if not assistant_text or not on_tongue:
+        return
+    import os as _os
+
+    model = _os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf")
+    llm_base = _os.environ.get("ARCHIVE_LLM_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
+    candidates = [{"id": i.get("id"), "topic": i.get("topic")} for i in on_tongue]
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Ты судья Vox. Дан ответ Шушуни владельцу и список тем, которые Шушуня держал 'на языке'. "
+                    "Верни строгий JSON {\"conveyed_ids\":[...]} — id только тех тем, которые РЕАЛЬНО прозвучали в ответе "
+                    "(были изложены или явно упомянуты владельцу). Если тема не прозвучала — не включай её."
+                ),
+            },
+            {"role": "user", "content": json.dumps({"answer": assistant_text[:3000], "on_tongue": candidates}, ensure_ascii=False)},
+        ],
+        "temperature": 0,
+        "max_tokens": 200,
+        "response_format": {"type": "json_object"},
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    try:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(f"{llm_base}/v1/chat/completions", data=data, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(request, timeout=120) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        content = str(((result.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
+        if "{" in content:
+            content = content[content.find("{") : content.rfind("}") + 1]
+        conveyed_ids = [int(i) for i in (json.loads(content).get("conveyed_ids") or [])]
+        if conveyed_ids:
+            mark_delivered(conveyed_ids)
+    except Exception as exc:  # noqa: BLE001 - a missed judgement just lets the intent linger
+        print(f"Vox conveyance judge failed: {exc}", flush=True)

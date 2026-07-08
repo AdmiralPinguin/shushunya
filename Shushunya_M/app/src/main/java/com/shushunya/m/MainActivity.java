@@ -3181,9 +3181,10 @@ public class MainActivity extends Activity {
     private void pollPendingReports() {
         new Thread(() -> {
             int count = 0;
-            int maxReportId = 0;
-            StringBuilder topics = new StringBuilder();
+            boolean backgrounded = !appInForeground;
+            java.util.ArrayList<String> notifyLines = new java.util.ArrayList<>();
             try {
+                // Badge: read-only summary, no marking.
                 URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/reports/pending");
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("GET");
@@ -3193,27 +3194,36 @@ public class MainActivity extends Activity {
                 if (conn.getResponseCode() >= 200 && conn.getResponseCode() < 300) {
                     JSONObject payload = new JSONObject(readAll(conn.getInputStream()));
                     count = payload.optInt("count", 0);
-                    // What to announce is Shushunya's (server) logic: the client
-                    // just displays the announce line and tracks the newest id
-                    // so the phone does not re-buzz for the same news.
-                    topics.append(payload.optString("announce", "").trim());
-                    JSONArray items = payload.optJSONArray("topics");
-                    for (int i = 0; items != null && i < items.length(); i++) {
-                        JSONObject item = items.optJSONObject(i);
-                        if (item != null) {
-                            maxReportId = Math.max(maxReportId, item.optInt("id", 0));
+                }
+                // Notification: only when backgrounded, and Vox decides what to
+                // buzz and marks it announced server-side. The phone is stateless.
+                if (backgrounded && count > 0) {
+                    URL a = new URL(trimSlash(baseUrl) + "/archive/client/chat/reports/announce");
+                    HttpURLConnection ac = (HttpURLConnection) a.openConnection();
+                    ac.setRequestMethod("GET");
+                    ac.setConnectTimeout(8000);
+                    ac.setReadTimeout(12000);
+                    applyMobileAuth(ac);
+                    if (ac.getResponseCode() >= 200 && ac.getResponseCode() < 300) {
+                        JSONObject ap = new JSONObject(readAll(ac.getInputStream()));
+                        if (ap.optBoolean("notify", false)) {
+                            JSONArray lines = ap.optJSONArray("notify_lines");
+                            for (int i = 0; lines != null && i < lines.length(); i++) {
+                                String line = lines.optString(i, "").trim();
+                                if (!line.isEmpty()) {
+                                    notifyLines.add(line);
+                                }
+                            }
                         }
                     }
                 }
             } catch (Exception ignored) {
             }
             int finalCount = count;
-            int finalMaxId = maxReportId;
-            String finalTopics = topics.toString();
             main.post(() -> {
                 updateReportsBadge(finalCount);
-                if (!appInForeground && finalCount > 0) {
-                    maybeShowReportsNotification(finalCount, finalMaxId, finalTopics);
+                if (!notifyLines.isEmpty()) {
+                    showVoxNotification(finalCount, notifyLines);
                 }
                 if (!reportsPollScheduled) {
                     reportsPollScheduled = true;
@@ -3226,12 +3236,8 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void maybeShowReportsNotification(int count, int maxReportId, String topics) {
-        if (maxReportId <= 0) {
-            return;
-        }
-        int lastNotified = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("last_reports_notified_id", 0);
-        if (maxReportId <= lastNotified) {
+    private void showVoxNotification(int count, java.util.List<String> lines) {
+        if (lines.isEmpty()) {
             return;
         }
         if (Build.VERSION.SDK_INT >= 33
@@ -3240,18 +3246,15 @@ public class MainActivity extends Activity {
         }
         Intent intent = new Intent(this, MainActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        PendingIntent pendingIntent = PendingIntent.getActivity(
-                this,
-                8,
-                intent,
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 8, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        String body = topics.isEmpty() ? ("Докладов в очереди: " + count) : topics;
-        body = TextUtils.ellipsize(body, new android.text.TextPaint(), 420, TextUtils.TruncateAt.END).toString();
+        String body = TextUtils.join("\n", lines);
+        body = TextUtils.ellipsize(body, new android.text.TextPaint(), 600, TextUtils.TruncateAt.END).toString();
         android.app.Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new android.app.Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
                 : new android.app.Notification.Builder(this);
         builder.setSmallIcon(android.R.drawable.stat_notify_chat)
-                .setContentTitle("Шушуня хочет что-то сказать (" + count + ")")
+                .setContentTitle("Шушуня хочет что-то сказать")
                 .setContentText(body)
                 .setStyle(new android.app.Notification.BigTextStyle().bigText(body))
                 .setContentIntent(pendingIntent)
@@ -3259,10 +3262,6 @@ public class MainActivity extends Activity {
         NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (manager != null) {
             manager.notify(1002, builder.build());
-            getSharedPreferences(PREFS, MODE_PRIVATE)
-                    .edit()
-                    .putInt("last_reports_notified_id", maxReportId)
-                    .apply();
         }
     }
 

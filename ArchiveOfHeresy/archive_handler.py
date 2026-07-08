@@ -135,6 +135,14 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             write_json(self, 200, {"ok": True, **pending_summary()})
             return
 
+        if self.path.startswith("/archive/chat/reports/announce") or self.path.startswith("/archive/mobile/chat/reports/announce"):
+            if not require_auth(self, allow_mobile=True):
+                return
+            # Vox decides what to buzz and marks it announced server-side; the
+            # phone calls this only when backgrounded and keeps no state.
+            write_json(self, 200, phone_announce())
+            return
+
         if self.path == "/archive/mobile/warmaster/state":
             if not require_auth(self, allow_mobile=True):
                 return

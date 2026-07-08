@@ -6,6 +6,8 @@ PROJECT_ROOT="$(cd "$ROOT/.." && pwd)"
 
 # Ensure the CPU embedding server is up (vector memory depends on it).
 systemctl --user start shushunya-embedder.service 2>/dev/null || true
+# Ensure Vox (Shushunya's intent-to-speak service) is up.
+"$(cd "$(dirname "${BASH_SOURCE[0]}")/../Vox" && pwd)/start-vox.sh" 2>/dev/null || true
 ENV_DIR="$ROOT/ArchiveOfHeresy"
 RUNTIME_DIR="$ROOT/runtime"
 PID_FILE="$RUNTIME_DIR/archive-main.pid"
