@@ -4,6 +4,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler
@@ -87,6 +88,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             session_id = "default"
             limit = CHAT_HISTORY_LIMIT
             after_id = 0
+            wait_sec = 0.0
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
                 session_id = shared_chat_session_id((params.get("session_id") or [SHARED_CHAT_SESSION_ID])[0])
@@ -98,14 +100,29 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     after_id = int((params.get("after_id") or [0])[0])
                 except (TypeError, ValueError):
                     after_id = 0
+                try:
+                    wait_sec = max(0.0, min(float((params.get("wait") or [0])[0]), 25.0))
+                except (TypeError, ValueError):
+                    wait_sec = 0.0
             else:
                 session_id = shared_chat_session_id(SHARED_CHAT_SESSION_ID)
+            # Telegram-style delta long-poll: with after_id+wait the request is
+            # held until new messages exist (or the wait expires), so clients
+            # append deltas instead of re-downloading and re-rendering history.
+            messages = chat_history(session_id, limit=limit, after_id=after_id)
+            if wait_sec > 0 and after_id > 0 and not messages:
+                deadline = time.time() + wait_sec
+                while time.time() < deadline:
+                    time.sleep(1.0)
+                    messages = chat_history(session_id, limit=limit, after_id=after_id)
+                    if messages:
+                        break
             write_json(
                 self,
                 200,
                 {
                     "session_id": session_id,
-                    "messages": chat_history(session_id, limit=limit, after_id=after_id),
+                    "messages": messages,
                     "source_of_truth": "server",
                 },
             )

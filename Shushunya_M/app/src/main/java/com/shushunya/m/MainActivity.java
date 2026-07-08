@@ -110,6 +110,10 @@ public class MainActivity extends Activity {
     private String lastAgentTasksJson = "";
     private String lastChatHistoryJson = "";
     private boolean brigadePollScheduled;
+    private long lastSeenChatMessageId;
+    private TextView pendingAnswerBubble;
+    private boolean chatDeltaLoopRunning;
+    private final java.util.ArrayDeque<String> pendingLocalEchoes = new java.util.ArrayDeque<>();
     private LinearLayout messageList;
     private LinearLayout inputPanel;
     private LinearLayout composer;
@@ -2112,7 +2116,11 @@ public class MainActivity extends Activity {
         translatorView.setVisibility(translator ? View.VISIBLE : View.GONE);
         agentView.setVisibility(agent ? View.VISIBLE : View.GONE);
         if (chat) {
-            loadServerChatHistory();
+            if (messageList == null || messageList.getChildCount() == 0) {
+                loadServerChatHistory();
+            } else {
+                startChatDeltaLoop();
+            }
             translatorView.setPadding(0, dp(10), 0, 0);
             agentView.setPadding(0, dp(6), 0, 0);
             scrollView.setPadding(0, 0, 0, lastKeyboardHeight > 0 ? lastKeyboardHeight + inputPanel.getHeight() + dp(14) : 0);
@@ -2393,10 +2401,13 @@ public class MainActivity extends Activity {
         resetAttachImageButton();
         if (hasImage) {
             addImageMessage(text, imagePreview, imageLabel);
+            pendingLocalEchoes.addLast("user\n" + text + "\n[image attached server-side]");
         } else {
             addMessage(true, text);
+            pendingLocalEchoes.addLast("user\n" + text);
         }
         TextView answerBubble = addMessage(false, "", false);
+        pendingAnswerBubble = answerBubble;
         setWaiting(true);
         new Thread(() -> {
             PowerManager.WakeLock wakeLock = acquireAnswerWakeLock();
@@ -2405,64 +2416,29 @@ public class MainActivity extends Activity {
                 liveBubble.start();
                 String jobId = requestChatStart(text, imageDataUrl);
                 String finalText = pollChatJobUntilDone(jobId);
+                pendingLocalEchoes.addLast("assistant\n" + finalText);
+                main.post(() -> {
+                    if (pendingAnswerBubble == answerBubble) {
+                        pendingAnswerBubble = null;
+                    }
+                });
                 liveBubble.append(finalText);
                 liveBubble.finish();
                 showAnswerNotification(finalText);
                 main.post(() -> setWaiting(false));
             } catch (Exception e) {
-                // The server keeps working and persists the answer into the
-                // shared history; recover it from there instead of erroring out.
-                recoverAnswerFromHistory(answerBubble);
+                // No manual recovery needed: the delta stream is the recovery.
+                // The answer lands server-side and the delta loop fills this bubble.
+                main.post(() -> {
+                    answerBubble.setText("⏳ связь моргнула — ответ доедет сюда сам");
+                    setWaiting(false);
+                });
             } finally {
                 if (wakeLock != null && wakeLock.isHeld()) {
                     wakeLock.release();
                 }
             }
         }).start();
-    }
-
-    private void recoverAnswerFromHistory(TextView answerBubble) {
-        main.post(() -> answerBubble.setText("Связь моргнула — подтягиваю ответ из истории…"));
-        long deadline = System.currentTimeMillis() + 240000;
-        while (System.currentTimeMillis() < deadline) {
-            try {
-                Thread.sleep(6000);
-                URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/messages?session_id=" + SERVER_CHAT_SESSION_ID + "&limit=4");
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("GET");
-                conn.setConnectTimeout(8000);
-                conn.setReadTimeout(12000);
-                applyMobileAuth(conn);
-                if (conn.getResponseCode() < 200 || conn.getResponseCode() >= 300) {
-                    continue;
-                }
-                JSONObject payload = new JSONObject(readAll(conn.getInputStream()));
-                JSONArray history = payload.optJSONArray("messages");
-                if (history == null || history.length() == 0) {
-                    continue;
-                }
-                JSONObject last = history.optJSONObject(history.length() - 1);
-                if (last == null || "user".equals(last.optString("role", ""))) {
-                    continue;  // the answer has not landed yet
-                }
-                String answer = last.optString("content", "").trim();
-                if (answer.isEmpty()) {
-                    continue;
-                }
-                main.post(() -> {
-                    answerBubble.setText(answer);
-                    setWaiting(false);
-                    maybeScrollToBottom(false);
-                });
-                showAnswerNotification(answer);
-                return;
-            } catch (Exception ignored) {
-            }
-        }
-        main.post(() -> {
-            answerBubble.setText("Сервер ещё думает или связи нет. Ответ появится в истории — открой чат позже.");
-            setWaiting(false);
-        });
     }
 
     private String warmasterTaskFromChatCommand(String text) {
@@ -3003,7 +2979,17 @@ public class MainActivity extends Activity {
                     return;
                 }
                 String historyKey = history.toString();
+                long maxId = 0;
+                for (int i = 0; i < history.length(); i++) {
+                    JSONObject item = history.optJSONObject(i);
+                    if (item != null) {
+                        maxId = Math.max(maxId, item.optLong("id", 0));
+                    }
+                }
+                long finalMaxId = maxId;
                 main.post(() -> {
+                    lastSeenChatMessageId = Math.max(lastSeenChatMessageId, finalMaxId);
+                    startChatDeltaLoop();
                     if (historyKey.equals(lastChatHistoryJson)) {
                         return;  // nothing changed: a rebuild would just blink
                     }
@@ -3025,6 +3011,97 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {
             }
         }).start();
+    }
+
+    private void startChatDeltaLoop() {
+        if (chatDeltaLoopRunning) {
+            return;
+        }
+        chatDeltaLoopRunning = true;
+        new Thread(() -> {
+            // Telegram-style delta stream: one short-lived long-poll at a time.
+            // New messages are APPENDED to the view; nothing is ever rebuilt,
+            // and a dropped poll is a normal outcome, not an error.
+            while (true) {
+                if (!appInForeground) {
+                    try {
+                        Thread.sleep(2000);
+                    } catch (InterruptedException ignored) {
+                        break;
+                    }
+                    continue;
+                }
+                try {
+                    URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/messages?session_id=" + SERVER_CHAT_SESSION_ID
+                            + "&after_id=" + lastSeenChatMessageId + "&wait=25&limit=50");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setConnectTimeout(10000);
+                    conn.setReadTimeout(35000);
+                    applyMobileAuth(conn);
+                    if (conn.getResponseCode() < 200 || conn.getResponseCode() >= 300) {
+                        Thread.sleep(3000);
+                        continue;
+                    }
+                    JSONObject payload = new JSONObject(readAll(conn.getInputStream()));
+                    JSONArray delta = payload.optJSONArray("messages");
+                    if (delta == null || delta.length() == 0) {
+                        continue;
+                    }
+                    final JSONArray finalDelta = delta;
+                    main.post(() -> appendChatDelta(finalDelta));
+                } catch (InterruptedException stop) {
+                    break;
+                } catch (Exception transient_) {
+                    try {
+                        Thread.sleep(3000);
+                    } catch (InterruptedException ignored) {
+                        break;
+                    }
+                }
+            }
+        }).start();
+    }
+
+    private void appendChatDelta(JSONArray delta) {
+        boolean appended = false;
+        for (int i = 0; i < delta.length(); i++) {
+            JSONObject item = delta.optJSONObject(i);
+            if (item == null) {
+                continue;
+            }
+            long id = item.optLong("id", 0);
+            if (id <= lastSeenChatMessageId) {
+                continue;
+            }
+            lastSeenChatMessageId = Math.max(lastSeenChatMessageId, id);
+            String role = item.optString("role", "");
+            String text = item.optString("content", "").trim();
+            if (text.isEmpty()) {
+                continue;
+            }
+            boolean fromUser = "user".equals(role);
+            String echoKey = (fromUser ? "user\n" : "assistant\n") + text;
+            if (pendingLocalEchoes.remove(echoKey)) {
+                continue;  // already shown locally (own message or job-delivered answer)
+            }
+            if (!fromUser && pendingAnswerBubble != null) {
+                // The awaited answer arrives through the delta stream (e.g. after
+                // a dropped poll): fill the waiting bubble instead of appending.
+                pendingAnswerBubble.setText(text);
+                pendingAnswerBubble = null;
+                setWaiting(false);
+                showAnswerNotification(text);
+                appended = true;
+                continue;
+            }
+            addMessage(fromUser, text, false);
+            appended = true;
+        }
+        if (appended) {
+            lastChatHistoryJson = "";  // view diverged from last full snapshot
+            maybeScrollToBottom(false);
+        }
     }
 
     private void pollPendingReports() {
@@ -3154,9 +3231,7 @@ public class MainActivity extends Activity {
                     reportsButton.setEnabled(true);
                     reportsButton.setVisibility(View.GONE);
                 }
-                for (long delay : new long[] {6000, 15000, 30000, 60000}) {
-                    main.postDelayed(this::loadServerChatHistory, delay);
-                }
+                // The voiced reports arrive through the chat delta stream.
             });
         }).start();
     }
