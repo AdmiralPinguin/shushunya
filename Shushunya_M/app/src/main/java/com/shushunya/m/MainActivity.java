@@ -2899,7 +2899,7 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             int count = 0;
             try {
-                URL url = new URL(trimSlash(baseUrl) + "/archive/chat/reports/pending");
+                URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/reports/pending");
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("GET");
                 conn.setConnectTimeout(8000);
@@ -2944,7 +2944,7 @@ public class MainActivity extends Activity {
         }
         new Thread(() -> {
             try {
-                URL url = new URL(trimSlash(baseUrl) + "/archive/chat/reports/deliver");
+                URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/reports/deliver");
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setConnectTimeout(8000);

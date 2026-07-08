@@ -111,7 +111,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if self.path.startswith("/archive/chat/reports/pending"):
+        if self.path.startswith("/archive/chat/reports/pending") or self.path.startswith("/archive/mobile/chat/reports/pending"):
             if not require_auth(self, allow_mobile=True):
                 return
             write_json(self, 200, {"ok": True, **pending_summary()})
@@ -452,7 +452,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             self.mobile_chat_start()
             return
 
-        if self.path == "/archive/chat/reports/enqueue":
+        if self.path in ("/archive/chat/reports/enqueue", "/archive/mobile/chat/reports/enqueue"):
             if not require_auth(self, allow_mobile=True):
                 return
             try:
@@ -470,7 +470,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             write_json(self, 201 if report_id else 400, {"ok": bool(report_id), "report_id": report_id, **pending_summary()})
             return
 
-        if self.path == "/archive/chat/reports/deliver":
+        if self.path in ("/archive/chat/reports/deliver", "/archive/mobile/chat/reports/deliver"):
             if not require_auth(self, allow_mobile=True):
                 return
             summary = pending_summary()
