@@ -895,17 +895,13 @@ class ArchiveHandler(BaseHTTPRequestHandler):
     def warmaster_acceptance_message(self, task_id):
         return f"Вармастер принял задачу и ведет исполнение: task_id={task_id}. Ход работы доступен во вкладке Бригады."
 
-    def append_warmaster_acceptance_message(self, session_id, task_id):
+    def append_warmaster_acceptance_message(self, session_id, task_id, task_text=""):
         clean_task_id = str(task_id or "").strip()
         if not clean_task_id:
             return
-        append_chat_message(
-            shared_chat_session_id(session_id or SHARED_CHAT_SESSION_ID),
-            "assistant",
-            self.warmaster_acceptance_message(clean_task_id),
-            source="warmaster",
-            dedupe_key=f"warmaster:{clean_task_id}:accepted",
-        )
+        # Voiced by the persona in a background thread: the chat gets a live
+        # "взял в работу" reply instead of a dry static line.
+        start_persona_mission_ack(session_id or SHARED_CHAT_SESSION_ID, clean_task_id, task_text)
 
     def warmaster_loop_started_or_active(self, status, payload):
         if 200 <= int(status or 0) < 300:
@@ -948,7 +944,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 source=client_source,
                 dedupe_key=f"warmaster:{resolved_task_id}:user" if resolved_task_id else None,
             )
-            self.append_warmaster_acceptance_message(SHARED_CHAT_SESSION_ID, resolved_task_id)
+            self.append_warmaster_acceptance_message(SHARED_CHAT_SESSION_ID, resolved_task_id, task_text=task)
             response["backend"] = "warmaster"
             response["task_id"] = resolved_task_id
             response["message"] = self.warmaster_acceptance_message(resolved_task_id) if resolved_task_id else "Вармастер принял задачу."
@@ -1149,7 +1145,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             source=client_source,
             dedupe_key=f"warmaster:{resolved_task_id}:user" if resolved_task_id else None,
         )
-        self.append_warmaster_acceptance_message(session_id, resolved_task_id or task_id)
+        self.append_warmaster_acceptance_message(session_id, resolved_task_id or task_id, task_text=original_text or task)
         activity = {}
         try:
             activity = self.warmaster_fetch_activity(resolved_task_id or task_id)

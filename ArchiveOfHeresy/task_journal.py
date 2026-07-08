@@ -245,7 +245,7 @@ def append_journal_page(entry_text, namespace, task_id, event):
                 body_lines = body_lines[1:]
         body_lines.append(f"- {now_iso()} — {entry_text}")
         body_lines = body_lines[-TASK_JOURNAL_MAX_LINES:]
-        body = "Журнал дел Шушуни: какие задачи бригад она начинала и чем они закончились.\n\n" + "\n".join(body_lines)
+        body = "Журнал дел Шушуни: какие задачи бригад он начинал и чем они закончились.\n\n" + "\n".join(body_lines)
         bookshelf.upsert_page(
             index,
             {

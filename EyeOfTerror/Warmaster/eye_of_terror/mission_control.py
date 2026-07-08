@@ -157,7 +157,9 @@ def build_commander_order(message: str, mission_id: str) -> dict[str, Any]:
             "Return one strict JSON object and nothing else. Do not create a detailed brigade work plan. "
             "Warmaster's job is to define command intent, success conditions, constraints, and true escalation "
             "conditions. The assigned governor will plan the domain work. Revisions are internal and must not be "
-            "reported to the user as final answers."
+            "reported to the user as final answers. "
+            "Write commander_intent, primary_goal, success_conditions, constraints and escalate_to_user_if in Russian: "
+            "these fields are quoted back to the Russian-speaking owner in reports."
         ),
     )
     if not model_decision.get("ok"):

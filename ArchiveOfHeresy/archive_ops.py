@@ -962,6 +962,50 @@ def extract_json_object(text):
     return parsed
 
 
+def append_persona_mission_ack(session_id, task_id, task_text=""):
+    """Voice a short in-character confirmation that a mission went to work and
+    append it to the shared chat. Runs in a background thread so delegation
+    stays instant; the dry static line is replaced by Shushunya's own reply."""
+    note = (
+        "[Миссия принята в работу]\n"
+        f"task_id: {task_id}\n"
+        + (f"суть задачи: {trim_chat_text(task_text)[:300]}\n" if task_text else "")
+        + "Подтверди владельцу одной-двумя фразами своим голосом, что ты взял это в работу и доложишь результат. "
+        "По-русски. Не выдумывай прогресс, не задавай вопросов, не пересказывай задачу целиком."
+    )
+    payload = {
+        "model": DEFAULT_MODEL,
+        "messages": [persona_page_context(shared_memory_namespace(None)), {"role": "user", "content": note}],
+        "temperature": 0.5,
+        "max_tokens": 220,
+    }
+    try:
+        _status, response = proxy_json("POST", "/v1/chat/completions", payload=payload, timeout=120)
+        content = str((((response.get("choices") or [{}])[0].get("message") or {}).get("content")) or "").strip()
+    except Exception as exc:  # noqa: BLE001 - ack voicing must not break delegation
+        print(f"Mission ack voicing failed for {task_id}: {exc}", flush=True)
+        return
+    if content:
+        append_chat_message(
+            shared_chat_session_id(session_id),
+            "assistant",
+            content,
+            source="warmaster",
+            dedupe_key=f"warmaster:{task_id}:accepted",
+        )
+
+
+def start_persona_mission_ack(session_id, task_id, task_text=""):
+    if not str(task_id or "").strip():
+        return
+    threading.Thread(
+        target=append_persona_mission_ack,
+        args=(session_id, task_id, task_text),
+        daemon=True,
+        name=f"mission-ack-{task_id}",
+    ).start()
+
+
 def decide_chat_turn_action(session_id, text, image_data_url="", model=None):
     user_text = trim_chat_text(text)
     manifest = turn_capability_manifest(image_attached=bool(image_data_url), pending_reports=pending_summary())
