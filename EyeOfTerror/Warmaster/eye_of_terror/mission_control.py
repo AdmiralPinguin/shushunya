@@ -101,10 +101,23 @@ def record_mission_state(
     return state
 
 
+OWNER_REQUEST_LINE_RE = re.compile(r"Исходный запрос пользователя:\s*(.+?)(?:\n\n|$)", re.S)
+
+
+def owner_request_from_message(message: str) -> str:
+    """The owner's literal words. Chat requests arrive wrapped in the
+    'Запрос Шушуни к EyeOfTerror Warmaster...' boilerplate; protocol fields
+    that are quoted back to the owner must carry his words, not the wrapper."""
+    match = OWNER_REQUEST_LINE_RE.search(message or "")
+    text = match.group(1) if match else (message or "")
+    return " ".join(text.split()).strip()
+
+
 def commander_order_prompt_payload(message: str, route: dict[str, Any], mission_id: str) -> dict[str, Any]:
     return {
         "mission_id": mission_id,
-        "user_request": message,
+        "user_request": owner_request_from_message(message),
+        "mission_request": message,
         "route": route,
         "required_json_schema": {
             "commander_intent": "short command intent, not a detailed brigade plan",
@@ -173,12 +186,13 @@ def build_commander_order(message: str, mission_id: str) -> dict[str, Any]:
         }
     try:
         payload = _extract_json_object(str(model_decision.get("content") or ""))
-        primary_goal = concrete_primary_goal(str(payload.get("primary_goal") or ""), message)
+        owner_request = owner_request_from_message(message)
+        primary_goal = concrete_primary_goal(str(payload.get("primary_goal") or ""), owner_request)
         order = commander_order(
             mission_id,
             to=route.governor,
             supporting_governors=[item.get("name") for item in route.supporting_governors if isinstance(item, dict)],
-            user_request=message,
+            user_request=owner_request,
             commander_intent=str(payload.get("commander_intent") or "").strip(),
             primary_goal=primary_goal,
             success_conditions=payload.get("success_conditions") if isinstance(payload.get("success_conditions"), list) else [],
@@ -211,7 +225,7 @@ def governor_task_from_order(order: dict[str, Any]) -> str:
 def open_mission(warmaster_root: Path, message: str, task_id: str | None, source_channel: str = "main_chat") -> dict[str, Any]:
     mission_id = mission_id_for(task_id, message)
     mission_dir = mission_dir_for(warmaster_root, mission_id)
-    intake = mission_intake(mission_id, message, source_channel=source_channel)
+    intake = mission_intake(mission_id, owner_request_from_message(message), source_channel=source_channel)
     validate_protocol_payload(intake, expected_type="mission_intake")
     commander = build_commander_order(message, mission_id)
     if not commander.get("ok"):
@@ -489,6 +503,24 @@ def worker_report_from_payload(mission_id: str, step_id: str, worker: str, paylo
         status = "done"
     else:
         status = "failed"
+    # Honesty gate: a worker must not swallow trouble. Every problem-shaped
+    # field the payload carries (problems, gaps, blockers, error) becomes a
+    # protocol-visible problem so the governor can re-plan instead of trusting
+    # a clean-looking "done".
+    problems = [str(item) for item in payload.get("problems", [])] if isinstance(payload.get("problems"), list) else []
+    for key, prefix in (("gaps", "gap"), ("blockers", "blocker")):
+        values = payload.get(key)
+        if isinstance(values, list):
+            for item in values:
+                if isinstance(item, dict):
+                    item = item.get("message") or item.get("code") or json.dumps(item, ensure_ascii=False)
+                text = str(item).strip()
+                if text:
+                    problems.append(f"{prefix}: {text}")
+    if payload.get("error"):
+        problems.append(f"error: {str(payload.get('error')).strip()}")
+    seen: set[str] = set()
+    problems = [item for item in problems if not (item in seen or seen.add(item))][:20]
     report = worker_report(
         mission_id,
         step_id=step_id,
@@ -496,7 +528,7 @@ def worker_report_from_payload(mission_id: str, step_id: str, worker: str, paylo
         status=status,
         summary=str(payload.get("summary") or payload.get("error") or raw_status or "Worker step finished."),
         artifacts=[str(item) for item in payload.get("artifacts", [])] if isinstance(payload.get("artifacts"), list) else [],
-        problems=[str(item) for item in payload.get("problems", [])] if isinstance(payload.get("problems"), list) else [],
+        problems=problems,
         next_recommended_action=str(payload.get("next_recommended_action") or payload.get("next_action") or ""),
     )
     validate_protocol_payload(report, expected_type="worker_report")
@@ -642,6 +674,9 @@ def build_acceptance_review(command: dict[str, Any], report: dict[str, Any], led
         instructions=(
             "Return one strict JSON object and nothing else. Decide whether the governor report satisfies the commander_order. "
             "Do not accept internal needs_revision/blocker reports as final user answers. Reject shallow or incomplete results. "
+            "Judge against the commander_order success_conditions, not against the mere presence of worker problems: "
+            "problems prefixed 'gap:' are informational coverage notes and are acceptable when success_conditions are still met. "
+            "Do not order a revision that repeats a previously failed revision without a new approach. "
             "Set escalate_to_user=true only when a real user decision, missing access, or external impossibility blocks progress."
         ),
     )

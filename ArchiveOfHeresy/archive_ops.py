@@ -314,10 +314,22 @@ def run_mobile_chat_payload(payload):
         administratum_intent = None
         administratum_result = None
         administratum_message = None
-        if should_detect_administratum_intent(client_source, payload):
-            administratum_intent = detect_administratum_intent(text, model=model)
+        # One decision point: the turn controller gates task creation. The intent
+        # parser runs only to STRUCTURE the task the controller already ordered —
+        # not as a second brain on every message (that both doubled latency and
+        # let the two models disagree about whether a task was created).
+        if str(turn_decision.get("action") or "") == "create_administratum_task" and should_detect_administratum_intent(client_source, payload):
+            administratum_intent = detect_administratum_intent(str(turn_decision.get("task") or "") or text, model=model)
             administratum_result = create_administratum_task_from_intent(administratum_intent, session_id, client_source)
             administratum_message = administratum_intent_context(administratum_result)
+            if administratum_message is None:
+                administratum_message = {
+                    "role": "system",
+                    "content": (
+                        "Turn controller выбрал создание задачи Администратума, но структуратор не распознал в ней "
+                        "task/watch. Задача НЕ создана — скажи владельцу честно и уточни, что именно записать."
+                    ),
+                }
         # Pending-reports outbox: on a deliver turn the queued reports are injected
         # in full and marked delivered after a successful answer; on ordinary turns
         # only a topics note is injected so Shushunya can mention news exists
@@ -460,7 +472,15 @@ def run_mobile_chat_payload(payload):
             raise
         finally:
             if maintenance_record is not None:
-                maybe_update_focus_memory(maintenance_record)
+                # Post-answer memory maintenance must not sit inside the user's
+                # wait: the answer is already persisted, so the librarian cycle
+                # (and its periodic wiki/graph syncs) runs in the background.
+                threading.Thread(
+                    target=maybe_update_focus_memory,
+                    args=(maintenance_record,),
+                    daemon=True,
+                    name=f"librarian-{maintenance_record.get('turn_id')}",
+                ).start()
 
 
 def memory_catalog(memory_namespace):

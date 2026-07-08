@@ -1465,420 +1465,71 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     )
                 return
 
-            request_messages = messages_for_chat_context(session_id, system_prompt, text, image_data_url=image_data_url)
-            request_messages.insert(0, capability_contract_message(turn_capabilities, decision))
-            append_chat_message(
-                session_id,
-                "user",
-                text if not image_data_url else f"{text}\n[image attached server-side]",
-                created_at=created_at,
-                source=client_source,
-            )
-            administratum_intent = None
-            administratum_result = None
-            administratum_message = None
-            if should_detect_administratum_intent(client_source, payload):
-                administratum_intent = detect_administratum_intent(text, model=model)
-                administratum_result = create_administratum_task_from_intent(administratum_intent, session_id, client_source)
-                administratum_message = administratum_intent_context(administratum_result)
-            mobile_payload = {
-                "model": model,
-                "user": session_id,
-                "archive_enabled": archive_enabled,
-                "focus_enabled": focus_enabled,
-                "vector_enabled": vector_enabled,
-                "graph_enabled": graph_enabled,
-                "archive_system_prompt_enabled": archive_system_prompt_enabled,
-                "memory_namespace": memory_namespace,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "stream": stream,
-                "messages": request_messages,
-            }
-            memory_messages = sanitize_messages_for_memory(request_messages)
-            magos_message = None
-            magos_result = None
-            magos = focus_components(memory_namespace)["magos"]
-            if focus_enabled and magos is not None:
-                try:
-                    magos_message = magos.prepare_request(
-                        memory_messages,
-                        model=model,
-                        conversation_id=session_id,
-                        turn_id=turn_id,
-                        memory_namespace=memory_namespace,
-                    )
-                    magos_result = magos.last_result
-                except Exception as exc:
-                    print(f"Magos hard fail-soft mobile chat: {exc}", flush=True)
-                    magos_result = {"error": str(exc)}
-
-            prepared_payload = dict(mobile_payload)
-            prepared_payload["messages"] = prepare_messages(
-                request_messages,
-                include_focus=focus_enabled,
-                include_vector=vector_enabled,
-                include_graph=graph_enabled,
-                include_system_prompt=archive_system_prompt_enabled,
-                magos_message=magos_message,
-                administratum_message=administratum_message,
-                query_messages=memory_messages,
-                memory_namespace=memory_namespace,
-            )
-            archive_prepared_messages = prepare_messages(
-                memory_messages,
-                include_focus=focus_enabled,
-                include_vector=vector_enabled,
-                include_graph=graph_enabled,
-                include_system_prompt=archive_system_prompt_enabled,
-                magos_message=magos_message,
-                administratum_message=administratum_message,
-                query_messages=memory_messages,
-                memory_namespace=memory_namespace,
-            )
-            diagnostics = prompt_diagnostics(
-                archive_prepared_messages,
-                memory_messages,
-                include_focus=focus_enabled,
-                include_vector=vector_enabled,
-                include_graph=graph_enabled,
-                include_system_prompt=archive_system_prompt_enabled,
-                magos_message=magos_message,
-                memory_namespace=memory_namespace,
-            )
-
-            record = {
-                "turn_id": turn_id,
-                "created_at": created_at,
-                "source": f"{client_source}-chat-session",
-                "conversation_id": session_id,
-                "memory_namespace": memory_namespace,
-                "archive_enabled": archive_enabled,
-                "focus_enabled": focus_enabled,
-                "vector_enabled": vector_enabled,
-                "graph_enabled": graph_enabled,
-                "archive_system_prompt_enabled": archive_system_prompt_enabled,
-                "magos_enabled": bool(magos_message),
-                "magos_result": magos_result,
-                "administratum_intent": administratum_intent,
-                "administratum_result": administratum_result,
-                "turn_decision": decision,
-                "turn_capabilities": turn_capabilities,
-                "turn_protocol": {"request": turn.get("request"), "response": turn.get("response")},
-                "prompt_diagnostics": diagnostics,
-                "model": model,
-                "request": {
-                    "session_id": session_id,
-                    "text": text,
-                    "has_image": bool(image_data_url),
-                    "stream": stream,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                },
-                "prepared_messages": archive_prepared_messages,
-                "status": "pending",
-                "http_status": None,
-                "response": None,
-                "assistant_message": None,
-                "error": None,
-            }
-
+            # Single pipeline: this endpoint used to carry its own copy of the
+            # chat flow (intent + Magos + prepare + record + librarian), which
+            # drifted from the job path and bred bugs. It now delegates to
+            # run_mobile_chat_payload; stream=true replays the final text as one
+            # SSE chunk (true token streaming had no live consumers).
+            payload["stream"] = False
+            payload["session_id"] = session_id
+            payload["memory_namespace"] = memory_namespace
+            payload["client_source"] = client_source
+            payload["turn_decision"] = decision
+            payload["turn_capabilities"] = turn_capabilities
+            payload["turn_protocol"] = {"request": turn.get("request"), "response": turn.get("response")}
+            if decision.get("action") == "ask_clarification":
+                payload["forced_chat_reply"] = str(decision.get("reply") or "").strip()
             try:
-                if stream:
-                    self.stream_mobile_chat_completion(prepared_payload, record, session_id)
-                    if record.get("status") == "ok":
-                        maintenance_record = record
-                else:
-                    status, response = proxy_json("POST", "/v1/chat/completions", payload=prepared_payload)
-                    assistant = assistant_message(response)
-                    if assistant:
-                        append_chat_message(session_id, "assistant", assistant.get("content") or "")
-                    record["status"] = "ok"
-                    record["http_status"] = status
-                    record["response"] = response
-                    record["assistant_message"] = assistant
-                    maybe_write_archives(record)
-                    write_json(self, status, response)
-                    maintenance_record = record
-            except HTTPError as exc:
-                try:
-                    error_payload = json.loads(exc.read().decode("utf-8"))
-                except Exception:
-                    error_payload = {"error": str(exc)}
-                record["status"] = "upstream_error"
-                record["http_status"] = exc.code
-                record["response"] = error_payload
-                record["error"] = json.dumps(error_payload, ensure_ascii=False)
-                maybe_abandon_magos_focus(record)
-                maybe_write_archives(record)
-                write_json(self, exc.code, error_payload)
-            except (TimeoutError, URLError) as exc:
-                error_payload = {"error": f"LLM host unavailable: {exc}"}
-                record["status"] = "unavailable"
-                record["http_status"] = 502
-                record["response"] = error_payload
-                record["error"] = error_payload["error"]
-                maybe_abandon_magos_focus(record)
-                maybe_write_archives(record)
-                write_json(self, 502, error_payload)
+                result = run_mobile_chat_payload(payload)
+            except ChatQueueBusy as exc:
+                write_json(self, 503, {"error": str(exc), "type": "chat_queue_busy"})
+                return
             except Exception as exc:
-                error_payload = {"error": str(exc)}
-                record["status"] = "archive_error"
-                record["http_status"] = 500
-                record["response"] = error_payload
-                record["error"] = error_payload["error"]
-                maybe_abandon_magos_focus(record)
-                maybe_write_archives(record)
-                write_json(self, 500, error_payload)
-        if maintenance_record is not None:
-            maybe_update_focus_memory(maintenance_record)
-
-    def stream_mobile_chat_completion(self, prepared_payload, record, session_id):
-        assistant_parts = []
-        finish_reason = None
-        streamed_chunks = []
-
-        try:
-            with open_upstream("POST", "/v1/chat/completions", payload=prepared_payload) as upstream:
-                self.send_response(upstream.status)
-                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("X-Accel-Buffering", "no")
-                self.end_headers()
-
-                for raw_line in upstream:
-                    self.wfile.write(raw_line)
-                    self.wfile.flush()
-                    decoded = raw_line.decode("utf-8", errors="replace").strip()
-                    if not decoded.startswith("data:"):
-                        continue
-
-                    data = decoded[5:].strip()
-                    if data == "[DONE]":
-                        continue
-
-                    try:
-                        chunk = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-
-                    streamed_chunks.append(chunk)
-                    delta, chunk_finish = stream_delta(chunk)
-                    if delta:
-                        assistant_parts.append(delta)
-                    if chunk_finish:
-                        finish_reason = chunk_finish
-
-            assistant_text = "".join(assistant_parts).strip()
-            if assistant_text:
-                append_chat_message(session_id, "assistant", assistant_text)
-            response = {
-                "object": "chat.completion",
-                "model": record.get("model"),
-                "choices": [
-                    {
-                        "index": 0,
-                        "finish_reason": finish_reason or "stop",
-                        "message": {"role": "assistant", "content": assistant_text},
-                    }
-                ],
-                "streamed_chunks": streamed_chunks,
-            }
-            record["status"] = "ok"
-            record["http_status"] = 200
-            record["response"] = response
-            record["assistant_message"] = {"role": "assistant", "content": assistant_text} if assistant_text else None
-            if record["assistant_message"]:
-                append_chat_message(
-                    record.get("shared_chat_session_id") or SHARED_CHAT_SESSION_ID,
-                    "assistant",
-                    assistant_text,
-                    source=record.get("client_source") or "api",
-                )
-            maybe_write_archives(record)
-        except (BrokenPipeError, ConnectionResetError) as exc:
-            assistant_text = "".join(assistant_parts).strip()
-            if assistant_text:
-                append_chat_message(session_id, "assistant", assistant_text)
-            record["status"] = "client_disconnected"
-            record["http_status"] = 499
-            record["response"] = {
-                "choices": [
-                    {
-                        "index": 0,
-                        "finish_reason": "client_disconnected",
-                        "message": {"role": "assistant", "content": assistant_text},
-                    }
-                ],
-                "streamed_chunks": streamed_chunks,
-            }
-            record["assistant_message"] = {"role": "assistant", "content": assistant_text} if assistant_text else None
-            record["error"] = str(exc)
-            maybe_abandon_magos_focus(record)
-            maybe_write_archives(record)
+                write_json(self, 502, {"error": f"chat pipeline failed: {exc}", "session_id": session_id})
+                return
+            response = result.get("response") if isinstance(result.get("response"), dict) else {}
+            if stream:
+                self.stream_static_mobile_chat_completion(str(result.get("message") or ""), finish_reason="stop")
+            else:
+                write_json(self, 200, response)
 
     def chat_completion(self):
-        maintenance_record = None
-        with CHAT_QUEUE_LOCK:
-            created_at = now_iso()
-            turn_id = str(uuid.uuid4())
-            payload = read_json(self)
-            archive_enabled = internal_flag(payload.pop("archive_enabled", True), default=True)
-            focus_enabled = internal_flag(payload.pop("focus_enabled", True), default=True)
-            vector_enabled = internal_flag(payload.pop("vector_enabled", focus_enabled), default=True)
-            graph_enabled = internal_flag(payload.pop("graph_enabled", focus_enabled), default=True)
-            archive_system_prompt_enabled = internal_flag(payload.pop("archive_system_prompt_enabled", True), default=True)
-            memory_namespace = shared_memory_namespace(payload.pop("memory_namespace", SHARED_MEMORY_NAMESPACE))
-            client_source = str(payload.pop("client_source", payload.pop("source", "api")) or "api").strip()[:80] or "api"
-            shared_session_id = shared_chat_session_id(payload.get("session_id") or payload.get("user") or SHARED_CHAT_SESSION_ID)
-            payload["messages"] = list(payload.get("messages", []))
-            payload["messages"].insert(
-                0,
-                capability_contract_message(
-                    turn_capability_manifest(),
-                    {"action": "answer_in_chat", "reason": "generic OpenAI-compatible chat endpoint"},
-                ),
-            )
-            memory_messages = sanitize_messages_for_memory(payload["messages"])
-            user_text_for_channel = trim_chat_text(latest_user_message(memory_messages))
-            if user_text_for_channel:
-                append_chat_message(shared_session_id, "user", user_text_for_channel, created_at=created_at, source=client_source)
-            administratum_intent = None
-            administratum_result = None
-            administratum_message = None
-            if user_text_for_channel and should_detect_administratum_intent(client_source, payload):
-                administratum_intent = detect_administratum_intent(user_text_for_channel, model=payload.get("model"))
-                administratum_result = create_administratum_task_from_intent(administratum_intent, shared_session_id, client_source)
-                administratum_message = administratum_intent_context(administratum_result)
-            magos_message = None
-            magos_result = None
-            magos = focus_components(memory_namespace)["magos"]
-            if focus_enabled and magos is not None:
-                try:
-                    magos_message = magos.prepare_request(
-                        memory_messages,
-                        model=payload.get("model"),
-                        conversation_id=shared_session_id,
-                        turn_id=turn_id,
-                        memory_namespace=memory_namespace,
-                    )
-                    magos_result = magos.last_result
-                except Exception as exc:
-                    print(f"Magos hard fail-soft: {exc}", flush=True)
-                    magos_message = None
-                    magos_result = {"error": str(exc)}
-            prepared_payload = dict(payload)
-            prepared_payload["messages"] = prepare_messages(
-                payload["messages"],
-                include_focus=focus_enabled,
-                include_vector=vector_enabled,
-                include_graph=graph_enabled,
-                include_system_prompt=archive_system_prompt_enabled,
-                magos_message=magos_message,
-                administratum_message=administratum_message,
-                query_messages=memory_messages,
-                memory_namespace=memory_namespace,
-            )
-            sanitized_payload = dict(payload)
-            sanitized_payload["messages"] = memory_messages
-            archive_prepared_messages = prepare_messages(
-                memory_messages,
-                include_focus=focus_enabled,
-                include_vector=vector_enabled,
-                include_graph=graph_enabled,
-                include_system_prompt=archive_system_prompt_enabled,
-                magos_message=magos_message,
-                administratum_message=administratum_message,
-                query_messages=memory_messages,
-                memory_namespace=memory_namespace,
-            )
-            diagnostics = prompt_diagnostics(
-                archive_prepared_messages,
-                memory_messages,
-                include_focus=focus_enabled,
-                include_vector=vector_enabled,
-                include_graph=graph_enabled,
-                include_system_prompt=archive_system_prompt_enabled,
-                magos_message=magos_message,
-                memory_namespace=memory_namespace,
-            )
-
-            record = {
-                "turn_id": turn_id,
-                "created_at": created_at,
-                "source": f"{client_source}-chat-completions",
-                "conversation_id": shared_session_id,
-                "memory_namespace": memory_namespace,
-                "shared_chat_session_id": shared_session_id,
-                "client_source": client_source,
-                "archive_enabled": archive_enabled,
-                "focus_enabled": focus_enabled,
-                "vector_enabled": vector_enabled,
-                "graph_enabled": graph_enabled,
-                "archive_system_prompt_enabled": archive_system_prompt_enabled,
-                "magos_enabled": bool(magos_message),
-                "magos_result": magos_result,
-                "administratum_intent": administratum_intent,
-                "administratum_result": administratum_result,
-                "prompt_diagnostics": diagnostics,
-                "model": payload.get("model"),
-                "request": sanitized_payload,
-                "prepared_messages": archive_prepared_messages,
-                "status": "pending",
-                "http_status": None,
-                "response": None,
-                "assistant_message": None,
-                "error": None,
-            }
-
-            try:
-                if prepared_payload.get("stream"):
-                    self.stream_chat_completion(prepared_payload, record)
-                    if record.get("status") == "ok":
-                        maintenance_record = record
-                else:
-                    status, response = proxy_json("POST", self.path, payload=prepared_payload)
-                    record["status"] = "ok"
-                    record["http_status"] = status
-                    record["response"] = response
-                    record["assistant_message"] = assistant_message(response)
-                    if record["assistant_message"]:
-                        append_chat_message(shared_session_id, "assistant", record["assistant_message"].get("content") or "", source=client_source)
-                    maybe_write_archives(record)
-                    write_json(self, status, response)
-                    maintenance_record = record
-            except HTTPError as exc:
-                try:
-                    error_payload = json.loads(exc.read().decode("utf-8"))
-                except Exception:
-                    error_payload = {"error": str(exc)}
-                record["status"] = "upstream_error"
-                record["http_status"] = exc.code
-                record["response"] = error_payload
-                record["error"] = json.dumps(error_payload, ensure_ascii=False)
-                maybe_abandon_magos_focus(record)
-                maybe_write_archives(record)
-                write_json(self, exc.code, error_payload)
-            except (TimeoutError, URLError) as exc:
-                error_payload = {"error": f"LLM host unavailable: {exc}"}
-                record["status"] = "unavailable"
-                record["http_status"] = 502
-                record["response"] = error_payload
-                record["error"] = error_payload["error"]
-                maybe_abandon_magos_focus(record)
-                maybe_write_archives(record)
-                write_json(self, 502, error_payload)
-            except Exception as exc:
-                error_payload = {"error": str(exc)}
-                record["status"] = "archive_error"
-                record["http_status"] = 500
-                record["response"] = error_payload
-                record["error"] = error_payload["error"]
-                maybe_abandon_magos_focus(record)
-                maybe_write_archives(record)
-                write_json(self, 500, error_payload)
-        if maintenance_record is not None:
-            maybe_update_focus_memory(maintenance_record)
+        # Generic OpenAI-compatible endpoint. It used to carry a third copy of
+        # the chat pipeline; it now extracts the latest user message and
+        # delegates to the single job pipeline (run_mobile_chat_payload).
+        payload = read_json(self)
+        user_text = trim_chat_text(latest_user_message(sanitize_messages_for_memory(list(payload.get("messages") or []))))
+        if not user_text:
+            write_json(self, 400, {"error": "no user message in messages[]"})
+            return
+        job_payload = {
+            "text": user_text,
+            "model": payload.get("model") or DEFAULT_MODEL,
+            "session_id": payload.get("session_id") or payload.get("user") or SHARED_CHAT_SESSION_ID,
+            "memory_namespace": payload.get("memory_namespace") or SHARED_MEMORY_NAMESPACE,
+            "client_source": str(payload.get("client_source") or payload.get("source") or "api").strip()[:80] or "api",
+            "archive_enabled": internal_flag(payload.get("archive_enabled", True), default=True),
+            "focus_enabled": internal_flag(payload.get("focus_enabled", True), default=True),
+            "vector_enabled": internal_flag(payload.get("vector_enabled", True), default=True),
+            "graph_enabled": internal_flag(payload.get("graph_enabled", True), default=True),
+            "archive_system_prompt_enabled": internal_flag(payload.get("archive_system_prompt_enabled", True), default=True),
+            "system_event": internal_flag(payload.get("system_event", False), default=False),
+            "intent_detection": internal_flag(payload.get("intent_detection", True), default=True),
+            "max_tokens": payload.get("max_tokens") or 2048,
+            "temperature": payload.get("temperature") or 0.4,
+            "stream": False,
+            "turn_decision": payload.get("turn_decision") if isinstance(payload.get("turn_decision"), dict) else {"action": "answer_in_chat"},
+        }
+        try:
+            result = run_mobile_chat_payload(job_payload)
+        except ChatQueueBusy as exc:
+            write_json(self, 503, {"error": str(exc), "type": "chat_queue_busy"})
+            return
+        except Exception as exc:
+            write_json(self, 502, {"error": f"chat pipeline failed: {exc}"})
+            return
+        response = result.get("response") if isinstance(result.get("response"), dict) else {}
+        write_json(self, 200, response)
 
     def stream_chat_completion(self, prepared_payload, record):
         assistant_parts = []

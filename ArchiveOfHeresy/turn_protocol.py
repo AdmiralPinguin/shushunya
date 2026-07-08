@@ -122,15 +122,20 @@ def turn_capability_manifest(*, image_attached: bool = False, pending_reports: d
 
 
 def capability_contract_message(manifest: dict[str, Any] | None = None, decision: dict[str, Any] | None = None) -> dict[str, str]:
+    """Compact per-turn contract for the ANSWERING model. The full capability
+    manifest (~5K chars) belongs only to the turn-decision call; repeating it
+    in every answer prompt drowned the model in boilerplate."""
+    del manifest  # the answering model needs only the selected action, not the menu
+    decision = decision or {}
     payload = {
-        "capabilities": manifest or turn_capability_manifest(),
-        "selected_action": decision or {},
+        "selected_action": {
+            "action": str(decision.get("action") or "answer_in_chat"),
+            "task": str(decision.get("task") or "")[:300],
+            "reason": str(decision.get("reason") or "")[:200],
+        },
         "runtime_contract": [
-            "Speak only from the listed capabilities and selected_action.",
-            "If selected_action.action is answer_in_chat, answer normally but do not claim any background/external work has started.",
-            "If selected_action.action is ask_clarification, ask the clarification; do not start work.",
-            "If selected_action.action is request_warmaster_mission or create_administratum_task, the server, not prose, performs that action.",
-            "For request_warmaster_mission, selected_action must describe the user request and outcome, but must not choose Warmaster's internal brigadier.",
+            "Внешние действия исполняет сервер, а не текст: не обещай и не описывай фоновую работу, поиск, файлы, бригады или напоминания, если selected_action этого не выбрал.",
+            "answer_in_chat / ask_clarification: просто ответь или уточни, никакая работа не запускалась.",
         ],
     }
     return {
