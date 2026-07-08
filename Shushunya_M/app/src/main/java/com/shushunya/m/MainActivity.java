@@ -203,12 +203,12 @@ public class MainActivity extends Activity {
         createNotificationChannel();
         requestNotificationPermissionIfNeeded();
         try {
-            android.content.Intent voxService = new android.content.Intent(this, VoxNotifyService.class);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(voxService);
-            } else {
-                startService(voxService);
-            }
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().getToken()
+                    .addOnCompleteListener(task -> {
+                        if (task.isSuccessful() && task.getResult() != null) {
+                            VoxMessagingService.registerToken(getApplicationContext(), task.getResult());
+                        }
+                    });
         } catch (Exception ignored) {
         }
         baseUrl = DEFAULT_BASE_URL;

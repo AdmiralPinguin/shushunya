@@ -478,6 +478,17 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             self.mobile_chat_start()
             return
 
+        if self.path in ("/archive/chat/reports/register-token", "/archive/mobile/chat/reports/register-token"):
+            if not require_auth(self, allow_mobile=True):
+                return
+            try:
+                payload = read_json(self)
+            except json.JSONDecodeError as exc:
+                write_json(self, 400, {"ok": False, "error": f"Invalid JSON: {exc}"})
+                return
+            write_json(self, 200, register_push_token(payload.get("token")))
+            return
+
         if self.path in ("/archive/chat/reports/enqueue", "/archive/mobile/chat/reports/enqueue"):
             if not require_auth(self, allow_mobile=True):
                 return

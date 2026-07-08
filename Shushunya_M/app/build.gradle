@@ -1,5 +1,6 @@
 plugins {
     id("com.android.application")
+    id("com.google.gms.google-services")
 }
 
 def localEnvValue(String path, String key) {
@@ -39,4 +40,9 @@ android {
         versionName = "2.4.1"
         buildConfigField("String", "CLIENT_API_KEY", "\"$clientApiKey\"")
     }
+}
+
+dependencies {
+    implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
+    implementation("com.google.firebase:firebase-messaging")
 }

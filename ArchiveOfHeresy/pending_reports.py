@@ -85,6 +85,15 @@ def task_roster_note():
     }
 
 
+def register_push_token(token):
+    """Forward the device's FCM token to Vox, which sends the real push."""
+    try:
+        return _post("/register-token", {"token": str(token or "").strip()}, timeout=15)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Vox register-token failed: {exc}", flush=True)
+        return {"ok": False, "error": str(exc)}
+
+
 def phone_announce():
     """What the phone should buzz about right now. Vox decides which urgent
     intents are still unannounced and marks them announced server-side, so the

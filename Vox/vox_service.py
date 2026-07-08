@@ -25,6 +25,9 @@ import json
 import os
 import sqlite3
 import threading
+import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -39,7 +42,10 @@ LLM_MODEL = os.environ.get("VOX_LLM_MODEL", os.environ.get("ARCHIVE_DEFAULT_MODE
 EMBED_BASE_URL = os.environ.get("VOX_EMBED_BASE_URL", "http://127.0.0.1:8181").rstrip("/")
 EMBED_MODEL = os.environ.get("VOX_EMBED_MODEL", "multilingual-e5-large")
 WARMASTER_BASE_URL = os.environ.get("VOX_WARMASTER_BASE_URL", "http://127.0.0.1:7000").rstrip("/")
+FCM_SERVICE_ACCOUNT = os.environ.get("VOX_FCM_SERVICE_ACCOUNT", str(ROOT / "firebase-service-account.json"))
 RELEVANCE_MIN = float(os.environ.get("VOX_RELEVANCE_MIN", "0.78"))
+_FCM_TOKEN_CACHE = {"access_token": "", "exp": 0.0}
+_FCM_LOCK = threading.Lock()
 import re
 
 OWNER_REQUEST_RE = re.compile(r"Исходный запрос пользователя:\s*(.+?)(?:\n\n|$)", re.S)
@@ -84,6 +90,7 @@ def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(DB_PATH, timeout=15)
     db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE IF NOT EXISTS fcm_tokens (token TEXT PRIMARY KEY, updated_at TEXT NOT NULL)")
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS intents (
@@ -120,6 +127,92 @@ def cosine(a: list[float], b: list[float]) -> float:
     na = sum(x * x for x in a) ** 0.5
     nb = sum(x * x for x in b) ** 0.5
     return dot / (na * nb) if na and nb else 0.0
+
+
+def _fcm_access_token() -> str:
+    """Service-account -> OAuth2 access token for FCM v1 (cached ~55 min)."""
+    with _FCM_LOCK:
+        if _FCM_TOKEN_CACHE["access_token"] and _FCM_TOKEN_CACHE["exp"] > time.time() + 60:
+            return _FCM_TOKEN_CACHE["access_token"]
+        import jwt  # noqa: PLC0415
+
+        with open(FCM_SERVICE_ACCOUNT, encoding="utf-8") as handle:
+            sa = json.load(handle)
+        now = int(time.time())
+        assertion = jwt.encode(
+            {
+                "iss": sa["client_email"],
+                "scope": "https://www.googleapis.com/auth/firebase.messaging",
+                "aud": sa["token_uri"],
+                "iat": now,
+                "exp": now + 3600,
+            },
+            sa["private_key"],
+            algorithm="RS256",
+        )
+        body = urllib.parse.urlencode(
+            {"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer", "assertion": assertion}
+        ).encode("utf-8")
+        request = urllib.request.Request(sa["token_uri"], data=body, headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
+        with urllib.request.urlopen(request, timeout=20) as response:
+            token = json.loads(response.read().decode("utf-8"))
+        _FCM_TOKEN_CACHE["access_token"] = token["access_token"]
+        _FCM_TOKEN_CACHE["exp"] = time.time() + int(token.get("expires_in", 3600))
+        return _FCM_TOKEN_CACHE["access_token"]
+
+
+def _fcm_project_id() -> str:
+    with open(FCM_SERVICE_ACCOUNT, encoding="utf-8") as handle:
+        return json.load(handle)["project_id"]
+
+
+def push_fcm(title: str, body: str) -> dict:
+    """Send an FCM data+notification push to every registered device. Real push:
+    the phone gets it with the app fully closed, no foreground service."""
+    if not os.path.exists(FCM_SERVICE_ACCOUNT):
+        return {"ok": False, "error": "no service account"}
+    with connect() as db:
+        tokens = [row["token"] for row in db.execute("SELECT token FROM fcm_tokens")]
+    if not tokens:
+        return {"ok": True, "sent": 0, "reason": "no tokens"}
+    try:
+        access = _fcm_access_token()
+        project = _fcm_project_id()
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"auth: {exc}"}
+    url = f"https://fcm.googleapis.com/v1/projects/{project}/messages:send"
+    sent, dead = 0, []
+    for token in tokens:
+        message = {
+            "message": {
+                "token": token,
+                "notification": {"title": title, "body": body[:240]},
+                "android": {"priority": "high", "notification": {"channel_id": "shushunya_answers"}},
+            }
+        }
+        data = json.dumps(message, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", "Authorization": f"Bearer {access}"}, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=20):
+                sent += 1
+        except urllib.error.HTTPError as exc:
+            if exc.code in (404, 400):  # stale/invalid token -> forget it
+                dead.append(token)
+        except Exception:  # noqa: BLE001
+            pass
+    if dead:
+        with connect() as db:
+            db.executemany("DELETE FROM fcm_tokens WHERE token = ?", [(t,) for t in dead])
+    return {"ok": True, "sent": sent, "pruned": len(dead)}
+
+
+def register_fcm_token(token: str) -> dict:
+    token = str(token or "").strip()
+    if not token:
+        return {"ok": False, "error": "empty token"}
+    with connect() as db:
+        db.execute("INSERT OR REPLACE INTO fcm_tokens (token, updated_at) VALUES (?, ?)", (token, now_iso()))
+    return {"ok": True}
 
 
 def classify_intent(source: str, kind: str, body: str) -> dict:
@@ -200,6 +293,7 @@ def create_intent(payload: dict) -> dict:
         embedding = embed_text(f"{topic} {body}")
     except Exception:
         embedding = []
+    result = None
     with _LOCK:
         with connect() as db:
             if dedupe_key:
@@ -213,13 +307,23 @@ def create_intent(payload: dict) -> dict:
                         "UPDATE intents SET body = ?, topic = ?, announce_line = ?, speech_class = ?, embedding_json = ?, updated_at = ?, announced_at = NULL WHERE id = ?",
                         (body, topic, announce_line, speech_class, json.dumps(embedding), now_iso(), int(row["id"])),
                     )
-                    return {"ok": True, "intent_id": int(row["id"]), "refreshed": True, "speech_class": speech_class}
-            cursor = db.execute(
-                "INSERT INTO intents (created_at, updated_at, source, kind, topic, body, announce_line, speech_class, dedupe_key, embedding_json) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (now_iso(), now_iso(), source, kind, topic, body, announce_line, speech_class, dedupe_key, json.dumps(embedding)),
-            )
-            return {"ok": True, "intent_id": int(cursor.lastrowid), "speech_class": speech_class}
+                    result = {"ok": True, "intent_id": int(row["id"]), "refreshed": True, "speech_class": speech_class}
+            if result is None:
+                cursor = db.execute(
+                    "INSERT INTO intents (created_at, updated_at, source, kind, topic, body, announce_line, speech_class, dedupe_key, embedding_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (now_iso(), now_iso(), source, kind, topic, body, announce_line, speech_class, dedupe_key, json.dumps(embedding)),
+                )
+                result = {"ok": True, "intent_id": int(cursor.lastrowid), "speech_class": speech_class}
+    # Urgent intents push to the phone immediately — real FCM, not polling.
+    if speech_class == "срочно" and announce_line:
+        threading.Thread(
+            target=push_fcm,
+            args=("Шушуня хочет что-то сказать", announce_line),
+            daemon=True,
+            name="vox-fcm-push",
+        ).start()
+    return result
 
 
 def open_intents(db: sqlite3.Connection) -> list[dict]:
@@ -422,6 +526,10 @@ class VoxHandler(BaseHTTPRequestHandler):
             payload = self._payload()
             if parsed.path == "/intent":
                 self._reply(201, create_intent(payload))
+            elif parsed.path == "/register-token":
+                self._reply(200, register_fcm_token(payload.get("token")))
+            elif parsed.path == "/test-push":
+                self._reply(200, push_fcm("Шушуня (тест)", str(payload.get("body") or "Проверка пуша")))
             elif parsed.path == "/on-tongue":
                 self._reply(200, on_tongue(str(payload.get("context") or ""), int(payload.get("limit") or 6)))
             elif parsed.path == "/conveyed":

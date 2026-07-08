@@ -37,6 +37,7 @@ from pending_reports import (
     pending_summary,
     task_roster_note,
     phone_announce,
+    register_push_token,
     judge_conveyed,
     pending_topics_note,
     reports_event_text,
