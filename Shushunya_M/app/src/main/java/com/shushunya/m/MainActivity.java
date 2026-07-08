@@ -164,6 +164,9 @@ public class MainActivity extends Activity {
     private boolean drawerOpen;
     private boolean userPinnedScroll;
     private boolean chatTouchActive;
+    private boolean agentPinnedScroll;
+    private boolean agentTouchActive;
+    private ValueAnimator agentScrollAnimator;
     private boolean appInForeground;
     private String pendingImageDataUrl;
     private String pendingImageLabel;
@@ -577,16 +580,16 @@ public class MainActivity extends Activity {
         agentScrollView.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
         agentScrollView.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                chatTouchActive = true;
-                userPinnedScroll = true;
-                if (scrollAnimator != null) {
-                    scrollAnimator.cancel();
-                    scrollAnimator = null;
+                agentTouchActive = true;
+                agentPinnedScroll = true;
+                if (agentScrollAnimator != null) {
+                    agentScrollAnimator.cancel();
+                    agentScrollAnimator = null;
                 }
             }
             if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
-                chatTouchActive = false;
-                userPinnedScroll = !isAtAgentBottom();
+                agentTouchActive = false;
+                agentPinnedScroll = !isAtAgentBottom();
             }
             return false;
         });
@@ -1362,6 +1365,7 @@ public class MainActivity extends Activity {
             return;
         }
         lastAgentTasksJson = key;
+        final int savedAgentScrollY = agentScrollView == null ? 0 : agentScrollView.getScrollY();
         agentMessageList.removeAllViews();
         agentLiveBubble = null;
         if (tasks == null || tasks.length() == 0) {
@@ -1424,7 +1428,13 @@ public class MainActivity extends Activity {
             String label = agentBrigadeLabel(agentBrigadeFilter);
             addAgentMessage(false, label.isEmpty() ? "Задач по бригадам нет." : "У бригады " + label + " пока нет задач.", false);
         }
-        maybeScrollAgentToBottom(true);
+        if (agentPinnedScroll) {
+            // The owner is reading above: keep his place instead of yanking to the bottom.
+            final int savedScrollY = savedAgentScrollY;
+            main.post(() -> agentScrollView.scrollTo(0, savedScrollY));
+        } else {
+            maybeScrollAgentToBottom(false);
+        }
     }
 
     private boolean agentTaskMatchesBrigade(JSONObject task) {
@@ -1669,7 +1679,7 @@ public class MainActivity extends Activity {
                     .setInterpolator(new DecelerateInterpolator())
                     .start();
         }
-        maybeScrollAgentToBottom(true);
+        maybeScrollAgentToBottom(false);
     }
 
     private String agentBrigadeLabel(String governor) {
@@ -2847,7 +2857,7 @@ public class MainActivity extends Activity {
                     .setInterpolator(new DecelerateInterpolator())
                     .start();
         }
-        maybeScrollAgentToBottom(true);
+        maybeScrollAgentToBottom(false);
         return bubble;
     }
 
@@ -3157,15 +3167,27 @@ public class MainActivity extends Activity {
         if (agentScrollView == null || agentMessageList == null) {
             return;
         }
-        if (!force && (chatTouchActive || userPinnedScroll)) {
+        if (!force && (agentTouchActive || agentPinnedScroll)) {
             return;
         }
         if (force) {
-            userPinnedScroll = false;
+            agentPinnedScroll = false;
         }
         main.postDelayed(() -> {
             int target = Math.max(0, agentMessageList.getBottom() + agentScrollView.getPaddingBottom() - agentScrollView.getHeight());
-            agentScrollView.scrollTo(0, target);
+            if (agentScrollAnimator != null) {
+                agentScrollAnimator.cancel();
+                agentScrollAnimator = null;
+            }
+            if (!force) {
+                agentScrollView.scrollTo(0, target);
+                return;
+            }
+            agentScrollAnimator = ValueAnimator.ofInt(agentScrollView.getScrollY(), target);
+            agentScrollAnimator.setDuration(150);
+            agentScrollAnimator.setInterpolator(new DecelerateInterpolator());
+            agentScrollAnimator.addUpdateListener(a -> agentScrollView.scrollTo(0, (int) a.getAnimatedValue()));
+            agentScrollAnimator.start();
         }, 60);
     }
 
