@@ -1662,8 +1662,22 @@ public class MainActivity extends Activity {
 
     private String pollAgentTaskUntilDone(String taskId) throws Exception {
         String finalMessage = "";
+        int transportFailures = 0;
         while (true) {
-            JSONObject snapshot = requestAgentTaskSnapshot(taskId);
+            JSONObject snapshot;
+            try {
+                snapshot = requestAgentTaskSnapshot(taskId);
+                transportFailures = 0;
+            } catch (Exception transportError) {
+                // Transient network drops must not detach the monitor: the task
+                // keeps running server-side and we can just poll again.
+                transportFailures++;
+                if (transportFailures >= 40) {
+                    throw transportError;
+                }
+                Thread.sleep(appInForeground ? 4000 : 10000);
+                continue;
+            }
             JSONObject finalEvent = snapshot.optJSONObject("final");
             JSONArray events = snapshot.optJSONArray("events");
             if (events != null) {
@@ -2318,20 +2332,59 @@ public class MainActivity extends Activity {
                 showAnswerNotification(finalText);
                 main.post(() -> setWaiting(false));
             } catch (Exception e) {
-                main.post(() -> {
-                    setWaiting(false);
-                    String error = "Связь сорвалась: " + e.getMessage();
-                    answerBubble.setText(error);
-                    saveChatMessage(false, error);
-                    showAnswerNotification(error);
-                    maybeScrollToBottom(false);
-                });
+                // The server keeps working and persists the answer into the
+                // shared history; recover it from there instead of erroring out.
+                recoverAnswerFromHistory(answerBubble);
             } finally {
                 if (wakeLock != null && wakeLock.isHeld()) {
                     wakeLock.release();
                 }
             }
         }).start();
+    }
+
+    private void recoverAnswerFromHistory(TextView answerBubble) {
+        main.post(() -> answerBubble.setText("Связь моргнула — подтягиваю ответ из истории…"));
+        long deadline = System.currentTimeMillis() + 240000;
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(6000);
+                URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/messages?session_id=" + SERVER_CHAT_SESSION_ID + "&limit=4");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(8000);
+                conn.setReadTimeout(12000);
+                applyMobileAuth(conn);
+                if (conn.getResponseCode() < 200 || conn.getResponseCode() >= 300) {
+                    continue;
+                }
+                JSONObject payload = new JSONObject(readAll(conn.getInputStream()));
+                JSONArray history = payload.optJSONArray("messages");
+                if (history == null || history.length() == 0) {
+                    continue;
+                }
+                JSONObject last = history.optJSONObject(history.length() - 1);
+                if (last == null || "user".equals(last.optString("role", ""))) {
+                    continue;  // the answer has not landed yet
+                }
+                String answer = last.optString("content", "").trim();
+                if (answer.isEmpty()) {
+                    continue;
+                }
+                main.post(() -> {
+                    answerBubble.setText(answer);
+                    setWaiting(false);
+                    maybeScrollToBottom(false);
+                });
+                showAnswerNotification(answer);
+                return;
+            } catch (Exception ignored) {
+            }
+        }
+        main.post(() -> {
+            answerBubble.setText("Сервер ещё думает или связи нет. Ответ появится в истории — открой чат позже.");
+            setWaiting(false);
+        });
     }
 
     private String warmasterTaskFromChatCommand(String text) {
@@ -2398,27 +2451,9 @@ public class MainActivity extends Activity {
                     maybeScrollToBottom(false);
                     refreshBrigadeMonitor();
                 });
-                while (true) {
-                    JSONObject snapshot = requestAgentTaskSnapshot(acceptedTaskId);
-                    JSONObject finalEvent = snapshot.optJSONObject("final");
-                    if (finalEvent != null) {
-                        String finalText = finalEvent.optString("message", "").trim();
-                        boolean cancelled = finalEvent.optBoolean("cancelled", false);
-                        String result = finalText.isEmpty() && cancelled ? "Warmaster остановлен." : finalText;
-                        if (!result.isEmpty()) {
-                            main.post(() -> {
-                                answerBubble.setText(result);
-                                maybeScrollToBottom(false);
-                            });
-                            showAnswerNotification(result);
-                        }
-                        break;
-                    }
-                    if (!snapshot.optBoolean("running", false)) {
-                        break;
-                    }
-                    Thread.sleep(2000);
-                }
+                // No live-watch loop: the app must not depend on a standing
+                // connection. The result returns through the pending-reports
+                // outbox (badge/notification); progress is in the Brigades tab.
                 String finishedTaskId = acceptedTaskId;
                 main.post(() -> {
                     agentRunning = false;
@@ -2431,9 +2466,8 @@ public class MainActivity extends Activity {
                     setWaiting(false);
                     setAgentRunButtonRunning(false);
                     if (agentStatus != null) {
-                        agentStatus.setText("Warmaster завершил задачу " + finishedTaskId);
+                        agentStatus.setText("Warmaster ведёт задачу " + finishedTaskId + "; результат придёт докладом.");
                     }
-                    refreshBrigadeMonitor();
                 });
             } catch (Exception exc) {
                 String acceptedForCatch = acceptedTaskIdRef[0];
@@ -2624,8 +2658,22 @@ public class MainActivity extends Activity {
         if (jobId == null || jobId.trim().isEmpty()) {
             throw new IllegalStateException("empty chat job id");
         }
+        int transportFailures = 0;
         while (true) {
-            JSONObject snapshot = requestMobileJobSnapshot(jobId);
+            JSONObject snapshot;
+            try {
+                snapshot = requestMobileJobSnapshot(jobId);
+                transportFailures = 0;
+            } catch (Exception transportError) {
+                // One dropped poll must not kill the wait: the server finishes
+                // the turn and persists the answer regardless of our connection.
+                transportFailures++;
+                if (transportFailures >= 40) {
+                    throw new IllegalStateException("connection lost while waiting for the answer", transportError);
+                }
+                Thread.sleep(appInForeground ? 3000 : 8000);
+                continue;
+            }
             String status = snapshot.optString("status", "");
             if ("done".equals(status)) {
                 JSONObject response = snapshot.optJSONObject("response");
