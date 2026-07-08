@@ -112,6 +112,20 @@ public class MainActivity extends Activity {
     private boolean brigadePollScheduled;
     private long lastSeenChatMessageId;
     private TextView pendingAnswerBubble;
+    private LinearLayout agentAppendTarget;
+    private String brigadeStateKey = "";
+    private boolean brigadeDeltaLoopRunning;
+    private final java.util.LinkedHashMap<String, AgentSection> agentSections = new java.util.LinkedHashMap<>();
+
+    private static class AgentSection {
+        LinearLayout container;
+        LinearLayout cardHost;
+        LinearLayout cardsHost;
+        LinearLayout finalHost;
+        String cardKey = "";
+        final java.util.ArrayList<String> cardKeys = new java.util.ArrayList<>();
+        boolean finalShown;
+    }
     private boolean chatDeltaLoopRunning;
     private final java.util.ArrayDeque<String> pendingLocalEchoes = new java.util.ArrayDeque<>();
     private LinearLayout messageList;
@@ -205,6 +219,9 @@ public class MainActivity extends Activity {
             manager.cancel(1002);  // the in-app badge takes over while foreground
         }
         pollPendingReports();
+        if (TAB_AGENT.equals(currentTab)) {
+            startBrigadeDeltaLoop();
+        }
     }
 
     @Override
@@ -1138,6 +1155,11 @@ public class MainActivity extends Activity {
         if (agentStatus != null) {
             agentStatus.setText(label.isEmpty() ? "Показываю все бригады..." : "Показываю: " + label);
         }
+        agentSections.clear();
+        lastAgentTasksJson = "";
+        if (agentMessageList != null) {
+            agentMessageList.removeAllViews();
+        }
         refreshBrigadeMonitor();
     }
 
@@ -1159,19 +1181,36 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void scheduleBrigadePoll() {
-        if (brigadePollScheduled) {
+    private void startBrigadeDeltaLoop() {
+        if (brigadeDeltaLoopRunning) {
             return;
         }
-        brigadePollScheduled = true;
-        main.postDelayed(() -> {
-            brigadePollScheduled = false;
-            if (!appInForeground || !TAB_AGENT.equals(currentTab)) {
-                return;  // poll only while the Brigades tab is actually watched
+        brigadeDeltaLoopRunning = true;
+        new Thread(() -> {
+            // Same delta model as the chat: one held request at a time, the
+            // server answers when the meaningful brigade state changed.
+            try {
+                while (appInForeground && TAB_AGENT.equals(currentTab)) {
+                    try {
+                        JSONObject payload = requestAgentTaskList(brigadeStateKey, 25);
+                        String newKey = payload.optString("state_key", "");
+                        boolean changed = payload.optBoolean("changed", true);
+                        if (!newKey.isEmpty()) {
+                            brigadeStateKey = newKey;
+                        }
+                        if (changed) {
+                            JSONArray tasks = payload.optJSONArray("tasks");
+                            main.post(() -> renderAgentTaskHistory(tasks));
+                        }
+                    } catch (Exception transient_) {
+                        Thread.sleep(3000);
+                    }
+                }
+            } catch (InterruptedException ignored) {
+            } finally {
+                brigadeDeltaLoopRunning = false;
             }
-            refreshBrigadeMonitor();
-            scheduleBrigadePoll();
-        }, 5000);
+        }).start();
     }
 
     private void refreshAgentState() {
@@ -1341,11 +1380,18 @@ public class MainActivity extends Activity {
     }
 
     private JSONObject requestAgentTaskList() throws Exception {
-        URL url = new URL(trimSlash(baseUrl) + "/archive/client/warmaster/tasks?prefix=client&limit=" + AGENT_HISTORY_LIMIT);
+        return requestAgentTaskList("", 0);
+    }
+
+    private JSONObject requestAgentTaskList(String stateKey, int waitSec) throws Exception {
+        String suffix = (stateKey == null || stateKey.isEmpty() || waitSec <= 0)
+                ? ""
+                : "&state_key=" + stateKey + "&wait=" + waitSec;
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/warmaster/tasks?prefix=client&limit=" + AGENT_HISTORY_LIMIT + suffix);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
         conn.setConnectTimeout(12000);
-        conn.setReadTimeout(30000);
+        conn.setReadTimeout(40000);
         conn.setRequestProperty("Accept", "application/json");
         applyMobileAuth(conn);
 
@@ -1401,84 +1447,112 @@ public class MainActivity extends Activity {
         if (agentMessageList == null) {
             return;
         }
-        // Rebuild only when the MEANING changed: the raw payload carries
-        // timestamps/cursors that differ on every poll, so comparing it as-is
-        // rebuilt (and blinked) the whole tab every 5 seconds.
         String key = agentTasksDiffKey(tasks);
         if (key.equals(lastAgentTasksJson)) {
             return;
         }
         lastAgentTasksJson = key;
-        final int savedAgentScrollY = agentScrollView == null ? 0 : agentScrollView.getScrollY();
-        agentMessageList.removeAllViews();
-        agentLiveBubble = null;
-        if (tasks == null || tasks.length() == 0) {
-            addAgentMessage(false, "История Warmaster пока пустая.", false);
-            return;
+        applyBrigadeTasks(tasks);
+    }
+
+    private void applyBrigadeTasks(JSONArray tasks) {
+        // Incremental, messenger-style rendering: sections are created once,
+        // task cards are swapped in place, activity cards are APPENDED and the
+        // final message is added once. Nothing full-screen is ever rebuilt.
+        boolean firstFill = agentSections.isEmpty();
+        if (firstFill) {
+            agentMessageList.removeAllViews();
         }
-        int shown = 0;
-        for (int i = tasks.length() - 1; i >= 0; i--) {
+        int visible = 0;
+        int length = tasks == null ? 0 : tasks.length();
+        for (int i = length - 1; i >= 0; i--) {
             JSONObject task = tasks.optJSONObject(i);
-            if (task == null) {
+            if (task == null || !agentTaskMatchesBrigade(task)) {
                 continue;
             }
-            if (!agentTaskMatchesBrigade(task)) {
-                continue;
-            }
-            shown++;
-            String prompt = task.optString("task", "").trim();
             String taskId = task.optString("task_id", "").trim();
-            boolean running = task.optBoolean("running", false);
-            boolean cancelled = task.optBoolean("cancelled", false);
-            boolean success = task.optBoolean("success", false);
+            if (taskId.isEmpty()) {
+                continue;
+            }
+            visible++;
+            AgentSection section = agentSections.get(taskId);
+            if (section == null) {
+                section = new AgentSection();
+                section.container = new LinearLayout(this);
+                section.container.setOrientation(LinearLayout.VERTICAL);
+                section.cardHost = new LinearLayout(this);
+                section.cardHost.setOrientation(LinearLayout.VERTICAL);
+                section.cardsHost = new LinearLayout(this);
+                section.cardsHost.setOrientation(LinearLayout.VERTICAL);
+                section.finalHost = new LinearLayout(this);
+                section.finalHost.setOrientation(LinearLayout.VERTICAL);
+                agentAppendTarget = section.container;
+                String prompt = task.optString("task", "").trim();
+                if (!prompt.isEmpty()) {
+                    addAgentMessage(true, prompt, false);
+                }
+                agentAppendTarget = null;
+                section.container.addView(section.cardHost, new LinearLayout.LayoutParams(-1, -2));
+                section.container.addView(section.cardsHost, new LinearLayout.LayoutParams(-1, -2));
+                section.container.addView(section.finalHost, new LinearLayout.LayoutParams(-1, -2));
+                agentMessageList.addView(section.container, new LinearLayout.LayoutParams(-1, -2));
+                agentSections.put(taskId, section);
+            }
+            JSONObject missionState = task.optJSONObject("mission_state");
+            String cardKey = task.optString("status", "") + "|" + task.optBoolean("running", false)
+                    + "|" + task.optString("current_step", "")
+                    + "|" + (missionState == null ? "" : missionState.optString("user_visible_state", ""));
+            if (!cardKey.equals(section.cardKey)) {
+                section.cardKey = cardKey;
+                section.cardHost.removeAllViews();
+                agentAppendTarget = section.cardHost;
+                addAgentTaskCard(task, false);
+                agentAppendTarget = null;
+            }
+            JSONArray cards = task.optJSONArray("activity_cards");
+            if (cards == null) {
+                cards = task.optJSONArray("activity_entries");
+            }
+            int total = cards == null ? 0 : cards.length();
+            boolean prefixIntact = total >= section.cardKeys.size();
+            for (int j = 0; prefixIntact && j < section.cardKeys.size(); j++) {
+                JSONObject entry = cards.optJSONObject(j);
+                if (entry == null || !section.cardKeys.get(j).equals(agentActivityCardKey(entry))) {
+                    prefixIntact = false;
+                }
+            }
+            if (!prefixIntact) {
+                section.cardsHost.removeAllViews();
+                section.cardKeys.clear();
+            }
+            for (int j = section.cardKeys.size(); j < total; j++) {
+                JSONObject entry = cards.optJSONObject(j);
+                if (entry == null) {
+                    continue;
+                }
+                agentAppendTarget = section.cardsHost;
+                addAgentActivityEntry(entry, j, total, true);
+                agentAppendTarget = null;
+                section.cardKeys.add(agentActivityCardKey(entry));
+            }
             String finalText = task.optString("final", "").trim();
-            String governor = task.optString("governor", "").trim();
-            String currentStep = task.optString("current_step", "").trim();
-            if (!prompt.isEmpty()) {
-                addAgentMessage(true, prompt, false);
-            }
-            addAgentTaskCard(task, false);
-            JSONArray activityEntries = task.optJSONArray("activity_cards");
-            if (activityEntries == null) {
-                activityEntries = task.optJSONArray("activity_entries");
-            }
-            if (activityEntries != null && activityEntries.length() > 0) {
-                for (int j = 0; j < activityEntries.length(); j++) {
-                    JSONObject entry = activityEntries.optJSONObject(j);
-                    if (entry != null) {
-                        addAgentActivityEntry(entry, j, activityEntries.length(), false);
-                    }
-                }
-            } else {
-                StringBuilder summary = new StringBuilder();
-                if (running) {
-                    summary.append(currentStep.isEmpty()
-                            ? "Сейчас делает: выполняет задачу."
-                            : "Сейчас делает: " + currentStep);
-                } else if (cancelled) {
-                    summary.append("Остановлено.");
-                } else if (success) {
-                    summary.append("Готово.");
-                } else {
-                    summary.append("Завершилось без успешного final.");
-                }
-                addAgentMessage(false, summary.toString(), false);
-            }
-            if (!finalText.isEmpty()) {
-                addAgentFinalMessage(finalText, false);
+            if (!finalText.isEmpty() && !section.finalShown) {
+                section.finalShown = true;
+                agentAppendTarget = section.finalHost;
+                addAgentFinalMessage(finalText, true);
+                agentAppendTarget = null;
             }
         }
-        if (shown == 0) {
+        if (firstFill && visible == 0) {
             String label = agentBrigadeLabel(agentBrigadeFilter);
             addAgentMessage(false, label.isEmpty() ? "Задач по бригадам нет." : "У бригады " + label + " пока нет задач.", false);
         }
-        if (agentPinnedScroll) {
-            // The owner is reading above: keep his place instead of yanking to the bottom.
-            final int savedScrollY = savedAgentScrollY;
-            main.post(() -> agentScrollView.scrollTo(0, savedScrollY));
-        } else {
-            maybeScrollAgentToBottom(false);
-        }
+        maybeScrollAgentToBottom(false);
+    }
+
+    private String agentActivityCardKey(JSONObject entry) {
+        return entry.optString("headline", "").hashCode() + "~" + entry.optString("status", "")
+                + "~" + entry.optString("severity", "") + "~" + entry.optString("detail", "").hashCode();
     }
 
     private boolean agentTaskMatchesBrigade(JSONObject task) {
@@ -1714,7 +1788,7 @@ public class MainActivity extends Activity {
         lp.bottomMargin = dp(5);
         lp.leftMargin = dp(4);
         lp.rightMargin = dp(4);
-        agentMessageList.addView(card, lp);
+        (agentAppendTarget != null ? agentAppendTarget : agentMessageList).addView(card, lp);
         if (animate) {
             card.animate()
                     .alpha(1f)
@@ -2131,7 +2205,7 @@ public class MainActivity extends Activity {
             scrollView.setPadding(0, 0, 0, 0);
             updateAgentKeyboardLift();
             refreshBrigadeMonitor();
-            scheduleBrigadePoll();
+            startBrigadeDeltaLoop();
         } else {
             inputPanel.animate().translationY(0f).setDuration(120).start();
             scrollView.setPadding(0, 0, 0, 0);
@@ -2863,7 +2937,7 @@ public class MainActivity extends Activity {
         lp.gravity = fromUser ? Gravity.RIGHT : Gravity.LEFT;
         lp.topMargin = dp(6);
         lp.bottomMargin = dp(6);
-        agentMessageList.addView(bubble, lp);
+        (agentAppendTarget != null ? agentAppendTarget : agentMessageList).addView(bubble, lp);
 
         if (animate) {
             bubble.animate()

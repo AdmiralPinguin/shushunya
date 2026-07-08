@@ -1,4 +1,5 @@
 """ArchiveOfHeresy HTTP request handler (all gateway/proxy/memory routes)."""
+import hashlib
 import json
 import os
 import re
@@ -755,6 +756,51 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             write_json(self, 502, {"ok": False, "error": f"warmaster unavailable: {exc}"})
 
+    def collect_agent_tasks(self, limit):
+        status, response = proxy_json_url("GET", f"{WARMASTER_BASE_URL}/runs?limit={limit}", timeout=30)
+        active = set(response.get("process_active_runs") if isinstance(response.get("process_active_runs"), list) else [])
+        runs = response.get("runs") if isinstance(response.get("runs"), list) else []
+        tasks = []
+        for run in runs:
+            if not isinstance(run, dict):
+                continue
+            task_id = str(run.get("task_id") or "").strip()
+            activity = {}
+            try:
+                activity = self.warmaster_fetch_activity(task_id)
+            except Exception:
+                activity = self.warmaster_activity_from_payload(run)
+            tasks.append(self.warmaster_run_as_agent_task(run, active=task_id in active, activity=activity))
+        return status, response, tasks
+
+    @staticmethod
+    def agent_tasks_state_key(tasks):
+        """Meaning-only fingerprint (mirrors the app's diff key): timestamps and
+        cursors change on every poll and must not count as a state change."""
+        parts = []
+        for task in tasks:
+            cards = task.get("activity_cards") if isinstance(task.get("activity_cards"), list) else []
+            card_bits = ";".join(
+                f"{hash(str(card.get('headline') or ''))}~{card.get('status') or ''}~{card.get('severity') or ''}~{hash(str(card.get('detail') or ''))}"
+                for card in cards
+                if isinstance(card, dict)
+            )
+            mission_state = task.get("mission_state") if isinstance(task.get("mission_state"), dict) else {}
+            parts.append(
+                "|".join(
+                    [
+                        str(task.get("task_id") or ""),
+                        str(task.get("status") or ""),
+                        str(bool(task.get("running"))),
+                        str(task.get("current_step") or ""),
+                        str(hash(str(task.get("final") or ""))),
+                        str(mission_state.get("user_visible_state") or ""),
+                        card_bits,
+                    ]
+                )
+            )
+        return hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()
+
     def mobile_agent_tasks(self):
         params = parse_qs(urlsplit(self.path).query)
         raw_limit = (params.get("limit") or ["20"])[0]
@@ -762,22 +808,36 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             limit = max(1, min(int(raw_limit), 100))
         except (TypeError, ValueError):
             limit = 20
+        client_key = str((params.get("state_key") or [""])[0]).strip()
         try:
-            status, response = proxy_json_url("GET", f"{WARMASTER_BASE_URL}/runs?limit={limit}", timeout=30)
-            active = set(response.get("process_active_runs") if isinstance(response.get("process_active_runs"), list) else [])
-            runs = response.get("runs") if isinstance(response.get("runs"), list) else []
-            tasks = []
-            for run in runs:
-                if not isinstance(run, dict):
-                    continue
-                task_id = str(run.get("task_id") or "").strip()
-                activity = {}
-                try:
-                    activity = self.warmaster_fetch_activity(task_id)
-                except Exception:
-                    activity = self.warmaster_activity_from_payload(run)
-                tasks.append(self.warmaster_run_as_agent_task(run, active=task_id in active, activity=activity))
-            write_json(self, status, {"ok": True, "backend": "warmaster", "tasks": tasks, "warmaster": response})
+            wait_sec = max(0.0, min(float((params.get("wait") or [0])[0]), 25.0))
+        except (TypeError, ValueError):
+            wait_sec = 0.0
+        try:
+            status, response, tasks = self.collect_agent_tasks(limit)
+            state_key = self.agent_tasks_state_key(tasks)
+            # Delta long-poll: hold the request while the meaningful state
+            # matches what the client already renders.
+            if wait_sec > 0 and client_key and state_key == client_key:
+                deadline = time.time() + wait_sec
+                while time.time() < deadline:
+                    time.sleep(2.0)
+                    status, response, tasks = self.collect_agent_tasks(limit)
+                    state_key = self.agent_tasks_state_key(tasks)
+                    if state_key != client_key:
+                        break
+            write_json(
+                self,
+                status,
+                {
+                    "ok": True,
+                    "backend": "warmaster",
+                    "state_key": state_key,
+                    "changed": state_key != client_key,
+                    "tasks": tasks,
+                    "warmaster": response,
+                },
+            )
         except HTTPError as exc:
             self.write_proxy_error(exc)
         except Exception as exc:
