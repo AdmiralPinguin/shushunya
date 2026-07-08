@@ -100,10 +100,24 @@ def source_fetch_limit(source: dict[str, Any], source_map: dict[str, Any], defau
     return default_max_bytes
 
 
+READER_PROXY_PREFIX = os.environ.get("AUSPEX_READER_PROXY", "https://r.jina.ai/").strip()
+
+
+def fetch_looks_blocked(result: dict[str, Any]) -> bool:
+    """Direct fetch was refused by an anti-bot wall (403/Cloudflare challenge)."""
+    if not result.get("ok"):
+        return True
+    text = str(result.get("text") or "")
+    return len(text.strip()) < 400 and ("just a moment" in text.lower() or "enable javascript and cookies" in text.lower())
+
+
 def fetch_with_fallbacks(source: dict[str, Any], source_map: dict[str, Any], fetcher: FetchFn, max_bytes: int) -> dict[str, Any]:
     url = str(source.get("url") or "").strip()
     limit = source_fetch_limit(source, source_map, max_bytes)
-    result = fetcher(url, limit)
+    try:
+        result = fetcher(url, limit)
+    except Exception as exc:  # noqa: BLE001 - a raised 403 must still reach the proxy fallback below
+        result = {"ok": False, "error": str(exc)}
     text = str(result.get("text") or "")
     old_url = reddit_old_url(url)
     if old_url and result.get("ok") and len(text.strip()) < 200 and "reddit" in text.lower() and "verification" in text.lower():
@@ -112,6 +126,20 @@ def fetch_with_fallbacks(source: dict[str, Any], source_map: dict[str, Any], fet
             fallback["fallback_from_url"] = url
             fallback["fallback_reason"] = "reddit verification page"
             return fallback
+    # Anti-bot walls (Lexicanum/Fandom sit behind Cloudflare): re-fetch the page
+    # as text through a reader proxy instead of giving up on the source.
+    if READER_PROXY_PREFIX and url.startswith("http") and fetch_looks_blocked(result):
+        try:
+            proxied = fetcher(READER_PROXY_PREFIX + url, limit)
+        except Exception as exc:  # noqa: BLE001 - proxy failure falls back to the original result
+            proxied = {"ok": False, "error": str(exc)}
+        if proxied.get("ok") and len(str(proxied.get("text") or "").strip()) > 400:
+            proxied["fallback_from_url"] = url
+            proxied["fallback_reason"] = "reader proxy bypass (direct fetch blocked by anti-bot wall)"
+            return proxied
+        result.setdefault("error", "")
+        if not result.get("ok"):
+            result["error"] = f"{result.get('error') or 'fetch failed'}; reader proxy also failed"
     return result
 
 
@@ -198,6 +226,11 @@ def run(request: dict[str, Any], workspace_root: Path, fetcher: FetchFn = defaul
     host_path = sandbox_path(workspace_root, output_path)
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(json.dumps(snapshots, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    failed_sources = [item for item in snapshots["snapshots"] if not item.get("ok")]
+    problems = [
+        f"source fetch failed: {item.get('source_title') or item.get('requested_url')} — {item.get('error') or 'no content'}"
+        for item in failed_sources
+    ]
     return {
         "ok": True,
         "worker": "AuspexBrowser",
@@ -207,7 +240,10 @@ def run(request: dict[str, Any], workspace_root: Path, fetcher: FetchFn = defaul
         "artifacts": [output_path],
         "model_guidance": guidance,
         "gaps": [item["source_title"] for item in snapshots["skipped"]],
-        "confidence": "medium",
+        # Failed fetches are protocol-visible problems, not silence: the governor
+        # must be able to re-plan source acquisition instead of looping blind.
+        "problems": problems,
+        "confidence": "low" if failed_sources else "medium",
     }
 
 
