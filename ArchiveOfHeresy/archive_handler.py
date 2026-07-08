@@ -1149,16 +1149,69 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         payload["session_id"] = session_id
         payload["memory_namespace"] = shared_memory_namespace(payload.get("memory_namespace"))
         payload["client_source"] = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
-        warmaster_task = "" if image_data_url else self.mobile_chat_warmaster_task(session_id, text)
-        if warmaster_task:
-            payload["warmaster_task"] = warmaster_task
+        try:
+            turn = decide_chat_turn_action(session_id, text, image_data_url=image_data_url, model=payload.get("model") or DEFAULT_MODEL)
+        except Exception as exc:
+            write_json(self, 502, {"ok": False, "error": f"turn protocol unavailable: {exc}", "session_id": session_id})
+            return
+        decision = turn.get("decision") if isinstance(turn.get("decision"), dict) else {"action": "answer_in_chat"}
+        payload["turn_decision"] = decision
+        payload["turn_capabilities"] = turn.get("capabilities") if isinstance(turn.get("capabilities"), dict) else {}
+        payload["turn_protocol"] = {
+            "request": turn.get("request"),
+            "response": turn.get("response"),
+        }
+        if decision.get("action") == "delegate_to_warmaster":
+            payload["warmaster_task"] = str(decision.get("task") or "").strip()
             job_id = create_mobile_job("warmaster", payload)
             run_mobile_job(job_id, lambda payload=payload: self.run_mobile_warmaster_payload(payload))
             write_json(self, 202, {"ok": True, "job_id": job_id, "type": "warmaster", "session_id": session_id, "status": "queued"})
             return
+        if decision.get("action") == "ask_clarification":
+            payload["forced_chat_reply"] = str(decision.get("reply") or "").strip()
         job_id = create_mobile_job("chat", payload)
         run_mobile_job(job_id, lambda payload=payload: run_mobile_chat_payload(payload))
         write_json(self, 202, {"ok": True, "job_id": job_id, "type": "chat", "session_id": session_id, "status": "queued"})
+
+    def mobile_chat_protocol_completion_payload(self, message, finish_reason="turn_protocol_reply", extra=None):
+        payload = {
+            "object": "chat.completion",
+            "model": "archive-turn-protocol",
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": finish_reason,
+                    "message": {"role": "assistant", "content": message},
+                }
+            ],
+        }
+        if isinstance(extra, dict):
+            payload.update(extra)
+        return payload
+
+    def stream_static_mobile_chat_completion(self, message, finish_reason="turn_protocol_reply", extra=None):
+        self.send_response(202)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        chunk = {
+            "object": "chat.completion.chunk",
+            "model": "archive-turn-protocol",
+            "choices": [{"index": 0, "delta": {"content": message}, "finish_reason": None}],
+        }
+        done = {
+            "object": "chat.completion.chunk",
+            "model": "archive-turn-protocol",
+            "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
+        }
+        if isinstance(extra, dict):
+            chunk.update(extra)
+            done.update(extra)
+        self.wfile.write(f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode("utf-8"))
+        self.wfile.write(f"data: {json.dumps(done, ensure_ascii=False)}\n\n".encode("utf-8"))
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
 
     def mobile_translate_start(self):
         try:
@@ -1331,7 +1384,47 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             max_tokens = int(payload.get("max_tokens") or 2048)
             temperature = float(payload.get("temperature") or 0.4)
 
+            try:
+                turn = decide_chat_turn_action(session_id, text, image_data_url=image_data_url, model=model)
+            except Exception as exc:
+                write_json(self, 502, {"error": f"turn protocol unavailable: {exc}", "session_id": session_id})
+                return
+            decision = turn.get("decision") if isinstance(turn.get("decision"), dict) else {"action": "answer_in_chat"}
+            turn_capabilities = turn.get("capabilities") if isinstance(turn.get("capabilities"), dict) else {}
+            if decision.get("action") == "delegate_to_warmaster":
+                task_id = str(payload.get("task_id") or f"client-{uuid.uuid4().hex[:12]}").strip()
+                payload["stream"] = False
+                payload["session_id"] = session_id
+                payload["memory_namespace"] = memory_namespace
+                payload["client_source"] = client_source
+                payload["task_id"] = task_id
+                payload["warmaster_task"] = str(decision.get("task") or "").strip()
+                payload["turn_decision"] = decision
+                payload["turn_capabilities"] = turn_capabilities
+                payload["turn_protocol"] = {"request": turn.get("request"), "response": turn.get("response")}
+                job_id = create_mobile_job("warmaster", payload)
+                run_mobile_job(job_id, lambda payload=payload: self.run_mobile_warmaster_payload(payload))
+                message = (
+                    f"Вармастер-пайплайн поставлен в очередь: task_id={task_id}. "
+                    "Ход работы будет во вкладке Бригады, а в основной чат вернется финальный результат или запрос решения."
+                )
+                extra = {"warmaster": {"ok": True, "task_id": task_id, "job_id": job_id, "status": "queued"}}
+                if stream:
+                    self.stream_static_mobile_chat_completion(message, finish_reason="warmaster_queued", extra=extra)
+                else:
+                    write_json(
+                        self,
+                        202,
+                        self.mobile_chat_protocol_completion_payload(
+                            message,
+                            finish_reason="warmaster_queued",
+                            extra=extra,
+                        ),
+                    )
+                return
+
             request_messages = messages_for_chat_context(session_id, system_prompt, text, image_data_url=image_data_url)
+            request_messages.insert(0, capability_contract_message(turn_capabilities, decision))
             append_chat_message(
                 session_id,
                 "user",
@@ -1427,6 +1520,9 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "magos_result": magos_result,
                 "administratum_intent": administratum_intent,
                 "administratum_result": administratum_result,
+                "turn_decision": decision,
+                "turn_capabilities": turn_capabilities,
+                "turn_protocol": {"request": turn.get("request"), "response": turn.get("response")},
                 "prompt_diagnostics": diagnostics,
                 "model": model,
                 "request": {
@@ -1594,6 +1690,13 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             client_source = str(payload.pop("client_source", payload.pop("source", "api")) or "api").strip()[:80] or "api"
             shared_session_id = shared_chat_session_id(payload.get("session_id") or payload.get("user") or SHARED_CHAT_SESSION_ID)
             payload["messages"] = list(payload.get("messages", []))
+            payload["messages"].insert(
+                0,
+                capability_contract_message(
+                    turn_capability_manifest(),
+                    {"action": "answer_in_chat", "reason": "generic OpenAI-compatible chat endpoint"},
+                ),
+            )
             memory_messages = sanitize_messages_for_memory(payload["messages"])
             user_text_for_channel = trim_chat_text(latest_user_message(memory_messages))
             if user_text_for_channel:

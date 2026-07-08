@@ -23,6 +23,12 @@ from archivist_agent.graph_memory import GRAPH_TOP_K, GraphMemory
 from archivist_agent.magos_agent import MAGOS_CONTEXT_LAYERS, MAGOS_EXTRA_NAMESPACES, Magos
 from archivist_agent.quality_report import generate_quality_report
 from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_user_message
+from turn_protocol import (
+    build_turn_decision_request,
+    capability_contract_message,
+    normalize_turn_decision,
+    turn_capability_manifest,
+)
 
 try:
     from EyeOfTerror.Administratum.intent_parser import (
@@ -234,8 +240,12 @@ def run_mobile_chat_payload(payload):
         system_prompt = ""
         max_tokens = int(payload.get("max_tokens") or 2048)
         temperature = float(payload.get("temperature") or 0.4)
+        turn_capabilities = payload.get("turn_capabilities") if isinstance(payload.get("turn_capabilities"), dict) else turn_capability_manifest(image_attached=bool(image_data_url))
+        turn_decision = payload.get("turn_decision") if isinstance(payload.get("turn_decision"), dict) else {"action": "answer_in_chat"}
+        forced_chat_reply = trim_chat_text(payload.get("forced_chat_reply") or "")
 
         request_messages = messages_for_chat_context(session_id, system_prompt, text, image_data_url=image_data_url)
+        request_messages.insert(0, capability_contract_message(turn_capabilities, turn_decision))
         append_chat_message(
             session_id,
             "user",
@@ -243,6 +253,55 @@ def run_mobile_chat_payload(payload):
             created_at=created_at,
             source=client_source,
         )
+        if forced_chat_reply:
+            assistant = {"role": "assistant", "content": forced_chat_reply}
+            append_chat_message(session_id, "assistant", forced_chat_reply, source=client_source)
+            response = {
+                "object": "chat.completion",
+                "model": "archive-turn-protocol",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "turn_protocol_reply",
+                        "message": assistant,
+                    }
+                ],
+            }
+            record = {
+                "turn_id": turn_id,
+                "created_at": created_at,
+                "source": f"{client_source}-chat-session",
+                "conversation_id": session_id,
+                "memory_namespace": memory_namespace,
+                "archive_enabled": archive_enabled,
+                "focus_enabled": focus_enabled,
+                "vector_enabled": vector_enabled,
+                "graph_enabled": graph_enabled,
+                "archive_system_prompt_enabled": archive_system_prompt_enabled,
+                "magos_enabled": False,
+                "magos_result": None,
+                "administratum_intent": None,
+                "administratum_result": None,
+                "turn_decision": turn_decision,
+                "turn_capabilities": turn_capabilities,
+                "prompt_diagnostics": {},
+                "model": "archive-turn-protocol",
+                "request": {
+                    "session_id": session_id,
+                    "client_source": client_source,
+                    "text": text,
+                    "has_image": bool(image_data_url),
+                    "stream": False,
+                },
+                "prepared_messages": request_messages,
+                "status": "ok",
+                "http_status": 200,
+                "response": response,
+                "assistant_message": assistant,
+                "error": None,
+            }
+            maybe_write_archives(record)
+            return {"ok": True, "session_id": session_id, "response": response, "message": forced_chat_reply}
         administratum_intent = None
         administratum_result = None
         administratum_message = None
@@ -330,6 +389,8 @@ def run_mobile_chat_payload(payload):
             "magos_result": magos_result,
             "administratum_intent": administratum_intent,
             "administratum_result": administratum_result,
+            "turn_decision": turn_decision,
+            "turn_capabilities": turn_capabilities,
             "prompt_diagnostics": diagnostics,
             "model": model,
             "request": {
@@ -790,6 +851,7 @@ def prompt_diagnostics(
         "client_history_messages": 0,
         "archive_system_prompt": 0,
         "persona": 0,
+        "capability_contract": 0,
         "focus": 0,
         "magos": 0,
         "administratum": 0,
@@ -803,6 +865,8 @@ def prompt_diagnostics(
         if content.startswith("ArchiveOfHeresy identity context"):
             counters["archive_system_prompt"] += 1
             counters["persona"] += 1
+        elif content.startswith("ArchiveOfHeresy capability contract"):
+            counters["capability_contract"] += 1
         elif content.startswith("Ты Шушуня:"):
             counters["archive_system_prompt"] += 1
         elif content.startswith("Активный focus-файл ArchiveOfHeresy"):
@@ -866,6 +930,27 @@ def extract_json_object(text):
     if not isinstance(parsed, dict):
         raise ValueError("expected JSON object")
     return parsed
+
+
+def decide_chat_turn_action(session_id, text, image_data_url="", model=None):
+    user_text = trim_chat_text(text)
+    manifest = turn_capability_manifest(image_attached=bool(image_data_url))
+    history = chat_history(session_id, limit=12)
+    request = build_turn_decision_request(
+        model=model or DEFAULT_MODEL,
+        user_text=user_text,
+        recent_history=history,
+        manifest=manifest,
+    )
+    _status, response = proxy_json("POST", "/v1/chat/completions", payload=request, timeout=180)
+    content = str((((response.get("choices") or [{}])[0].get("message") or {}).get("content")) or "")
+    decision = normalize_turn_decision(extract_json_object(content))
+    return {
+        "decision": decision,
+        "capabilities": manifest,
+        "request": request,
+        "response": response,
+    }
 
 
 def persona_page_context(memory_namespace="default", max_chars=12000):
