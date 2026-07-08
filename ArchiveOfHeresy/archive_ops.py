@@ -30,6 +30,14 @@ from turn_protocol import (
     normalize_turn_decision,
     turn_capability_manifest,
 )
+from pending_reports import (
+    enqueue_report,
+    mark_delivered,
+    pending_reports,
+    pending_summary,
+    pending_topics_note,
+    reports_event_text,
+)
 
 try:
     from EyeOfTerror.Administratum.intent_parser import (
@@ -310,6 +318,23 @@ def run_mobile_chat_payload(payload):
             administratum_intent = detect_administratum_intent(text, model=model)
             administratum_result = create_administratum_task_from_intent(administratum_intent, session_id, client_source)
             administratum_message = administratum_intent_context(administratum_result)
+        # Pending-reports outbox: on a deliver turn the queued reports are injected
+        # in full and marked delivered after a successful answer; on ordinary turns
+        # only a topics note is injected so Shushunya can mention news exists
+        # without spilling the content uninvited.
+        reports_message = None
+        reports_to_deliver = []
+        if str(turn_decision.get("action") or "") == "deliver_pending_reports":
+            reports_to_deliver = pending_reports()
+            if reports_to_deliver:
+                reports_message = {"role": "system", "content": reports_event_text(reports_to_deliver)}
+            else:
+                reports_message = {
+                    "role": "system",
+                    "content": "Владелец спросил про новости, но очередь докладов пуста. Скажи честно, что новостей нет.",
+                }
+        elif not internal_flag(payload.get("system_event", False), default=False):
+            reports_message = pending_topics_note()
         mobile_payload = {
             "model": model,
             "user": session_id,
@@ -351,6 +376,7 @@ def run_mobile_chat_payload(payload):
             include_system_prompt=archive_system_prompt_enabled,
             magos_message=magos_message,
             administratum_message=administratum_message,
+            reports_message=reports_message,
             query_messages=memory_messages,
             memory_namespace=memory_namespace,
         )
@@ -362,6 +388,7 @@ def run_mobile_chat_payload(payload):
             include_system_prompt=archive_system_prompt_enabled,
             magos_message=magos_message,
             administratum_message=administratum_message,
+            reports_message=reports_message,
             query_messages=memory_messages,
             memory_namespace=memory_namespace,
         )
@@ -419,6 +446,8 @@ def run_mobile_chat_payload(payload):
             record["http_status"] = status
             record["response"] = response
             record["assistant_message"] = assistant
+            if reports_to_deliver and assistant:
+                mark_delivered([report["id"] for report in reports_to_deliver])
             maybe_write_archives(record)
             maintenance_record = record
             return {"ok": True, "session_id": session_id, "response": response, "message": (assistant or {}).get("content", "")}
@@ -935,7 +964,7 @@ def extract_json_object(text):
 
 def decide_chat_turn_action(session_id, text, image_data_url="", model=None):
     user_text = trim_chat_text(text)
-    manifest = turn_capability_manifest(image_attached=bool(image_data_url))
+    manifest = turn_capability_manifest(image_attached=bool(image_data_url), pending_reports=pending_summary())
     history = chat_history(session_id, limit=12)
     request = build_turn_decision_request(
         model=model or DEFAULT_MODEL,
@@ -1129,6 +1158,7 @@ def prepare_messages(
     include_system_prompt=True,
     magos_message=None,
     administratum_message=None,
+    reports_message=None,
     query_messages=None,
     memory_namespace="default",
 ):
@@ -1144,6 +1174,8 @@ def prepare_messages(
             prepared.append(focus_message)
     if administratum_message:
         prepared.append(administratum_message)
+    if reports_message:
+        prepared.append(reports_message)
     # Memory retrieval into the prompt now flows only through Magos's curated
     # memory_context (above). The old mechanical vector/graph auto-injection was
     # removed so nothing bypasses Magos's relevance filtering.

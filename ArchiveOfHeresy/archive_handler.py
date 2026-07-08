@@ -111,6 +111,12 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if self.path.startswith("/archive/chat/reports/pending"):
+            if not require_auth(self, allow_mobile=True):
+                return
+            write_json(self, 200, {"ok": True, **pending_summary()})
+            return
+
         if self.path == "/archive/mobile/warmaster/state":
             if not require_auth(self, allow_mobile=True):
                 return
@@ -444,6 +450,46 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             if not require_auth(self, allow_mobile=True):
                 return
             self.mobile_chat_start()
+            return
+
+        if self.path == "/archive/chat/reports/enqueue":
+            if not require_auth(self, allow_mobile=True):
+                return
+            try:
+                payload = read_json(self)
+            except json.JSONDecodeError as exc:
+                write_json(self, 400, {"ok": False, "error": f"Invalid JSON: {exc}"})
+                return
+            report_id = enqueue_report(
+                payload.get("source"),
+                payload.get("kind"),
+                payload.get("topic"),
+                payload.get("body"),
+                dedupe_key=payload.get("dedupe_key"),
+            )
+            write_json(self, 201 if report_id else 400, {"ok": bool(report_id), "report_id": report_id, **pending_summary()})
+            return
+
+        if self.path == "/archive/chat/reports/deliver":
+            if not require_auth(self, allow_mobile=True):
+                return
+            summary = pending_summary()
+            if not summary["count"]:
+                write_json(self, 200, {"ok": True, "delivered": 0, "message": "очередь докладов пуста"})
+                return
+            job_payload = {
+                "session_id": SHARED_CHAT_SESSION_ID,
+                "client_source": "report-button",
+                "source": "report-button",
+                "system_event": True,
+                "intent_detection": False,
+                "turn_decision": {"action": "deliver_pending_reports"},
+                "text": "[Кнопка доклада] Владелец нажал кнопку и разрешил доложить накопленное.",
+                "stream": False,
+            }
+            job_id = create_mobile_job("chat", job_payload)
+            run_mobile_job(job_id, lambda payload=job_payload: run_mobile_chat_payload(payload))
+            write_json(self, 202, {"ok": True, "job_id": job_id, "pending": summary["count"], "status": "queued"})
             return
 
         if self.path == "/archive/mobile/translate":

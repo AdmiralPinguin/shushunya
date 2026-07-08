@@ -14,29 +14,11 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
-import urllib.request
-
 import archive_state
-from archive_config import ARCHIVE_API_KEY, ARCHIVE_BASE_URL, DEFAULT_MODEL, WARMASTER_BASE_URL
+from archive_config import WARMASTER_BASE_URL
 from archive_httpio import proxy_json_url
 from archive_util import shared_memory_namespace, wiki_bookshelf_for_namespace
-from archive_ops import append_chat_message
-
-
-def _post_self(path, payload, timeout=240):
-    """POST to our own HTTP API (the chat pipeline needs the full handler stack)."""
-    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(
-        ARCHIVE_BASE_URL + path,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    if ARCHIVE_API_KEY:
-        request.add_header("Authorization", f"Bearer {ARCHIVE_API_KEY}")
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        body = response.read().decode("utf-8")
-        return response.status, json.loads(body) if body else {}
+from pending_reports import enqueue_report
 
 TASK_JOURNAL_ENABLED = os.environ.get("ARCHIVE_TASK_JOURNAL_ENABLED", "1").strip().lower() not in (
     "0",
@@ -138,7 +120,9 @@ def final_message_from_orchestration(orchestration):
     return final_response_message_from_orchestration(orchestration)
 
 
-def deliver_final_to_chat(task_id):
+def deliver_final_to_chat(task_id, run=None):
+    """Queue the accepted final answer; the owner releases it via the report
+    button or by asking for news (pending-reports outbox)."""
     try:
         final_message = final_message_from_orchestration(fetch_orchestration(task_id))
     except Exception as exc:  # noqa: BLE001 - final delivery must not break the journal loop
@@ -146,14 +130,10 @@ def deliver_final_to_chat(task_id):
         return False
     if not final_message:
         return False
-    append_chat_message(
-        SHARED_CHAT_SESSION_ID,
-        "assistant",
-        final_message,
-        source="warmaster",
-        dedupe_key=f"warmaster:{task_id}:final",
-    )
-    return True
+    goal = " ".join(str((run or {}).get("goal") or "").split())[:120] or task_id
+    body = f"Задача бригады выполнена и принята Warmaster'ом.\ntask: {goal}\nfinal ответ:\n{final_message[:4000]}"
+    report_id = enqueue_report("warmaster", "task_completed", f"готово: {goal}", body, dedupe_key=f"warmaster:{task_id}:final")
+    return bool(report_id)
 
 
 def escalation_facts(task_id, run):
@@ -188,14 +168,15 @@ def escalation_facts(task_id, run):
 
 
 def deliver_escalation_to_chat(task_id, run, event_kind):
+    """Queue a Warmaster escalation report; it reaches the chat only when the
+    owner presses the report button or asks for news (pending-reports outbox)."""
     if not TASK_ESCALATION_TO_CHAT:
         return False
     facts = escalation_facts(task_id, run)
-    lines = [f"[Доклад Warmaster'а владельцу]", f"kind: {event_kind}"]
     if event_kind == "task_blocked":
-        lines.append("Задача бригады остановлена и ждёт решения владельца.")
+        lines = ["Задача бригады остановлена и ждёт решения владельца."]
     else:
-        lines.append("Задача бригады провалена, доложи владельцу честно.")
+        lines = ["Задача бригады провалена."]
     lines.append(f"task: {facts.get('goal')}")
     lines.append(f"губернатор: {facts.get('governor')}; task_id: {task_id}")
     if facts.get("warmaster_reason"):
@@ -204,33 +185,9 @@ def deliver_escalation_to_chat(task_id, run, event_kind):
         lines.append(f"что требуется: {facts['required_order']}")
     for blocker in facts.get("blockers") or []:
         lines.append(f"блокер: {blocker}")
-    lines.append(
-        "Сформулируй это владельцу голосом Шушуни: что случилось и какое решение или ресурс нужен от него. "
-        "Не выдумывай деталей сверх доклада. Не создавай из этого новую задачу."
-    )
-    request_payload = {
-        "model": DEFAULT_MODEL,
-        "user": SHARED_CHAT_SESSION_ID,
-        "session_id": SHARED_CHAT_SESSION_ID,
-        "client_source": "warmaster",
-        "source": "warmaster",
-        "archive_enabled": True,
-        "focus_enabled": True,
-        "archive_system_prompt_enabled": True,
-        "intent_detection": False,
-        "system_event": True,
-        "metadata": {"source": "warmaster", "system_event": True, "event_kind": event_kind, "task_id": task_id},
-        "messages": [{"role": "user", "content": "\n".join(lines)}],
-        "stream": False,
-        "temperature": 0.4,
-        "max_tokens": 1024,
-    }
-    try:
-        _status, response = _post_self("/v1/chat/completions", request_payload)
-        return bool(response)
-    except Exception as exc:  # noqa: BLE001 - escalation delivery must not break the poller
-        print(f"Task escalation delivery failed for {task_id}: {exc}", flush=True)
-        return False
+    topic = ("нужно решение: " if event_kind == "task_blocked" else "провал задачи: ") + str(facts.get("goal") or task_id)[:120]
+    report_id = enqueue_report("warmaster", event_kind, topic, "\n".join(lines), dedupe_key=f"warmaster:{task_id}:{event_kind}")
+    return bool(report_id)
 
 
 def run_entry_text(run, event):
@@ -326,7 +283,7 @@ def poll_once():
         elif status in TERMINAL_STATUSES:
             remember_entry(run_entry_text(run, "finished"), task_id, f"finished-{status}")
             if status == "completed":
-                deliver_final_to_chat(task_id)
+                deliver_final_to_chat(task_id, run)
             elif status == "failed":
                 deliver_escalation_to_chat(task_id, run, "task_failed")
     if changed:

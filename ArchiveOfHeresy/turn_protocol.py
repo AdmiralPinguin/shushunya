@@ -10,6 +10,7 @@ TURN_ACTIONS = {
     "ask_clarification",
     "issue_mission_order",
     "create_administratum_task",
+    "deliver_pending_reports",
 }
 
 
@@ -38,8 +39,8 @@ GOVERNOR_CAPABILITIES = [
 ]
 
 
-def turn_capability_manifest(*, image_attached: bool = False) -> dict[str, Any]:
-    return {
+def turn_capability_manifest(*, image_attached: bool = False, pending_reports: dict[str, Any] | None = None) -> dict[str, Any]:
+    manifest = {
         "version": 1,
         "principle": (
             "Shushunya may speak and act only through the capabilities listed here. "
@@ -100,6 +101,25 @@ def turn_capability_manifest(*, image_attached: bool = False) -> dict[str, Any]:
             "After delegation, the truthful user-facing answer is only the server acceptance with task_id/status.",
         ],
     }
+    if pending_reports and int(pending_reports.get("count") or 0) > 0:
+        manifest["capabilities"].append(
+            {
+                "action": "deliver_pending_reports",
+                "available": True,
+                "description": (
+                    "Deliver Shushunya's queued proactive reports (finished/blocked brigade tasks, Administratum reminders "
+                    "and summaries) into the chat. Choose this when the user asks for news, pending reports, or whether "
+                    "Shushunya wants to say something ('что там ещё', 'что нового', 'докладывай', 'хочешь что-то сказать?')."
+                ),
+                "server_effect": "ArchiveOfHeresy injects the queued report contents into this turn and marks them delivered.",
+                "pending": pending_reports,
+                "limits": [
+                    "Use only when the user asks to hear the news/reports.",
+                    "Report contents come from the server queue; never invent them.",
+                ],
+            }
+        )
+    return manifest
 
 
 def capability_contract_message(manifest: dict[str, Any] | None = None, decision: dict[str, Any] | None = None) -> dict[str, str]:
@@ -140,7 +160,7 @@ def build_turn_decision_request(
                     "If a real workflow would need missing essential input, choose ask_clarification instead of issue_mission_order. "
                     "Do not hide missing inputs as risks inside a mission_order when the governor cannot start responsibly. "
                     "The JSON schema is: "
-                    "{\"action\":\"answer_in_chat|ask_clarification|issue_mission_order|create_administratum_task\","
+                    "{\"action\":\"answer_in_chat|ask_clarification|issue_mission_order|create_administratum_task|deliver_pending_reports\","
                     "\"task\":\"full task text if an external action is selected, otherwise empty\","
                     "\"mission_order\":{\"user_request\":\"full recovered user request\","
                     "\"target_governor\":\"IskandarKhayon|Ceraxia|Moriana\","

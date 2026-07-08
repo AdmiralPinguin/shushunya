@@ -46,41 +46,19 @@ def archive_api_key_from_env_file() -> str:
 
 
 def deliver_system_event(kind: str, body: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    event_payload = payload or {}
-    event_text = (
-        "[Системное событие Администратума]\n"
-        f"kind: {kind}\n"
-        f"body: {body}\n"
-        "Сформулируй это владельцу голосом Шушуни. Не создавай из этого новую задачу."
-    )
+    """Queue the event in the Archive's pending-reports outbox. It reaches the
+    chat only when the owner presses the report button or asks for news —
+    proactive events must not barge into an ongoing dialogue."""
+    del payload  # event details live in the body text; the queue stores plain reports
+    topic = " ".join(str(body or "").split())[:120] or kind
     request_payload = {
-        "model": ARCHIVE_MODEL,
-        "user": SESSION_ID,
-        "session_id": SESSION_ID,
-        "client_source": "administratum",
         "source": "administratum",
-        "memory_namespace": MEMORY_NAMESPACE,
-        "archive_enabled": True,
-        "focus_enabled": True,
-        "vector_enabled": True,
-        "graph_enabled": True,
-        "archive_system_prompt_enabled": True,
-        "intent_detection": False,
-        "system_event": True,
-        "metadata": {
-            "source": "administratum",
-            "system_event": True,
-            "intent_detection": False,
-            "event_kind": kind,
-            "payload": event_payload,
-        },
-        "messages": [{"role": "user", "content": event_text}],
-        "stream": False,
-        "temperature": 0.4,
-        "max_tokens": 1024,
+        "kind": kind,
+        "topic": topic,
+        "body": str(body or "").strip(),
     }
     try:
-        status, response = post_json("/v1/chat/completions", request_payload)
+        status, response = post_json("/archive/chat/reports/enqueue", request_payload)
         return {"ok": 200 <= status < 300, "status": status, "response": response}
     except (OSError, TimeoutError, urllib.error.URLError, json.JSONDecodeError) as exc:
         return {"ok": False, "error": str(exc)}
