@@ -35,6 +35,7 @@ from pending_reports import (
     mark_delivered,
     pending_reports,
     pending_summary,
+    task_roster_note,
     phone_announce,
     judge_conveyed,
     pending_topics_note,
@@ -352,6 +353,15 @@ def run_mobile_chat_payload(payload):
             reports_message = pending_topics_note(context_text=text)
             if reports_message:
                 vox_on_tongue = reports_message.get("on_tongue") or []
+        # Live task roster is always at hand on ordinary turns, so task status is
+        # answered from truth (authoritative over stale focus/ack lines).
+        roster_message = None
+        if not internal_flag(payload.get("system_event", False), default=False):
+            roster_message = task_roster_note()
+        # When the roster carries live work, suppress the focus file: a focus that
+        # narrates delegated work as "я собираю" is the stale crutch that fought
+        # the truth. Topic knowledge still comes through Magos (vector/wiki).
+        focus_for_prompt = focus_enabled and roster_message is None
         mobile_payload = {
             "model": model,
             "user": session_id,
@@ -387,25 +397,27 @@ def run_mobile_chat_payload(payload):
         prepared_payload = dict(mobile_payload)
         prepared_payload["messages"] = prepare_messages(
             request_messages,
-            include_focus=focus_enabled,
+            include_focus=focus_for_prompt,
             include_vector=vector_enabled,
             include_graph=graph_enabled,
             include_system_prompt=archive_system_prompt_enabled,
             magos_message=magos_message,
             administratum_message=administratum_message,
             reports_message=reports_message,
+            roster_message=roster_message,
             query_messages=memory_messages,
             memory_namespace=memory_namespace,
         )
         archive_prepared_messages = prepare_messages(
             memory_messages,
-            include_focus=focus_enabled,
+            include_focus=focus_for_prompt,
             include_vector=vector_enabled,
             include_graph=graph_enabled,
             include_system_prompt=archive_system_prompt_enabled,
             magos_message=magos_message,
             administratum_message=administratum_message,
             reports_message=reports_message,
+            roster_message=roster_message,
             query_messages=memory_messages,
             memory_namespace=memory_namespace,
         )
@@ -1229,6 +1241,7 @@ def prepare_messages(
     magos_message=None,
     administratum_message=None,
     reports_message=None,
+    roster_message=None,
     query_messages=None,
     memory_namespace="default",
 ):
@@ -1247,6 +1260,10 @@ def prepare_messages(
     if reports_message:
         # Strip the Vox judge payload before it reaches the prompt.
         prepared.append({"role": reports_message["role"], "content": reports_message["content"]})
+    if roster_message:
+        # Last system block, right before the conversation: live task status must
+        # win on recency over the (possibly stale) focus file and history.
+        prepared.append(roster_message)
     # Memory retrieval into the prompt now flows only through Magos's curated
     # memory_context (above). The old mechanical vector/graph auto-injection was
     # removed so nothing bypasses Magos's relevance filtering.

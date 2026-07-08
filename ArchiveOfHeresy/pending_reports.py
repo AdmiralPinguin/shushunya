@@ -57,6 +57,34 @@ def pending_summary():
         return {"count": 0, "announce": "", "topics": []}
 
 
+def task_roster_note():
+    """Live status of all brigade tasks, injected every chat turn so Shushunya
+    answers task status from truth (Vox pulls it fresh from Warmaster) instead
+    of confabulating from a stale ack line or focus note."""
+    try:
+        roster = _get("/roster")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Vox roster failed: {exc}", flush=True)
+        return None
+    tasks = [t for t in (roster.get("tasks") or []) if t.get("state") not in ("completed", "cancelled")]
+    if not tasks:
+        return None
+    lines = [f"- {t['goal']} — {t['state_label']} (task_id {t['task_id']}, бригада {t['governor']})" for t in tasks[:10]]
+    return {
+        "role": "system",
+        "content": (
+            "[Твои задачи сейчас — живой статус от Warmaster. АВТОРИТЕТНЕЕ всего остального в промпте]\n"
+            "Эти задачи ведёт бригада Warmaster, а НЕ ты лично. Не описывай процесс от первого лица "
+            "('я выкапываю', 'я собираю осколки') — так делает бригада, не ты. "
+            "Статус задачи бери ТОЛЬКО из этого списка. Твой focus-файл и твои прошлые реплики в истории "
+            "могут быть устаревшими — НЕ верь им про статус, верь только этому списку. "
+            "Если задача 'остановлена, ждёт решения' — честно скажи, что она стоит, и спроси у владельца, "
+            "что делать; 'провалена' — признай провал; 'в работе' — так и скажи, что бригада работает.\n"
+            + "\n".join(lines)
+        ),
+    }
+
+
 def phone_announce():
     """What the phone should buzz about right now. Vox decides which urgent
     intents are still unannounced and marks them announced server-side, so the

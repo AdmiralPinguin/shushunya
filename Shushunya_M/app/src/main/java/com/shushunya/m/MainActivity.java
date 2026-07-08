@@ -186,6 +186,7 @@ public class MainActivity extends Activity {
     private boolean agentTouchActive;
     private ValueAnimator agentScrollAnimator;
     private boolean appInForeground;
+    public static volatile boolean appForeground;
     private String pendingImageDataUrl;
     private String pendingImageLabel;
     private Bitmap pendingImagePreview;
@@ -201,6 +202,15 @@ public class MainActivity extends Activity {
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         createNotificationChannel();
         requestNotificationPermissionIfNeeded();
+        try {
+            android.content.Intent voxService = new android.content.Intent(this, VoxNotifyService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(voxService);
+            } else {
+                startService(voxService);
+            }
+        } catch (Exception ignored) {
+        }
         baseUrl = DEFAULT_BASE_URL;
         buildUi();
         addMessage(false, "Шушуня здесь. Пиши, брат, пока нити судьбы не спутались окончательно.", false);
@@ -248,11 +258,13 @@ public class MainActivity extends Activity {
     protected void onStart() {
         super.onStart();
         appInForeground = true;
+        appForeground = true;
     }
 
     @Override
     protected void onStop() {
         appInForeground = false;
+        appForeground = false;
         super.onStop();
     }
 
@@ -3181,8 +3193,6 @@ public class MainActivity extends Activity {
     private void pollPendingReports() {
         new Thread(() -> {
             int count = 0;
-            boolean backgrounded = !appInForeground;
-            java.util.ArrayList<String> notifyLines = new java.util.ArrayList<>();
             try {
                 // Badge: read-only summary, no marking.
                 URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/reports/pending");
@@ -3195,36 +3205,13 @@ public class MainActivity extends Activity {
                     JSONObject payload = new JSONObject(readAll(conn.getInputStream()));
                     count = payload.optInt("count", 0);
                 }
-                // Notification: only when backgrounded, and Vox decides what to
-                // buzz and marks it announced server-side. The phone is stateless.
-                if (backgrounded && count > 0) {
-                    URL a = new URL(trimSlash(baseUrl) + "/archive/client/chat/reports/announce");
-                    HttpURLConnection ac = (HttpURLConnection) a.openConnection();
-                    ac.setRequestMethod("GET");
-                    ac.setConnectTimeout(8000);
-                    ac.setReadTimeout(12000);
-                    applyMobileAuth(ac);
-                    if (ac.getResponseCode() >= 200 && ac.getResponseCode() < 300) {
-                        JSONObject ap = new JSONObject(readAll(ac.getInputStream()));
-                        if (ap.optBoolean("notify", false)) {
-                            JSONArray lines = ap.optJSONArray("notify_lines");
-                            for (int i = 0; lines != null && i < lines.length(); i++) {
-                                String line = lines.optString(i, "").trim();
-                                if (!line.isEmpty()) {
-                                    notifyLines.add(line);
-                                }
-                            }
-                        }
-                    }
-                }
+                // Buzzing is owned by VoxNotifyService (survives backgrounding);
+                // this in-app poll only keeps the badge fresh.
             } catch (Exception ignored) {
             }
             int finalCount = count;
             main.post(() -> {
                 updateReportsBadge(finalCount);
-                if (!notifyLines.isEmpty()) {
-                    showVoxNotification(finalCount, notifyLines);
-                }
                 if (!reportsPollScheduled) {
                     reportsPollScheduled = true;
                     main.postDelayed(() -> {

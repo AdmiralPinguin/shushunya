@@ -38,7 +38,20 @@ LLM_BASE_URL = os.environ.get("VOX_LLM_BASE_URL", "http://127.0.0.1:8080").rstri
 LLM_MODEL = os.environ.get("VOX_LLM_MODEL", os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"))
 EMBED_BASE_URL = os.environ.get("VOX_EMBED_BASE_URL", "http://127.0.0.1:8181").rstrip("/")
 EMBED_MODEL = os.environ.get("VOX_EMBED_MODEL", "multilingual-e5-large")
+WARMASTER_BASE_URL = os.environ.get("VOX_WARMASTER_BASE_URL", "http://127.0.0.1:7000").rstrip("/")
 RELEVANCE_MIN = float(os.environ.get("VOX_RELEVANCE_MIN", "0.78"))
+import re
+
+OWNER_REQUEST_RE = re.compile(r"Исходный запрос пользователя:\s*(.+?)(?:\n\n|$)", re.S)
+STATE_LABELS = {
+    "running": "в работе",
+    "queued": "в очереди",
+    "blocked": "остановлена, ждёт твоего решения",
+    "failed": "провалена",
+    "completed": "готова",
+    "cancelled": "отменена",
+    "interrupted": "прервана",
+}
 CLASSES = ("срочно", "важно", "к слову", "фон", "unclassified")
 STATES = ("open", "mentioned", "conveyed", "closed")
 _LOCK = threading.Lock()
@@ -305,6 +318,46 @@ def announce_for_phone() -> dict:
     }
 
 
+def _get_json(url: str, timeout: float = 15.0) -> dict:
+    with urllib.request.urlopen(urllib.request.Request(url, method="GET"), timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _human_goal(run: dict) -> str:
+    goal = str(run.get("goal") or "")
+    match = OWNER_REQUEST_RE.search(goal)
+    return " ".join((match.group(1) if match else goal).split())[:160]
+
+
+def task_roster(limit: int = 10) -> dict:
+    """Live roster of all of Shushunya's brigade tasks, pulled fresh from
+    Warmaster (never stored — a roster can't go stale if it isn't cached).
+    This is what Shushunya always has at hand, so task status is answered from
+    truth instead of from a frozen focus note or an old acknowledgement."""
+    try:
+        response = _get_json(f"{WARMASTER_BASE_URL}/runs?limit={max(1, min(limit, 30))}")
+    except Exception as exc:  # noqa: BLE001 - Warmaster down: empty roster, not a lie
+        return {"ok": False, "error": str(exc), "tasks": []}
+    runs = response.get("runs") if isinstance(response.get("runs"), list) else []
+    active_ids = set(response.get("process_active_runs") or [])
+    tasks = []
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        status = str(run.get("status") or "").lower()
+        tasks.append(
+            {
+                "task_id": str(run.get("task_id") or ""),
+                "goal": _human_goal(run),
+                "governor": str(run.get("governor") or ""),
+                "state": status,
+                "state_label": STATE_LABELS.get(status, status or "неизвестно"),
+                "active": str(run.get("task_id") or "") in active_ids or status in {"running", "queued"},
+            }
+        )
+    return {"ok": True, "tasks": tasks}
+
+
 def mark_conveyed(payload: dict) -> dict:
     conveyed = [int(i) for i in payload.get("conveyed_ids") or []]
     mentioned = [int(i) for i in payload.get("mentioned_ids") or []]
@@ -352,6 +405,8 @@ class VoxHandler(BaseHTTPRequestHandler):
                 self._reply(200, announce_for_phone())
             elif parsed.path == "/deliverable":
                 self._reply(200, deliverable_intents())
+            elif parsed.path == "/roster":
+                self._reply(200, task_roster())
             elif parsed.path == "/intents":
                 with connect() as db:
                     rows = db.execute("SELECT * FROM intents ORDER BY id DESC LIMIT 50").fetchall()
