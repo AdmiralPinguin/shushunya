@@ -104,6 +104,8 @@ public class MainActivity extends Activity {
                     + "Не используй это выражение при прямом обращении к пользователю и не заменяй им имена.";
 
     private final Handler main = new Handler(Looper.getMainLooper());
+    private Button reportsButton;
+    private boolean reportsPollScheduled;
     private LinearLayout messageList;
     private LinearLayout inputPanel;
     private LinearLayout composer;
@@ -187,6 +189,7 @@ public class MainActivity extends Activity {
         if (TAB_CHAT.equals(currentTab)) {
             loadServerChatHistory();
         }
+        pollPendingReports();
     }
 
     @Override
@@ -348,6 +351,18 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, dp(42), 1);
         titleLp.leftMargin = dp(10);
         titleRow.addView(title, titleLp);
+
+        reportsButton = new Button(this);
+        reportsButton.setText("✉");
+        reportsButton.setTextColor(Color.rgb(10, 25, 55));
+        reportsButton.setTextSize(15);
+        reportsButton.setTypeface(Typeface.DEFAULT_BOLD);
+        reportsButton.setBackground(pill(Color.rgb(244, 217, 137), Color.rgb(48, 190, 180), dp(15)));
+        reportsButton.setVisibility(View.GONE);
+        LinearLayout.LayoutParams reportsLp = new LinearLayout.LayoutParams(dp(84), dp(42));
+        reportsLp.leftMargin = dp(8);
+        titleRow.addView(reportsButton, reportsLp);
+        reportsButton.setOnClickListener(v -> deliverPendingReports());
 
         endpoint = new TextView(this);
         endpoint.setText(baseUrl);
@@ -2873,6 +2888,82 @@ public class MainActivity extends Activity {
                 });
             } catch (Exception ignored) {
             }
+        }).start();
+    }
+
+    private void pollPendingReports() {
+        if (!appInForeground) {
+            reportsPollScheduled = false;
+            return;
+        }
+        new Thread(() -> {
+            int count = 0;
+            try {
+                URL url = new URL(trimSlash(baseUrl) + "/archive/chat/reports/pending");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(8000);
+                conn.setReadTimeout(12000);
+                applyMobileAuth(conn);
+                if (conn.getResponseCode() >= 200 && conn.getResponseCode() < 300) {
+                    JSONObject payload = new JSONObject(readAll(conn.getInputStream()));
+                    count = payload.optInt("count", 0);
+                }
+            } catch (Exception ignored) {
+            }
+            int finalCount = count;
+            main.post(() -> {
+                updateReportsBadge(finalCount);
+                if (appInForeground && !reportsPollScheduled) {
+                    reportsPollScheduled = true;
+                    main.postDelayed(() -> {
+                        reportsPollScheduled = false;
+                        pollPendingReports();
+                    }, 30000);
+                }
+            });
+        }).start();
+    }
+
+    private void updateReportsBadge(int count) {
+        if (reportsButton == null) {
+            return;
+        }
+        if (count > 0) {
+            reportsButton.setText("✉ " + count);
+            reportsButton.setVisibility(View.VISIBLE);
+        } else {
+            reportsButton.setVisibility(View.GONE);
+        }
+    }
+
+    private void deliverPendingReports() {
+        if (reportsButton != null) {
+            reportsButton.setEnabled(false);
+            reportsButton.setText("✉ …");
+        }
+        new Thread(() -> {
+            try {
+                URL url = new URL(trimSlash(baseUrl) + "/archive/chat/reports/deliver");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setConnectTimeout(8000);
+                conn.setReadTimeout(15000);
+                conn.setDoOutput(true);
+                applyMobileAuth(conn);
+                conn.getOutputStream().write("{}".getBytes());
+                readAll(conn.getInputStream());
+            } catch (Exception ignored) {
+            }
+            main.post(() -> {
+                if (reportsButton != null) {
+                    reportsButton.setEnabled(true);
+                    reportsButton.setVisibility(View.GONE);
+                }
+                for (long delay : new long[] {6000, 15000, 30000, 60000}) {
+                    main.postDelayed(this::loadServerChatHistory, delay);
+                }
+            });
         }).start();
     }
 
