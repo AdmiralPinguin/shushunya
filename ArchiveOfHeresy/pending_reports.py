@@ -9,9 +9,8 @@ prompt gets a topics-only note so Shushunya can mention that news exists
 without spilling the content uninvited.
 """
 import json
-import os
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from archive_config import SQLITE_PATH
 from archive_state import ARCHIVE_LOCK
@@ -54,8 +53,17 @@ def enqueue_report(source, kind, topic, body, dedupe_key=None):
     with ARCHIVE_LOCK:
         with _connect() as db:
             if dedupe_key:
-                row = db.execute("SELECT id FROM pending_reports WHERE dedupe_key = ?", (dedupe_key,)).fetchone()
+                row = db.execute(
+                    "SELECT id FROM pending_reports WHERE dedupe_key = ? AND status = 'pending'",
+                    (dedupe_key,),
+                ).fetchone()
                 if row:
+                    # The same report is still unclaimed: refresh it in place
+                    # instead of piling up copies of the same news.
+                    db.execute(
+                        "UPDATE pending_reports SET created_at = ?, topic = ?, body = ? WHERE id = ?",
+                        (now_iso(), topic, body, int(row["id"])),
+                    )
                     return int(row["id"])
             cursor = db.execute(
                 "INSERT INTO pending_reports (created_at, source, kind, topic, body, dedupe_key) VALUES (?, ?, ?, ?, ?, ?)",
@@ -64,22 +72,8 @@ def enqueue_report(source, kind, topic, body, dedupe_key=None):
             return int(cursor.lastrowid)
 
 
-REPORT_TTL_HOURS = float(os.environ.get("ARCHIVE_REPORT_TTL_HOURS", "24"))
-
-
-def _expire_stale(db):
-    """Unclaimed reports must not haunt the queue forever: after the TTL they
-    expire silently (they stay in the table for history, just not pending)."""
-    cutoff = (datetime.now().astimezone() - timedelta(hours=REPORT_TTL_HOURS)).isoformat(timespec="seconds")
-    db.execute(
-        "UPDATE pending_reports SET status = 'expired', delivered_at = ? WHERE status = 'pending' AND created_at < ?",
-        (now_iso(), cutoff),
-    )
-
-
 def pending_reports(limit=20):
     with _connect() as db:
-        _expire_stale(db)
         rows = db.execute(
             "SELECT * FROM pending_reports WHERE status = 'pending' ORDER BY id LIMIT ?",
             (max(1, min(int(limit), 100)),),
@@ -88,10 +82,18 @@ def pending_reports(limit=20):
 
 
 def pending_summary():
-    """Cheap indicator payload: count + topics only, no content."""
+    """Indicator payload: count, topics, and a server-composed announce line —
+    the client is a dumb screen, what to announce is Shushunya's logic."""
     reports = pending_reports()
+    announce = ""
+    if reports:
+        newest = reports[-1]
+        announce = str(newest.get("topic") or newest.get("kind") or "")
+        if len(reports) > 1:
+            announce += f" (и ещё {len(reports) - 1} в очереди)"
     return {
         "count": len(reports),
+        "announce": announce,
         "topics": [{"id": r["id"], "kind": r["kind"], "topic": r["topic"], "created_at": r["created_at"]} for r in reports],
     }
 
