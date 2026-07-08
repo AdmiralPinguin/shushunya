@@ -1250,11 +1250,9 @@ def prepare_messages(
         prepared.append(persona_page_context(memory_namespace))
     query = latest_user_message(query_messages if query_messages is not None else messages)
     if magos_message:
+        # Magos now carries both the semantic recall AND the recent-thread memory
+        # that the focus file used to hold — no separate focus injection.
         prepared.append(magos_message)
-    if include_focus:
-        focus_message = focus_context_message(memory_namespace)
-        if focus_message:
-            prepared.append(focus_message)
     if administratum_message:
         prepared.append(administratum_message)
     if reports_message:

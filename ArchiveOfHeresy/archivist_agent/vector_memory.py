@@ -501,6 +501,53 @@ class VectorMemory:
         results.sort(key=lambda item: (-item["score"], item["created_at"]))
         return results[:limit]
 
+    def recent_session_chunks(self, conversation_id, limit=8, offset=0, memory_namespace=None, exclude_turn_id=None):
+        """The band of this conversation's chunks just BEFORE the verbatim tail —
+        by time, NOT gated by a similarity threshold. This is the reliable
+        'middle memory' that replaces the focus file: content that fell off the
+        verbatim tail is still present because it is recent in this thread, not
+        because it cleared a cosine bar. `offset` skips the newest chunks that
+        the verbatim tail already carries, so nothing is injected twice."""
+        if not self.db_path.exists() or not conversation_id:
+            return []
+        where = ["conversation_id = ?"]
+        params = [str(conversation_id)]
+        if memory_namespace:
+            where.append("memory_namespace = ?")
+            params.append(str(memory_namespace))
+        params.append(max(1, min(int(limit), 40)))
+        params.append(max(0, int(offset)))
+        rows = []
+        with sqlite3.connect(self.db_path) as db:
+            db.row_factory = sqlite3.Row
+            rows = db.execute(
+                f"""
+                SELECT turn_id, conversation_id, memory_namespace, created_at, role, content, label
+                FROM vector_chunks
+                WHERE {" AND ".join(where)}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            ).fetchall()
+        chunks = []
+        for row in rows:
+            if exclude_turn_id and row["turn_id"] == exclude_turn_id:
+                continue
+            chunks.append(
+                {
+                    "turn_id": row["turn_id"],
+                    "conversation_id": row["conversation_id"],
+                    "memory_namespace": row["memory_namespace"],
+                    "created_at": row["created_at"],
+                    "role": row["role"],
+                    "content": row["content"],
+                    "label": row["label"],
+                }
+            )
+        chunks.reverse()  # chronological for reading
+        return chunks
+
     def context_for_query(self, query, limit=VECTOR_TOP_K, memory_namespace=None):
         matches = self.search(query, limit=limit, memory_namespace=memory_namespace)
         if not matches:

@@ -355,25 +355,15 @@ class Librarian:
         if not user_text or not assistant_text:
             return {"status": "skipped", "reason": "empty_exchange"}
 
-        index = self.bookshelf.load_index()
-        active = self.bookshelf.active_focus(index)
-        decision = self.agent_cycle(record, index, active, user_text, assistant_text)
+        # The focus file is gone: the recent-thread memory it tried to hold is now
+        # served live by Magos (recent session chunks + semantic recall). The
+        # librarian's per-turn LLM call is kept only to label the exchange.
+        decision = self.label_cycle(record, user_text, assistant_text)
 
-        # Vector indexing runs after the librarian decision so chunks carry its label.
         vector_chunks = 0
         if self.vector_memory is not None:
             vector_chunks = self.vector_memory.index_turn(record, label=decision.get("label") or "")
 
-        if not active or decision["action"] == "new":
-            if active:
-                self.bookshelf.pause_focus(active)
-            focus = self.bookshelf.create_focus(index, record, decision, user_text, assistant_text)
-        else:
-            focus = self.bookshelf.update_focus(active, record, decision, user_text, assistant_text)
-
-        index["active_id"] = focus["id"]
-        self.bookshelf.enforce_limit(index)
-        self.bookshelf.save_index(index)
         wiki_result = None
         if self.wiki_memory is not None:
             wiki_result = self.wiki_memory.process_turn(record)
@@ -385,15 +375,17 @@ class Librarian:
             "memory_namespace": self.memory_namespace,
             "vector_chunks": vector_chunks,
             "label": decision.get("label") or "",
-            "focus": {
-                "action": decision["action"],
-                "id": focus.get("id"),
-                "title": focus.get("title"),
-                "importance": focus.get("importance"),
-            },
             "wiki": wiki_result,
             "graph": graph_result,
         }
+
+    def label_cycle(self, record, user_text, assistant_text):
+        """One small LLM call to classify the exchange (факт/мнение/прикол/...)."""
+        try:
+            decision = self.agent_cycle(record, {"files": []}, None, user_text, assistant_text)
+        except Exception:
+            return {"label": ""}
+        return {"label": str(decision.get("label") or "").strip()}
 
     def agent_cycle(self, record, index, active, user_text, assistant_text):
         messages = [

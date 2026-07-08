@@ -21,6 +21,12 @@ MAGOS_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_MAGOS_CONTEXT_CHARS", "6000"))
 MAGOS_GROUNDING_MIN_OVERLAP = float(os.environ.get("ARCHIVE_MAGOS_GROUNDING_MIN_OVERLAP", "0.2"))
 MAGOS_MIN_WIKI_SCORE = float(os.environ.get("ARCHIVE_MAGOS_MIN_WIKI_SCORE", "0.35"))
 MAGOS_MIN_VECTOR_SCORE = float(os.environ.get("ARCHIVE_MAGOS_MIN_VECTOR_SCORE", "0.32"))
+# The "middle memory" replacing the focus file: this many chunks of the current
+# conversation, in the band just before the verbatim tail (offset skips what the
+# tail already carries), ungated by similarity. Kept small to bound the prompt.
+MAGOS_SESSION_RECENT = int(os.environ.get("ARCHIVE_MAGOS_SESSION_RECENT", "8"))
+MAGOS_SESSION_TAIL_SKIP = int(os.environ.get("ARCHIVE_MAGOS_SESSION_TAIL_SKIP", "6"))
+MAGOS_SESSION_CHUNK_CHARS = int(os.environ.get("ARCHIVE_MAGOS_SESSION_CHUNK_CHARS", "320"))
 MAGOS_MIN_GRAPH_SCORE = float(os.environ.get("ARCHIVE_MAGOS_MIN_GRAPH_SCORE", "0.12"))
 MAGOS_ENABLED = os.environ.get("ARCHIVE_MAGOS_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
 MAGOS_CONTEXT_LAYERS = {
@@ -40,15 +46,14 @@ MAGOS_SYSTEM_PROMPT = os.environ.get(
     "ARCHIVE_MAGOS_SYSTEM_PROMPT",
     "Ты Магос ArchiveOfHeresy: изолированный агент извлечения памяти перед ответом модели. "
     "Ты не Шушуня и не архивариус-писатель после ответа. "
-    "Твоя задача: выбрать подходящий focus-файл или открыть новый пустой focus для новой темы, "
-    "а также собрать короткий набор релевантных фактов из памяти. "
+    "Твоя задача: собрать короткий набор релевантных фактов из памяти для ответа. "
     "Отвечай только валидным JSON без markdown и художественного тона.",
 )
 MAGOS_TASK_PROMPT = os.environ.get(
     "ARCHIVE_MAGOS_TASK_PROMPT",
-    "Сначала оцени существующие focus-файлы. Если один из них подходит текущему запросу, выбери его. "
-    "Если тема полностью новая или старый focus будет мешать, выбери создание нового пустого focus. "
-    "Затем собери memory_context: только факты, решения, статусы, связи и ограничения, которые помогут ответу. "
+    "Собери memory_context: только факты, решения, статусы, связи и ограничения, которые помогут ответу. "
+    "Раздел 'Недавнее в этом разговоре' — свежая нить текущего диалога, всегда учитывай его для непрерывности "
+    "(что обсуждали, как что назвали, что решили). Раздел 'Похожее из памяти' — ассоциативно найденное старое. "
     "Фрагменты vector_context подписаны эпистемическим ярлыком в квадратных скобках: "
     "[факт] можно передавать как информацию; [мнение] передавай только как мнение владельца, не как истину; "
     "[прикол] — это была шутка или сарказм, не выдавай содержимое за факт; "
@@ -57,12 +62,11 @@ MAGOS_TASK_PROMPT = os.environ.get(
     "[без ярлыка] — старая запись, оценивай по содержимому сам. "
     "Фрагменты с пометкой namespace=agent — это работа отделов/бригад Шушуни: выполненные исследования, "
     "созданные файлы и журналы задач; используй их, когда владелец спрашивает о задачах, исследованиях или их результатах. "
-    "memory_context разрешено собирать ТОЛЬКО из содержимого полей wiki_context, vector_context, graph_context и focus_candidates. "
+    "memory_context разрешено собирать ТОЛЬКО из содержимого полей wiki_context, vector_context, graph_context. "
     "Запрещено пересказывать или переформулировать сам query, запрещены мета-описания вида 'пользователь спрашивает о...'. "
     "Не добавляй ничего из собственных знаний: если про сущность из query в этих полях ничего нет, значит в памяти про неё пусто. "
     "Если связь слабая, косвенная или сомнительная, не добавляй этот фрагмент в memory_context. "
-    "Лучше вернуть memory_context пустой строкой, чем подмешать шум. "
-    "Новый пустой focus должен иметь короткий title, importance 1..5 и reason.",
+    "Лучше вернуть memory_context пустой строкой, чем подмешать шум.",
 )
 
 
@@ -115,11 +119,9 @@ class Magos:
             if not query:
                 return None
 
-            index = self.focus.load_index()
-            focus_candidates = self.focus_candidates(index)
             wiki_context = self.wiki_context(query) if "wiki" in MAGOS_CONTEXT_LAYERS else ""
             vector_context = (
-                self.vector_context(query, memory_namespace=memory_namespace)
+                self.vector_context(query, memory_namespace=memory_namespace, conversation_id=conversation_id, turn_id=turn_id)
                 if "vector" in MAGOS_CONTEXT_LAYERS
                 else ""
             )
@@ -139,16 +141,11 @@ class Magos:
                 {
                     "task": MAGOS_TASK_PROMPT,
                     "query": query,
-                    "focus_candidates": focus_candidates,
                     "wiki_context": wiki_context,
                     "vector_context": vector_context,
                     "graph_context": graph_context,
                     "enabled_context_layers": sorted(MAGOS_CONTEXT_LAYERS),
                     "schema": {
-                        "focus_action": "use_existing|new_empty|keep_active",
-                        "focus_id": "required for use_existing",
-                        "new_title": "required for new_empty",
-                        "new_importance": "1..5",
                         "reason": "short reason",
                         "memory_context": "compact facts to pass into the model",
                     },
@@ -159,12 +156,8 @@ class Magos:
                 # model (same host) is down too, so there is nothing to serve.
                 return None
 
-            focus_result = self.apply_focus_decision(index, decision, conversation_id, turn_id)
             self.last_result = {
                 "turn_id": turn_id,
-                "action": decision.get("focus_action"),
-                "focus_id": focus_result.get("focus_id"),
-                "created_empty_focus": focus_result.get("created_empty_focus", False),
                 "reason": decision.get("reason"),
                 "memory_context_chars": len(decision.get("memory_context") or ""),
                 "context_sources": context_sources,
@@ -178,17 +171,7 @@ class Magos:
 
             memory_context = trim_text(decision.get("memory_context"), MAGOS_CONTEXT_CHARS)
             if memory_context:
-                grounding_sources = " ".join(
-                    filter(
-                        None,
-                        [
-                            wiki_context,
-                            vector_context,
-                            graph_context,
-                            json.dumps(focus_candidates, ensure_ascii=False) if focus_candidates else "",
-                        ],
-                    )
-                ).strip()
+                grounding_sources = " ".join(filter(None, [wiki_context, vector_context, graph_context])).strip()
                 grounding = token_overlap(memory_context, grounding_sources) if grounding_sources else 0.0
                 if grounding < MAGOS_GROUNDING_MIN_OVERLAP:
                     self.last_result["memory_context_dropped"] = f"ungrounded:{grounding:.2f}"
@@ -273,7 +256,7 @@ class Magos:
             lines.append(f"## {page.get('title')}{source} score={score:.3f}\n{trim_text(content, 1200)}")
         return "\n\n".join(lines)
 
-    def vector_context(self, query, memory_namespace="default"):
+    def vector_context(self, query, memory_namespace="default", conversation_id=None, turn_id=None):
         if self.vector_memory is None:
             return ""
         namespaces = [memory_namespace] + sorted(ns for ns in MAGOS_EXTRA_NAMESPACES if ns != memory_namespace)
@@ -285,22 +268,46 @@ class Magos:
                     limit=VECTOR_TOP_K,
                     min_score=MAGOS_MIN_VECTOR_SCORE,
                     memory_namespace=namespace,
+                    exclude_turn_id=turn_id,
                 )
             )
         matches.sort(key=lambda item: (-item["score"], item["created_at"]))
         matches = matches[:VECTOR_TOP_K]
-        if not matches:
-            return ""
-        lines = ["# Vector Memory Matches", ""]
-        for index, match in enumerate(matches, 1):
-            label = str(match.get("label") or "").strip() or "без ярлыка"
-            source = str(match.get("memory_namespace") or "")
-            source_note = f"; namespace={source}" if source and source != memory_namespace else ""
-            lines.append(
-                f"{index}. [{label}] score={match['score']:.3f}; role={match['role']}; created_at={match['created_at']}{source_note}\n"
-                f"   {trim_text(match['content'], 700).replace(chr(10), chr(10) + '   ')}"
-            )
-        return "\n\n".join(lines)
+
+        sections = []
+        # Recent thread memory: the current conversation's latest chunks, by time,
+        # ungated by similarity — the reliable replacement for the focus file.
+        recent = self.vector_memory.recent_session_chunks(
+            conversation_id,
+            limit=MAGOS_SESSION_RECENT,
+            offset=MAGOS_SESSION_TAIL_SKIP,
+            memory_namespace=memory_namespace,
+            exclude_turn_id=turn_id,
+        )
+        seen = set()
+        if recent:
+            lines = ["# Недавнее в этом разговоре (нить перед последними репликами)", ""]
+            for chunk in recent:
+                seen.add(f"{chunk['created_at']}:{chunk['role']}")
+                label = str(chunk.get("label") or "").strip() or "без ярлыка"
+                lines.append(
+                    f"[{label}] {chunk['role']}: " + trim_text(chunk["content"], MAGOS_SESSION_CHUNK_CHARS).replace(chr(10), " ")
+                )
+            sections.append("\n".join(lines))
+
+        relevant = [m for m in matches if f"{m['created_at']}:{m['role']}" not in seen]
+        if relevant:
+            lines = ["# Похожее из памяти (по смыслу)", ""]
+            for index, match in enumerate(relevant, 1):
+                label = str(match.get("label") or "").strip() or "без ярлыка"
+                source = str(match.get("memory_namespace") or "")
+                source_note = f"; namespace={source}" if source and source != memory_namespace else ""
+                lines.append(
+                    f"{index}. [{label}] score={match['score']:.3f}; role={match['role']}; created_at={match['created_at']}{source_note}\n"
+                    f"   {trim_text(match['content'], 700).replace(chr(10), chr(10) + '   ')}"
+                )
+            sections.append("\n\n".join(lines))
+        return "\n\n".join(sections)
 
     def graph_context(self, query):
         if self.graph_memory is None:
