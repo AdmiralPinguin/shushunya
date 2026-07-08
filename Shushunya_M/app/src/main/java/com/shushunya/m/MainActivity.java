@@ -1354,13 +1354,53 @@ public class MainActivity extends Activity {
         return new JSONObject(response);
     }
 
+    private String agentTasksDiffKey(JSONArray tasks) {
+        if (tasks == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < tasks.length(); i++) {
+            JSONObject task = tasks.optJSONObject(i);
+            if (task == null) {
+                continue;
+            }
+            sb.append(task.optString("task_id", "")).append('|')
+                    .append(task.optString("status", "")).append('|')
+                    .append(task.optBoolean("running", false)).append('|')
+                    .append(task.optString("current_step", "")).append('|')
+                    .append(task.optString("final", "").hashCode()).append('|')
+                    .append(task.optString("task", "").hashCode()).append('|');
+            JSONObject missionState = task.optJSONObject("mission_state");
+            sb.append(missionState == null ? "" : missionState.optString("user_visible_state", "")).append('|');
+            JSONArray cards = task.optJSONArray("activity_cards");
+            if (cards == null) {
+                cards = task.optJSONArray("activity_entries");
+            }
+            if (cards != null) {
+                for (int j = 0; j < cards.length(); j++) {
+                    JSONObject card = cards.optJSONObject(j);
+                    if (card == null) {
+                        continue;
+                    }
+                    sb.append(card.optString("headline", "").hashCode()).append('~')
+                            .append(card.optString("status", "")).append('~')
+                            .append(card.optString("severity", "")).append('~')
+                            .append(card.optString("detail", "").hashCode()).append(';');
+                }
+            }
+            sb.append('\n');
+        }
+        return sb.toString();
+    }
+
     private void renderAgentTaskHistory(JSONArray tasks) {
         if (agentMessageList == null) {
             return;
         }
-        // Rebuild only when the payload actually changed: a full removeAllViews
-        // on every poll made the whole tab blink.
-        String key = tasks == null ? "" : tasks.toString();
+        // Rebuild only when the MEANING changed: the raw payload carries
+        // timestamps/cursors that differ on every poll, so comparing it as-is
+        // rebuilt (and blinked) the whole tab every 5 seconds.
+        String key = agentTasksDiffKey(tasks);
         if (key.equals(lastAgentTasksJson)) {
             return;
         }
