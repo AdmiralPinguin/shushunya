@@ -2501,7 +2501,8 @@ public class MainActivity extends Activity {
         selectedImagePreview.setVisibility(View.GONE);
         resetAttachImageButton();
         if (hasImage) {
-            addImageMessage(text, imagePreview, imageLabel);
+            addImageMessage(text, imagePreview, imageLabel, -1);
+            maybeScrollToBottom(true);
             pendingLocalEchoes.addLast("user\n" + text + "\n[image attached server-side]");
         } else {
             addMessage(true, text);
@@ -3041,11 +3042,24 @@ public class MainActivity extends Activity {
         return bubble;
     }
 
-    private void addImageMessage(String text, Bitmap image, String fallbackLabel) {
-        addImageMessage(text, image, fallbackLabel, -1);
+    private void sizeImageView(ImageView imageView, Bitmap image) {
+        int width = Math.min(getResources().getDisplayMetrics().widthPixels - dp(96), dp(430));
+        int height = image != null
+                ? Math.max(dp(160), Math.min(dp(320), Math.round(width * image.getHeight() / Math.max(1f, image.getWidth()))))
+                : dp(220);
+        ViewGroup.LayoutParams lp = imageView.getLayoutParams();
+        if (lp == null) {
+            imageView.setLayoutParams(new LinearLayout.LayoutParams(-1, height));
+        } else {
+            lp.height = height;
+            imageView.setLayoutParams(lp);
+        }
     }
 
-    private void addImageMessage(String text, Bitmap image, String fallbackLabel, int insertIndex) {
+    // Builds the image bubble AT its position synchronously (with a placeholder
+    // if the bitmap isn't ready yet) and returns the ImageView to fill later —
+    // so an async image lands in its chronological slot, never at the bottom.
+    private ImageView addImageMessage(String text, Bitmap image, String fallbackLabel, int insertIndex) {
         boolean prepend = insertIndex >= 0;
         LinearLayout bubble = new LinearLayout(this);
         bubble.setOrientation(LinearLayout.VERTICAL);
@@ -3056,16 +3070,15 @@ public class MainActivity extends Activity {
             bubble.setTranslationY(dp(10));
         }
 
+        ImageView imageView = new ImageView(this);
+        imageView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        imageView.setBackground(pill(Color.rgb(6, 14, 36), Color.rgb(201, 156, 58), dp(14)));
+        imageView.setPadding(dp(2), dp(2), dp(2), dp(2));
         if (image != null) {
-            ImageView imageView = new ImageView(this);
             imageView.setImageBitmap(image);
-            imageView.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            imageView.setBackground(pill(Color.rgb(6, 14, 36), Color.rgb(201, 156, 58), dp(14)));
-            imageView.setPadding(dp(2), dp(2), dp(2), dp(2));
-            int width = Math.min(getResources().getDisplayMetrics().widthPixels - dp(96), dp(430));
-            int height = Math.max(dp(160), Math.min(dp(320), Math.round(width * image.getHeight() / Math.max(1f, image.getWidth()))));
-            bubble.addView(imageView, new LinearLayout.LayoutParams(-1, height));
         }
+        sizeImageView(imageView, image);
+        bubble.addView(imageView);
 
         if (text != null && !text.trim().isEmpty()) {
             TextView caption = new TextView(this);
@@ -3090,7 +3103,7 @@ public class MainActivity extends Activity {
         lp.bottomMargin = dp(6);
         if (prepend) {
             messageList.addView(bubble, Math.min(insertIndex, messageList.getChildCount()), lp);
-            return;
+            return imageView;
         }
         messageList.addView(bubble, lp);
 
@@ -3100,7 +3113,7 @@ public class MainActivity extends Activity {
                 .setDuration(210)
                 .setInterpolator(new DecelerateInterpolator())
                 .start();
-        maybeScrollToBottom(true);
+        return imageView;
     }
 
     private TextView addMessage(boolean fromUser, String text, boolean save) {
@@ -3342,12 +3355,15 @@ public class MainActivity extends Activity {
     }
 
     private void fetchAndRenderAsset(boolean fromUser, String caption, String assetId, int insertIndex) {
+        // Place the bubble NOW, in its chronological slot, with whatever we have
+        // (cached bitmap or a placeholder). The image fills in later — it never
+        // jumps to the bottom.
         Bitmap cached = imageCache.get(assetId);
+        final ImageView target = addImageMessage(caption, cached, caption.isEmpty() ? "[изображение]" : caption, insertIndex);
+        if (insertIndex < 0) {
+            maybeScrollToBottom(false);
+        }
         if (cached != null) {
-            addImageMessage(caption, cached, caption.isEmpty() ? "[изображение]" : caption, insertIndex);
-            if (insertIndex < 0) {
-                maybeScrollToBottom(false);
-            }
             return;
         }
         final String url = trimSlash(baseUrl) + "/archive/client/chat/asset/" + assetId;
@@ -3392,12 +3408,8 @@ public class MainActivity extends Activity {
             }
             main.post(() -> {
                 if (finalBmp != null) {
-                    addImageMessage(caption, finalBmp, caption.isEmpty() ? "[изображение]" : caption, insertIndex);
-                } else if (!caption.isEmpty()) {
-                    addMessage(fromUser, caption, false);
-                }
-                if (insertIndex < 0) {
-                    maybeScrollToBottom(false);
+                    target.setImageBitmap(finalBmp);
+                    sizeImageView(target, finalBmp);
                 }
             });
         }).start();
