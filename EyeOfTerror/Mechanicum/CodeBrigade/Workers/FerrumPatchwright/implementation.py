@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Patch implementation role implementation."""
 
+import re
 import sys
 from pathlib import Path
 
@@ -484,24 +485,119 @@ def normalize_patch_payload(payload: dict[str, Any], source: str) -> dict[str, A
     return payload
 
 
+def _fenced_blocks(text: str) -> list[tuple[str, str]]:
+    """Return (info_string, body) for every ``` fenced block in the text."""
+    blocks: list[tuple[str, str]] = []
+    pattern = re.compile(r"```([^\n`]*)\n(.*?)```", re.DOTALL)
+    for match in pattern.finditer(text):
+        blocks.append((match.group(1).strip(), match.group(2)))
+    return blocks
+
+
+def _attach_fenced_write_file_content(payload: dict[str, Any], raw_text: str) -> None:
+    """Fill write_file operations that carry no inline content from a fenced code
+    block — the robust way to move a whole source file out of the fragile JSON
+    string (large multi-line code routinely breaks JSON escaping)."""
+    operations = payload.get("operations")
+    if not isinstance(operations, list):
+        return
+    pending = [
+        op for op in operations
+        if isinstance(op, dict) and str(op.get("type")) == "write_file"
+        and (not str(op.get("content") or "").strip() or not str(op.get("path") or "").strip())
+    ]
+    if not pending:
+        return
+    blocks = _fenced_blocks(raw_text)
+    if not blocks:
+        return
+    for op in pending:
+        path = str(op.get("path") or "").strip()
+        chosen_body = None
+        chosen_info = ""
+        for info, body in blocks:
+            info = info.strip()
+            if path and info and (info == path or info == path.rsplit("/", 1)[-1] or path.endswith(info) or info.endswith(path)):
+                chosen_body, chosen_info = body, info
+                break
+        if chosen_body is None and len(pending) == 1 and len(blocks) == 1:
+            chosen_body, chosen_info = blocks[0][1], blocks[0][0].strip()  # single file, single block: unambiguous
+        if chosen_body is not None:
+            op["content"] = chosen_body.rstrip("\n") + "\n"
+            op.setdefault("overwrite", True)
+            # The model often names the file only in the fence info string.
+            if not path and chosen_info and ("." in chosen_info or "/" in chosen_info) and " " not in chosen_info:
+                op["path"] = chosen_info
+
+
 def patch_payload_from_model_content(content: str) -> dict[str, Any]:
     text = content.strip()
     if not text:
         return {}
+    payload: Any = {}
     if "CERAXIA_PATCH:" in text:
-        return extract_json_after_marker(text, "CERAXIA_PATCH:")
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if "```" in lines:
-            lines = lines[:lines.index("```")]
-        text = "\n".join(lines).strip()
-    try:
-        payload = json.JSONDecoder().raw_decode(text)[0]
-    except json.JSONDecodeError:
-        return {}
-    return payload if isinstance(payload, dict) else {}
+        payload = extract_json_after_marker(text, "CERAXIA_PATCH:")
+    else:
+        body = text
+        if body.startswith("```"):
+            lines = body.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if "```" in lines:
+                lines = lines[:lines.index("```")]
+            body = "\n".join(lines).strip()
+        try:
+            payload = json.JSONDecoder().raw_decode(body)[0]
+        except json.JSONDecodeError:
+            return {}
+    if isinstance(payload, dict):
+        # Models name the target inconsistently — accept file/filename/target as path.
+        for op in payload.get("operations") or []:
+            if isinstance(op, dict) and not str(op.get("path") or "").strip():
+                for alias in ("file", "filename", "target", "path_to_file"):
+                    if str(op.get(alias) or "").strip():
+                        op["path"] = op[alias]
+                        break
+        _attach_fenced_write_file_content(payload, content)
+        return payload
+    return {}
+
+
+_LANG_EXT = {
+    "php": "php", "python": "py", "питон": "py", "javascript": "js", "js": "js", "typescript": "ts",
+    "ruby": "rb", "go": "go", "rust": "rs", "c++": "cpp", "cpp": "cpp", "java": "java",
+    "bash": "sh", "shell": "sh", "c#": "cs", "lua": "lua", "perl": "pl",
+}
+
+
+def _derive_write_file_path(goal: str, verification_commands: list, content: str) -> str:
+    """Best-effort filename when the model left write_file.path empty: prefer a
+    filename it named in a verification command, then any explicit *.ext in the
+    goal, then <slug>.<ext> from the requested language."""
+    for command in verification_commands if isinstance(verification_commands, list) else []:
+        match = re.search(r"([\w./-]+\.[A-Za-z0-9]{1,6})", str(command))
+        if match:
+            return match.group(1)
+    match = re.search(r"([\w./-]+\.[A-Za-z0-9]{1,6})", goal or "")
+    if match:
+        return match.group(1)
+    lowered = (goal or "").lower()
+    ext = next((e for kw, e in _LANG_EXT.items() if kw in lowered), "txt")
+    slug = "program"
+    for word in re.findall(r"[a-zA-Zа-яё]{4,}", lowered):
+        if word not in ("напиши", "сделай", "консольную", "консоль", "текстовый", "файл", "программу", "please", "write", "create"):
+            slug = re.sub(r"[^a-z0-9]+", "", word) or "program"
+            break
+    return f"{slug}.{ext}"
+
+
+def _fill_missing_write_file_paths(spec: dict[str, Any], goal: str, content: str) -> None:
+    operations = spec.get("operations") if isinstance(spec.get("operations"), list) else []
+    verification = spec.get("verification_commands")
+    for op in operations:
+        if isinstance(op, dict) and str(op.get("type")) == "write_file" and not str(op.get("path") or "").strip():
+            op["path"] = _derive_write_file_path(goal, verification, content)
+            op.setdefault("overwrite", True)
 
 
 def model_generated_patch_spec(
@@ -525,9 +621,13 @@ def model_generated_patch_spec(
             if isinstance(item, dict)
         ],
         "required_shape": {
-            "operations": [
+            "operations_for_modifying_existing_code": [
                 {"type": "replace", "path": "relative/file.py", "old": "exact old text", "new": "exact new text"}
             ],
+            "operations_for_creating_a_new_program_from_scratch": [
+                {"type": "write_file", "path": "galaga.php", "overwrite": True}
+            ],
+            "note_for_write_file": "Do NOT put the code inside the JSON. Leave out 'content'. After the CERAXIA_PATCH line, add the full source as a fenced code block whose info string is the file path, e.g.:\n```galaga.php\n<?php ... full program ...\n```",
             "verification_commands": ["python -m py_compile relative/file.py"],
             "diagnostics": {"reason": "why this patch satisfies the task"},
         },
@@ -538,10 +638,15 @@ def model_generated_patch_spec(
         context,
         layer="code_worker_patch_generation",
         instructions=(
-            "Generate one concrete CERAXIA_PATCH JSON object for the target repository. "
-            "Use only relative paths and exact text from supplied excerpts. "
-            "Prefer replace operations over rewrites. Include verification_commands. "
-            "Return only CERAXIA_PATCH: followed by JSON."
+            "Generate one concrete CERAXIA_PATCH JSON object (key 'operations') that fulfils the goal. Two modes:\n"
+            "1) MODIFY existing code: use replace operations with exact text from the supplied excerpts; prefer replace over rewrites.\n"
+            "2) CREATE A NEW standalone program/file from scratch (no existing file to edit — e.g. 'write a game/script in "
+            "<language>'): emit a write_file operation (type write_file, a sensible relative filename like galaga.php, "
+            "overwrite true) WITHOUT a 'content' field, and put the COMPLETE runnable source code as a fenced code block "
+            "AFTER the CERAXIA_PATCH line, with the file path as the fence info string (```galaga.php\\n<code>\\n```). "
+            "Write the whole program, not a stub. This keeps the JSON small and valid. Do NOT invent excerpts.\n"
+            "Set verification_commands for the language ('php -l galaga.php' for PHP, 'python -m py_compile file.py' for "
+            "Python); if no checker fits, use an empty list. Return only CERAXIA_PATCH: followed by JSON."
         ),
     )
     payload = patch_payload_from_model_content(str(decision.get("content") or ""))
@@ -551,6 +656,7 @@ def model_generated_patch_spec(
         normalized = normalize_patch_payload(payload, "model_generated_patch")
     except ValueError as exc:
         return {"patch_spec": {}, "decision": decision, "diagnostic": str(exc)}
+    _fill_missing_write_file_paths(normalized, request_goal(request), str(decision.get("content") or ""))
     normalized.setdefault("source", "model_generated_patch")
     normalized.setdefault("diagnostics", {})
     if isinstance(normalized.get("diagnostics"), dict):
