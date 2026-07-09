@@ -846,9 +846,25 @@ def revision_plan_from_findings(findings: list[dict[str, str]], missing_artifact
         if target:
             step_id, worker = target
             add_revision_step(steps, step_id, worker, f"Missing artifact: {artifact}", "missing_artifacts")
+    step_workers = {
+        "corpus_ingestion": "CorpusIngestor",
+        "source_discovery": "Lexmechanic",
+        "source_acquisition": "AuspexBrowser",
+        "source_rendering": "OcularisRenderium",
+        "fact_extraction": "NoosphericExtractor",
+        "structure_mapping": "Chronologis",
+        "synthesis_planning": "ScriptoriumArchitect",
+        "draft_reconstruction": "ScriptoriumDaemon",
+    }
     for finding in findings:
         message = str(finding.get("message") or "")
         lowered = message.lower()
+        # The model critic may name the exact steps to rerun; honor its routing.
+        named_steps = [step_id for step_id in step_workers if step_id in lowered]
+        if named_steps:
+            for step_id in named_steps:
+                add_revision_step(steps, step_id, step_workers[step_id], message, "critic_finding")
+            continue
         if "missing required direct event in timeline" in lowered:
             add_revision_step(steps, "fact_extraction", "NoosphericExtractor", message, "critic_finding")
             add_revision_step(steps, "structure_mapping", "Chronologis", message, "critic_finding")
@@ -1036,6 +1052,42 @@ def model_review_payload(
     }
 
 
+def model_event_coverage_blockers(
+    reconstruction: str,
+    coverage_events: list[dict[str, Any]],
+    request_guidance: Any,
+) -> list[dict[str, str]]:
+    """Focused coverage judgement: only the draft text and the event list, so a
+    small model actually reads instead of drowning in the full review payload."""
+    if not coverage_events:
+        return []
+    guidance = request_guidance(
+        "ReductorVerifier",
+        {
+            "reconstruction_text": reconstruction[:26000],
+            "required_events": coverage_events,
+        },
+        (
+            "You are checking event coverage in a draft document. required_events lists events "
+            "(event_id, label, summary, wording_hints). Read reconstruction_text carefully and decide for each "
+            "event whether the text tells it in ANY language or wording — a Russian retelling of an English label "
+            "counts as covered; wording_hints are optional hints, not required phrases. Return strict JSON "
+            '{"missing_event_ids": [...]} listing ONLY events genuinely absent from the text; if every event is '
+            "told, return an empty list."
+        ),
+    )
+    if not guidance.get("ok"):
+        return []  # model unavailability is surfaced by the main review call
+    parsed = parsed_model_content(guidance)
+    missing = parsed.get("missing_event_ids") if isinstance(parsed.get("missing_event_ids"), list) else []
+    by_id = {str(event.get("event_id")): event for event in coverage_events}
+    return [
+        {"severity": "blocker", "message": f"Draft does not visibly cover required event: {by_id[str(missing_id)].get('label')}"}
+        for missing_id in missing
+        if str(missing_id) in by_id
+    ]
+
+
 def model_review_findings(decision: dict[str, Any]) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     if not decision.get("ok"):
         return [], [
@@ -1061,7 +1113,15 @@ def model_review_findings(decision: dict[str, Any]) -> tuple[list[dict[str, str]
             continue
         for item in values:
             if isinstance(item, dict):
-                message = str(item.get("message") or item.get("note") or item.get("summary") or "").strip()
+                message = str(
+                    item.get("message") or item.get("note") or item.get("summary")
+                    or item.get("reason") or item.get("description") or item.get("issue") or ""
+                ).strip()
+                fix_action = str(item.get("fix_action") or item.get("fix") or item.get("action") or "").strip()
+                if fix_action:
+                    # Keep the model's own routing in the message so the
+                    # revision planner can honor the steps it names.
+                    message = f"{message} [fix: {fix_action}]" if message else f"[fix: {fix_action}]"
                 item_severity = str(item.get("severity") or severity)
             else:
                 message = str(item).strip()
@@ -1218,21 +1278,28 @@ def review_artifacts(
     findings.extend(comprehensive_findings)
     gate_findings, quality_gates = mode_quality_gates(output_mode, research_corpus, structure_map, reconstruction, synthesis_plan)
     findings.extend(gate_findings)
-    model_guidance = request_required_scriptorium_guidance(
+    findings.extend(model_event_coverage_blockers(reconstruction, coverage_events_for_model, request_guidance))
+    # Deliberately NOT request_required_scriptorium_guidance: that helper
+    # short-circuits to the model_brain embedded in the worker order (a
+    # step-level action plan), so the critic would "review" without ever
+    # reading the draft. Independent review needs its own model call.
+    model_guidance = request_guidance(
         "ReductorVerifier",
-        request,
-        model_review_payload(request, source_map, notes, timeline, reconstruction, coverage, findings, warnings, comprehensive_metrics, quality_gates, coverage_events_for_model),
+        model_review_payload(request, source_map, notes, timeline, reconstruction, coverage, findings, warnings, comprehensive_metrics, quality_gates),
         (
             "You are an independent Scriptorium critic. Check whether the draft actually satisfies the user's "
             "research/writing task, whether chronology is complete, whether unsupported invention exists, and "
-            "whether the revision plan points to the right upstream workers. required_events_to_verify lists key "
-            "events whose coverage you must judge yourself: read reconstruction_preview and decide for each whether "
-            "the draft genuinely tells that event in ANY language or wording (wording_hints are only hints, not "
-            "required phrases). For each event truly absent from the draft, add a blocker with the exact message "
-            "'Draft does not visibly cover required event: <label>'; if all are covered, do not block for coverage. "
-            "Return JSON with status, blockers, warnings, and evidence_notes. Do not waive hard source/evidence blockers."
+            "whether the revision plan points to the right upstream workers. Event coverage has already been "
+            "judged separately — do not re-check it and do not add coverage blockers. Block ONLY on defects that "
+            "rerunning pipeline steps can actually fix (wrong or missing content relative to the fetched corpus, "
+            "invented claims, broken chronology). The workers physically cannot buy books or bypass paywalls: "
+            "commercial novels without public texts will NEVER be fetched, no matter how many revisions run. "
+            "Demanding primary snapshots of such sources is a wasted revision and is forbidden — if the draft's "
+            "gaps section honestly names the missing primary sources, that limitation is a warning, never a "
+            "blocker. Wiki-sourced claims with honest confidence labels are acceptable evidence for events whose "
+            "primary text is unavailable. Return JSON with status, blockers, warnings, and evidence_notes. "
+            "Do not waive blockers for defects the pipeline can fix."
         ),
-        request_guidance,
     )
     if not model_guidance.get("ok"):
         return model_unavailable_payload("ReductorVerifier", request.get("task_id"), model_guidance)

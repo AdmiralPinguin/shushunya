@@ -945,6 +945,20 @@ def source_map_for_contract(
     corpus_summary = corpus_index.get("summary") if isinstance(corpus_index, dict) and isinstance(corpus_index.get("summary"), dict) else {}
     corpus_gaps = corpus_index.get("gaps") if isinstance(corpus_index, dict) and isinstance(corpus_index.get("gaps"), list) else []
     coverage_gaps.extend(str(gap) for gap in corpus_gaps if gap)
+    local_primaries = [
+        source
+        for source in sources
+        if isinstance(source, dict)
+        and str(source.get("source_class") or "") == "local_primary_candidate"
+        and int(source.get("text_chars") or 0) > 20000
+    ]
+    if local_primaries:
+        titles = "; ".join(str(source.get("title") or "")[:90] for source in local_primaries)
+        # A locally provided full primary text falsifies the playbook's static
+        # "book text unavailable" gap — keep gaps truthful or the critic blocks
+        # forever on a limitation that no longer exists.
+        coverage_gaps = [gap for gap in coverage_gaps if "unavailable to automated workers" not in gap]
+        quality_notes.append(f"Local corpus provides the FULL primary text (fetched, available to workers): {titles}.")
     if sources and not coverage["ready_for_extraction"]:
         coverage_gaps.append("Source set is not extraction-ready: it needs both official/primary evidence and secondary cross-checking.")
     return {

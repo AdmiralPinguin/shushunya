@@ -268,10 +268,10 @@ def build_mode_draft(
     lines = [
         f"# {topic}",
         "",
-        f"Output mode: {output_mode}",
-        "",
     ]
-    lines.extend(revision_context_lines(revision_context, "## Фокус ревизии"))
+    # Revision focus deliberately NOT embedded: it's an internal work note; in
+    # the deliverable it both confuses the reader and poisons the critic, which
+    # re-reads old findings from the draft and repeats them as current.
     sections = synthesis_plan.get("sections") if isinstance(synthesis_plan.get("sections"), list) else []
     for section in sections:
         if not isinstance(section, dict):
@@ -963,9 +963,12 @@ def run(
         output_mode = str(research_intent_from_request(request).get("output_mode") or "event_reconstruction")
         reconstruction = build_reconstruction(source_map, source_snapshots, notes, timeline, revision_context)
         coverage_report = build_coverage_report(source_map, source_snapshots, notes, timeline, revision_context=revision_context)
-    guidance = request_required_scriptorium_guidance(
+    # Deliberately NOT request_required_scriptorium_guidance: that helper
+    # short-circuits to the model_brain embedded in the worker order (a
+    # step-level action plan), and the writer would never get to ask the model
+    # for the actual rewritten document. Writing needs its own model call.
+    guidance = request_guidance(
         "ScriptoriumDaemon",
-        request,
         model_payload(request, source_map, notes, timeline, reconstruction, coverage_report, research_corpus, synthesis_plan, structure_map),
         (
             "You are the Scriptorium writer. The mechanically assembled draft_reconstruction_preview is only raw material — "
@@ -981,7 +984,6 @@ def run(
             "conflicting versions side by side, marked. Also return warnings (list of strings) if something important "
             "could not be grounded."
         ),
-        request_guidance,
     )
     if not guidance.get("ok"):
         return model_unavailable_payload("ScriptoriumDaemon", request.get("task_id"), guidance)

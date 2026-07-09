@@ -160,13 +160,26 @@ def evidence_item(snapshot: dict[str, Any], matched_markers: str, excerpt: str) 
     }
 
 
+def snapshot_search_text(snapshot: dict[str, Any]) -> str:
+    """Full text for evidence search: user-provided local primaries are read
+    whole from disk — the snapshot excerpt covers only the head of the file,
+    and the key scene is usually not on the first pages."""
+    local_path = str(snapshot.get("local_path") or "")
+    if local_path:
+        try:
+            return Path(local_path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
+    return str(snapshot.get("text_excerpt") or "")
+
+
 def snapshot_evidence(event_id: str, snapshots: dict[str, Any]) -> list[dict[str, Any]]:
     markers = EVENT_EVIDENCE_MARKERS.get(event_id, [])
     evidence: list[dict[str, str]] = []
     for snapshot in snapshots.get("snapshots", []):
         if not isinstance(snapshot, dict) or not snapshot.get("ok"):
             continue
-        text = str(snapshot.get("text_excerpt") or "")
+        text = snapshot_search_text(snapshot)
         lowered = text.lower()
         matched = [marker for marker in markers if marker.lower() in lowered]
         if matched:

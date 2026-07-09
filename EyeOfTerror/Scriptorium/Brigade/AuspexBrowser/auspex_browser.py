@@ -158,7 +158,7 @@ def compact_snapshot(source: dict[str, Any], result: dict[str, Any]) -> dict[str
         "is_binary": bool(result.get("is_binary")),
         "truncated": bool(result.get("truncated")),
         "bytes_read": result.get("bytes_read", 0),
-        "text_excerpt": text[:6000],
+        "text_excerpt": text[:12000],
         "render_required": bool(result.get("render_required")),
         "render_reason": result.get("render_reason", ""),
         "error": result.get("error", ""),

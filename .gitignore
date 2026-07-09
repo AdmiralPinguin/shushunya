@@ -179,3 +179,8 @@ Thumbs.db
 # Firebase service-account private key — never commit
 Vox/firebase-service-account.json
 Shushunya_M/app/google-services.json
+
+# Scraped copyrighted source texts — local working corpus, never commit
+Corpus/*.txt
+Corpus/*.epub
+Corpus/*.pdf
