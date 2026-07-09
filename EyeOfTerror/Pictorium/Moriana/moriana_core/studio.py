@@ -43,12 +43,30 @@ def produce_refined_image(
     intent: str,
     max_refine: int = 1,
     loras: list[dict[str, Any]] | None = None,
+    lora_style: str | None = None,
     log: Callable[[str], None] = print,
 ) -> dict[str, Any]:
     """Draft in FLUX, judge with vision, refine in SDXL img2img on the judge's
-    notes, judge again, keep the best. Returns the best image path and the trail."""
+    notes, judge again, keep the best. Returns the best image path and the trail.
+
+    If lora_style is given, autonomously fetch a matching SDXL LoRA and apply it
+    in the refine pass (full autonomy: HuggingFace, SDXL-only, size-capped)."""
     store = ForgeStore()
     queue = ForgeQueue(store, start_worker=True)
+
+    loras = list(loras or [])
+    if lora_style:
+        try:
+            from EyeOfTerror.Pictorium.Moriana.moriana_core.lora_scout import acquire_lora  # noqa: PLC0415
+
+            got = acquire_lora(lora_style)
+            if got:
+                loras.append({"name": got["name"], "weight": 0.7})
+                log(f"[studio] LoRA acquired for '{lora_style}': {got['repo']}")
+            else:
+                log(f"[studio] no SDXL LoRA found for '{lora_style}', continuing without")
+        except Exception as exc:  # noqa: BLE001 - a LoRA miss must not sink the render
+            log(f"[studio] LoRA scout failed: {exc}")
 
     # 1. understand + art-directed draft prompt (Promptwright thinker), FLUX draft
     plan = plan_txt2img(PlanRequest(request=intent, use_thinker=True, use_memory=False))
