@@ -122,9 +122,13 @@ def run(request, workspace_root=None):
     run(request, workspace_root); the image brigade's logic lives in handle().
     After handling, materialise declared artifacts so the next step's input
     preflight passes."""
+    try:
+        from EyeOfTerror.Pictorium.Brigades.Image.worker_api import inject_input_artifacts, persist_expected_artifacts
+        inject_input_artifacts(request, workspace_root)
+    except Exception as exc:  # noqa: BLE001
+        print(f'artifact inject failed: {exc}', flush=True)
     result = handle(request)
     try:
-        from EyeOfTerror.Pictorium.Brigades.Image.worker_api import persist_expected_artifacts
         persist_expected_artifacts(request, workspace_root, result)
     except Exception as exc:  # noqa: BLE001
         print(f'artifact persist failed: {exc}', flush=True)

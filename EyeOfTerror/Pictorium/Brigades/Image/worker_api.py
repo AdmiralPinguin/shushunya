@@ -254,7 +254,6 @@ def persist_expected_artifacts(request, workspace_root, result):
     if not isinstance(expected, list) or not expected:
         return
     root = _Path(workspace_root).resolve()
-    payload = result.get("worker_report") if isinstance(result.get("worker_report"), dict) else result
     for artifact in expected:
         if not isinstance(artifact, str) or not artifact.startswith("/work/"):
             continue
@@ -262,11 +261,56 @@ def persist_expected_artifacts(request, workspace_root, result):
         if not host_path.is_relative_to(root):
             continue
         host_path.parent.mkdir(parents=True, exist_ok=True)
+        # Store the FULL worker result: response() spreads the domain data
+        # (job_spec, project_spec, resource_report, forge_jobs, ...) onto the
+        # top level, and the next worker needs those, not just the protocol wrap.
         body = {
             "artifact": artifact,
             "step_id": request.get("step_id"),
-            "worker": request.get("worker"),
             "produced_by": request.get("worker"),
-            "result": payload,
+            "result": result,
         }
         host_path.write_text(_json.dumps(body, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+# Transport/protocol keys that must NOT be carried between steps — only the
+# domain data (job_spec, resource_report, forge_jobs, ...) flows forward.
+_ARTIFACT_TRANSPORT_KEYS = {
+    "ok", "worker", "api_version", "protocol_mode", "worker_order", "worker_report",
+    "execution_packet", "artifact", "step_id", "produced_by", "next_recommended_action",
+    "problems", "artifacts", "summary", "type", "protocol_version", "mission_id",
+    "created_at", "status", "model_brain",
+}
+
+
+def inject_input_artifacts(request, workspace_root):
+    """Merge each input artifact's domain data into the request so a worker finds
+    what the previous step produced (e.g. ForgeDispatcher needs Promptwright's
+    job_spec). The static dispatch plan carries no runtime data, so it is read
+    back from the materialised artifacts on disk."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    if workspace_root is None or not isinstance(request, dict):
+        return
+    inputs = request.get("input_artifacts")
+    if not isinstance(inputs, list) or not inputs:
+        step = request.get("step") if isinstance(request.get("step"), dict) else {}
+        inputs = step.get("input_artifacts") if isinstance(step.get("input_artifacts"), list) else []
+    if not inputs:
+        return
+    root = _Path(workspace_root).resolve()
+    for artifact in inputs:
+        if not isinstance(artifact, str) or not artifact.startswith("/work/"):
+            continue
+        host_path = (root / artifact.removeprefix("/work/")).resolve()
+        if not host_path.is_relative_to(root) or not host_path.is_file():
+            continue
+        try:
+            stored = _json.loads(host_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        data = stored.get("result") if isinstance(stored, dict) and isinstance(stored.get("result"), dict) else {}
+        for key, value in data.items():
+            if key not in _ARTIFACT_TRANSPORT_KEYS and key not in request:
+                request[key] = value
