@@ -229,7 +229,7 @@ def memory_search(memory_namespace, query, limit=5, include_content=False, layer
     }
 
 
-def run_mobile_chat_payload(payload):
+def run_mobile_chat_payload(payload, on_token=None):
     maintenance_record = None
     with CHAT_QUEUE_LOCK:
         created_at = now_iso()
@@ -469,8 +469,11 @@ def run_mobile_chat_payload(payload):
             "error": None,
         }
         try:
-            status, response = proxy_json("POST", "/v1/chat/completions", payload=prepared_payload)
-            assistant = assistant_message(response)
+            if on_token is not None:
+                status, response, assistant = stream_chat_completion(prepared_payload, on_token)
+            else:
+                status, response = proxy_json("POST", "/v1/chat/completions", payload=prepared_payload)
+                assistant = assistant_message(response)
             if assistant:
                 append_chat_message(session_id, "assistant", assistant.get("content") or "", source=client_source)
             record["status"] = "ok"
@@ -1582,6 +1585,54 @@ def stream_delta(payload):
     if content is None:
         content = assistant_content(message)
     return str(content or ""), choice.get("finish_reason")
+
+
+def stream_chat_completion(prepared_payload, on_token):
+    """Stream tokens from llama.cpp and forward each visible content delta to
+    on_token, while returning the same (status, response, assistant) shape the
+    blocking path produces — so all downstream persistence stays identical."""
+    streaming_payload = dict(prepared_payload)
+    streaming_payload["stream"] = True
+    parts = []
+    finish_reason = None
+    upstream = open_upstream("POST", "/v1/chat/completions", payload=streaming_payload, timeout=600)
+    try:
+        for raw in upstream:
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[len("data:") :].strip()
+            if data == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            choice = (chunk.get("choices") or [{}])[0]
+            if choice.get("finish_reason"):
+                finish_reason = choice.get("finish_reason")
+            # Only the visible answer is streamed to the user; any reasoning
+            # tokens are ignored, matching what the blocking path would keep.
+            piece = (choice.get("delta") or {}).get("content")
+            if piece:
+                parts.append(piece)
+                try:
+                    on_token(piece)
+                except Exception:  # noqa: BLE001 - a dropped client must not kill generation bookkeeping
+                    pass
+    finally:
+        try:
+            upstream.close()
+        except Exception:  # noqa: BLE001
+            pass
+    full = "".join(parts)
+    assistant = {"role": "assistant", "content": full}
+    response = {
+        "object": "chat.completion",
+        "model": prepared_payload.get("model"),
+        "choices": [{"index": 0, "finish_reason": finish_reason or "stop", "message": assistant}],
+    }
+    return 200, response, assistant
 
 
 def write_archives(record):

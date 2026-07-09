@@ -495,6 +495,12 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             self.mobile_chat_start()
             return
 
+        if self.path in ("/archive/mobile/chat/stream", "/archive/chat/stream"):
+            if not require_auth(self, allow_mobile=True):
+                return
+            self.mobile_chat_stream()
+            return
+
         if self.path in ("/archive/chat/reports/register-token", "/archive/mobile/chat/reports/register-token"):
             if not require_auth(self, allow_mobile=True):
                 return
@@ -1339,6 +1345,80 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         job_id = create_mobile_job("chat", payload)
         run_mobile_job(job_id, lambda payload=payload: run_mobile_chat_payload(payload))
         write_json(self, 202, {"ok": True, "job_id": job_id, "type": "chat", "session_id": session_id, "status": "queued"})
+
+    def mobile_chat_stream(self):
+        """Token-by-token SSE for a chat send: the answer appears fluidly as it
+        is generated, same pipeline (retrieval, turn protocol, memory) as the
+        job path — only the delivery is streamed."""
+        try:
+            payload = read_json(self)
+        except json.JSONDecodeError as exc:
+            write_json(self, 400, {"error": f"Invalid JSON: {exc}"})
+            return
+        session_id = shared_chat_session_id(payload.get("session_id") or payload.get("user") or SHARED_CHAT_SESSION_ID)
+        text = trim_chat_text(payload.get("text") or payload.get("message") or "")
+        image_data_url = str(payload.get("image_data_url") or "").strip()
+        if not text and not image_data_url:
+            write_json(self, 400, {"ok": False, "error": "Missing text or image_data_url", "session_id": session_id})
+            return
+        payload["session_id"] = session_id
+        payload["memory_namespace"] = shared_memory_namespace(payload.get("memory_namespace"))
+        payload["client_source"] = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
+        try:
+            turn = decide_chat_turn_action(session_id, text, image_data_url=image_data_url, model=payload.get("model") or DEFAULT_MODEL)
+        except Exception as exc:
+            write_json(self, 502, {"ok": False, "error": f"turn protocol unavailable: {exc}", "session_id": session_id})
+            return
+        decision = turn.get("decision") if isinstance(turn.get("decision"), dict) else {"action": "answer_in_chat"}
+        payload["turn_decision"] = decision
+        payload["turn_capabilities"] = turn.get("capabilities") if isinstance(turn.get("capabilities"), dict) else {}
+        payload["turn_protocol"] = {"request": turn.get("request"), "response": turn.get("response")}
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+        def sse(obj):
+            self.wfile.write(("data: " + json.dumps(obj, ensure_ascii=False) + "\n\n").encode("utf-8"))
+            self.wfile.flush()
+
+        try:
+            if decision.get("action") == "request_warmaster_mission":
+                # Brigade work isn't a token stream: hand the app back to its
+                # warmaster flow, and kick the mission off here so nothing is lost.
+                task = warmaster_request_to_message(decision.get("warmaster_request") if isinstance(decision.get("warmaster_request"), dict) else {})
+                payload["warmaster_task"] = task
+                job_id = create_mobile_job("warmaster", payload)
+                run_mobile_job(job_id, lambda payload=payload: self.run_mobile_warmaster_payload(payload))
+                sse({"type": "route", "backend": "warmaster", "job_id": job_id, "warmaster_task": task})
+                sse({"type": "done"})
+                return
+            if decision.get("action") == "ask_clarification":
+                reply = str(decision.get("reply") or "").strip()
+                payload["forced_chat_reply"] = reply
+                run_mobile_chat_payload(payload)  # persists the forced reply
+                if reply:
+                    sse({"type": "token", "text": reply})
+                sse({"type": "done", "full": reply})
+                return
+            collected = []
+
+            def on_token(piece):
+                collected.append(piece)
+                sse({"type": "token", "text": piece})
+
+            run_mobile_chat_payload(payload, on_token=on_token)
+            sse({"type": "done", "full": "".join(collected)})
+        except (BrokenPipeError, ConnectionResetError):
+            return  # client walked away mid-stream; the answer is already persisted
+        except Exception as exc:  # noqa: BLE001
+            try:
+                sse({"type": "error", "error": str(exc)})
+            except Exception:  # noqa: BLE001
+                pass
 
     def mobile_chat_protocol_completion_payload(self, message, finish_reason="turn_protocol_reply", extra=None):
         payload = {

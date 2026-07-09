@@ -2500,15 +2500,13 @@ public class MainActivity extends Activity {
             try {
                 StreamingBubble liveBubble = new StreamingBubble(answerBubble);
                 liveBubble.start();
-                String jobId = requestChatStart(text, imageDataUrl);
-                String finalText = pollChatJobUntilDone(jobId);
+                String finalText = streamChatAnswer(text, imageDataUrl, liveBubble);
                 pendingLocalEchoes.addLast("assistant\n" + finalText);
                 main.post(() -> {
                     if (pendingAnswerBubble == answerBubble) {
                         pendingAnswerBubble = null;
                     }
                 });
-                liveBubble.append(finalText);
                 liveBubble.finish();
                 showAnswerNotification(finalText);
                 main.post(() -> setWaiting(false));
@@ -2729,6 +2727,71 @@ public class MainActivity extends Activity {
         String finalText = liveBubble.targetText();
         saveChatMessage(false, finalText);
         showAnswerNotification(finalText);
+    }
+
+    private String streamChatAnswer(String text, String imageDataUrl, StreamingBubble liveBubble) throws Exception {
+        URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/stream");
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(15000);
+        conn.setReadTimeout(180000);
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setRequestProperty("Accept", "text/event-stream");
+        applyMobileAuth(conn);
+        JSONObject payload = new JSONObject();
+        payload.put("session_id", SERVER_CHAT_SESSION_ID);
+        payload.put("text", text);
+        payload.put("client_source", "app");
+        if (imageDataUrl != null && !imageDataUrl.isEmpty()) {
+            payload.put("image_data_url", imageDataUrl);
+        }
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(payload.toString().getBytes(StandardCharsets.UTF_8));
+        }
+        if (conn.getResponseCode() < 200 || conn.getResponseCode() >= 300) {
+            throw new IllegalStateException("stream http " + conn.getResponseCode());
+        }
+        StringBuilder full = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.startsWith("data:")) {
+                    continue;
+                }
+                String data = line.substring(5).trim();
+                if (data.isEmpty()) {
+                    continue;
+                }
+                JSONObject evt = new JSONObject(data);
+                String type = evt.optString("type", "");
+                if ("token".equals(type)) {
+                    String piece = evt.optString("text", "");
+                    full.append(piece);
+                    liveBubble.append(piece);
+                } else if ("route".equals(type)) {
+                    // The turn controller sent this to the brigade; the mission is
+                    // already running server-side. Surface an ack; progress shows
+                    // in the Brigades tab and the delta stream.
+                    String ack = "Взял в работу — веду через бригаду. Прогресс во вкладке «Бригады».";
+                    full.setLength(0);
+                    full.append(ack);
+                    liveBubble.append(ack);
+                } else if ("error".equals(type)) {
+                    throw new IllegalStateException(evt.optString("error", "stream error"));
+                } else if ("done".equals(type)) {
+                    String f = evt.optString("full", "");
+                    if (full.length() == 0 && !f.isEmpty()) {
+                        full.append(f);
+                        liveBubble.append(f);
+                    }
+                    break;
+                }
+            }
+        } finally {
+            conn.disconnect();
+        }
+        return full.toString();
     }
 
     private String requestChatStart(String text, String imageDataUrl) throws Exception {
