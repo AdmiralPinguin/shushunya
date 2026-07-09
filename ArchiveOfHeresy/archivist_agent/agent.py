@@ -67,7 +67,12 @@ LIBRARIAN_WIKI_TASK_PROMPT = os.environ.get(
     "Рассортируй информацию по тематическим страницам. Если новые сообщения меняют старое решение, "
     "интегрируй новое как актуальное, а старое пометь как superseded только если это полезно для истории. "
     "Не копируй переписку подряд и не складывай противоречия без статуса актуальности. "
-    "Пиши сухо, кратко, проверяемо. Не добавляй фактов, которых нет во входных данных.",
+    "Пиши сухо, кратко, проверяемо. Не добавляй фактов, которых нет во входных данных. "
+    "ОСОБО: если владелец сообщает устойчивый факт о самом Шушуне (как он выглядит, его внешность/образ, "
+    "форма, идентичность, постоянные черты) — это долговременное персона-знание, обязательно сохрани его "
+    "на отдельной тематической персона-странице (kind persona), например id 'appearance' для внешности. "
+    "persona-core и standing-rules не трогай (они ручные), но НОВЫЕ персона-страницы создавать нужно — "
+    "не выкидывай такие факты и не путай их со статусом проекта.",
 )
 
 
@@ -832,7 +837,7 @@ class WikiMemory:
                                 "operation": "upsert",
                                 "id": "optional existing page id",
                                 "title": "page title",
-                                "kind": "project|decision|preference|topic|entity|note",
+                                "kind": "project|decision|preference|topic|entity|note|persona",
                                 "importance": "integer 1..5",
                                 "body": "complete updated markdown body for the page",
                             }
@@ -845,6 +850,7 @@ class WikiMemory:
                 "To use a tool, return {\"tool\":\"read_wiki_page\",\"id\":\"...\"} or {\"tool\":\"read_wiki_page\",\"title\":\"...\"}.",
                 "To finish, return {\"tool\":\"finish\",\"page_updates\":[...]}",
                 "In namespace shushunya, never update persona-core or standing-rules; they are manual-only.",
+            "In namespace shushunya, DO create a dedicated persona page (kind persona) for durable facts the owner states about Shushunya himself (e.g. his appearance -> id 'appearance'); do not drop such facts and do not file them as project status.",
                 "Read an existing page before overwriting it when the catalog suggests the topic already exists.",
                 "Each page body must represent the current integrated state, not a raw transcript.",
                 "Use explicit sections such as Current Facts, Active Decisions, Superseded, Open Questions, Next Steps when useful.",
