@@ -83,6 +83,23 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if self.path.startswith("/archive/mobile/chat/asset/") or self.path.startswith("/archive/chat/asset/"):
+            if not require_auth(self, allow_mobile=True):
+                return
+            asset_id = urlsplit(self.path).path.rsplit("/", 1)[-1]
+            found = read_chat_asset(asset_id)
+            if not found:
+                write_json(self, 404, {"ok": False, "error": "asset not found"})
+                return
+            data, mime = found
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
         if self.path.startswith("/archive/mobile/chat/messages") or self.path.startswith("/archive/chat/messages"):
             if not require_auth(self, allow_mobile=True):
                 return

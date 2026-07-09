@@ -775,6 +775,68 @@ def chat_history(session_id, limit=CHAT_HISTORY_LIMIT, after_id=0):
     ]
 
 
+ASSETS_ROOT = Path(os.environ.get("ARCHIVE_ASSETS_ROOT", str(SQLITE_PATH.parent.parent / "assets")))
+ASSET_MIME_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif"}
+
+
+def register_chat_asset(data, mime="image/png"):
+    """Store binary asset bytes on disk under a fresh id; return the asset_id.
+    The chat message references it, the app fetches it by id — the chat stream
+    itself stays light."""
+    if not data:
+        return None
+    mime = str(mime or "image/png").split(";")[0].strip().lower()
+    if mime not in ASSET_MIME_EXT:
+        mime = "image/png"
+    asset_id = uuid.uuid4().hex
+    ASSETS_ROOT.mkdir(parents=True, exist_ok=True)
+    (ASSETS_ROOT / f"{asset_id}.bin").write_bytes(data)
+    (ASSETS_ROOT / f"{asset_id}.mime").write_text(mime, encoding="utf-8")
+    return asset_id
+
+
+def read_chat_asset(asset_id):
+    """Return (bytes, mime) for a stored asset, or None. id is sanitised to a
+    bare hex token so the path can never escape the assets dir."""
+    token = "".join(ch for ch in str(asset_id or "") if ch in "0123456789abcdef")
+    if not token or len(token) > 64:
+        return None
+    blob = ASSETS_ROOT / f"{token}.bin"
+    if not blob.is_file():
+        return None
+    mime_file = ASSETS_ROOT / f"{token}.mime"
+    mime = mime_file.read_text(encoding="utf-8").strip() if mime_file.is_file() else "image/png"
+    return blob.read_bytes(), mime
+
+
+def deliver_image_to_chat(session_id, image, mime="image/png", caption="", source="pictorium", dedupe_key=None):
+    """Put a generated image into the shared chat as an assistant message with an
+    asset_id — the delivery bridge from an image brigade (Moriana) to the app.
+    `image` is raw bytes or a path to a file on disk."""
+    if isinstance(image, (str, Path)):
+        path = Path(image)
+        if not path.is_file():
+            print(f"deliver_image_to_chat: no such file {path}", flush=True)
+            return None
+        data = path.read_bytes()
+        if mime == "image/png":
+            mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp", "gif": "image/gif"}.get(path.suffix.lower().lstrip("."), "image/png")
+    else:
+        data = image
+    asset_id = register_chat_asset(data, mime)
+    if not asset_id:
+        return None
+    append_chat_message(
+        shared_chat_session_id(session_id),
+        "assistant",
+        caption or "Готовое изображение.",
+        asset_id=asset_id,
+        source=source,
+        dedupe_key=dedupe_key,
+    )
+    return asset_id
+
+
 def append_chat_message(session_id, role, content, asset_id=None, created_at=None, source="unknown", dedupe_key=None):
     session_id = shared_chat_session_id(session_id)
     role = "assistant" if role == "assistant" else "user"

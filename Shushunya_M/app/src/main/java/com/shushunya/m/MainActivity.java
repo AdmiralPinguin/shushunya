@@ -3088,7 +3088,9 @@ public class MainActivity extends Activity {
                         }
                         String role = item.optString("role", "");
                         String text = item.optString("content", "");
-                        if (!text.isEmpty()) {
+                        if (messageHasAsset(item)) {
+                            fetchAndRenderAsset("user".equals(role), text.trim(), item.optString("asset_id", "").trim());
+                        } else if (!text.isEmpty()) {
                             addMessage("user".equals(role), text, false);
                         }
                     }
@@ -3149,6 +3151,48 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    private boolean messageHasAsset(JSONObject item) {
+        String assetId = item.optString("asset_id", "").trim();
+        return !assetId.isEmpty() && !"null".equals(assetId);
+    }
+
+    private void fetchAndRenderAsset(boolean fromUser, String caption, String assetId) {
+        final String url = trimSlash(baseUrl) + "/archive/client/chat/asset/" + assetId;
+        new Thread(() -> {
+            Bitmap bmp = null;
+            try {
+                HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(20000);
+                applyMobileAuth(conn);
+                if (conn.getResponseCode() >= 200 && conn.getResponseCode() < 300) {
+                    java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+                    try (java.io.InputStream in = conn.getInputStream()) {
+                        byte[] chunk = new byte[8192];
+                        int read;
+                        while ((read = in.read(chunk)) != -1) {
+                            buffer.write(chunk, 0, read);
+                        }
+                    }
+                    byte[] raw = buffer.toByteArray();
+                    bmp = BitmapFactory.decodeByteArray(raw, 0, raw.length);
+                }
+                conn.disconnect();
+            } catch (Exception ignored) {
+            }
+            final Bitmap finalBmp = bmp;
+            main.post(() -> {
+                if (finalBmp != null) {
+                    addImageMessage(caption, finalBmp, caption.isEmpty() ? "[изображение]" : caption);
+                } else if (!caption.isEmpty()) {
+                    addMessage(fromUser, caption, false);
+                }
+                maybeScrollToBottom(false);
+            });
+        }).start();
+    }
+
     private void appendChatDelta(JSONArray delta) {
         boolean appended = false;
         for (int i = 0; i < delta.length(); i++) {
@@ -3163,10 +3207,17 @@ public class MainActivity extends Activity {
             lastSeenChatMessageId = Math.max(lastSeenChatMessageId, id);
             String role = item.optString("role", "");
             String text = item.optString("content", "").trim();
+            boolean fromUser = "user".equals(role);
+            if (messageHasAsset(item)) {
+                // Image message (e.g. from Moriana): fetch the asset by id and render it.
+                fetchAndRenderAsset(fromUser, text, item.optString("asset_id", "").trim());
+                appended = true;
+                showAnswerNotification(text.isEmpty() ? "Готово изображение" : text);
+                continue;
+            }
             if (text.isEmpty()) {
                 continue;
             }
-            boolean fromUser = "user".equals(role);
             String echoKey = (fromUser ? "user\n" : "assistant\n") + text;
             if (pendingLocalEchoes.remove(echoKey)) {
                 continue;  // already shown locally (own message or job-delivered answer)
