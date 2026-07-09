@@ -62,7 +62,12 @@ def prepare_dispatch(payload: dict[str, Any] | None) -> dict[str, Any]:
     ForgeQueue, JobSpec, _ForgeStore = _forge_runtime()
     spec = JobSpec(**raw_spec)
     queue = ForgeQueue(_store(data), start_worker=False)
-    submit = bool(data.get("submit", False))
+    # Real generation requires submission. The order may set it; otherwise the
+    # live service defaults from FORGE_AUTOSUBMIT so a mission actually produces
+    # an image, while tests (no env) keep the safe dry-run default.
+    import os as _os
+
+    submit = bool(data.get("submit", _os.environ.get("FORGE_AUTOSUBMIT") == "1"))
     try:
         validation = queue.validate(spec)
     except Exception as exc:
