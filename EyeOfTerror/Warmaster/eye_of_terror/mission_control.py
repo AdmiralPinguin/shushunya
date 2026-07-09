@@ -378,6 +378,9 @@ def record_worker_orders(run_dir: Path, mission_id: str, mission_dir: Path) -> d
         step_id = str(order.get("step_id") or dispatch_path.stem)
         _write_json(mission_dir / "worker_orders" / f"worker_order-{step_id}.json", order)
         count += 1
+        from .run_state import _step_label, _worker_label  # noqa: PLC0415
+
+        worker_to = str(order.get("to") or "")
         append_progress_event(
             mission_dir / "progress_events.jsonl",
             progress_event(
@@ -386,8 +389,8 @@ def record_worker_orders(run_dir: Path, mission_id: str, mission_dir: Path) -> d
                 role="governor",
                 phase="executing",
                 status="started",
-                title=f"Выдан приказ воркеру {order.get('to')}",
-                body=f"Шаг {step_id}: {order.get('task')}",
+                title=f"Приказ воркеру {_worker_label(worker_to)}",
+                body=f"{_step_label(step_id)}: поставлен в работу.",
             ),
         )
     mission = _read_json(mission_dir / "mission.json")
@@ -445,16 +448,21 @@ def record_worker_execution_started(run_dir: Path, packet: dict[str, Any]) -> No
     if mission:
         record_mission_state(mission_dir, "executing", active=True)
     narration = step_narration(mission_dir, order, worker, step_id)
+    from .run_state import _step_label, _worker_label  # noqa: PLC0415
+
+    # Body stays Russian: the model narration if we have it, else a Russian
+    # label — never the raw English pipeline task text (that leaked before).
+    russian_body = narration or f"{_worker_label(worker)} выполняет: {_step_label(step_id)}."
     append_progress_event(
         mission_dir / "progress_events.jsonl",
         progress_event(
             mission_id,
-            actor=worker,
+            actor=_worker_label(worker),
             role="worker",
             phase="executing",
             status="running",
-            title=narration or f"{worker}: шаг {step_id}",
-            body=(f"{narration}\n\n" if narration else "") + str(order.get("task") or packet.get("purpose") or ""),
+            title=narration or f"{_worker_label(worker)}: {_step_label(step_id)}",
+            body=russian_body,
         ),
     )
 
@@ -598,16 +606,25 @@ def record_worker_protocol_report(run_dir: Path, report: dict[str, Any]) -> None
     elif report.get("status") == "failed":
         phase = "failed"
         event_status = "failed"
+    from .run_state import _russian_step_detail, _step_label, _worker_label  # noqa: PLC0415
+
+    worker = str(report.get("worker") or "Worker")
+    report_status = str(report.get("status") or "")
+    status_word = {
+        "completed": "готово", "passed_with_warnings": "готово, с замечаниями",
+        "needs_revision": "нужна доработка", "blocked": "остановлено", "failed": "провалено",
+        "ready": "готово", "running": "в работе",
+    }.get(report_status, report_status)
     append_progress_event(
         mission_dir / "progress_events.jsonl",
         progress_event(
             mission_id,
-            actor=str(report.get("worker") or "Worker"),
+            actor=_worker_label(worker),
             role="worker",
             phase=phase,
             status=event_status,
-            title=f"Шаг {step_id}: {report.get('status')}",
-            body=str(report.get("summary") or ""),
+            title=f"{_step_label(step_id)}: {status_word}",
+            body=_russian_step_detail(step_id, worker, report_status, str(report.get("summary") or "")),
         ),
     )
 
