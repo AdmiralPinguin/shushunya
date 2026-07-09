@@ -1351,10 +1351,37 @@ def maybe_write_archives(record):
         write_archives(record)
 
 
+_LIBRARIAN_STATE_LOCK = threading.Lock()
+_LIBRARIAN_INFLIGHT = {"running": False, "rerun": False}
+
+
 def maybe_update_focus_memory(record):
-    if record.get("archive_enabled", True):
-        with MAINTENANCE_LOCK:
-            update_focus_memory(record)
+    """Run the librarian after a turn. Coalesced single-flight: if one is already
+    running, just flag a rerun instead of stacking another (the running cycle
+    already syncs every turn since last_sync, so stacking is pure waste and GPU
+    contention). The in-flight cycle drains the rerun before exiting, so the
+    latest turn is always consolidated."""
+    if not record.get("archive_enabled", True):
+        return
+    with _LIBRARIAN_STATE_LOCK:
+        if _LIBRARIAN_INFLIGHT["running"]:
+            _LIBRARIAN_INFLIGHT["rerun"] = True
+            return
+        _LIBRARIAN_INFLIGHT["running"] = True
+    try:
+        while True:
+            with MAINTENANCE_LOCK:
+                update_focus_memory(record)
+            with _LIBRARIAN_STATE_LOCK:
+                if not _LIBRARIAN_INFLIGHT["rerun"]:
+                    _LIBRARIAN_INFLIGHT["running"] = False
+                    return
+                _LIBRARIAN_INFLIGHT["rerun"] = False  # drain: one more pass catches turns that arrived mid-run
+    except Exception:
+        with _LIBRARIAN_STATE_LOCK:
+            _LIBRARIAN_INFLIGHT["running"] = False
+            _LIBRARIAN_INFLIGHT["rerun"] = False
+        raise
 
 
 def prepare_messages(
