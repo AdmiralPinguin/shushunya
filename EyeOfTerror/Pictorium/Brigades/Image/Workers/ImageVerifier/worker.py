@@ -1,7 +1,76 @@
 from __future__ import annotations
 
+import base64
+import json
+import os
+import re
+import urllib.request
 from pathlib import Path
 from typing import Any
+
+VISION_BASE_URL = (
+    os.environ.get("EYE_MODEL_BASE_URL")
+    or os.environ.get("ARCHIVE_LLM_BASE_URL")
+    or "http://127.0.0.1:8079/v1"
+).rstrip("/")
+if not VISION_BASE_URL.endswith("/v1"):
+    VISION_BASE_URL = f"{VISION_BASE_URL}/v1"
+VISION_MODEL = os.environ.get("EYE_MODEL_NAME", "gemma-4-12b-it-UD-Q5_K_XL.gguf")
+
+
+def vision_review(image_path: Path, intent: str) -> dict[str, Any]:
+    """Actually LOOK at the generated image with the multimodal model and judge
+    it against the intent. This is the eyes the verifier never had — without it
+    the brigade cannot tell a faithful render from a two-headed mess."""
+    try:
+        data_uri = "data:image/png;base64," + base64.b64encode(image_path.read_bytes()).decode("ascii")
+    except OSError as exc:
+        return {"ok": False, "error": f"cannot read artifact: {exc}"}
+    system = (
+        "You are a strict image art critic for a generation pipeline. You are shown a generated image and the "
+        "intended subject/prompt. Judge ONLY what you actually see. Return strict JSON: "
+        '{"accept": bool, "quality": 1-10, "matches_intent": bool, '
+        '"problems": ["short concrete defects: extra or duplicate parts (e.g. two heads), wrong anatomy, missing '
+        'required features, wrong colors, blur, artifacts, off-subject"], '
+        '"refine_instructions": "one concrete paragraph telling the next pass exactly what to fix, in English, image-prompt style"}. '
+        "accept=true ONLY if the image is genuinely good AND faithfully depicts the intended subject. Be honest and harsh; "
+        "a pretty image that shows the wrong thing does NOT pass."
+    )
+    payload = {
+        "model": VISION_MODEL,
+        "temperature": 0.2,
+        "max_tokens": 500,
+        "messages": [
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"Intended subject / prompt:\n{intent[:1500]}\n\nJudge the image below."},
+                    {"type": "image_url", "image_url": {"url": data_uri}},
+                ],
+            },
+        ],
+    }
+    try:
+        request = urllib.request.Request(
+            f"{VISION_BASE_URL}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "X-LLM-Priority": "other"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=180) as response:
+            content = str(((json.loads(response.read())["choices"] or [{}])[0].get("message") or {}).get("content") or "")
+    except Exception as exc:  # noqa: BLE001 - a blind spot is worse than a soft failure
+        return {"ok": False, "error": str(exc)}
+    match = re.search(r"\{.*\}", content, re.DOTALL)
+    if not match:
+        return {"ok": False, "error": "no JSON in vision response", "raw": content[:300]}
+    try:
+        verdict = json.loads(match.group(0))
+    except json.JSONDecodeError as exc:
+        return {"ok": False, "error": f"bad JSON: {exc}", "raw": content[:300]}
+    verdict["ok"] = True
+    return verdict
 
 from EyeOfTerror.Pictorium.Brigades.Image.worker_api import (
     execution_packet,
@@ -123,6 +192,24 @@ def verify_image(payload: dict[str, Any] | None) -> dict[str, Any]:
         )
     verification = evaluate_artifact(path, metadata)
     blockers = []
+    # The eyes: actually look at the pixels and judge them against the intent.
+    intent = str(metadata.get("prompt") or "").strip()
+    vision = vision_review(path, intent) if intent else {"ok": False, "error": "no prompt to judge against"}
+    verification["vision_review"] = vision
+    if vision.get("ok"):
+        problems = [str(p) for p in (vision.get("problems") or []) if str(p).strip()]
+        if not vision.get("accept") or vision.get("matches_intent") is False or int(vision.get("quality") or 0) < 6:
+            blockers.append(
+                {
+                    "code": "vision_review_failed",
+                    "message": "image does not faithfully match the intended subject or is low quality: "
+                    + ("; ".join(problems[:6]) if problems else "see vision_review"),
+                    "details": {"quality": vision.get("quality"), "problems": problems},
+                    "target_worker": "Promptwright",
+                    "target_step": "image_planning",
+                    "requested_change": str(vision.get("refine_instructions") or "refine the image to match the intended subject"),
+                }
+            )
     dimension_match = verification.get("dimension_match") if isinstance(verification.get("dimension_match"), dict) else {}
     if dimension_match and not dimension_match.get("ok"):
         blockers.append(
