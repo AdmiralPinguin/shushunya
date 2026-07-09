@@ -103,3 +103,8 @@ def build_final_manifest(payload: dict[str, Any] | None) -> dict[str, Any]:
 
 def handle(payload: dict[str, Any] | None) -> dict[str, Any]:
     return build_final_manifest(payload)
+
+def run(request, workspace_root=None):  # noqa: ARG001
+    """HTTP worker-launcher entrypoint: the LegacyMechanicum server calls
+    run(request, workspace_root); the image brigade's logic lives in handle()."""
+    return handle(request)

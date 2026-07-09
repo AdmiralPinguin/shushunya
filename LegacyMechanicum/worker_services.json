@@ -83,5 +83,30 @@
     "port": 7007,
     "module_path": "EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis",
     "module": "fabricator_finalis"
+  },
+  "Promptwright": {
+    "port": 7022,
+    "module_path": "EyeOfTerror/Pictorium/Brigades/Image/Workers/Promptwright",
+    "module": "worker"
+  },
+  "ModelQuartermaster": {
+    "port": 7023,
+    "module_path": "EyeOfTerror/Pictorium/Brigades/Image/Workers/ModelQuartermaster",
+    "module": "worker"
+  },
+  "ForgeDispatcher": {
+    "port": 7024,
+    "module_path": "EyeOfTerror/Pictorium/Brigades/Image/Workers/ForgeDispatcher",
+    "module": "worker"
+  },
+  "ImageVerifier": {
+    "port": 7025,
+    "module_path": "EyeOfTerror/Pictorium/Brigades/Image/Workers/ImageVerifier",
+    "module": "worker"
+  },
+  "ArtifactFinalis": {
+    "port": 7026,
+    "module_path": "EyeOfTerror/Pictorium/Brigades/Image/Workers/ArtifactFinalis",
+    "module": "worker"
   }
 }
