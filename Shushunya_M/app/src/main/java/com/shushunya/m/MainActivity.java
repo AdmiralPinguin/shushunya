@@ -71,7 +71,8 @@ import java.util.ArrayList;
 public class MainActivity extends Activity {
     private static final String PREFS = "shushunya_m";
     private static final String NOTIFICATION_CHANNEL_ID = "shushunya_answers";
-    private static final int CHAT_HISTORY_LIMIT = 120;
+    private static final int CHAT_HISTORY_LIMIT = 30;
+    private static final int CHAT_OLDER_PAGE = 25;
     private static final int AGENT_HISTORY_LIMIT = 12;
     private static final String SERVER_CHAT_SESSION_ID = "shushunya-main";
     private static final String SERVER_MEMORY_NAMESPACE = "shushunya";
@@ -111,6 +112,13 @@ public class MainActivity extends Activity {
     private String lastChatHistoryJson = "";
     private boolean brigadePollScheduled;
     private long lastSeenChatMessageId;
+    // Chat is paged: keep only a window of recent messages in the view; images
+    // are decoded once and reused, so scrolling and re-renders stay cheap even
+    // when the history is huge.
+    private long oldestLoadedChatId = Long.MAX_VALUE;
+    private boolean loadingOlderChat;
+    private boolean noOlderChat;
+    private final android.util.LruCache<String, Bitmap> imageCache = new android.util.LruCache<>(16);
     private TextView pendingAnswerBubble;
     private LinearLayout agentAppendTarget;
     private String brigadeStateKey = "";
@@ -426,6 +434,13 @@ public class MainActivity extends Activity {
         scrollView.setFillViewport(false);
         scrollView.setClipToPadding(false);
         scrollView.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        // Near the top: pull in the previous page of history (Telegram-style),
+        // so only a small window is ever mounted no matter how long the chat is.
+        scrollView.setOnScrollChangeListener((v, x, y, oldX, oldY) -> {
+            if (y <= dp(80) && y < oldY) {
+                loadOlderChatPage();
+            }
+        });
         scrollView.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
                 chatTouchActive = true;
@@ -3027,12 +3042,19 @@ public class MainActivity extends Activity {
     }
 
     private void addImageMessage(String text, Bitmap image, String fallbackLabel) {
+        addImageMessage(text, image, fallbackLabel, -1);
+    }
+
+    private void addImageMessage(String text, Bitmap image, String fallbackLabel, int insertIndex) {
+        boolean prepend = insertIndex >= 0;
         LinearLayout bubble = new LinearLayout(this);
         bubble.setOrientation(LinearLayout.VERTICAL);
         bubble.setPadding(dp(8), dp(8), dp(8), dp(8));
         bubble.setBackground(pill(Color.rgb(78, 43, 105), Color.rgb(205, 160, 61), dp(18)));
-        bubble.setAlpha(0f);
-        bubble.setTranslationY(dp(10));
+        if (!prepend) {
+            bubble.setAlpha(0f);
+            bubble.setTranslationY(dp(10));
+        }
 
         if (image != null) {
             ImageView imageView = new ImageView(this);
@@ -3053,8 +3075,10 @@ public class MainActivity extends Activity {
             caption.setTextColor(Color.rgb(247, 240, 221));
             caption.setPadding(dp(6), dp(8), dp(6), dp(2));
             bubble.addView(caption, new LinearLayout.LayoutParams(-1, -2));
-            saveChatMessage(true, text);
-        } else if (fallbackLabel != null && !fallbackLabel.trim().isEmpty()) {
+            if (!prepend) {
+                saveChatMessage(true, text);
+            }
+        } else if (!prepend && fallbackLabel != null && !fallbackLabel.trim().isEmpty()) {
             saveChatMessage(true, fallbackLabel);
         }
 
@@ -3064,6 +3088,10 @@ public class MainActivity extends Activity {
         lp.gravity = Gravity.RIGHT;
         lp.topMargin = dp(6);
         lp.bottomMargin = dp(6);
+        if (prepend) {
+            messageList.addView(bubble, Math.min(insertIndex, messageList.getChildCount()), lp);
+            return;
+        }
         messageList.addView(bubble, lp);
 
         bubble.animate()
@@ -3076,6 +3104,11 @@ public class MainActivity extends Activity {
     }
 
     private TextView addMessage(boolean fromUser, String text, boolean save) {
+        return addMessage(fromUser, text, save, -1);
+    }
+
+    private TextView addMessage(boolean fromUser, String text, boolean save, int insertIndex) {
+        boolean prepend = insertIndex >= 0;
         TextView bubble = new TextView(this);
         bubble.setText(text);
         bubble.setTextSize(16);
@@ -3085,8 +3118,10 @@ public class MainActivity extends Activity {
         bubble.setBackground(fromUser
                 ? pill(Color.rgb(78, 43, 105), Color.rgb(205, 160, 61), dp(18))
                 : pill(Color.rgb(9, 35, 57), Color.rgb(33, 190, 181), dp(18)));
-        bubble.setAlpha(0f);
-        bubble.setTranslationY(dp(10));
+        if (!prepend) {
+            bubble.setAlpha(0f);
+            bubble.setTranslationY(dp(10));
+        }
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 Math.min(getResources().getDisplayMetrics().widthPixels - dp(74), dp(560)),
@@ -3094,6 +3129,10 @@ public class MainActivity extends Activity {
         lp.gravity = fromUser ? Gravity.RIGHT : Gravity.LEFT;
         lp.topMargin = dp(6);
         lp.bottomMargin = dp(6);
+        if (prepend) {
+            messageList.addView(bubble, Math.min(insertIndex, messageList.getChildCount()), lp);
+            return bubble;
+        }
         messageList.addView(bubble, lp);
 
         bubble.animate()
@@ -3107,6 +3146,77 @@ public class MainActivity extends Activity {
             saveChatMessage(fromUser, text);
         }
         return bubble;
+    }
+
+    private void loadOlderChatPage() {
+        if (loadingOlderChat || noOlderChat || oldestLoadedChatId <= 1 || oldestLoadedChatId == Long.MAX_VALUE) {
+            return;
+        }
+        loadingOlderChat = true;
+        final long before = oldestLoadedChatId;
+        new Thread(() -> {
+            JSONArray page = null;
+            try {
+                URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/messages?session_id=" + SERVER_CHAT_SESSION_ID
+                        + "&before_id=" + before + "&limit=" + CHAT_OLDER_PAGE);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(20000);
+                applyMobileAuth(conn);
+                if (conn.getResponseCode() >= 200 && conn.getResponseCode() < 300) {
+                    page = new JSONObject(readAll(conn.getInputStream())).optJSONArray("messages");
+                }
+                conn.disconnect();
+            } catch (Exception ignored) {
+            }
+            final JSONArray finalPage = page;
+            main.post(() -> {
+                try {
+                    if (finalPage == null || finalPage.length() == 0) {
+                        noOlderChat = true;
+                        return;
+                    }
+                    int heightBefore = messageList.getHeight();
+                    int scrollBefore = scrollView.getScrollY();
+                    long newOldest = oldestLoadedChatId;
+                    int insertAt = 0;
+                    for (int i = 0; i < finalPage.length(); i++) {
+                        JSONObject item = finalPage.optJSONObject(i);
+                        if (item == null) {
+                            continue;
+                        }
+                        long id = item.optLong("id", 0);
+                        if (id > 0) {
+                            newOldest = Math.min(newOldest, id);
+                        }
+                        if (id >= before) {
+                            continue;  // guard against overlap
+                        }
+                        String role = item.optString("role", "");
+                        String text = item.optString("content", "");
+                        if (messageHasAsset(item)) {
+                            fetchAndRenderAsset("user".equals(role), text.trim(), item.optString("asset_id", "").trim(), insertAt);
+                        } else if (!text.isEmpty()) {
+                            addMessage("user".equals(role), text, false, insertAt);
+                        } else {
+                            continue;
+                        }
+                        insertAt++;
+                    }
+                    oldestLoadedChatId = newOldest;
+                    // Keep the reading position steady as content grows above it.
+                    messageList.post(() -> {
+                        int delta = messageList.getHeight() - heightBefore;
+                        if (delta > 0) {
+                            scrollView.scrollTo(0, scrollBefore + delta);
+                        }
+                    });
+                } finally {
+                    loadingOlderChat = false;
+                }
+            });
+        }).start();
     }
 
     private void loadServerChatHistory() {
@@ -3129,13 +3239,19 @@ public class MainActivity extends Activity {
                 }
                 String historyKey = history.toString();
                 long maxId = 0;
+                long minId = Long.MAX_VALUE;
                 for (int i = 0; i < history.length(); i++) {
                     JSONObject item = history.optJSONObject(i);
                     if (item != null) {
-                        maxId = Math.max(maxId, item.optLong("id", 0));
+                        long id = item.optLong("id", 0);
+                        maxId = Math.max(maxId, id);
+                        if (id > 0) {
+                            minId = Math.min(minId, id);
+                        }
                     }
                 }
                 long finalMaxId = maxId;
+                long finalMinId = minId;
                 main.post(() -> {
                     lastSeenChatMessageId = Math.max(lastSeenChatMessageId, finalMaxId);
                     startChatDeltaLoop();
@@ -3143,6 +3259,8 @@ public class MainActivity extends Activity {
                         return;  // nothing changed: a rebuild would just blink
                     }
                     lastChatHistoryJson = historyKey;
+                    oldestLoadedChatId = finalMinId;
+                    noOlderChat = false;
                     messageList.removeAllViews();
                     for (int i = 0; i < history.length(); i++) {
                         JSONObject item = history.optJSONObject(i);
@@ -3220,6 +3338,18 @@ public class MainActivity extends Activity {
     }
 
     private void fetchAndRenderAsset(boolean fromUser, String caption, String assetId) {
+        fetchAndRenderAsset(fromUser, caption, assetId, -1);
+    }
+
+    private void fetchAndRenderAsset(boolean fromUser, String caption, String assetId, int insertIndex) {
+        Bitmap cached = imageCache.get(assetId);
+        if (cached != null) {
+            addImageMessage(caption, cached, caption.isEmpty() ? "[изображение]" : caption, insertIndex);
+            if (insertIndex < 0) {
+                maybeScrollToBottom(false);
+            }
+            return;
+        }
         final String url = trimSlash(baseUrl) + "/archive/client/chat/asset/" + assetId;
         new Thread(() -> {
             Bitmap bmp = null;
@@ -3239,19 +3369,36 @@ public class MainActivity extends Activity {
                         }
                     }
                     byte[] raw = buffer.toByteArray();
-                    bmp = BitmapFactory.decodeByteArray(raw, 0, raw.length);
+                    // Downscale on decode: a chat bubble never needs more than ~1024px,
+                    // and full-res decodes of several images are what choke the app.
+                    BitmapFactory.Options bounds = new BitmapFactory.Options();
+                    bounds.inJustDecodeBounds = true;
+                    BitmapFactory.decodeByteArray(raw, 0, raw.length, bounds);
+                    int sample = 1;
+                    int longest = Math.max(bounds.outWidth, bounds.outHeight);
+                    while (longest / sample > 1024) {
+                        sample *= 2;
+                    }
+                    BitmapFactory.Options opts = new BitmapFactory.Options();
+                    opts.inSampleSize = sample;
+                    bmp = BitmapFactory.decodeByteArray(raw, 0, raw.length, opts);
                 }
                 conn.disconnect();
             } catch (Exception ignored) {
             }
             final Bitmap finalBmp = bmp;
+            if (finalBmp != null) {
+                imageCache.put(assetId, finalBmp);
+            }
             main.post(() -> {
                 if (finalBmp != null) {
-                    addImageMessage(caption, finalBmp, caption.isEmpty() ? "[изображение]" : caption);
+                    addImageMessage(caption, finalBmp, caption.isEmpty() ? "[изображение]" : caption, insertIndex);
                 } else if (!caption.isEmpty()) {
                     addMessage(fromUser, caption, false);
                 }
-                maybeScrollToBottom(false);
+                if (insertIndex < 0) {
+                    maybeScrollToBottom(false);
+                }
             });
         }).start();
     }

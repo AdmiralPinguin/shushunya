@@ -106,6 +106,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             session_id = "default"
             limit = CHAT_HISTORY_LIMIT
             after_id = 0
+            before_id = 0
             wait_sec = 0.0
             if "?" in self.path:
                 params = parse_qs(urlsplit(self.path).query)
@@ -119,6 +120,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 except (TypeError, ValueError):
                     after_id = 0
                 try:
+                    before_id = int((params.get("before_id") or [0])[0])
+                except (TypeError, ValueError):
+                    before_id = 0
+                try:
                     wait_sec = max(0.0, min(float((params.get("wait") or [0])[0]), 25.0))
                 except (TypeError, ValueError):
                     wait_sec = 0.0
@@ -127,7 +132,8 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             # Telegram-style delta long-poll: with after_id+wait the request is
             # held until new messages exist (or the wait expires), so clients
             # append deltas instead of re-downloading and re-rendering history.
-            messages = chat_history(session_id, limit=limit, after_id=after_id)
+            # before_id gives scroll-up pagination (an older page).
+            messages = chat_history(session_id, limit=limit, after_id=after_id, before_id=before_id)
             if wait_sec > 0 and after_id > 0 and not messages:
                 deadline = time.time() + wait_sec
                 while time.time() < deadline:

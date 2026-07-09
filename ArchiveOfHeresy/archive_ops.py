@@ -726,7 +726,7 @@ def graph_context_message(query, memory_namespace="default"):
     }
 
 
-def chat_history(session_id, limit=CHAT_HISTORY_LIMIT, after_id=0):
+def chat_history(session_id, limit=CHAT_HISTORY_LIMIT, after_id=0, before_id=0):
     session_id = shared_chat_session_id(session_id)
     try:
         parsed_limit = int(limit if limit is not None else CHAT_HISTORY_LIMIT)
@@ -739,6 +739,10 @@ def chat_history(session_id, limit=CHAT_HISTORY_LIMIT, after_id=0):
         parsed_after_id = max(0, int(after_id or 0))
     except (TypeError, ValueError):
         parsed_after_id = 0
+    try:
+        parsed_before_id = max(0, int(before_id or 0))
+    except (TypeError, ValueError):
+        parsed_before_id = 0
     with sqlite3.connect(SQLITE_PATH) as db:
         db.row_factory = sqlite3.Row
         if parsed_after_id > 0:
@@ -752,6 +756,19 @@ def chat_history(session_id, limit=CHAT_HISTORY_LIMIT, after_id=0):
                 """,
                 (session_id, parsed_after_id, safe_limit),
             ).fetchall()
+        elif parsed_before_id > 0:
+            # Scroll-up pagination: the newest `limit` messages older than before_id.
+            rows = db.execute(
+                """
+                SELECT id, session_id, role, content, created_at, asset_id, source, dedupe_key
+                FROM mobile_chat_messages
+                WHERE session_id = ? AND id < ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (session_id, parsed_before_id, safe_limit),
+            ).fetchall()
+            rows = list(reversed(rows))
         else:
             rows = db.execute(
                 """
