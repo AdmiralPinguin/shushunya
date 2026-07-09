@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="shushunya.wiki">
+  <rect width="64" height="64" rx="10" fill="#0b0710"/>
+  <path d="M10 12h44v40H10z" fill="#171020" stroke="#d7b660" stroke-width="2"/>
+  <path d="M18 21h28M18 31h19M18 41h25" stroke="#fff3dc" stroke-width="4" stroke-linecap="round"/>
+  <path d="M50 14v36" stroke="#d64d9c" stroke-width="3"/>
+  <text x="32" y="58" text-anchor="middle" fill="#d7b660" font-family="monospace" font-size="8" font-weight="700">III</text>
+</svg>

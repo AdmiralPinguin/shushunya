@@ -3,68 +3,266 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>shushunya.com</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --fg: #fff3e8;
-      --red: #ff2424;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    html,
-    body {
-      width: 100%;
-      min-height: 100%;
-      margin: 0;
-    }
-
-    body {
-      display: grid;
-      min-height: 100vh;
-      place-items: center;
-      overflow: hidden;
-      background:
-        linear-gradient(rgba(0, 0, 0, 0.28), rgba(0, 0, 0, 0.48)),
-        url("./background.jpg") center / cover no-repeat,
-        radial-gradient(circle at 50% 48%, rgba(255, 36, 36, 0.28), transparent 42%),
-        linear-gradient(145deg, #020202 0%, #17100d 52%, #020202 100%);
-      color: var(--fg);
-      font-family: Impact, Haettenschweiler, "Arial Black", sans-serif;
-    }
-
-    main {
-      width: min(100vw, 1900px);
-      padding: clamp(18px, 4vw, 72px);
-      text-align: center;
-    }
-
-    h1 {
-      margin: 0;
-      font-size: clamp(66px, 16vw, 280px);
-      font-weight: 900;
-      line-height: 0.86;
-      letter-spacing: 0;
-      text-transform: uppercase;
-      text-wrap: balance;
-      text-shadow:
-        0 0 18px rgba(255, 36, 36, 0.72),
-        0 12px 0 #000,
-        0 28px 54px rgba(0, 0, 0, 0.9);
-    }
-
-    span {
-      display: block;
-      color: var(--red);
-    }
-  </style>
+  <meta name="theme-color" content="#12091b">
+  <meta name="description" content="shushunya.wiki - личные и публичные проектные вики с редактором, версиями и доступами.">
+  <title>shushunya.wiki</title>
+  <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="./site.webmanifest">
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <main>
-    <h1>Вован <span>хуй сосал</span></h1>
-  </main>
+  <canvas class="archive-canvas" id="archive-canvas" aria-hidden="true"></canvas>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="shushunya.wiki">
+        <span class="brand-mark" aria-hidden="true">III</span>
+        <span>
+          <strong>shushunya.wiki</strong>
+          <small>закрытые и открытые знания проектов</small>
+        </span>
+      </a>
+
+      <label class="search-box">
+        <span aria-hidden="true">⌕</span>
+        <input id="global-search" type="search" placeholder="Найти проект, страницу, тег" autocomplete="off">
+      </label>
+
+      <nav class="top-actions" aria-label="Быстрые действия">
+        <button class="icon-button" id="theme-toggle" type="button" title="Сменить свет">
+          <span aria-hidden="true">◐</span>
+        </button>
+        <button class="ghost-button" id="open-auth" type="button">Войти</button>
+        <button class="primary-button" id="new-project-top" type="button">Новый проект</button>
+      </nav>
+    </header>
+
+    <aside class="workspace-rail" aria-label="Рабочая область">
+      <section class="account-panel">
+        <div class="avatar" id="avatar">SW</div>
+        <div>
+          <p class="eyebrow">vault owner</p>
+          <h1 id="account-name">Шушуня</h1>
+          <p id="account-handle">@shushunya</p>
+        </div>
+      </section>
+
+      <section class="metric-grid" aria-label="Сводка">
+        <div>
+          <strong id="metric-projects">0</strong>
+          <span>проекты</span>
+        </div>
+        <div>
+          <strong id="metric-public">0</strong>
+          <span>публичные</span>
+        </div>
+        <div>
+          <strong id="metric-private">0</strong>
+          <span>скрытые</span>
+        </div>
+      </section>
+
+      <div class="filter-row" role="tablist" aria-label="Фильтр проектов">
+        <button class="filter-chip active" type="button" data-filter="all">Все</button>
+        <button class="filter-chip" type="button" data-filter="public">Public</button>
+        <button class="filter-chip" type="button" data-filter="private">Private</button>
+        <button class="filter-chip" type="button" data-filter="team">Team</button>
+      </div>
+
+      <section class="project-list-section">
+        <div class="section-heading">
+          <h2>Проекты</h2>
+          <button class="icon-button small" id="new-project" type="button" title="Добавить проект">＋</button>
+        </div>
+        <div class="project-list" id="project-list"></div>
+      </section>
+
+      <section class="public-strip">
+        <div class="section-heading">
+          <h2>Витрина</h2>
+          <span id="public-count">0</span>
+        </div>
+        <div class="public-links" id="public-links"></div>
+      </section>
+    </aside>
+
+    <main class="main-stage">
+      <section class="project-hero">
+        <div class="hero-copy">
+          <p class="eyebrow" id="project-visibility">private vault</p>
+          <h2 id="project-title">Выбери проект</h2>
+          <p id="project-summary">Документация, решения, заметки и публичные страницы проекта в одном месте.</p>
+          <div class="hero-actions">
+            <button class="primary-button" id="new-doc" type="button">Новая страница</button>
+            <button class="ghost-button" id="copy-share" type="button">Скопировать ссылку</button>
+          </div>
+        </div>
+        <div class="hero-visual" aria-label="Состояние проекта">
+          <canvas id="repo-map" width="640" height="360"></canvas>
+        </div>
+      </section>
+
+      <section class="doc-workspace">
+        <div class="doc-list-panel">
+          <div class="section-heading">
+            <h2>Страницы</h2>
+            <span id="doc-count">0</span>
+          </div>
+          <div class="doc-list" id="doc-list"></div>
+        </div>
+
+        <article class="reader-panel">
+          <div class="reader-toolbar">
+            <div class="breadcrumb" id="breadcrumb">wiki / page</div>
+            <div class="toolbar-buttons" role="group" aria-label="Режим страницы">
+              <button class="mode-button active" data-mode="preview" type="button">Preview</button>
+              <button class="mode-button" data-mode="edit" type="button">Edit</button>
+            </div>
+          </div>
+
+          <div class="doc-meta">
+            <input id="doc-title-input" class="title-input" type="text" value="">
+            <select id="doc-visibility" aria-label="Доступ страницы">
+              <option value="public">Public</option>
+              <option value="private">Private</option>
+              <option value="team">Team</option>
+              <option value="unlisted">Unlisted</option>
+            </select>
+          </div>
+
+          <div class="tag-row" id="tag-row"></div>
+
+          <div class="preview-surface" id="preview-surface"></div>
+          <textarea id="editor-surface" class="editor-surface" spellcheck="false"></textarea>
+
+          <div class="save-bar">
+            <input id="commit-message" type="text" placeholder="Короткое описание изменения">
+            <button class="primary-button" id="save-doc" type="button">Сохранить версию</button>
+          </div>
+        </article>
+
+        <aside class="activity-panel" aria-label="История и доступ">
+          <section>
+            <div class="section-heading">
+              <h2>Доступ</h2>
+              <span id="access-badge">Private</span>
+            </div>
+            <div class="access-grid">
+              <button class="access-tile" data-access="public" type="button">
+                <strong>Public</strong>
+                <span>видно всем</span>
+              </button>
+              <button class="access-tile" data-access="private" type="button">
+                <strong>Private</strong>
+                <span>только тебе</span>
+              </button>
+              <button class="access-tile" data-access="team" type="button">
+                <strong>Team</strong>
+                <span>для команды</span>
+              </button>
+              <button class="access-tile" data-access="unlisted" type="button">
+                <strong>Unlisted</strong>
+                <span>по ссылке</span>
+              </button>
+            </div>
+          </section>
+
+          <section>
+            <div class="section-heading">
+              <h2>История</h2>
+              <span id="version-count">0</span>
+            </div>
+            <div class="version-list" id="version-list"></div>
+          </section>
+
+          <section class="share-panel">
+            <div class="section-heading">
+              <h2>Публикация</h2>
+            </div>
+            <code id="share-url">https://shushunya.wiki/</code>
+          </section>
+        </aside>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="modal" id="auth-modal">
+    <form class="modal-body" id="auth-form" method="dialog">
+      <div class="section-heading">
+        <h2>Аккаунт</h2>
+        <button class="icon-button small" value="cancel" type="submit" title="Закрыть">×</button>
+      </div>
+      <label>
+        Имя
+        <input id="auth-name" name="name" type="text" autocomplete="name" required>
+      </label>
+      <label>
+        Handle
+        <input id="auth-handle" name="handle" type="text" autocomplete="username" required>
+      </label>
+      <label>
+        Email
+        <input id="auth-email" name="email" type="email" autocomplete="email" required>
+      </label>
+      <button class="primary-button" value="default" type="submit">Сохранить вход</button>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="project-modal">
+    <form class="modal-body" id="project-form" method="dialog">
+      <div class="section-heading">
+        <h2>Новый проект</h2>
+        <button class="icon-button small" value="cancel" type="submit" title="Закрыть">×</button>
+      </div>
+      <label>
+        Название
+        <input id="project-name" name="name" type="text" required>
+      </label>
+      <label>
+        Описание
+        <textarea id="project-description" name="description" rows="4" required></textarea>
+      </label>
+      <label>
+        Доступ
+        <select id="project-access" name="access">
+          <option value="private">Private</option>
+          <option value="public">Public</option>
+          <option value="team">Team</option>
+        </select>
+      </label>
+      <button class="primary-button" value="default" type="submit">Создать проект</button>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="doc-modal">
+    <form class="modal-body" id="doc-form" method="dialog">
+      <div class="section-heading">
+        <h2>Новая страница</h2>
+        <button class="icon-button small" value="cancel" type="submit" title="Закрыть">×</button>
+      </div>
+      <label>
+        Заголовок
+        <input id="doc-name" name="name" type="text" required>
+      </label>
+      <label>
+        Теги
+        <input id="doc-tags" name="tags" type="text" placeholder="api, roadmap, notes">
+      </label>
+      <label>
+        Доступ
+        <select id="doc-access" name="access">
+          <option value="private">Private</option>
+          <option value="public">Public</option>
+          <option value="team">Team</option>
+          <option value="unlisted">Unlisted</option>
+        </select>
+      </label>
+      <button class="primary-button" value="default" type="submit">Создать страницу</button>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="./app.js" defer></script>
 </body>
 </html>
