@@ -1,0 +1,98 @@
+"""Moriana studio: the multi-stage 'make a good image' loop.
+
+understand -> FLUX draft -> the model LOOKS and judges -> if not good, SDXL
+img2img refine using the judge's concrete instructions -> look again -> keep
+the best. This turns the three proven capabilities (art-directed prompt, SDXL
+img2img refine, vision verification) into one closed loop, independent of the
+fragile mission machinery so it can be tested and driven directly.
+"""
+from __future__ import annotations
+
+import sqlite3
+import time
+from pathlib import Path
+from typing import Any, Callable
+
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.queue import ForgeQueue
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.schemas import JobSpec, PlanRequest
+from EyeOfTerror.Pictorium.Moriana.forge_runtime.storage import ForgeStore
+from EyeOfTerror.Pictorium.Moriana.moriana_core.image_evaluator import vision_review
+from EyeOfTerror.Pictorium.Moriana.moriana_core.promptwright import plan_txt2img
+
+FORGE_DB = "DemonsForge/runtime/forge.sqlite3"
+
+
+def _wait_for_image(store: ForgeStore, job_id: str, timeout_sec: int = 1500) -> str | None:
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        time.sleep(5)
+        job = store.get_job(job_id)
+        status = str(getattr(job, "status", "") or "")
+        if "succeeded" in status or "completed" in status:
+            conn = sqlite3.connect(FORGE_DB)
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT path FROM artifacts WHERE job_id=? AND kind='image'", (job_id,)).fetchone()
+            conn.close()
+            return row["path"] if row else None
+        if "failed" in status:
+            return None
+    return None
+
+
+def produce_refined_image(
+    intent: str,
+    max_refine: int = 1,
+    loras: list[dict[str, Any]] | None = None,
+    log: Callable[[str], None] = print,
+) -> dict[str, Any]:
+    """Draft in FLUX, judge with vision, refine in SDXL img2img on the judge's
+    notes, judge again, keep the best. Returns the best image path and the trail."""
+    store = ForgeStore()
+    queue = ForgeQueue(store, start_worker=True)
+
+    # 1. understand + art-directed draft prompt (Promptwright thinker), FLUX draft
+    plan = plan_txt2img(PlanRequest(request=intent, use_thinker=True, use_memory=False))
+    prompt = plan.prompt or intent
+    draft_spec = JobSpec(engine="flux", model="FLUX.1-schnell", type="txt2img", prompt=prompt, width=832, height=832, steps=4)
+    log(f"[studio] FLUX draft: {prompt[:120]}...")
+    draft_path = _wait_for_image(store, queue.submit(draft_spec).id)
+    if not draft_path:
+        return {"ok": False, "error": "draft generation failed"}
+
+    best = {"path": draft_path, "verdict": vision_review(Path(draft_path), intent), "stage": "flux_draft"}
+    trail = [{"stage": "flux_draft", "path": draft_path, "verdict": best["verdict"]}]
+    log(f"[studio] draft verdict: accept={best['verdict'].get('accept')} quality={best['verdict'].get('quality')}")
+
+    # 2. refine loop in SDXL img2img, guided by the vision judge
+    current = draft_path
+    for i in range(max_refine):
+        verdict = trail[-1]["verdict"]
+        if verdict.get("ok") and verdict.get("accept") and int(verdict.get("quality") or 0) >= 8:
+            break  # already good, no point spending a refine pass
+        fixes = str(verdict.get("refine_instructions") or "").strip()
+        refine_prompt = f"{prompt} {fixes}".strip()
+        refine_spec = JobSpec(
+            engine="sdxl",
+            model="stable-diffusion-xl-base-1.0",
+            type="img2img",
+            prompt=refine_prompt,
+            source_images=[current],
+            strength=0.42,
+            width=1024,
+            height=1024,
+            steps=16,
+            loras=loras or [],
+        )
+        log(f"[studio] SDXL refine {i + 1} on fixes: {fixes[:100]}...")
+        refined_path = _wait_for_image(store, queue.submit(refine_spec).id)
+        if not refined_path:
+            log("[studio] refine failed, keeping best so far")
+            break
+        refined_verdict = vision_review(Path(refined_path), intent)
+        trail.append({"stage": f"sdxl_refine_{i + 1}", "path": refined_path, "verdict": refined_verdict})
+        log(f"[studio] refine verdict: accept={refined_verdict.get('accept')} quality={refined_verdict.get('quality')}")
+        current = refined_path
+        if int(refined_verdict.get("quality") or 0) >= int((best["verdict"] or {}).get("quality") or 0):
+            best = {"path": refined_path, "verdict": refined_verdict, "stage": f"sdxl_refine_{i + 1}"}
+
+    return {"ok": True, "best_path": best["path"], "best_stage": best["stage"], "best_verdict": best["verdict"], "trail": trail}
