@@ -230,6 +230,7 @@ def memory_search(memory_namespace, query, limit=5, include_content=False, layer
 
 
 def run_mobile_chat_payload(payload, on_token=None):
+    LLM_PRIORITY.set("chat")  # the owner's live answer jumps ahead of brigade work
     maintenance_record = None
     with CHAT_QUEUE_LOCK:
         created_at = now_iso()
@@ -1170,6 +1171,7 @@ def warmaster_duplicate_task_id(task_text):
 
 
 def decide_chat_turn_action(session_id, text, image_data_url="", model=None):
+    LLM_PRIORITY.set("chat")  # turn decision is part of serving the owner's message
     user_text = trim_chat_text(text)
     manifest = turn_capability_manifest(image_attached=bool(image_data_url), pending_reports=pending_summary())
     history = chat_history(session_id, limit=12)
@@ -1368,6 +1370,7 @@ def maybe_update_focus_memory(record):
             _LIBRARIAN_INFLIGHT["rerun"] = True
             return
         _LIBRARIAN_INFLIGHT["running"] = True
+    LLM_PRIORITY.set("librarian")  # memory consolidation outranks a fresh answer
     try:
         while True:
             with MAINTENANCE_LOCK:

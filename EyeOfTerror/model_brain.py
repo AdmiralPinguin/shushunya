@@ -8,7 +8,9 @@ import urllib.request
 from typing import Any
 
 
-DEFAULT_BASE_URL = "http://127.0.0.1:8080/v1"
+# Front door is the priority dispatcher (8079), not llama.cpp (8080) directly:
+# brigade model_brain calls are "other" priority and yield to chat/librarian.
+DEFAULT_BASE_URL = "http://127.0.0.1:8079/v1"
 DEFAULT_MODEL = "gemma-4-12b-it-UD-Q5_K_XL.gguf"
 
 

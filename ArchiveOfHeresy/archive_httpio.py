@@ -1,10 +1,23 @@
 """HTTP request/response and upstream-proxy helpers for ArchiveOfHeresy."""
+import contextvars
 import json
 from datetime import datetime
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from archive_config import *  # noqa: F401,F403
+
+# Priority carried to the LLM dispatcher (in front of llama.cpp). Set per serving
+# path — "chat" for the owner's live answer, "librarian" for memory
+# consolidation — and inherited by every upstream call on that thread; defaults
+# to "other" for all ancillary/background work.
+LLM_PRIORITY = contextvars.ContextVar("llm_priority", default="other")
+
+
+def _with_priority(headers):
+    headers = dict(headers or {})
+    headers.setdefault("X-LLM-Priority", LLM_PRIORITY.get())
+    return headers
 
 
 def read_json(handler):
@@ -67,7 +80,7 @@ def proxy_json(method, path, payload=None, timeout=180):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
 
-    request = Request(f"{LLM_BASE_URL}{path}", data=data, headers=headers, method=method)
+    request = Request(f"{LLM_BASE_URL}{path}", data=data, headers=_with_priority(headers), method=method)
     with urlopen(request, timeout=timeout) as response:
         body = response.read().decode("utf-8")
         return response.status, json.loads(body) if body else {}
@@ -80,7 +93,7 @@ def open_upstream(method, path, payload=None, timeout=180):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
 
-    request = Request(f"{LLM_BASE_URL}{path}", data=data, headers=headers, method=method)
+    request = Request(f"{LLM_BASE_URL}{path}", data=data, headers=_with_priority(headers), method=method)
     return urlopen(request, timeout=timeout)
 
 

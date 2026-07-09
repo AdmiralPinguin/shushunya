@@ -37,7 +37,7 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("VOX_DB_PATH", ROOT / "runtime" / "vox.sqlite3"))
 DEFAULT_PORT = int(os.environ.get("VOX_PORT", "7400"))
-LLM_BASE_URL = os.environ.get("VOX_LLM_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
+LLM_BASE_URL = os.environ.get("VOX_LLM_BASE_URL", "http://127.0.0.1:8079").rstrip("/")
 LLM_MODEL = os.environ.get("VOX_LLM_MODEL", os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"))
 EMBED_BASE_URL = os.environ.get("VOX_EMBED_BASE_URL", "http://127.0.0.1:8181").rstrip("/")
 EMBED_MODEL = os.environ.get("VOX_EMBED_MODEL", "multilingual-e5-large")

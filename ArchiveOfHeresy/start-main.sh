@@ -6,6 +6,14 @@ PROJECT_ROOT="$(cd "$ROOT/.." && pwd)"
 
 # Ensure the CPU embedding server is up (vector memory depends on it).
 systemctl --user start shushunya-embedder.service 2>/dev/null || true
+# Ensure the LLM priority dispatcher is up (front door to llama.cpp: chat and
+# librarian jump ahead of brigade work). Everything points at it, not 8080.
+if ! curl -fsS --max-time 3 "http://127.0.0.1:${LLM_DISPATCH_PORT:-8079}/health" >/dev/null 2>&1; then
+  nohup python3 "$PROJECT_ROOT/CoreOfMadness/llm-dispatcher/dispatcher.py" \
+    > "$PROJECT_ROOT/CoreOfMadness/llm-dispatcher/dispatcher.log" 2>&1 &
+  sleep 1
+fi
+export ARCHIVE_LLM_BASE_URL="${ARCHIVE_LLM_BASE_URL:-http://127.0.0.1:8079}"
 # Ensure Vox (Shushunya's intent-to-speak service) is up.
 "$(cd "$(dirname "${BASH_SOURCE[0]}")/../Vox" && pwd)/start-vox.sh" 2>/dev/null || true
 ENV_DIR="$ROOT/ArchiveOfHeresy"
