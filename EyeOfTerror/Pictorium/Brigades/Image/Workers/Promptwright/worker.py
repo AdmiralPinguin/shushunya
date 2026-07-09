@@ -140,7 +140,15 @@ def prepare_image_plan(payload: dict[str, Any] | None) -> dict[str, Any]:
 def handle(payload: dict[str, Any] | None) -> dict[str, Any]:
     return prepare_image_plan(payload)
 
-def run(request, workspace_root=None):  # noqa: ARG001
+def run(request, workspace_root=None):
     """HTTP worker-launcher entrypoint: the LegacyMechanicum server calls
-    run(request, workspace_root); the image brigade's logic lives in handle()."""
-    return handle(request)
+    run(request, workspace_root); the image brigade's logic lives in handle().
+    After handling, materialise declared artifacts so the next step's input
+    preflight passes."""
+    result = handle(request)
+    try:
+        from EyeOfTerror.Pictorium.Brigades.Image.worker_api import persist_expected_artifacts
+        persist_expected_artifacts(request, workspace_root, result)
+    except Exception as exc:  # noqa: BLE001
+        print(f'artifact persist failed: {exc}', flush=True)
+    return result

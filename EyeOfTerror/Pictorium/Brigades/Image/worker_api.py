@@ -228,3 +228,45 @@ def revision_packet(
         "action": action,
         "issues": issues,
     }
+
+
+def persist_expected_artifacts(request, workspace_root, result):
+    """Write each declared expected artifact to the sandbox so the next step's
+    input-artifact preflight passes. Image workers pass their real data through
+    the dispatch packet, but the gateway still gates each step on the artifact
+    FILE existing — so the step output is materialised here from the worker's
+    result. Uses the order's /work/<slug>/... paths, not a hardcoded path."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    if workspace_root is None or not isinstance(request, dict) or not isinstance(result, dict):
+        return
+    # The launcher hands run() the nested packet["request"]; expected artifacts
+    # live under step.expected_artifacts there (top-level only on the raw packet).
+    expected = request.get("expected_artifacts")
+    if not isinstance(expected, list) or not expected:
+        step = request.get("step") if isinstance(request.get("step"), dict) else {}
+        expected = step.get("expected_artifacts")
+    if not isinstance(expected, list) or not expected:
+        worker_order = request.get("worker_order") if isinstance(request.get("worker_order"), dict) else {}
+        single = worker_order.get("expected_output")
+        expected = [single] if isinstance(single, str) and single else []
+    if not isinstance(expected, list) or not expected:
+        return
+    root = _Path(workspace_root).resolve()
+    payload = result.get("worker_report") if isinstance(result.get("worker_report"), dict) else result
+    for artifact in expected:
+        if not isinstance(artifact, str) or not artifact.startswith("/work/"):
+            continue
+        host_path = (root / artifact.removeprefix("/work/")).resolve()
+        if not host_path.is_relative_to(root):
+            continue
+        host_path.parent.mkdir(parents=True, exist_ok=True)
+        body = {
+            "artifact": artifact,
+            "step_id": request.get("step_id"),
+            "worker": request.get("worker"),
+            "produced_by": request.get("worker"),
+            "result": payload,
+        }
+        host_path.write_text(_json.dumps(body, ensure_ascii=False, indent=2), encoding="utf-8")
