@@ -275,7 +275,9 @@ def capabilities() -> dict[str, Any]:
         | {job_type for meta in ENGINE_MODELS.values() for job_type in meta["job_types"]}
     )
     engine_policy = {
-        "txt2img_default_order": ["stable_diffusion", "flux", "sdxl"],
+        # FLUX first: CPU-only here (GPU is the chat LLM's), where SD3.5-large is
+        # unusably slow and FLUX.1-schnell renders sharply in minutes.
+        "txt2img_default_order": ["flux", "sdxl", "stable_diffusion"],
         "image_operation_engine": "sdxl",
         "notes": [
             "Use SD3.5/Flux for first text-to-image concepts by default.",

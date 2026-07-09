@@ -57,7 +57,9 @@ def _choose_engine(text: str, preferred: str | None, job_type: JobType) -> str:
     if any(token in lowered for token in ["first concept", "первый концепт", "первую картинку", "первое изображение"]):
         if caps["engines"]["flux"]["available"]:
             return "flux"
-    for engine in caps.get("engine_policy", {}).get("txt2img_default_order", ["stable_diffusion", "flux", "sdxl"]):
+    # FLUX first: on this CPU-only box (the GPU is held by the chat LLM) SD3.5-large
+    # is unusably slow, while FLUX.1-schnell renders a sharp image in minutes.
+    for engine in caps.get("engine_policy", {}).get("txt2img_default_order", ["flux", "sdxl", "stable_diffusion"]):
         if caps["engines"][engine]["available"]:
             return engine
     return "stable_diffusion"

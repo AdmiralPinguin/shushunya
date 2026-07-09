@@ -37,11 +37,15 @@ MEMORY_WRITE_TIMEOUT_SECONDS = float(os.environ.get("FORGE_MEMORY_WRITE_TIMEOUT_
 MEMORY_PROPOSAL_MAX_CHARS = int(os.environ.get("FORGE_MEMORY_PROPOSAL_MAX_CHARS", "4000"))
 MEMORY_EVIDENCE_MAX_CHARS = int(os.environ.get("FORGE_MEMORY_EVIDENCE_MAX_CHARS", "3000"))
 
-PLANNER_THINKER_ENABLED = os.environ.get("FORGE_PLANNER_THINKER_ENABLED", "0") not in {"0", "false", "False", "no", "off"}
-PLANNER_THINKER_BASE_URL = os.environ.get("FORGE_PLANNER_THINKER_BASE_URL", "").rstrip("/")
+# The planner thinker (art director) is on by default and routed through the
+# LLM priority dispatcher: without it the raw task text goes straight to the
+# image model and the result is incoherent. It runs at "other" priority so it
+# never delays the owner's chat.
+PLANNER_THINKER_ENABLED = os.environ.get("FORGE_PLANNER_THINKER_ENABLED", "1") not in {"0", "false", "False", "no", "off"}
+PLANNER_THINKER_BASE_URL = os.environ.get("FORGE_PLANNER_THINKER_BASE_URL", "http://127.0.0.1:8079/v1").rstrip("/")
 PLANNER_THINKER_API_KEY = os.environ.get("FORGE_PLANNER_THINKER_API_KEY", "").strip()
-PLANNER_THINKER_MODEL = os.environ.get("FORGE_PLANNER_THINKER_MODEL", "").strip()
-PLANNER_THINKER_TIMEOUT_SECONDS = float(os.environ.get("FORGE_PLANNER_THINKER_TIMEOUT_SECONDS", "20"))
+PLANNER_THINKER_MODEL = os.environ.get("FORGE_PLANNER_THINKER_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf").strip()
+PLANNER_THINKER_TIMEOUT_SECONDS = float(os.environ.get("FORGE_PLANNER_THINKER_TIMEOUT_SECONDS", "120"))
 PLANNER_THINKER_MAX_PATCH_CHARS = int(os.environ.get("FORGE_PLANNER_THINKER_MAX_PATCH_CHARS", "12000"))
 
 MAX_WIDTH = 1536
