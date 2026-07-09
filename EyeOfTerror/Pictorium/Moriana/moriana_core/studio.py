@@ -81,36 +81,50 @@ def produce_refined_image(
     trail = [{"stage": "flux_draft", "path": draft_path, "verdict": best["verdict"]}]
     log(f"[studio] draft verdict: accept={best['verdict'].get('accept')} quality={best['verdict'].get('quality')}")
 
-    # 2. refine loop in SDXL img2img, guided by the vision judge
+    # 2. improve loop. Route by the KIND of problem the judge saw:
+    #  - structural (two heads, duplicate/extra parts, wrong count): img2img
+    #    preserves the flawed composition, so REGENERATE a fresh FLUX draft with
+    #    a hard anti-duplication boost.
+    #  - detail/quality: SDXL img2img refine on the judge's notes.
     current = draft_path
     for i in range(max_refine):
         verdict = trail[-1]["verdict"]
         if verdict.get("ok") and verdict.get("accept") and int(verdict.get("quality") or 0) >= 8:
-            break  # already good, no point spending a refine pass
+            break  # already good, no point spending a pass
+        problems_text = " ".join(str(p) for p in (verdict.get("problems") or [])).lower()
         fixes = str(verdict.get("refine_instructions") or "").strip()
-        refine_prompt = f"{prompt} {fixes}".strip()
-        refine_spec = JobSpec(
-            engine="sdxl",
-            model="stable-diffusion-xl-base-1.0",
-            type="img2img",
-            prompt=refine_prompt,
-            source_images=[current],
-            strength=0.42,
-            width=1024,
-            height=1024,
-            steps=16,
-            loras=loras or [],
+        structural = any(
+            token in problems_text
+            for token in ("two head", "second head", "extra head", "duplicate", "two face", "two creature", "second face", "extra limb", "extra eye")
         )
-        log(f"[studio] SDXL refine {i + 1} on fixes: {fixes[:100]}...")
-        refined_path = _wait_for_image(store, queue.submit(refine_spec).id)
-        if not refined_path:
-            log("[studio] refine failed, keeping best so far")
+        if structural:
+            boosted = (
+                f"{prompt} ABSOLUTELY ONE single head and one face only, a single fused creature, "
+                "no second head, no duplicate head on the neck or back, one body."
+            )
+            spec = JobSpec(engine="flux", model="FLUX.1-schnell", type="txt2img", prompt=boosted, width=832, height=832, steps=4)
+            stage = f"flux_regen_{i + 1}"
+            log(f"[studio] structural defect ({problems_text[:60]}...) -> fresh FLUX regen with anti-duplication")
+        else:
+            spec = JobSpec(
+                engine="sdxl", model="stable-diffusion-xl-base-1.0", type="img2img",
+                prompt=f"{prompt} {fixes}".strip(), source_images=[current],
+                strength=0.42, width=1024, height=1024, steps=16, loras=loras,
+            )
+            stage = f"sdxl_refine_{i + 1}"
+            log(f"[studio] SDXL refine {i + 1} on fixes: {fixes[:100]}...")
+        new_path = _wait_for_image(store, queue.submit(spec).id)
+        if not new_path:
+            log("[studio] pass failed, keeping best so far")
             break
-        refined_verdict = vision_review(Path(refined_path), intent)
-        trail.append({"stage": f"sdxl_refine_{i + 1}", "path": refined_path, "verdict": refined_verdict})
-        log(f"[studio] refine verdict: accept={refined_verdict.get('accept')} quality={refined_verdict.get('quality')}")
-        current = refined_path
-        if int(refined_verdict.get("quality") or 0) >= int((best["verdict"] or {}).get("quality") or 0):
-            best = {"path": refined_path, "verdict": refined_verdict, "stage": f"sdxl_refine_{i + 1}"}
+        new_verdict = vision_review(Path(new_path), intent)
+        trail.append({"stage": stage, "path": new_path, "verdict": new_verdict})
+        log(f"[studio] {stage} verdict: accept={new_verdict.get('accept')} quality={new_verdict.get('quality')}")
+        current = new_path
+        # Prefer accepted images; among equals, higher quality wins.
+        best_score = (bool((best["verdict"] or {}).get("accept")), int((best["verdict"] or {}).get("quality") or 0))
+        new_score = (bool(new_verdict.get("accept")), int(new_verdict.get("quality") or 0))
+        if new_score >= best_score:
+            best = {"path": new_path, "verdict": new_verdict, "stage": stage}
 
     return {"ok": True, "best_path": best["path"], "best_stage": best["stage"], "best_verdict": best["verdict"], "trail": trail}
