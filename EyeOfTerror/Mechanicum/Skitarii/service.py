@@ -1,7 +1,7 @@
-"""Skitarii brigade HTTP service.
+"""Skitarii warband HTTP service.
 
 The single door the governor knocks on for a code mission. Replaces the old
-six paper-workers: one POST runs the whole brigade (spec -> fighter loop -> accept)
+six paper-workers: one POST runs the whole warband (spec -> fighter loop -> accept)
 inside the sandbox VM and returns an honest verdict.
 
   POST /mission  {"goal": "...", "task_id": "...", "checks": [...optional...]}
@@ -19,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from brigade import run_mission  # noqa: E402
+from warband import run_mission  # noqa: E402
 from planner import plan_and_run  # noqa: E402
 from executor import VmExecutor  # noqa: E402
 from explorer import explore, brief_for_fighter  # noqa: E402
@@ -231,7 +231,7 @@ def main():
     port = int(os.environ.get("SKITARII_PORT", "7200"))
     srv = ThreadingHTTPServer((host, port), Handler)
     srv.daemon_threads = True          # a crashing request thread never takes the server down
-    print(f"Skitarii brigade listening on http://{host}:{port}", flush=True)
+    print(f"Skitarii warband listening on http://{host}:{port}", flush=True)
     srv.serve_forever()
 
 

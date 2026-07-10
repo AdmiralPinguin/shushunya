@@ -1,4 +1,4 @@
-"""Skitarii brigade orchestrator.
+"""Skitarii warband orchestrator.
 
 The whole flow the old six paper-workers should have been:
     goal -> Postanovshchik (executable checks)

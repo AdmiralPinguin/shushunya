@@ -1,5 +1,5 @@
 """Real end-to-end test: preload an existing buggy file into the sandbox VM, run the
-brigade to fix it, and verify the fix by execution — the bridge→VM→patch→verify path.
+warband to fix it, and verify the fix by execution — the bridge→VM→patch→verify path.
 
 Slow (needs the VM and Qwen). Gated behind RUN_E2E=1:
     RUN_E2E=1 python3 test_skitarii_e2e.py
@@ -22,7 +22,7 @@ VM_KEY = os.environ.get("SKITARII_VM_KEY",
 class TestE2EPatchInVM(unittest.TestCase):
     def test_fix_existing_file_by_execution(self):
         from executor import VmExecutor
-        from brigade import run_mission
+        from warband import run_mission
 
         wd = f"/home/skitarii/work/e2e-{uuid.uuid4().hex[:8]}"
         ex = VmExecutor(host="127.0.0.1", port=2222, user="skitarii", key=VM_KEY, workdir=wd)

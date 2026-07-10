@@ -1,4 +1,4 @@
-"""Bridge from Warmaster's research loop to the Skitarii brigade v2.
+"""Bridge from Warmaster's research loop to the Skitarii warband v2.
 
 When a Ceraxia code mission runs, instead of the dead six-worker paper pipeline it
 is handed to the Skitarii HTTP service, which does the whole thing (spec -> agentic
@@ -257,7 +257,7 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
                 mc.progress_event(mission_id, "Ceraxia", "governor",
                                   "completed" if accepted else "blocked",
                                   "done" if accepted else "blocked",
-                                  "Бригада Skitarii завершила код-миссию",
+                                  "Варбанда Skitarii завершила код-миссию",
                                   summary[:400]),
             )
         except Exception as exc:  # noqa: BLE001 - finalization is best-effort

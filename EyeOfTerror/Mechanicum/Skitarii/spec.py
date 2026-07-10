@@ -1,7 +1,7 @@
 """Postanovshchik: turns the user's goal into executable success checks.
 
 One small LLM call. The checks are shell commands whose exit code 0 means pass —
-they are the brigade's source of truth instead of paper review.
+they are the warband's source of truth instead of paper review.
 """
 from __future__ import annotations
 

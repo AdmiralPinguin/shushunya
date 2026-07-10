@@ -1,5 +1,5 @@
 """Capability evaluation — 30 fixed tasks across the categories that matter, plus a
-runner that scores them. The headline metric is FALSE ACCEPTED = 0%: the brigade must
+runner that scores them. The headline metric is FALSE ACCEPTED = 0%: the warband must
 never report success on work that doesn't actually pass an independent oracle check.
 
 Each task: id, category, goal, oracle_checks (structured checks the RUNNER re-runs to
@@ -131,7 +131,7 @@ def _post(path: str, body: dict, timeout: int = 1800) -> dict:
 
 def run_eval(tasks: list[dict]) -> dict:
     """Run tasks live through the Skitarii service and score them. Metrics include the
-    headline FALSE ACCEPTED count (brigade said accepted, but our oracle re-run failed)."""
+    headline FALSE ACCEPTED count (warband said accepted, but our oracle re-run failed)."""
     m = {"total": len(tasks), "accepted": 0, "false_accepted": 0, "correct": 0,
          "clarified_when_expected": 0, "seconds": 0, "per_task": []}
     for t in tasks:

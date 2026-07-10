@@ -50,7 +50,7 @@ def explore(goal: str, workspace: dict[str, str] | None) -> dict[str, Any]:
         head = "\n".join(content.splitlines()[:25])
         listing.append(f"### {path}\n{head}")
     prompt = (
-        "You are the recon head of a coding brigade. Given the TASK and the loaded project files, "
+        "You are the recon head of a coding warband. Given the TASK and the loaded project files, "
         "work out where the change goes. Return ONE strict JSON object and nothing else:\n"
         '{"target_files": ["files to edit"], "related_files": ["files to read/respect but likely not edit"], '
         '"tests": ["existing test files that cover this"], "invariants": ["behaviours that must NOT break"], '

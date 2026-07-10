@@ -1,6 +1,6 @@
 """Mission store — async lifecycle for Skitarii missions.
 
-Turns the brigade from a blocking HTTP call into managed missions: start in the
+Turns the warband from a blocking HTTP call into managed missions: start in the
 background, poll status/events, answer a mid-run question, cancel. Every event is
 appended to a JSONL journal so a restart can see what happened (crash-visible).
 """

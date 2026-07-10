@@ -1,4 +1,4 @@
-"""Planner — the head of the brigade (separate agent, non-coder model).
+"""Planner — the head of the warband (separate agent, non-coder model).
 
 The coder fighters (Qwen) are strong hands but a weak head: they don't decompose,
 don't plan, and can tunnel into a wall. So a separate planner on a general model
@@ -14,7 +14,7 @@ import re
 import urllib.request
 from typing import Any
 
-from brigade import run_mission
+from warband import run_mission
 from acceptor import accept
 from spec import build_spec
 
@@ -50,7 +50,7 @@ def decompose(goal: str) -> list[dict[str, Any]]:
     """Split the goal into ordered subtasks. Returns [] for a small single-file task
     (the caller then runs one fighter directly)."""
     prompt = (
-        "You are the planning head of a coding brigade. Split the task into the MINIMUM number of "
+        "You are the planning head of a coding warband. Split the task into the MINIMUM number of "
         "independent subtasks, each producing one file or coherent module with a clear goal. "
         "A small task (one script/file) is ONE subtask — do not over-split. Order them so earlier "
         "subtasks are prerequisites of later ones.\n"

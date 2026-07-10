@@ -1,4 +1,4 @@
-"""Focused tests for the Skitarii brigade — no LLM, no VM. They pin the safety
+"""Focused tests for the Skitarii warband — no LLM, no VM. They pin the safety
 invariants the review flagged: no false success, path preservation, spec fallback,
 patch/greenfield classification, oracle acceptance, budget honesty.
 
@@ -159,7 +159,7 @@ class TestBridge(unittest.TestCase):
     def test_patch_without_named_files_pulls_a_slice(self):
         # a modify request with no explicit path must still load real source (a slice),
         # never an empty set that would trigger a greenfield rewrite
-        f, is_patch = self.b._collect_workspace("почини логику приёмщика acceptor в бригаде Skitarii")
+        f, is_patch = self.b._collect_workspace("почини логику приёмщика acceptor в варбанде Skitarii")
         self.assertTrue(is_patch)
         self.assertGreater(len(f), 0)
 
