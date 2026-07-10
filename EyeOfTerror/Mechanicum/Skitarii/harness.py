@@ -72,6 +72,12 @@ TOOLS = [
             "url": {"type": "string"},
         }, "required": ["url"]}}},
     {"type": "function", "function": {
+        "name": "ask_user",
+        "description": "Ask the human ONE concrete question when the task is genuinely ambiguous and you cannot decide safely (missing requirement, unclear intent). Blocks until they answer. Use rarely — prefer sensible defaults; do NOT ask about things you can just try.",
+        "parameters": {"type": "object", "properties": {
+            "question": {"type": "string"},
+        }, "required": ["question"]}}},
+    {"type": "function", "function": {
         "name": "done",
         "description": "Finish the mission. Call ONLY after the success checks actually passed when you ran them.",
         "parameters": {"type": "object", "properties": {
@@ -141,8 +147,16 @@ def _memory_read(task_id: str) -> str:
     return str(data.get("content") or "(память задачи пуста)")
 
 
-def _dispatch_tool(executor: Any, name: str, args: dict[str, Any], task_id: str = "") -> str:
+def _dispatch_tool(executor: Any, name: str, args: dict[str, Any], task_id: str = "",
+                   ask_fn=None) -> str:
     try:
+        if name == "ask_user":
+            q = str(args.get("question") or "").strip()
+            if not q:
+                return "ERROR: empty question"
+            if ask_fn is None:
+                return "No interactive user is available. Proceed with the most sensible default and note the assumption."
+            return ask_fn(q) or "(no answer given — proceed on your best judgement)"
         if name == "memory_note":
             return _memory_note(task_id, str(args.get("note") or "")) if task_id else "ERROR: no task_id"
         if name == "memory_read":
@@ -199,7 +213,8 @@ def _check_text(check: Any) -> str:
 
 
 def run_fighter(goal: str, checks: list[Any], executor: Any,
-                max_steps: int = 40, max_wall_sec: int = 3600, task_id: str = "") -> dict[str, Any]:
+                max_steps: int = 40, max_wall_sec: int = 3600, task_id: str = "",
+                ask_fn=None, cancel_fn=None) -> dict[str, Any]:
     """The agentic loop. Returns {ok, summary, artifacts, transcript, steps, seconds}."""
     settings = _llm_settings()
     started = time.monotonic()
@@ -210,6 +225,10 @@ def run_fighter(goal: str, checks: list[Any], executor: Any,
     ]
     transcript: list[dict] = []
     for step in range(1, max_steps + 1):
+        if cancel_fn is not None and cancel_fn():
+            return {"ok": False, "summary": "cancelled by user", "artifacts": [],
+                    "transcript": transcript, "steps": step, "seconds": int(time.monotonic() - started),
+                    "cancelled": True}
         if time.monotonic() - started > max_wall_sec:
             return {"ok": False, "summary": f"wall-clock budget exceeded ({max_wall_sec}s)",
                     "artifacts": [], "transcript": transcript, "steps": step, "seconds": int(time.monotonic() - started)}
@@ -235,7 +254,7 @@ def run_fighter(goal: str, checks: list[Any], executor: Any,
                 return {"ok": True, "summary": str(args.get("summary") or ""),
                         "artifacts": [str(a) for a in (args.get("artifacts") or [])],
                         "transcript": transcript, "steps": step, "seconds": int(time.monotonic() - started)}
-            result = _dispatch_tool(executor, name, args, task_id=task_id)
+            result = _dispatch_tool(executor, name, args, task_id=task_id, ask_fn=ask_fn)
             transcript.append({"step": step, "tool": name,
                                "args": {k: (v[:200] if isinstance(v, str) else v) for k, v in args.items()},
                                "result": result[:800]})

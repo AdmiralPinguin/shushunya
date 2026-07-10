@@ -98,22 +98,24 @@ def reconsider(top_goal: str, stuck_goal: str, failed: dict[str, Any]) -> str:
 
 
 def _run_with_retry(goal: str, executor: Any, task_id: str, *, top_goal: str,
-                    note, max_wall_sec: int, rounds: int = 2) -> dict[str, Any]:
+                    note, max_wall_sec: int, rounds: int = 2, ask_fn=None, cancel_fn=None) -> dict[str, Any]:
     """Run a fighter; if it gets stuck, let the planner change the approach once."""
-    res = run_mission(goal, executor, task_id=task_id, max_fighter_rounds=rounds, max_wall_sec=max_wall_sec)
-    if res.get("accepted"):
+    res = run_mission(goal, executor, task_id=task_id, max_fighter_rounds=rounds,
+                      max_wall_sec=max_wall_sec, ask_fn=ask_fn, cancel_fn=cancel_fn)
+    if res.get("accepted") or res.get("status") == "cancelled":
         return res
     note("Планировщик: боец застрял — переобдумываю подход.")
     new_goal = reconsider(top_goal, goal, res)
     if not new_goal:
         return res
     note(f"Планировщик: новый подход → {new_goal[:120]}")
-    res2 = run_mission(new_goal, executor, task_id=task_id, max_fighter_rounds=rounds, max_wall_sec=max_wall_sec)
+    res2 = run_mission(new_goal, executor, task_id=task_id, max_fighter_rounds=rounds,
+                       max_wall_sec=max_wall_sec, ask_fn=ask_fn, cancel_fn=cancel_fn)
     res2["reconsidered"] = True
-    return res2 if res2.get("accepted") else res2
+    return res2
 
 
-def plan_and_run(goal: str, executor: Any, *, task_id: str = "",
+def plan_and_run(goal: str, executor: Any, *, task_id: str = "", ask_fn=None, cancel_fn=None,
                  max_wall_sec: int = 5400, memory=None) -> dict[str, Any]:
     """Plan the goal, run fighters per subtask in one shared workdir, then accept the
     whole thing against the top-level checks. `memory(note)` is an optional callback."""
@@ -128,7 +130,8 @@ def plan_and_run(goal: str, executor: Any, *, task_id: str = "",
     # small task → single fighter, but with the head's anti-stuck retry
     if len(subtasks) <= 1:
         note("Планировщик: задача простая, один боец.")
-        return _run_with_retry(goal, executor, task_id, top_goal=goal, note=note, max_wall_sec=max_wall_sec)
+        return _run_with_retry(goal, executor, task_id, top_goal=goal, note=note,
+                               max_wall_sec=max_wall_sec, ask_fn=ask_fn, cancel_fn=cancel_fn)
 
     note(f"Планировщик разбил на {len(subtasks)} подзадач: " + "; ".join(s["title"] for s in subtasks))
     top_spec = build_spec(goal)          # final acceptance for the whole task
@@ -138,7 +141,11 @@ def plan_and_run(goal: str, executor: Any, *, task_id: str = "",
         # all subtasks share ONE workdir (executor), so files accumulate into one project.
         # anti-stuck: if the fighter can't crack it, the head changes the approach once.
         res = _run_with_retry(sub["goal"], executor, task_id, top_goal=goal, note=note,
-                              max_wall_sec=max_wall_sec // max(1, len(subtasks)))
+                              max_wall_sec=max_wall_sec // max(1, len(subtasks)),
+                              ask_fn=ask_fn, cancel_fn=cancel_fn)
+        if res.get("status") == "cancelled":
+            return {"status": "cancelled", "accepted": False, "subtasks": sub_results,
+                    "summary": "cancelled", "artifacts": [], "checks": top_spec["checks"]}
         sub_results.append({"title": sub["title"], "status": res.get("status"),
                             "accepted": res.get("accepted"), "reconsidered": res.get("reconsidered", False)})
         note(f"  → {sub['title']}: {res.get('status')}")

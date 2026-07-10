@@ -201,5 +201,53 @@ class TestExplorerReviewer(unittest.TestCase):
         self.assertFalse(r["approved"])
 
 
+class TestMissionStore(unittest.TestCase):
+    def test_async_lifecycle_and_result(self):
+        import mission_store, time as _t
+        m = mission_store.create("t-async-1", "goal")
+        mission_store.run_async(m, lambda mm: {"status": "done", "accepted": True})
+        for _ in range(50):
+            if m.status in ("done", "failed"):
+                break
+            _t.sleep(0.05)
+        self.assertEqual(m.status, "done")
+        self.assertTrue(m.result["accepted"])
+
+    def test_ask_user_blocks_then_answers(self):
+        import mission_store, threading, time as _t
+        m = mission_store.create("t-ask-1", "goal")
+        out = {}
+        def worker(mm):
+            out["ans"] = mm.ask_user("which port?")
+            return {"status": "done", "accepted": True}
+        mission_store.run_async(m, worker)
+        for _ in range(40):
+            if m.status == "needs_user":
+                break
+            _t.sleep(0.05)
+        self.assertEqual(m.status, "needs_user")
+        self.assertEqual(m.question, "which port?")
+        self.assertTrue(m.provide_answer("8099"))
+        for _ in range(40):
+            if m.status == "done":
+                break
+            _t.sleep(0.05)
+        self.assertEqual(out.get("ans"), "8099")
+
+    def test_cancel_unblocks_and_stops(self):
+        import mission_store, time as _t
+        m = mission_store.create("t-cancel-1", "goal")
+        def worker(mm):
+            mm.ask_user("waiting?")   # will block until cancel
+            return {"status": "done", "accepted": True}
+        mission_store.run_async(m, worker)
+        for _ in range(40):
+            if m.status == "needs_user":
+                break
+            _t.sleep(0.05)
+        self.assertTrue(mission_store.cancel("t-cancel-1"))
+        self.assertEqual(m.status, "cancelled")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

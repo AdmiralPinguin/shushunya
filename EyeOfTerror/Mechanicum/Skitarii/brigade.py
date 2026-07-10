@@ -19,7 +19,7 @@ from spec import build_spec
 
 
 def run_mission(goal: str, executor: Any, *, checks: list[str] | None = None,
-                task_id: str = "",
+                task_id: str = "", ask_fn=None, cancel_fn=None,
                 max_fighter_rounds: int = 2, max_steps: int = 40,
                 max_wall_sec: int = 3600) -> dict[str, Any]:
     """Drive one code mission end to end. Returns a verdict dict."""
@@ -45,8 +45,12 @@ def run_mission(goal: str, executor: Any, *, checks: list[str] | None = None,
                           "and fix exactly these, then re-run them:\n"
                           + "\n".join(f"- `{f['target']}` -> {f.get('why') or f.get('stderr') or 'failed'}" for f in fails))
         fighter = run_fighter(goal + retry_note, checks, executor, task_id=task_id,
+                              ask_fn=ask_fn, cancel_fn=cancel_fn,
                               max_steps=max_steps, max_wall_sec=max_wall_sec)
         last_fighter = fighter
+        if fighter.get("cancelled"):
+            return {"status": "cancelled", "accepted": False, "rounds": rounds,
+                    "summary": "cancelled", "artifacts": [], "checks": checks}
 
         # 3) Priyomshchik: independent re-run. The fighter's own 'ok' is not trusted.
         artifacts = fighter.get("artifacts") or deliverables
