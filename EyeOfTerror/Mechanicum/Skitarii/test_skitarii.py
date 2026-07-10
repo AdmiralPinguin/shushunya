@@ -37,10 +37,10 @@ class TestNoFalseSuccess(unittest.TestCase):
         v = accept(ex, ["x.py"], [])
         self.assertFalse(v["accepted"])
 
-    def test_passing_check_is_accepted(self):
+    def test_behavioural_check_is_accepted(self):
         ex = _ex()
-        ex.write_file("x.py", "print(1)")
-        v = accept(ex, ["x.py"], [{"cmd": "python3 -m py_compile x.py"}])
+        ex.write_file("x.py", "print('hi')")
+        v = accept(ex, ["x.py"], [{"cmd": "python3 x.py", "expect_stdout": "hi"}])
         self.assertTrue(v["accepted"])
 
     def test_failing_check_is_rejected(self):
@@ -48,6 +48,15 @@ class TestNoFalseSuccess(unittest.TestCase):
         ex.write_file("x.py", "def broken(:")  # syntax error
         v = accept(ex, ["x.py"], [{"cmd": "python3 -m py_compile x.py"}])
         self.assertFalse(v["accepted"])
+
+    def test_compile_only_is_blocked(self):
+        # even if it PASSES, a syntax/compile-only check set must not be accepted —
+        # wrong logic would slip through. This is the review's key gap, now structural.
+        ex = _ex()
+        ex.write_file("x.py", "def add(a,b): return a-b")  # compiles, logic wrong
+        v = accept(ex, ["x.py"], [{"cmd": "python3 -m py_compile x.py"}])
+        self.assertFalse(v["accepted"])
+        self.assertIn("behavioural", v.get("reason", ""))
 
 
 class TestOracleAndExpect(unittest.TestCase):

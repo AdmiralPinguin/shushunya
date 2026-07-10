@@ -10,6 +10,7 @@ correct — the model never hand-writes shell.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -38,6 +39,23 @@ def run_check(executor: Any, check: dict[str, Any]) -> dict[str, Any]:
     return {**record, "ok": True}
 
 
+_COMPILE_RE = re.compile(r"py_compile|php\s+-l|node\s+--check|tsc\s|bash\s+-n|-fsyntax-only|gofmt|javac\b")
+_TEST_RE = re.compile(r"pytest|unittest|\bnose\b|jest|mocha|go\s+test|phpunit|\brspec\b|(^|/)test_|_test\.")
+
+
+def check_kind(check: dict[str, Any]) -> str:
+    """behavior = verifies output (expect_stdout/oracle); test = runs a test runner;
+    compile = syntax/compile only; run = bare command (weakly behavioural)."""
+    if "expect_stdout" in check or "oracle" in check:
+        return "behavior"
+    cmd = str(check.get("cmd") or "")
+    if _TEST_RE.search(cmd):
+        return "test"
+    if _COMPILE_RE.search(cmd):
+        return "compile"
+    return "run"
+
+
 def accept(executor: Any, deliverables: list[str], checks: list[dict[str, Any]]) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     for path in deliverables:
@@ -45,12 +63,19 @@ def accept(executor: Any, deliverables: list[str], checks: list[dict[str, Any]])
         exists = r["returncode"] == 0
         results.append({"kind": "deliverable", "target": path, "ok": exists})
     for check in checks:
-        results.append(run_check(executor, check))
-    # A mission that proved NOTHING must not be accepted. Require at least one real
-    # executable check (a deliverable-exists test alone is too weak — it says the file
-    # is there, not that it works). Empty spec => blocked, never a false success.
+        res = run_check(executor, check)
+        res["check_kind"] = check_kind(check)
+        results.append(res)
+    # A mission that proved NOTHING must not be accepted.
     if not checks:
         return {"accepted": False, "results": results,
                 "reason": "no executable success checks were produced — cannot confirm the work is correct"}
+    # STRUCTURAL gate (not just a prompt hint): compile/syntax alone can't catch wrong
+    # logic. Require at least one BEHAVIOURAL or TEST check, else BLOCKED.
+    kinds = {check_kind(c) for c in checks}
+    if not (kinds & {"behavior", "test"}):
+        return {"accepted": False, "results": results,
+                "reason": "checks are compile/run-only — no behavioural or functional test, "
+                          "so wrong logic could pass. Add an expect_stdout/oracle or a test run."}
     ok = bool(results) and all(r["ok"] for r in results)
     return {"accepted": ok, "results": results}

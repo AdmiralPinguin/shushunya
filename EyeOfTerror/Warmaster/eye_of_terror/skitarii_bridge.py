@@ -38,10 +38,32 @@ _SLICE_STOP = {"почини", "исправь", "измени", "добавь",
                "который", "которая", "please", "code", "file", "project", "function", "должна", "чтобы"}
 
 
-def _repo_slice(goal: str, max_files: int = 15) -> dict[str, str]:
-    """PATCH task named no files. Pull a relevant slice of the repo by grepping the
-    goal's keywords across source files, so the fighter edits real code. Bounded and
-    scoped to the repo (excludes vcs/runtime/models/vm)."""
+_CODE_EXT = (".py", ".php", ".js", ".ts", ".go", ".java", ".rb", ".rs", ".c", ".h", ".cpp")
+
+
+def _add_file(files: dict[str, str], root: str, p: Path, limit: int) -> bool:
+    """Add p to files (rel→content) if safe/small/new. Returns True if room remains."""
+    try:
+        rel = str(p.resolve().relative_to(root))
+    except (OSError, ValueError):
+        return len(files) < limit
+    _JUNK = ("site-packages/", "dist-packages/", "/venv/", "/.venv/", "node_modules/",
+             "/__pycache__/", "DemonsForge/DemonsForge/", "/lib/python")
+    if rel in files or _safe_repo_file(rel) is None or any(j in "/" + rel for j in _JUNK):
+        return len(files) < limit
+    try:
+        if p.stat().st_size < 100_000:
+            files[rel] = p.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        pass
+    return len(files) < limit
+
+
+def _repo_slice(goal: str, max_files: int = 40) -> dict[str, str]:
+    """PATCH task named no files. Build a MODULE-level slice: grep the goal's keywords
+    to find target files, then pull their directory neighbours and nearby tests so the
+    fighter sees real context (siblings, tests, config) — not one isolated file, but
+    also not the whole monorepo. Bounded and scoped to the repo."""
     import re
     import subprocess
     words = [w for w in re.findall(r"[A-Za-zА-Яа-я_][\w-]{3,}", goal) if w.lower() not in _SLICE_STOP]
@@ -49,31 +71,36 @@ def _repo_slice(goal: str, max_files: int = 15) -> dict[str, str]:
         return {}
     root = str(REPO_ROOT.resolve())
     files: dict[str, str] = {}
+    target_dirs: set[Path] = set()
+    # 1) target files by keyword
     for kw in words[:6]:
         try:
             out = subprocess.run(
-                ["grep", "-rliI", "--include=*.py", "--include=*.php", "--include=*.js",
-                 "--include=*.ts", "--include=*.go", "--include=*.java",
-                 "--exclude-dir=.git", "--exclude-dir=node_modules", "--exclude-dir=runtime",
+                ["grep", "-rliI"] + [f"--include=*{e}" for e in _CODE_EXT] +
+                ["--exclude-dir=.git", "--exclude-dir=node_modules", "--exclude-dir=runtime",
                  "--exclude-dir=models", "--exclude-dir=vm-sandbox", "--exclude-dir=__pycache__",
+                 "--exclude-dir=venv", "--exclude-dir=.venv", "--exclude-dir=site-packages",
+                 "--exclude-dir=lib", "--exclude-dir=dist-packages", "--exclude-dir=DemonsForge",
                  kw, root],
                 capture_output=True, text=True, timeout=25).stdout
         except (OSError, subprocess.SubprocessError):
             continue
         for line in out.splitlines():
-            p = _safe_repo_file(str(Path(line).resolve().relative_to(root))) if line.startswith(root) else None
-            if p is None:
+            if not line.startswith(root):
                 continue
-            rel = str(p.relative_to(root))
-            if rel in files:
-                continue
-            try:
-                if p.stat().st_size < 100_000:
-                    files[rel] = p.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                pass
-            if len(files) >= max_files:
-                return files
+            p = Path(line)
+            target_dirs.add(p.parent)
+            if not _add_file(files, root, p, max_files // 2):
+                break
+    # 2) directory neighbours + tests around the targets (module context)
+    for d in list(target_dirs)[:8]:
+        try:
+            for p in sorted(d.iterdir()):
+                if p.is_file() and p.suffix in _CODE_EXT:
+                    if not _add_file(files, root, p, max_files):
+                        return files
+        except OSError:
+            pass
     return files
 
 

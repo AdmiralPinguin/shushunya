@@ -135,7 +135,14 @@ class Handler(BaseHTTPRequestHandler):
                 preloaded += 1
             except Exception:
                 pass
+        base_commit = ""
         if preloaded:
+            # snapshot the preloaded project as a git baseline so we can return a clean
+            # unified diff of exactly what the fighter changed (Этап 3: patch bundle).
+            snap = ex.bash("git init -q . && git add -A && "
+                           "git -c user.email=b@x -c user.name=skitarii commit -qm baseline && "
+                           "git rev-parse HEAD", timeout=60)
+            base_commit = (snap.get("stdout") or "").strip().split("\n")[-1]
             goal = (goal + f"\n\n(ПРАВКА СУЩЕСТВУЮЩЕГО кода: {preloaded} файл(ов) проекта уже лежат в "
                            "рабочем каталоге с их путями — читай и правь их, НЕ переписывай с нуля.)")
             _memory(task_id, f"Загружено {preloaded} файлов проекта для правки ({mode}).")
@@ -155,6 +162,18 @@ class Handler(BaseHTTPRequestHandler):
                                    memory=lambda m: _memory(task_id, m))
         verdict["files"] = _collect_files(ex, verdict.get("artifacts") or [])
         verdict["task_id"] = task_id
+        # patch bundle: a reviewable unified diff of what actually changed vs the baseline,
+        # plus rollback — the host applies it only after acceptance, never blindly.
+        if base_commit:
+            diff = ex.bash("git diff HEAD", timeout=60).get("stdout") or ""
+            changed = [ln for ln in (ex.bash("git diff --name-only HEAD", timeout=30).get("stdout") or "").splitlines() if ln]
+            verdict["patch_bundle"] = {
+                "base_commit": base_commit,
+                "changed_files": changed,
+                "unified_diff": diff[:400_000],
+                "rollback": "git apply -R <patch>",
+                "apply_gate": "accepted" if verdict.get("accepted") else "blocked",
+            }
         _memory(task_id, f"Итог: {verdict.get('status')} (accepted={verdict.get('accepted')}). "
                          f"{str(verdict.get('summary') or '')[:300]} Файлы: {verdict.get('artifacts')}")
         self._send(200, verdict)
