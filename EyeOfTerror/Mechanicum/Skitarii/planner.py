@@ -1,0 +1,158 @@
+"""Planner — the head of the brigade (separate agent, non-coder model).
+
+The coder fighters (Qwen) are strong hands but a weak head: they don't decompose,
+don't plan, and can tunnel into a wall. So a separate planner on a general model
+(gemma) does the thinking: split the goal into ordered subtasks, hand each to a
+fighter, watch progress, and decide done/continue/redirect. Head and hands are
+deliberately different agents on different models.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import urllib.request
+from typing import Any
+
+from brigade import run_mission
+from acceptor import accept
+from spec import build_spec
+
+
+def _planner_chat(prompt: str, max_tokens: int = 1200) -> str:
+    base = os.environ.get("PLANNER_LLM_BASE_URL", "http://127.0.0.1:8079/v1").rstrip("/")
+    if not base.endswith("/v1"):
+        base += "/v1"
+    payload = {
+        "model": os.environ.get("PLANNER_LLM_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"),
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0,
+        "max_tokens": max_tokens,
+    }
+    req = urllib.request.Request(f"{base}/chat/completions",
+                                 data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=300) as resp:
+        return str(((json.loads(resp.read()).get("choices") or [{}])[0].get("message") or {}).get("content") or "")
+
+
+def _extract_json(text: str) -> Any:
+    m = re.search(r"\[.*\]|\{.*\}", text, re.DOTALL)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except json.JSONDecodeError:
+        return None
+
+
+def decompose(goal: str) -> list[dict[str, Any]]:
+    """Split the goal into ordered subtasks. Returns [] for a small single-file task
+    (the caller then runs one fighter directly)."""
+    prompt = (
+        "You are the planning head of a coding brigade. Split the task into the MINIMUM number of "
+        "independent subtasks, each producing one file or coherent module with a clear goal. "
+        "A small task (one script/file) is ONE subtask — do not over-split. Order them so earlier "
+        "subtasks are prerequisites of later ones.\n"
+        'Return ONE JSON array and nothing else: [{"title": "...", "goal": "concrete instruction for a coder", '
+        '"depends_on": [indexes of earlier subtasks it needs, or []]}]\n\n'
+        f"TASK:\n{goal}"
+    )
+    try:
+        parsed = _extract_json(_planner_chat(prompt))
+    except Exception:
+        parsed = None
+    if not isinstance(parsed, list):
+        return []
+    subtasks = []
+    for i, item in enumerate(parsed):
+        if isinstance(item, dict) and str(item.get("goal") or "").strip():
+            subtasks.append({
+                "title": str(item.get("title") or f"subtask {i+1}"),
+                "goal": str(item.get("goal")),
+                "depends_on": [int(x) for x in (item.get("depends_on") or []) if isinstance(x, (int, float))],
+            })
+    return subtasks
+
+
+def reconsider(top_goal: str, stuck_goal: str, failed: dict[str, Any]) -> str:
+    """The head's anti-stuck move: a fighter got stuck (rounds exhausted, checks still
+    red). Ask the planner model for a DIFFERENT, simpler approach to the same goal."""
+    fails = ""
+    acc = failed.get("acceptance") or {}
+    if isinstance(acc, dict):
+        fails = "; ".join(str(r.get("why") or r.get("target")) for r in acc.get("results", []) if not r.get("ok"))
+    prompt = (
+        "A coder got STUCK on a subtask: it exhausted its attempts and the checks are still failing. "
+        "Do not repeat the same approach. Rewrite the subtask instruction with a DIFFERENT, simpler, more "
+        "robust strategy that still satisfies it (e.g. a simpler algorithm, standard library instead of a "
+        "dependency, smaller scope first). Return ONLY the new instruction text, no preamble.\n\n"
+        f"OVERALL TASK:\n{top_goal}\n\nSTUCK SUBTASK:\n{stuck_goal}\n\n"
+        f"WHAT FAILED:\n{fails or failed.get('summary','')}"
+    )
+    try:
+        out = _planner_chat(prompt, max_tokens=500).strip()
+        return out if len(out) > 10 else ""
+    except Exception:
+        return ""
+
+
+def _run_with_retry(goal: str, executor: Any, task_id: str, *, top_goal: str,
+                    note, max_wall_sec: int, rounds: int = 2) -> dict[str, Any]:
+    """Run a fighter; if it gets stuck, let the planner change the approach once."""
+    res = run_mission(goal, executor, task_id=task_id, max_fighter_rounds=rounds, max_wall_sec=max_wall_sec)
+    if res.get("accepted"):
+        return res
+    note("Планировщик: боец застрял — переобдумываю подход.")
+    new_goal = reconsider(top_goal, goal, res)
+    if not new_goal:
+        return res
+    note(f"Планировщик: новый подход → {new_goal[:120]}")
+    res2 = run_mission(new_goal, executor, task_id=task_id, max_fighter_rounds=rounds, max_wall_sec=max_wall_sec)
+    res2["reconsidered"] = True
+    return res2 if res2.get("accepted") else res2
+
+
+def plan_and_run(goal: str, executor: Any, *, task_id: str = "",
+                 max_wall_sec: int = 5400, memory=None) -> dict[str, Any]:
+    """Plan the goal, run fighters per subtask in one shared workdir, then accept the
+    whole thing against the top-level checks. `memory(note)` is an optional callback."""
+    def note(msg: str) -> None:
+        if memory:
+            try:
+                memory(msg)
+            except Exception:
+                pass
+
+    subtasks = decompose(goal)
+    # small task → single fighter, but with the head's anti-stuck retry
+    if len(subtasks) <= 1:
+        note("Планировщик: задача простая, один боец.")
+        return _run_with_retry(goal, executor, task_id, top_goal=goal, note=note, max_wall_sec=max_wall_sec)
+
+    note(f"Планировщик разбил на {len(subtasks)} подзадач: " + "; ".join(s["title"] for s in subtasks))
+    top_spec = build_spec(goal)          # final acceptance for the whole task
+    sub_results: list[dict[str, Any]] = []
+    for i, sub in enumerate(subtasks):
+        note(f"Подзадача {i+1}/{len(subtasks)}: {sub['title']}")
+        # all subtasks share ONE workdir (executor), so files accumulate into one project.
+        # anti-stuck: if the fighter can't crack it, the head changes the approach once.
+        res = _run_with_retry(sub["goal"], executor, task_id, top_goal=goal, note=note,
+                              max_wall_sec=max_wall_sec // max(1, len(subtasks)))
+        sub_results.append({"title": sub["title"], "status": res.get("status"),
+                            "accepted": res.get("accepted"), "reconsidered": res.get("reconsidered", False)})
+        note(f"  → {sub['title']}: {res.get('status')}")
+        if not res.get("accepted"):
+            note(f"Планировщик: подзадача '{sub['title']}' не сдалась даже после смены подхода — эскалирую.")
+            return {"status": "failed", "accepted": False, "subtasks": sub_results,
+                    "summary": f"Subtask '{sub['title']}' failed: {res.get('summary','')}",
+                    "artifacts": res.get("artifacts", []), "checks": top_spec["checks"]}
+
+    # whole-task acceptance: re-run the top-level checks against the combined project
+    acceptance = accept(executor, top_spec["deliverables"], top_spec["checks"])
+    note(f"Планировщик: итоговая приёмка — {'принято' if acceptance['accepted'] else 'НЕ принято'}.")
+    return {"status": "done" if acceptance["accepted"] else "failed",
+            "accepted": acceptance["accepted"], "subtasks": sub_results,
+            "summary": f"Собрано из {len(subtasks)} подзадач. Итоговые проверки: "
+                       f"{'все прошли' if acceptance['accepted'] else 'не все прошли'}.",
+            "artifacts": [], "checks": top_spec["checks"], "acceptance": acceptance}

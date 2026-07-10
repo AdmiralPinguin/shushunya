@@ -1,0 +1,17 @@
+[Unit]
+Description=Shushunya full stack (LLMs, archive, governors, bots)
+# Wait until the SHUSHUNYA data disk is mounted and the network is up.
+Requires=media-shushunya-SHUSHUNYA.mount
+After=media-shushunya-SHUSHUNYA.mount network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Owner of the project files. Change if the stack should run as another user.
+User=codexbox
+ExecStart=/media/shushunya/SHUSHUNYA/shushunya/boot-stack.sh
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

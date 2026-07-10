@@ -1,0 +1,156 @@
+"""Skitarii brigade HTTP service.
+
+The single door the governor knocks on for a code mission. Replaces the old
+six paper-workers: one POST runs the whole brigade (spec -> fighter loop -> accept)
+inside the sandbox VM and returns an honest verdict.
+
+  POST /mission  {"goal": "...", "task_id": "...", "checks": [...optional...]}
+      -> {"status": "done|failed", "accepted": bool, "summary", "artifacts",
+          "checks", "rounds":[...], "files": {path: content}}
+  GET  /health
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from brigade import run_mission  # noqa: E402
+from planner import plan_and_run  # noqa: E402
+from executor import VmExecutor  # noqa: E402
+
+VM_KEY = os.environ.get("SKITARII_VM_KEY",
+                        "/media/shushunya/SHUSHUNYA/shushunya/CoreOfMadness/vm-sandbox/skitarii_key")
+VM_PORT = int(os.environ.get("SKITARII_VM_PORT", "2222"))
+
+
+def _memory(task_id: str, note: str) -> None:
+    """Best-effort note to the task's wiki memory page (also feeds Shushunya)."""
+    try:
+        from harness import _memory_note
+        _memory_note(task_id, note)
+    except Exception:
+        pass
+
+
+def _mission_executor(task_id: str) -> VmExecutor:
+    # Each RUN gets its own unique clean workdir — a random suffix so two concurrent
+    # requests with the same task_id can't wipe each other's directory (race fix).
+    import uuid
+    safe = "".join(c for c in task_id if c.isalnum() or c in "-_") or "mission"
+    workdir = f"/home/skitarii/work/{safe}-{uuid.uuid4().hex[:8]}"
+    ex = VmExecutor(host="127.0.0.1", port=VM_PORT, user="skitarii", key=VM_KEY, workdir=workdir)
+    ex.bash(f"rm -rf {workdir}; mkdir -p {workdir}", timeout=30)
+    return ex
+
+
+def _collect_files(ex: VmExecutor, artifacts: list[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for path in artifacts[:12]:
+        try:
+            out[path] = ex.fetch_artifact(path).decode("utf-8", errors="replace")[:100_000]
+        except Exception:
+            pass
+    if not out:
+        # decomposed missions may not name artifacts — grab the code files in the workdir
+        listing = ex.bash("find . -maxdepth 2 -type f "
+                          "\\( -name '*.py' -o -name '*.php' -o -name '*.js' -o -name '*.sh' -o -name '*.md' "
+                          "-o -name '*.html' -o -name '*.css' -o -name '*.json' \\) | head -20", timeout=30)
+        for path in (listing.get("stdout") or "").split():
+            path = path.lstrip("./")
+            try:
+                out[path] = ex.fetch_artifact(path).decode("utf-8", errors="replace")[:100_000]
+            except Exception:
+                pass
+    return out
+
+
+class Handler(BaseHTTPRequestHandler):
+    def _send(self, code: int, obj: dict) -> None:
+        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):  # quiet
+        pass
+
+    def do_GET(self):
+        if self.path == "/health":
+            ex = VmExecutor(host="127.0.0.1", port=VM_PORT, user="skitarii", key=VM_KEY)
+            self._send(200, {"status": "ok", "service": "Skitarii", "vm_alive": ex.alive()})
+        else:
+            self._send(404, {"error": "not found"})
+
+    def do_POST(self):
+        if self.path != "/mission":
+            self._send(404, {"error": "not found"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, json.JSONDecodeError) as exc:
+            self._send(400, {"error": f"bad json: {exc}"})
+            return
+        goal = str(payload.get("goal") or "").strip()
+        if not goal:
+            self._send(400, {"error": "goal is required"})
+            return
+        task_id = str(payload.get("task_id") or f"m{int(time.time())}")
+        checks = payload.get("checks") if isinstance(payload.get("checks"), list) else None
+        workspace_files = payload.get("workspace_files") if isinstance(payload.get("workspace_files"), dict) else {}
+        mode = str(payload.get("mode") or "greenfield")
+        ex = _mission_executor(task_id)
+        if not ex.alive():
+            self._send(503, {"error": "sandbox VM is not reachable"})
+            return
+        # PATCH mode: preload the real project files so the fighter edits existing
+        # source instead of writing a blank greenfield file.
+        preloaded = 0
+        for rel, content in (workspace_files or {}).items():
+            try:
+                ex.write_file(str(rel), str(content))
+                preloaded += 1
+            except Exception:
+                pass
+        if preloaded:
+            goal = (goal + f"\n\n(ПРАВКА СУЩЕСТВУЮЩЕГО кода: {preloaded} файл(ов) проекта уже лежат в "
+                           "рабочем каталоге с их путями — читай и правь их, НЕ переписывай с нуля.)")
+            _memory(task_id, f"Загружено {preloaded} файлов проекта для правки ({mode}).")
+        elif mode == "patch":
+            _memory(task_id, "Режим patch, но целевые файлы не определены — работаю как greenfield по цели.")
+        _memory(task_id, f"Старт код-миссии. Цель: {goal[:400]}")
+        if checks:
+            # caller pinned exact checks → straight fighter, skip planning
+            verdict = run_mission(goal, ex, checks=checks, task_id=task_id,
+                                  max_fighter_rounds=int(payload.get("max_rounds") or 3),
+                                  max_steps=int(payload.get("max_steps") or 40),
+                                  max_wall_sec=int(payload.get("max_wall_sec") or 3600))
+        else:
+            # planner head decides: decompose into subtasks or run one fighter
+            verdict = plan_and_run(goal, ex, task_id=task_id,
+                                   max_wall_sec=int(payload.get("max_wall_sec") or 3600),
+                                   memory=lambda m: _memory(task_id, m))
+        verdict["files"] = _collect_files(ex, verdict.get("artifacts") or [])
+        verdict["task_id"] = task_id
+        _memory(task_id, f"Итог: {verdict.get('status')} (accepted={verdict.get('accepted')}). "
+                         f"{str(verdict.get('summary') or '')[:300]} Файлы: {verdict.get('artifacts')}")
+        self._send(200, verdict)
+
+
+def main():
+    host = os.environ.get("SKITARII_HOST", "127.0.0.1")
+    port = int(os.environ.get("SKITARII_PORT", "7200"))
+    srv = ThreadingHTTPServer((host, port), Handler)
+    print(f"Skitarii brigade listening on http://{host}:{port}", flush=True)
+    srv.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

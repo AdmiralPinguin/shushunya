@@ -44,7 +44,7 @@ def model_settings() -> dict[str, Any]:
         "base_url": base_url,
         "model": os.environ.get("EYE_MODEL_NAME") or os.environ.get("ARCHIVE_DEFAULT_MODEL") or os.environ.get("LLM_MODEL") or DEFAULT_MODEL,
         "timeout_sec": _float_env("EYE_MODEL_TIMEOUT_SEC", 180.0, 1.0, 600.0),
-        "max_tokens": _int_env("EYE_MODEL_MAX_TOKENS", 1024, 32, 4096),
+        "max_tokens": _int_env("EYE_MODEL_MAX_TOKENS", 1024, 32, 32768),
         "max_context_chars": _int_env("EYE_MODEL_MAX_CONTEXT_CHARS", 12000, 1000, 120000),
     }
 
@@ -130,15 +130,19 @@ def request_model_decision(
     *,
     layer: str = "worker",
     instructions: str = "Follow the worker contract and produce role-scoped guidance.",
+    max_tokens: int | None = None,
 ) -> dict[str, Any]:
     settings = model_settings()
     started = time.monotonic()
     contract = model_contract(owner, role, layer=layer)
+    # Callers that must emit a whole program in one shot (from-scratch codegen) can
+    # request a larger budget than the default; clamp to the model's hard ceiling.
+    effective_max_tokens = int(settings["max_tokens"]) if max_tokens is None else max(32, min(int(max_tokens), 32768))
     payload = {
         "model": settings["model"],
         "messages": _messages(owner, role, request, instructions, int(settings["max_context_chars"])),
         "temperature": 0,
-        "max_tokens": int(settings["max_tokens"]),
+        "max_tokens": effective_max_tokens,
         "chat_template_kwargs": {"enable_thinking": False},
     }
     url = f"{settings['base_url']}/chat/completions"

@@ -252,6 +252,15 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             write_json(self, 200, {"query": query, "memory_namespace": namespace, "matches": matches})
             return
 
+        if self.path.startswith("/archive/task-page"):
+            import task_page
+            params = parse_qs(urlsplit(self.path).query) if "?" in self.path else {}
+            task_id = (params.get("task_id") or [""])[0]
+            namespace = (params.get("namespace") or [None])[0]
+            content = task_page.read_task_page(task_id, namespace=namespace) if task_id else ""
+            write_json(self, 200, {"task_id": task_id, "content": content})
+            return
+
         if self.path.startswith("/archive/graph/search"):
             query = ""
             namespace = "default"
@@ -505,6 +514,25 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             if not require_auth(self, allow_mobile=True):
                 return
             self.mobile_chat_stream()
+            return
+
+        if self.path.startswith("/archive/task-page"):
+            try:
+                payload = read_json(self)
+            except json.JSONDecodeError as exc:
+                write_json(self, 400, {"ok": False, "error": f"Invalid JSON: {exc}"})
+                return
+            import task_page
+            task_id = str(payload.get("task_id") or "")
+            if not task_id:
+                write_json(self, 400, {"ok": False, "error": "task_id required"})
+                return
+            namespace = payload.get("namespace")
+            if payload.get("note"):
+                task_page.append_task_note(task_id, str(payload["note"]), namespace=namespace)
+            elif payload.get("body") is not None:
+                task_page.write_task_page(task_id, str(payload["body"]), namespace=namespace)
+            write_json(self, 200, {"ok": True, "task_id": task_id})
             return
 
         if self.path in ("/archive/chat/reports/register-token", "/archive/mobile/chat/reports/register-token"):

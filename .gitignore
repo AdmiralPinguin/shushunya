@@ -184,3 +184,6 @@ Shushunya_M/app/google-services.json
 Corpus/*.txt
 Corpus/*.epub
 Corpus/*.pdf
+
+# Skitarii sandbox VM: private key, disk images, cloud-init
+CoreOfMadness/vm-sandbox/

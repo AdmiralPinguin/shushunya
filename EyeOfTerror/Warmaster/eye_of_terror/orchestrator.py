@@ -23,6 +23,7 @@ from .run_package import load_json_file, load_json_object, load_ledger_dict, run
 from .run_state import list_runs, orchestration_state, run_progress, run_snapshot, run_summary
 from .run_validation import revision_plan_summary, run_oversight_summary, validate_oversight_against_run, validate_revision_plan
 from .runtime_state import ACTIVE_RUNS, ACTIVE_RUNS_LOCK, REPO_ROOT
+from .skitarii_bridge import run_via_skitarii, should_handle as skitarii_should_handle
 from .task_prepare import prepare_task, preflight_task
 from .views import executable_client_action, orchestration_view_fields, recovery_candidate_display
 
@@ -621,6 +622,10 @@ def research_loop_run(
     revision_cycles = 0
     stop_reason = "unknown"
     try:
+        # Brigade v2: hand Ceraxia code missions to the Skitarii sandbox brigade
+        # instead of the retired six-worker paper pipeline.
+        if skitarii_should_handle(run_dir):
+            return run_via_skitarii(run_dir, task_id, timeout_sec=timeout_sec)
         record_research_loop_event(
             run_dir,
             "research_loop_started",
@@ -744,6 +749,20 @@ def research_loop_run(
                     "step_ids": cycle.get("step_ids", []),
                 },
             )
+            if execution.get("ok"):
+                # A cycle that executed cleanly with nothing left to revise IS the
+                # finished mission. Mark it completed so the next iteration accepts
+                # and stops — otherwise the run looks startable again and a fresh
+                # full cycle re-invokes the model, which can wreck an already-good
+                # result (a passing finalize turned into needs_revision).
+                post_ok_summary = run_summary(run_dir)
+                post_ok_revision = post_ok_summary.get("revision_plan_summary") if isinstance(post_ok_summary.get("revision_plan_summary"), dict) else {}
+                if not post_ok_revision.get("required") and str(post_ok_summary.get("status") or "") != "completed":
+                    try:
+                        TaskLedger.load(run_dir / "task_ledger.json").set_status("completed")
+                        record_research_loop_event(run_dir, "research_loop_cycle_succeeded", {"cycle": cycle["index"], "operation": operation})
+                    except Exception:  # noqa: BLE001
+                        pass
             if not execution.get("ok"):
                 post_execution_summary = run_summary(run_dir)
                 post_revision_summary = post_execution_summary.get("revision_plan_summary") if isinstance(post_execution_summary.get("revision_plan_summary"), dict) else {}
