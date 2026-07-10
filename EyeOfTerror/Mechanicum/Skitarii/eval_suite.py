@@ -89,22 +89,27 @@ _t("unspecified", "un5", "clamp.py.clamp(15,0,10) должно 10. Есть ба
    [{"cmd": "python3 -c 'import clamp; print(clamp.clamp(15,0,10))'", "expect_stdout": "10"}],
    seed={"clamp.py": "def clamp(x, lo, hi):\n    return max(lo, x)\n"})
 
-# 5) regression — fix without breaking existing tests
+# 5) regression — fix without breaking existing tests.
+# The oracle check runs the seed test file WITHOUT requiring pytest (a bare Ubuntu /
+# our verifying host may not have it): import the test module and call every test_*
+# function; a failing assert raises -> non-zero exit. Prints "ok" on success.
+_RUNTESTS = ("python3 -c \"import {m} as t; [f() for n,f in sorted(vars(t).items()) "
+             "if n.startswith('test') and callable(f)]; print('ok')\"")
 _t("regression", "rg1", "Почини add в mathx.py (сейчас a-b, нужно a+b) и НЕ сломай существующий test_mathx.py.",
-   [{"cmd": "python3 -m pytest -q test_mathx.py"}],
+   [{"cmd": _RUNTESTS.format(m="test_mathx"), "expect_stdout": "ok"}],
    seed={"mathx.py": "def add(a,b): return a-b\ndef mul(a,b): return a*b\n",
          "test_mathx.py": "from mathx import add, mul\ndef test_add(): assert add(2,3)==5\ndef test_mul(): assert mul(2,3)==6\n"})
 _t("regression", "rg2", "Добавь в str2.py функцию shout(s)=s.upper()+'!'; существующий test_str2.py для reverse не сломай.",
-   [{"cmd": "python3 -m pytest -q test_str2.py"}, {"cmd": "python3 -c 'import str2; print(str2.shout(\"hi\"))'", "expect_stdout": "HI!"}],
+   [{"cmd": _RUNTESTS.format(m="test_str2"), "expect_stdout": "ok"}, {"cmd": "python3 -c 'import str2; print(str2.shout(\"hi\"))'", "expect_stdout": "HI!"}],
    seed={"str2.py": "def reverse(s): return s[::-1]\n", "test_str2.py": "from str2 import reverse\ndef test_rev(): assert reverse('ab')=='ba'\n"})
 _t("regression", "rg3", "Почини bug в num.py.parse (возвращает str, нужно int) и не сломай test_num.py.",
-   [{"cmd": "python3 -m pytest -q test_num.py"}],
+   [{"cmd": _RUNTESTS.format(m="test_num"), "expect_stdout": "ok"}],
    seed={"num.py": "def parse(s): return s\n", "test_num.py": "from num import parse\ndef test(): assert parse('5')==5\n"})
 _t("regression", "rg4", "В list_ops.py.first() ошибка, почини. test_list_ops.py должен остаться зелёным.",
-   [{"cmd": "python3 -m pytest -q test_list_ops.py"}],
+   [{"cmd": _RUNTESTS.format(m="test_list_ops"), "expect_stdout": "ok"}],
    seed={"list_ops.py": "def first(xs): return xs[-1]\n", "test_list_ops.py": "from list_ops import first\ndef test(): assert first([1,2,3])==1\n"})
 _t("regression", "rg5", "Почини temp.py.c_to_f (сейчас +32, нужно *9/5+32). test_temp.py не сломать.",
-   [{"cmd": "python3 -m pytest -q test_temp.py"}],
+   [{"cmd": _RUNTESTS.format(m="test_temp"), "expect_stdout": "ok"}],
    seed={"temp.py": "def c_to_f(c): return c + 32\n", "test_temp.py": "from temp import c_to_f\ndef test(): assert c_to_f(100)==212\n"})
 
 # 6) ambiguous — the right move is to ask (expects_clarification)
@@ -140,6 +145,7 @@ def _independent_verify(task: dict, files: dict) -> tuple[bool | None, str]:
     (delivered wins). This does NOT trust the service's self-report — it independently
     re-derives truth. Returns (passed, detail); passed is None when we can't check (a
     required interpreter, e.g. php/node, is missing on the host)."""
+    import importlib.util
     import pathlib
     import shutil
     import subprocess
@@ -166,6 +172,11 @@ def _independent_verify(task: dict, files: dict) -> tuple[bool | None, str]:
             cmd = str(c.get("cmd") or "")
             interp = cmd.strip().split()[0] if cmd.strip() else ""
             if interp in ("php", "node") and shutil.which(interp) is None:
+                unverifiable = True
+                continue
+            # a check that needs pytest can't be trusted on a host without it — mark
+            # unverifiable rather than falsely blaming the warband for our missing tool
+            if "pytest" in cmd and importlib.util.find_spec("pytest") is None:
                 unverifiable = True
                 continue
             try:
