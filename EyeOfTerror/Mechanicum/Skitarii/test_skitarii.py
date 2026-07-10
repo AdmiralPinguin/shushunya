@@ -164,5 +164,42 @@ class TestBridge(unittest.TestCase):
         self.assertGreater(len(f), 0)
 
 
+class TestExplorerReviewer(unittest.TestCase):
+    def test_explorer_greenfield_is_empty(self):
+        import explorer
+        exp = explorer.explore("напиши новый скрипт", None)
+        self.assertEqual(exp["target_files"], [])
+
+    def test_explorer_parses_and_scopes(self):
+        import explorer
+        orig = explorer._chat
+        explorer._chat = lambda p, max_tokens=900: (
+            '{"target_files":["a.py"],"related_files":["b.py"],"tests":["test_a.py"],'
+            '"invariants":["mul stays correct"],"risks":["off-by-one"]}')
+        try:
+            exp = explorer.explore("fix a.py", {"a.py": "def add(): pass", "b.py": "x=1"})
+        finally:
+            explorer._chat = orig
+        self.assertIn("a.py", exp["target_files"])
+        self.assertIn("mul stays correct", exp["invariants"])
+        self.assertIn("Recon", explorer.brief_for_fighter(exp))
+
+    def test_reviewer_vetoes_empty_diff(self):
+        import reviewer
+        r = reviewer.review("fix bug", "", {"results": []})
+        self.assertFalse(r["approved"])
+
+    def test_reviewer_rejects_when_acceptance_failed(self):
+        import reviewer
+        orig = reviewer._chat
+        reviewer._chat = lambda p, max_tokens=700: '{"approved": true, "issues": []}'
+        try:
+            # even if the model says approve, a real acceptance failure forces reject
+            r = reviewer.review("fix", "diff --git a b\n+x", {"results": [{"ok": False, "target": "t"}]})
+        finally:
+            reviewer._chat = orig
+        self.assertFalse(r["approved"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

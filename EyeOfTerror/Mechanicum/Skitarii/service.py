@@ -22,6 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from brigade import run_mission  # noqa: E402
 from planner import plan_and_run  # noqa: E402
 from executor import VmExecutor  # noqa: E402
+from explorer import explore, brief_for_fighter  # noqa: E402
+from reviewer import review  # noqa: E402
 
 VM_KEY = os.environ.get("SKITARII_VM_KEY",
                         "/media/shushunya/SHUSHUNYA/shushunya/CoreOfMadness/vm-sandbox/skitarii_key")
@@ -148,6 +150,15 @@ class Handler(BaseHTTPRequestHandler):
             _memory(task_id, f"Загружено {preloaded} файлов проекта для правки ({mode}).")
         elif mode == "patch":
             _memory(task_id, "Режим patch, но целевые файлы не определены — работаю как greenfield по цели.")
+        # Explorer: recon over the loaded project → steer the fighter (target files,
+        # invariants, existing tests) instead of grepping blindly.
+        exploration = {}
+        if workspace_files:
+            exploration = explore(goal, workspace_files)
+            brief = brief_for_fighter(exploration)
+            if brief:
+                goal += brief
+                _memory(task_id, "Explorer наметил цели/инварианты.")
         _memory(task_id, f"Старт код-миссии. Цель: {goal[:400]}")
         if checks:
             # caller pinned exact checks → straight fighter, skip planning
@@ -167,6 +178,21 @@ class Handler(BaseHTTPRequestHandler):
         if base_commit:
             diff = ex.bash("git diff HEAD", timeout=60).get("stdout") or ""
             changed = [ln for ln in (ex.bash("git diff --name-only HEAD", timeout=30).get("stdout") or "").splitlines() if ln]
+            # Reviewer: independent second head — sees only goal + diff + failures, hunts
+            # regressions/weakened tests. Can veto an otherwise-"accepted" patch.
+            last_acc = {}
+            for r in reversed(verdict.get("rounds") or []):
+                if isinstance(r.get("acceptance"), dict):
+                    last_acc = r["acceptance"]; break
+            if not last_acc and isinstance(verdict.get("acceptance"), dict):
+                last_acc = verdict["acceptance"]
+            rev = review(goal, diff, last_acc, invariants=exploration.get("invariants"))
+            verdict["review"] = rev
+            if verdict.get("accepted") and not rev["approved"]:
+                verdict["accepted"] = False
+                verdict["status"] = "needs_revision"
+                verdict["summary"] = "Ревьюер завернул: " + "; ".join(rev["issues"])[:400]
+                _memory(task_id, "Ревьюер завернул патч: " + "; ".join(rev["issues"])[:200])
             verdict["patch_bundle"] = {
                 "base_commit": base_commit,
                 "changed_files": changed,
