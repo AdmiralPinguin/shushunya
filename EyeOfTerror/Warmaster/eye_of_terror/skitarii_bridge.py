@@ -137,6 +137,69 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _verify_and_stage_patch(verdict: dict[str, Any], run_dir: Path, ledger: Any) -> dict[str, Any] | None:
+    """Take the accepted patch bundle and (1) save it as a .patch file, (2) check it still
+    applies to the LIVE source (`git apply --check` — read-only, no mutation), (3) apply it
+    in an ISOLATED throwaway git worktree and re-run the checks THERE. The live working tree
+    is never touched by default (the coders are sandboxed in a VM on purpose, and this repo
+    also holds other agents' WIP). Auto-apply to the live tree only if SKITARII_AUTOAPPLY=1.
+    Returns a summary dict, or None if there is no patch to stage."""
+    import shutil
+    import subprocess
+    import tempfile
+    pb = verdict.get("patch_bundle") if isinstance(verdict.get("patch_bundle"), dict) else None
+    diff = str((pb or {}).get("unified_diff") or "")
+    if not diff.strip():
+        return None
+    patch_file = run_dir / "work" / "skitarii.patch"
+    patch_file.parent.mkdir(parents=True, exist_ok=True)
+    patch_file.write_text(diff, encoding="utf-8")
+
+    def _run(cmd: list[str], cwd: Path | str, timeout: int = 120) -> subprocess.CompletedProcess:
+        return subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
+
+    root = REPO_ROOT
+    out: dict[str, Any] = {"patch_file": str(patch_file), "applies_to_live": None,
+                           "tests_pass_in_worktree": None, "applied_to_live": False,
+                           "apply_cmd": f"cd {root} && git apply {patch_file}"}
+    try:
+        if _run(["git", "rev-parse", "--git-dir"], root, 30).returncode != 0:
+            out["reason"] = "REPO_ROOT is not a git repo — patch saved but not verified"
+            ledger.record_event("skitarii_patch_stage", out); return out
+        # 1) does the patch still apply cleanly to the current live source? (read-only)
+        chk = _run(["git", "apply", "--check", "--3way", str(patch_file)], root, 60)
+        out["applies_to_live"] = (chk.returncode == 0)
+        if chk.returncode != 0:
+            out["apply_stderr"] = (chk.stderr or "")[:300]
+        # 2) apply + re-run checks in an isolated worktree at HEAD — never the live tree
+        checks = [c for c in (verdict.get("checks") or []) if isinstance(c, dict) and c.get("cmd")]
+        if out["applies_to_live"] and checks:
+            head = (_run(["git", "rev-parse", "HEAD"], root, 30).stdout or "").strip()
+            wt = tempfile.mkdtemp(prefix="skitarii-verify-")
+            try:
+                if _run(["git", "worktree", "add", "--detach", wt, head or "HEAD"], root, 120).returncode == 0:
+                    _run(["git", "apply", str(patch_file)], wt, 60)
+                    passed = True
+                    for c in checks:
+                        r = _run(["bash", "-c", str(c["cmd"])], wt, 120)
+                        ok = r.returncode == 0
+                        if c.get("expect_stdout"):
+                            ok = ok and (r.stdout or "").strip() == str(c["expect_stdout"]).strip()
+                        passed = passed and ok
+                    out["tests_pass_in_worktree"] = passed
+            finally:
+                _run(["git", "worktree", "remove", "--force", wt], root, 30)
+                shutil.rmtree(wt, ignore_errors=True)
+        # 3) auto-apply to the live tree ONLY behind an explicit opt-in
+        if (os.environ.get("SKITARII_AUTOAPPLY") == "1" and out["applies_to_live"]
+                and out.get("tests_pass_in_worktree") is not False):
+            out["applied_to_live"] = _run(["git", "apply", str(patch_file)], root, 60).returncode == 0
+    except Exception as exc:  # noqa: BLE001 - staging is best-effort, never fail the mission
+        out["error"] = str(exc)[:200]
+    ledger.record_event("skitarii_patch_stage", out)
+    return out
+
+
 def should_handle(run_dir: Path) -> bool:
     if os.environ.get("SKITARII_ENABLED", "1") != "1":
         return False
@@ -232,6 +295,10 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
             mdest.write_text(str(content), encoding="utf-8")
         saved.append(rel)
 
+    # accepted patch → validate it against the live source and stage it (isolated worktree
+    # re-run); the live tree is not mutated unless SKITARII_AUTOAPPLY=1.
+    patch_stage = _verify_and_stage_patch(verdict, run_dir, ledger) if accepted else None
+
     ledger.record_event("skitarii_verdict", {"accepted": accepted, "rounds": len(verdict.get("rounds") or []),
                                              "seconds": int(time.monotonic() - started), "artifacts": saved})
     status = "completed" if accepted else "blocked"
@@ -265,4 +332,5 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
 
     return {"ok": accepted, "phase": "completed" if accepted else "blocked",
             "task_id": task_id, "status": status, "summary": summary,
-            "artifacts": saved, "via": "skitarii", "rounds": verdict.get("rounds") or []}
+            "artifacts": saved, "via": "skitarii", "rounds": verdict.get("rounds") or [],
+            "patch_stage": patch_stage}
