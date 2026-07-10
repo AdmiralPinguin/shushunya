@@ -12,6 +12,8 @@ import time
 import urllib.request
 from typing import Any
 
+import tools as _tools
+
 TOOLS = [
     {"type": "function", "function": {
         "name": "bash",
@@ -116,7 +118,7 @@ def _chat(messages: list[dict], settings: dict[str, Any]) -> dict[str, Any]:
     payload = {
         "model": settings["model"],
         "messages": messages,
-        "tools": TOOLS,
+        "tools": TOOLS + _tools.extra_specs(),
         "temperature": 0,
         "max_tokens": settings["max_tokens"],
         "chat_template_kwargs": {"enable_thinking": False},
@@ -196,6 +198,9 @@ def _dispatch_tool(executor: Any, name: str, args: dict[str, Any], task_id: str 
                    "| sed -e 's/<script[^>]*>.*<\\/script>//g' -e 's/<[^>]*>//g' "
                    "| grep -vE '^\\s*$' | head -400")
             return executor.bash(cmd, timeout=55)["stdout"][:15_000] or "(empty)"
+        extra = _tools.dispatch_extra(name, args, executor)
+        if extra is not None:
+            return extra
         return f"ERROR: unknown tool {name}"
     except Exception as exc:  # tool errors go back to the model, they don't kill the loop
         return f"ERROR: {type(exc).__name__}: {exc}"

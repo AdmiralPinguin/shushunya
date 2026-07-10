@@ -273,5 +273,45 @@ class TestParallel(unittest.TestCase):
         self.assertIn("wt", str(ch.workdir))
 
 
+class TestToolRegistry(unittest.TestCase):
+    def test_deny_list_removes_tool(self):
+        import importlib, os, tools
+        os.environ["SKITARII_TOOLS_DENY"] = "grep_symbol"
+        importlib.reload(tools)
+        names = [t.name for t in tools.enabled_extra_tools()]
+        os.environ.pop("SKITARII_TOOLS_DENY", None); importlib.reload(tools)
+        self.assertNotIn("grep_symbol", names)
+        self.assertIn("git_diff", names)
+
+    def test_find_files_lists_created_file(self):
+        import tools
+        ex = _ex(); ex.write_file("hello.py", "x=1")
+        out = tools.dispatch_extra("find_files", {"pattern": "*.py"}, ex)
+        self.assertIn("hello.py", out)
+
+    def test_unknown_tool_returns_none(self):
+        import tools
+        self.assertIsNone(tools.dispatch_extra("does_not_exist", {}, _ex()))
+
+
+class TestEvalSuite(unittest.TestCase):
+    def test_thirty_tasks_six_categories(self):
+        import eval_suite
+        self.assertEqual(len(eval_suite.TASKS), 30)
+        self.assertEqual(eval_suite.categories(),
+                         {"greenfield": 5, "fix_one": 5, "multi": 5,
+                          "unspecified": 5, "regression": 5, "ambiguous": 5})
+
+    def test_every_non_ambiguous_task_has_a_behavioural_check(self):
+        # the eval is only meaningful if truth is checked by real behaviour, not compile
+        import eval_suite, acceptor
+        for t in eval_suite.TASKS:
+            if t["category"] == "ambiguous":
+                self.assertEqual(t["oracle_checks"], [])
+                continue
+            kinds = {acceptor.check_kind(c) for c in t["oracle_checks"]}
+            self.assertTrue(kinds & {"behavior", "test"}, f"{t['id']} has no behavioural oracle")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
