@@ -20,14 +20,18 @@ echo "[boot] Skitarii sandbox VM…"
 if ! pgrep -f "qemu-system.*skitarii" >/dev/null 2>&1; then
   bash CoreOfMadness/vm-sandbox/start-vm.sh
 fi
-echo "[boot] Skitarii brigade service (7200)…"
-if ! curl -fsS --max-time 3 http://127.0.0.1:7200/health >/dev/null 2>&1; then
+echo "[boot] Skitarii warband service (7200)…"
+# Prefer the user-systemd unit (survives sessions + auto-restarts). Fall back to a
+# bare nohup only if systemd --user isn't available for some reason.
+if systemctl --user list-unit-files skitarii-warband.service >/dev/null 2>&1; then
+  systemctl --user start skitarii-warband.service || true
+elif ! curl -fsS --max-time 3 http://127.0.0.1:7200/health >/dev/null 2>&1; then
   setsid nohup python3 EyeOfTerror/Mechanicum/Skitarii/service.py \
     >> EyeOfTerror/Mechanicum/Skitarii/service.log 2>&1 &
 fi
 
 echo "[boot] done. Status:"
-for pp in "8080 gemma" "8081 qwen" "8079 dispatcher" "8090 archive" "7000 gateway" "7101 iskandar" "7104 ceraxia" "7103 moriana"; do
+for pp in "8080 gemma" "8081 qwen" "8079 dispatcher" "8090 archive" "7000 gateway" "7101 iskandar" "7104 ceraxia" "7103 moriana" "7200 skitarii-warband"; do
   set -- $pp
   if curl -fsS -m2 "http://127.0.0.1:$1/health" >/dev/null 2>&1 || curl -fsS -m2 "http://127.0.0.1:$1/v1/models" >/dev/null 2>&1; then
     echo "  UP   $2 ($1)"; else echo "  DOWN $2 ($1)"; fi

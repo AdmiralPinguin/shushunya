@@ -1,0 +1,14 @@
+[Unit]
+Description=Shushunya Skitarii Warband code service (spec -> fighter loop -> real acceptance, port 7200)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/media/shushunya/SHUSHUNYA/shushunya
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/Mechanicum/Skitarii/service.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
