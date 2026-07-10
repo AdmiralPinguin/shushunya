@@ -129,36 +129,151 @@ def _post(path: str, body: dict, timeout: int = 1800) -> dict:
         return json.loads(r.read())
 
 
-def run_eval(tasks: list[dict]) -> dict:
-    """Run tasks live through the Skitarii service and score them. Metrics include the
-    headline FALSE ACCEPTED count (warband said accepted, but our oracle re-run failed)."""
-    m = {"total": len(tasks), "accepted": 0, "false_accepted": 0, "correct": 0,
-         "clarified_when_expected": 0, "seconds": 0, "per_task": []}
-    for t in tasks:
-        payload = {"goal": t["goal"], "task_id": f"eval-{t['id']}", "max_wall_sec": 900}
-        if t.get("seed"):
-            payload["workspace_files"] = t["seed"]; payload["mode"] = "patch"
-        if t["oracle_checks"]:
-            payload["checks"] = t["oracle_checks"]
-        started = time.time()
+def _get(path: str, timeout: int = 30) -> dict:
+    with urllib.request.urlopen(SERVICE + path, timeout=timeout) as r:
+        return json.loads(r.read())
+
+
+def _independent_verify(task: dict, files: dict) -> tuple[bool | None, str]:
+    """The eval's OWN oracle. Re-run the task's oracle_checks ourselves, on the host, in
+    a clean dir seeded with the task's baseline + the warband's delivered files overlaid
+    (delivered wins). This does NOT trust the service's self-report — it independently
+    re-derives truth. Returns (passed, detail); passed is None when we can't check (a
+    required interpreter, e.g. php/node, is missing on the host)."""
+    import pathlib
+    import shutil
+    import subprocess
+    import tempfile
+    checks = task.get("oracle_checks") or []
+    if not checks:
+        return None, "no oracle checks"
+    d = tempfile.mkdtemp(prefix="evalverify-")
+    try:
+        # baseline seed first, then overlay the warband's files so untouched deps exist
+        def _write(rel: str, content: str) -> None:
+            rel = "/".join(x for x in str(rel).replace("\\", "/").split("/") if x not in ("", ".", ".."))
+            if not rel:
+                return
+            p = pathlib.Path(d, rel)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(str(content), encoding="utf-8")
+        for rel, content in (task.get("seed") or {}).items():
+            _write(rel, content)
+        for rel, content in (files or {}).items():
+            _write(rel, content)
+        unverifiable = False
+        for c in checks:
+            cmd = str(c.get("cmd") or "")
+            interp = cmd.strip().split()[0] if cmd.strip() else ""
+            if interp in ("php", "node") and shutil.which(interp) is None:
+                unverifiable = True
+                continue
+            try:
+                r = subprocess.run(cmd, shell=True, cwd=d, capture_output=True, text=True, timeout=60)
+            except Exception as exc:  # noqa: BLE001
+                return False, f"{cmd!r} raised {exc}"
+            if r.returncode != 0:
+                return False, f"{cmd!r} exit {r.returncode}: {((r.stderr or r.stdout) or '').strip()[:160]}"
+            out = (r.stdout or "").strip()
+            if "expect_stdout" in c and out != str(c["expect_stdout"]).strip():
+                return False, f"{cmd!r} -> {out!r} != expected {str(c['expect_stdout']).strip()!r}"
+            if str(c.get("oracle") or "").strip():
+                o = subprocess.run(str(c["oracle"]), shell=True, capture_output=True, text=True, timeout=60)
+                if out != (o.stdout or "").strip():
+                    return False, f"{cmd!r} -> {out!r} != oracle {(o.stdout or '').strip()!r}"
+        if unverifiable:
+            return None, "required interpreter missing on host (php/node)"
+        return True, "independently verified"
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def _run_checked(t: dict) -> dict:
+    """A task with a ground-truth oracle. Run it, then INDEPENDENTLY re-verify."""
+    payload = {"goal": t["goal"], "task_id": f"eval-{t['id']}", "max_wall_sec": 900}
+    if t.get("seed"):
+        payload["workspace_files"] = t["seed"]; payload["mode"] = "patch"
+    if t["oracle_checks"]:
+        payload["checks"] = t["oracle_checks"]
+    row = {"id": t["id"], "cat": t["category"]}
+    try:
+        v = _post("/mission", payload)
+    except Exception as exc:  # noqa: BLE001
+        return {**row, "verdict": "error", "errored": 1, "detail": str(exc)[:180]}
+    accepted = bool(v.get("accepted"))
+    row["accepted"] = int(accepted)
+    ok, detail = _independent_verify(t, v.get("files") if isinstance(v.get("files"), dict) else {})
+    row["detail"] = detail
+    if accepted and ok is False:
+        row.update(verdict="FALSE_ACCEPT", false_accepted=1)      # said done, our oracle says NO
+    elif accepted and ok is True:
+        row.update(verdict="correct", correct=1)                  # said done, independently true
+    elif accepted and ok is None:
+        row.update(verdict="accepted_unverified", unverified=1)   # said done, we can't check (missing interp)
+    elif (not accepted) and ok is True:
+        row.update(verdict="false_reject", false_rejected=1)      # threw away a working solution
+    else:
+        row.update(verdict="failed", failed=1)                    # honestly didn't do it
+    return row
+
+
+def _run_ambiguous(t: dict) -> dict:
+    """An under-specified task: the right move is to ASK, never to fabricate success.
+    Run async so the real needs_user signal surfaces, then cancel (we won't answer)."""
+    row = {"id": t["id"], "cat": t["category"]}
+    try:
+        r = _post("/missions", {"goal": t["goal"], "task_id": f"eval-{t['id']}", "max_wall_sec": 300})
+    except Exception as exc:  # noqa: BLE001
+        return {**row, "verdict": "error", "errored": 1, "detail": str(exc)[:180]}
+    mid = r.get("mission_id") or ""
+    asked = accepted = False
+    status = ""
+    deadline = time.time() + 300
+    while time.time() < deadline:
         try:
-            v = _post("/mission", payload)
-        except Exception as exc:  # noqa: BLE001
-            m["per_task"].append({"id": t["id"], "error": str(exc)}); continue
-        dt = int(time.time() - started); m["seconds"] += dt
-        accepted = bool(v.get("accepted"))
-        m["accepted"] += int(accepted)
-        # ground truth: for checked tasks, accepted is only "correct" if the checks are real
-        # behavioural checks (the service re-ran them); a false-accept would be accepted w/o them.
-        if t.get("expects_clarification"):
-            asked = any(e for e in (v.get("rounds") or []))  # crude; real signal is needs_user in events
-            m["clarified_when_expected"] += int(not accepted)   # must NOT falsely accept an ambiguous task
-        else:
-            if accepted:
-                m["correct"] += 1
-        m["per_task"].append({"id": t["id"], "cat": t["category"], "accepted": accepted, "sec": dt,
-                              "status": v.get("status")})
-    m["false_accepted_pct"] = 0.0  # by construction the acceptor re-runs behavioural checks
+            snap = _get(f"/missions/{mid}")
+        except Exception:  # noqa: BLE001
+            break
+        status = str(snap.get("status") or "")
+        if status == "needs_user":
+            asked = True; break
+        if status in ("done", "failed", "blocked", "cancelled"):
+            accepted = bool(snap.get("accepted")) or status == "done"
+            break
+        time.sleep(3)
+    try:
+        _post(f"/missions/{mid}/cancel", {})
+    except Exception:  # noqa: BLE001
+        pass
+    if accepted:
+        row.update(verdict="FALSE_ACCEPT", accepted=1, false_accepted=1,
+                   detail="fabricated success on an ambiguous task")
+    elif asked:
+        row.update(verdict="asked_clarification", asked_clarification=1, detail="asked for clarification")
+    else:
+        row.update(verdict="failed_no_ask", failed=1, detail=f"ended {status!r} without asking")
+    return row
+
+
+def run_eval(tasks: list[dict]) -> dict:
+    """Run every task live through the Skitarii service and score it against an
+    INDEPENDENT oracle (see _independent_verify). The headline is FALSE ACCEPTED —
+    measured, not assumed: the warband claimed done but our own re-run disagreed."""
+    keys = ("accepted", "false_accepted", "correct", "unverified", "false_rejected",
+            "asked_clarification", "failed", "errored")
+    m: dict = {"total": len(tasks), "seconds": 0, "per_task": []}
+    for k in keys:
+        m[k] = 0
+    for t in tasks:
+        started = time.time()
+        row = _run_ambiguous(t) if t.get("expects_clarification") else _run_checked(t)
+        row["sec"] = int(time.time() - started)
+        m["seconds"] += row["sec"]
+        for k in keys:
+            m[k] += int(row.get(k, 0))
+        m["per_task"].append(row)
+    m["false_accepted_pct"] = round(100.0 * m["false_accepted"] / max(1, m["accepted"]), 1)
+    m["correct_pct"] = round(100.0 * m["correct"] / max(1, m["total"]), 1)
     return m
 
 
