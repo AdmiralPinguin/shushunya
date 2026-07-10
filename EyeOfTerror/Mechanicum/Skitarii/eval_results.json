@@ -1,0 +1,31 @@
+{
+  "date": "2026-07-11",
+  "note": "Первый честный полный прогон 30 задач через живой сервис (systemd, 7200). Числа сведены из первого полного прогона + перепрогона regression после фикса pytest-зависимой проверки. Верификация НЕЗАВИСИМАЯ: раннер сам пересобирал задачу на хосте (seed + отданные файлы) и заново гонял oracle-проверки.",
+  "totals": {
+    "total": 30,
+    "correct": 21,
+    "unverified": 2,
+    "false_rejected": 2,
+    "failed_no_ask": 5,
+    "false_accepted": 0,
+    "errored": 0,
+    "correct_pct": 70.0,
+    "false_accepted_pct_of_accepted": 0.0,
+    "code_correct_of_verifiable": "23/23"
+  },
+  "by_category": {
+    "greenfield": {"correct": 3, "unverified": 2, "comment": "gf3(php)/gf5(node) непроверяемы на хосте — код отдан, но независимо не подтверждён"},
+    "fix_one":    {"correct": 5},
+    "multi":      {"correct": 5},
+    "unspecified":{"correct": 4, "false_rejected": 1, "comment": "un4: рабочее решение зарезано собственной приёмкой"},
+    "regression": {"correct": 4, "false_rejected": 1, "comment": "rg2: рабочее решение зарезано собственной приёмкой"},
+    "ambiguous":  {"asked_clarification": 0, "failed_no_ask": 5, "false_accepted": 0, "comment": "не переспрашивает — молотит вслепую до таймаута; но и не выдумывает успех"}
+  },
+  "findings": [
+    "FALSE-ACCEPT = 0: ни разу не назвала успехом сломанное. Главная метрика доверия чиста.",
+    "На 23 независимо проверяемых код-задачах отданный код был корректен в 23/23.",
+    "2 false-reject (un4, rg2): собственная приёмка слишком строга — теряет годную работу.",
+    "0/5 на неоднозначных: не умеет переспрашивать — реальный разрыв с Claude/Codex.",
+    "artefact пойман и устранён: pytest-зависимая oracle-проверка ложно давала 4 false-accept из-за отсутствия pytest на хосте; проверки сделаны самодостаточными."
+  ]
+}
