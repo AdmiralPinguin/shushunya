@@ -20,23 +20,86 @@ _MODIFY_MARKERS = ("исправ", "почин", "fix ", "измен", "рефа
                    "поправ", "доработай", "bug", "рефактори", "оптимизир")
 
 
+def _safe_repo_file(rel: str) -> Path | None:
+    """Resolve rel under REPO_ROOT, refusing anything that escapes the repo (../,
+    symlinks, absolute paths). Returns the real path or None."""
+    rel = str(rel).lstrip("/")
+    try:
+        root = REPO_ROOT.resolve()
+        p = (REPO_ROOT / rel).resolve()
+    except OSError:
+        return None
+    if p == root or root not in p.parents:
+        return None
+    return p if p.is_file() else None
+
+
+_SLICE_STOP = {"почини", "исправь", "измени", "добавь", "файле", "проект", "код", "нужно",
+               "который", "которая", "please", "code", "file", "project", "function", "должна", "чтобы"}
+
+
+def _repo_slice(goal: str, max_files: int = 15) -> dict[str, str]:
+    """PATCH task named no files. Pull a relevant slice of the repo by grepping the
+    goal's keywords across source files, so the fighter edits real code. Bounded and
+    scoped to the repo (excludes vcs/runtime/models/vm)."""
+    import re
+    import subprocess
+    words = [w for w in re.findall(r"[A-Za-zА-Яа-я_][\w-]{3,}", goal) if w.lower() not in _SLICE_STOP]
+    if not words:
+        return {}
+    root = str(REPO_ROOT.resolve())
+    files: dict[str, str] = {}
+    for kw in words[:6]:
+        try:
+            out = subprocess.run(
+                ["grep", "-rliI", "--include=*.py", "--include=*.php", "--include=*.js",
+                 "--include=*.ts", "--include=*.go", "--include=*.java",
+                 "--exclude-dir=.git", "--exclude-dir=node_modules", "--exclude-dir=runtime",
+                 "--exclude-dir=models", "--exclude-dir=vm-sandbox", "--exclude-dir=__pycache__",
+                 kw, root],
+                capture_output=True, text=True, timeout=25).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for line in out.splitlines():
+            p = _safe_repo_file(str(Path(line).resolve().relative_to(root))) if line.startswith(root) else None
+            if p is None:
+                continue
+            rel = str(p.relative_to(root))
+            if rel in files:
+                continue
+            try:
+                if p.stat().st_size < 100_000:
+                    files[rel] = p.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+            if len(files) >= max_files:
+                return files
+    return files
+
+
 def _collect_workspace(goal: str) -> tuple[dict[str, str], bool]:
-    """Find existing repo files named in the goal and load them, so a PATCH task
-    edits real source instead of writing a blank greenfield file. Returns
+    """Load existing repo files this PATCH task references, so it edits real source
+    instead of writing a blank greenfield file. Named files first, then a keyword
+    slice (see _repo_slice). Traversal outside the repo is refused. Returns
     ({rel_path: content}, is_patch)."""
     import re
     files: dict[str, str] = {}
     for m in re.findall(r"[\w./-]+\.[A-Za-z0-9]{1,6}", goal):
         rel = m.lstrip("./")
-        p = REPO_ROOT / rel
+        p = _safe_repo_file(rel)
+        if p is None:
+            continue
         try:
-            if p.is_file() and p.stat().st_size < 200_000:
+            if p.stat().st_size < 200_000:
                 files[rel] = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
             pass
-        if len(files) >= 20:
+        if len(files) >= 30:
             break
     is_patch = bool(files) or any(k in goal.lower() for k in _MODIFY_MARKERS)
+    # PATCH task with no explicitly-named files → pull a relevant slice of the repo
+    if is_patch and not files:
+        files = _repo_slice(goal)
     return files, is_patch
 
 
@@ -78,6 +141,24 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
     ledger = TaskLedger.load(run_dir / "task_ledger.json")
     workspace, is_patch = _collect_workspace(goal)
     mode = "patch" if is_patch else "greenfield"
+    # SAFETY: a patch task whose source we couldn't load must NOT silently turn into a
+    # greenfield rewrite from scratch — that produces a plausible-looking but wrong
+    # "fix". Block and ask the user to name the files/dir instead.
+    if is_patch and not workspace:
+        msg = ("Это правка существующего кода, но я не смог определить какие файлы/каталог "
+               "менять. Уточни путь(и) к файлам или каталог проекта — писать с нуля я не буду.")
+        ledger.record_event("skitarii_patch_no_source", {"goal": goal[:200]})
+        ledger.set_result({"ok": False, "status": "blocked", "final_step": "skitarii",
+                           "summary": msg, "artifacts": []})
+        ledger.force_status("blocked", reason="patch task with no loadable source")
+        mdir = _mission_dir(run_dir)
+        if mdir and mdir.exists():
+            try:
+                mc.record_mission_state(mdir, "blocked")
+            except Exception:
+                pass
+        return {"ok": False, "phase": "blocked", "task_id": task_id, "status": "blocked",
+                "summary": msg, "needs_user": True}
     ledger.record_event("skitarii_dispatch", {"service": SKITARII_URL, "mode": mode,
                                               "preloaded_files": sorted(workspace.keys())})
     ledger.set_status("running")

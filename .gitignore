@@ -186,4 +186,11 @@ Corpus/*.epub
 Corpus/*.pdf
 
 # Skitarii sandbox VM: private key, disk images, cloud-init
-CoreOfMadness/vm-sandbox/
+
+# Skitarii sandbox VM: private key + disk images/logs (NOT the scripts/cloud-init)
+CoreOfMadness/vm-sandbox/skitarii_key
+CoreOfMadness/vm-sandbox/skitarii_key.pub
+CoreOfMadness/vm-sandbox/*.qcow2
+CoreOfMadness/vm-sandbox/*.iso
+CoreOfMadness/vm-sandbox/*.img
+CoreOfMadness/vm-sandbox/*.log

@@ -66,20 +66,31 @@ class TestOracleAndExpect(unittest.TestCase):
 
 class TestSpecFallback(unittest.TestCase):
     def test_synthesizes_syntax_check_when_model_gives_none(self):
-        # simulate the model returning files but no checks by calling the private path:
-        # build_spec would call the LLM, so we test the fallback shape directly here.
-        from spec import build_spec  # noqa: F401  (import kept to assert module loads)
-        # emulate: deliverables present, checks empty -> fallback adds a compile check
-        deliverables = ["a.py", "b.php"]
-        checks: list = []
-        # replicate the fallback block's effect
-        syntax = {".py": "python3 -m py_compile {p}", ".php": "php -l {p}"}
-        for d in deliverables:
-            ext = "." + d.rsplit(".", 1)[-1]
-            if ext in syntax and not checks:
-                pass
-        # the real invariant we care about: acceptor rejects empty checks (covered above)
-        self.assertTrue(True)
+        # real test: stub the LLM so it returns files but no checks, and assert the
+        # fallback synthesizes a per-file syntax check (never an empty check set).
+        import spec
+        orig = spec._chat_json
+        spec._chat_json = lambda prompt: {"deliverables": ["a.py", "b.php"], "checks": []}
+        try:
+            out = spec.build_spec("сделай a.py и b.php")
+        finally:
+            spec._chat_json = orig
+        self.assertTrue(out["checks"], "fallback must not leave checks empty")
+        cmds = " ".join(c["cmd"] for c in out["checks"])
+        self.assertIn("py_compile", cmds)
+        self.assertIn("php -l", cmds)
+
+    def test_malformed_llm_output_yields_no_false_success(self):
+        import spec
+        orig = spec._chat_json
+        spec._chat_json = lambda prompt: {}  # model gave nothing usable
+        try:
+            out = spec.build_spec("что-то")
+        finally:
+            spec._chat_json = orig
+        # no deliverables + no checks -> acceptor (tested above) will reject: no false success
+        self.assertEqual(out["checks"], [])
+        self.assertEqual(out["deliverables"], [])
 
 
 class TestPathPreservation(unittest.TestCase):
@@ -108,6 +119,40 @@ class TestExecutorTools(unittest.TestCase):
         info = ex.bash_background("sleep 1")
         self.assertTrue(info["started"])
         self.assertTrue(info["pid"])
+
+
+class TestBridge(unittest.TestCase):
+    """Real tests of the Warmaster→Skitarii bridge (not stubs)."""
+
+    @classmethod
+    def setUpClass(cls):
+        root = Path(__file__).resolve().parents[3]  # repo root
+        sys.path.insert(0, str(root))
+        sys.path.insert(0, str(root / "EyeOfTerror" / "Warmaster"))
+        from eye_of_terror import skitarii_bridge
+        cls.b = skitarii_bridge
+
+    def test_traversal_refused(self):
+        self.assertIsNone(self.b._safe_repo_file("../../etc/passwd"))
+        self.assertIsNone(self.b._safe_repo_file("/etc/passwd"))
+        self.assertIsNone(self.b._safe_repo_file("EyeOfTerror/../../etc/passwd"))
+
+    def test_named_repo_file_is_loaded_as_patch(self):
+        f, is_patch = self.b._collect_workspace("исправь EyeOfTerror/Mechanicum/Skitarii/acceptor.py")
+        self.assertTrue(is_patch)
+        self.assertTrue(any(k.endswith("acceptor.py") for k in f))
+
+    def test_greenfield_loads_nothing(self):
+        f, is_patch = self.b._collect_workspace("напиши новый скрипт hello.py с нуля")
+        self.assertFalse(is_patch)
+        self.assertEqual(f, {})
+
+    def test_patch_without_named_files_pulls_a_slice(self):
+        # a modify request with no explicit path must still load real source (a slice),
+        # never an empty set that would trigger a greenfield rewrite
+        f, is_patch = self.b._collect_workspace("почини логику приёмщика acceptor в бригаде Skitarii")
+        self.assertTrue(is_patch)
+        self.assertGreater(len(f), 0)
 
 
 if __name__ == "__main__":

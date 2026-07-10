@@ -55,7 +55,11 @@ def build_spec(goal: str) -> dict[str, Any]:
         "  Use expect_stdout ONLY for values written literally in the task text.\n"
         "- For anything you'd have to compute, use 'oracle': a command (python3 -c ... / node -e ...) that\n"
         "  produces the correct answer, so the real interpreter is the source of truth, not you.\n"
-        "- A bare {\"cmd\": ...} (no expect/oracle) passes on exit code 0 — use it for 'does it run / compile'.\n"
+        "- A bare {\"cmd\": ...} (no expect/oracle) passes on exit code 0 — use it ONLY for 'does it run / "
+        "compile'. A compile/syntax check ALONE is NOT acceptance: wrong logic would pass it.\n"
+        "- REQUIRED: include at least one BEHAVIOURAL check that verifies the program does the right thing "
+        "(expect_stdout or oracle on real inputs, or a command that runs the project's tests). Cover the main "
+        "case and at least one edge case. Never rely on compile-only.\n"
         "Keep 2-6 checks, runnable on bare Ubuntu with php, python3, node.\n\n"
         f"TASK:\n{goal}"
     )

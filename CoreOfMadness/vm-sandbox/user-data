@@ -1,0 +1,21 @@
+#cloud-config
+hostname: skitarii-vm
+users:
+  - name: skitarii
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILMfLcY3Yxjw4ypCn3YHltUB3JNXpUKTkRC5LCBdbbCQ skitarii
+ssh_pwauth: false
+package_update: true
+packages:
+  - php-cli
+  - python3
+  - python3-pip
+  - nodejs
+  - npm
+  - git
+  - curl
+  - build-essential
+runcmd:
+  - mkdir -p /home/skitarii/work && chown skitarii:skitarii /home/skitarii/work
