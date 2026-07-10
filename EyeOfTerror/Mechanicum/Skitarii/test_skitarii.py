@@ -249,5 +249,29 @@ class TestMissionStore(unittest.TestCase):
         self.assertEqual(m.status, "cancelled")
 
 
+class TestParallel(unittest.TestCase):
+    def test_dependency_waves(self):
+        from planner import _dependency_waves
+        subs = [{"title": "a", "depends_on": []}, {"title": "b", "depends_on": []},
+                {"title": "c", "depends_on": [0, 1]}]
+        w = _dependency_waves(subs)
+        self.assertEqual([s["title"] for s in w[0]], ["a", "b"])   # independent → same wave
+        self.assertEqual(w[1][0]["title"], "c")                     # dependent → later wave
+
+    def test_broken_deps_do_not_deadlock(self):
+        from planner import _dependency_waves
+        subs = [{"title": "a", "depends_on": [5]}]  # invalid dep
+        w = _dependency_waves(subs)
+        self.assertEqual(sum(len(x) for x in w), 1)  # still scheduled, no infinite loop
+
+    def test_child_executor_is_isolated(self):
+        ex = _ex()
+        ex.write_file("shared.py", "base")
+        ch = ex.child("s0")
+        ch.write_file("only_child.py", "x")
+        self.assertNotIn("wt", str(ex.workdir))
+        self.assertIn("wt", str(ch.workdir))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -50,6 +50,9 @@ class LocalExecutor:
             text = "\n".join(lines[offset:end])
         return text[:max_bytes]
 
+    def child(self, name: str) -> "LocalExecutor":
+        return LocalExecutor(self.workdir.parent / f"{self.workdir.name}_wt_{name}")
+
     def bash_background(self, command: str) -> dict[str, Any]:
         import uuid
         (self.workdir / ".bg").mkdir(exist_ok=True)
@@ -135,6 +138,11 @@ class VmExecutor:
         if proc.returncode != 0:
             raise FileNotFoundError(proc.stderr.decode(errors="replace") or rel)
         return proc.stdout
+
+    def child(self, name: str) -> "VmExecutor":
+        safe = "".join(c for c in name if c.isalnum() or c in "-_")
+        return VmExecutor(self.host, self.port, self.user, self.key,
+                          workdir=f"{self.workdir}_wt_{safe}")
 
     def alive(self) -> bool:
         try:

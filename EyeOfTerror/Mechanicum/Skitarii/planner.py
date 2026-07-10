@@ -115,6 +115,67 @@ def _run_with_retry(goal: str, executor: Any, task_id: str, *, top_goal: str,
     return res2
 
 
+def _dependency_waves(subtasks: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Group subtasks into waves: each wave holds subtasks whose deps are all satisfied
+    by earlier waves. Subtasks within a wave are independent → can run in parallel."""
+    done: set[int] = set()
+    waves: list[list[dict[str, Any]]] = []
+    remaining = list(range(len(subtasks)))
+    while remaining:
+        wave_idx = [i for i in remaining
+                    if all(d in done for d in subtasks[i].get("depends_on", []) if 0 <= d < len(subtasks))]
+        if not wave_idx:                      # broken deps → run the rest sequentially
+            wave_idx = remaining[:1]
+        waves.append([subtasks[i] for i in wave_idx])
+        done.update(wave_idx)
+        remaining = [i for i in remaining if i not in wave_idx]
+    return waves
+
+
+def _run_wave_parallel(wave, base_executor, task_id, top_goal, note, per, ask_fn, cancel_fn):
+    """Run one wave. A single subtask runs in the shared workdir. Several independent
+    subtasks each run in an isolated worktree (child executor, seeded from the current
+    project state), then their changes are merged back. Concurrency is capped."""
+    if len(wave) == 1:
+        return [_run_with_retry(wave[0]["goal"], base_executor, task_id, top_goal=top_goal,
+                                note=note, max_wall_sec=per, ask_fn=ask_fn, cancel_fn=cancel_fn)]
+    import concurrent.futures as _f
+    base = getattr(base_executor, "workdir", "")
+    limit = max(1, int(os.environ.get("SKITARII_PARALLEL", "2")))
+
+    def _one(idx_sub):
+        idx, sub = idx_sub
+        child = base_executor.child(f"{task_id}-s{idx}")
+        cdir = getattr(child, "workdir", "")
+        # seed the child with the current project so it has context
+        base_executor.bash(f"rm -rf {cdir!r}; mkdir -p {cdir!r}; cp -a {base!r}/. {cdir!r}/ 2>/dev/null || true", timeout=60)
+        # parallel fighters don't ask the user (can't interleave questions); cancel still applies
+        res = _run_with_retry(sub["goal"], child, task_id, top_goal=top_goal, note=note,
+                              max_wall_sec=per, ask_fn=None, cancel_fn=cancel_fn)
+        return idx, cdir, res
+
+    results: dict[int, dict] = {}
+    dirs: dict[int, str] = {}
+    with _f.ThreadPoolExecutor(max_workers=min(limit, len(wave))) as pool:
+        for idx, cdir, res in pool.map(_one, list(enumerate(wave))):
+            results[idx] = res
+            dirs[idx] = cdir
+    # merge each child's changes back into the shared project, in order; a file touched
+    # by two children is flagged as a conflict for a follow-up integrator.
+    seen: dict[str, int] = {}
+    for idx in range(len(wave)):
+        cdir = dirs[idx]
+        changed = (base_executor.bash(
+            f"cd {cdir!r} && find . -type f -not -path './.git/*' -not -path './.bg/*' -newer . 2>/dev/null; "
+            f"cd {cdir!r} && ls -1 2>/dev/null", timeout=30).get("stdout") or "")
+        base_executor.bash(f"cp -a {cdir!r}/. {base!r}/ 2>/dev/null || true", timeout=60)
+        for f in set(changed.split()):
+            if f in seen and seen[f] != idx:
+                note(f"Интеграция: файл {f} менялся в нескольких подзадачах — беру последнюю версию (нужен интегратор при конфликте).")
+            seen[f] = idx
+    return [results[i] for i in range(len(wave))]
+
+
 def plan_and_run(goal: str, executor: Any, *, task_id: str = "", ask_fn=None, cancel_fn=None,
                  max_wall_sec: int = 5400, memory=None) -> dict[str, Any]:
     """Plan the goal, run fighters per subtask in one shared workdir, then accept the
@@ -135,25 +196,29 @@ def plan_and_run(goal: str, executor: Any, *, task_id: str = "", ask_fn=None, ca
 
     note(f"Планировщик разбил на {len(subtasks)} подзадач: " + "; ".join(s["title"] for s in subtasks))
     top_spec = build_spec(goal)          # final acceptance for the whole task
+    waves = _dependency_waves(subtasks)
     sub_results: list[dict[str, Any]] = []
-    for i, sub in enumerate(subtasks):
-        note(f"Подзадача {i+1}/{len(subtasks)}: {sub['title']}")
-        # all subtasks share ONE workdir (executor), so files accumulate into one project.
-        # anti-stuck: if the fighter can't crack it, the head changes the approach once.
-        res = _run_with_retry(sub["goal"], executor, task_id, top_goal=goal, note=note,
-                              max_wall_sec=max_wall_sec // max(1, len(subtasks)),
-                              ask_fn=ask_fn, cancel_fn=cancel_fn)
-        if res.get("status") == "cancelled":
+    per = max(300, max_wall_sec // max(1, len(subtasks)))
+    for wave in waves:
+        if cancel_fn is not None and cancel_fn():
             return {"status": "cancelled", "accepted": False, "subtasks": sub_results,
                     "summary": "cancelled", "artifacts": [], "checks": top_spec["checks"]}
-        sub_results.append({"title": sub["title"], "status": res.get("status"),
-                            "accepted": res.get("accepted"), "reconsidered": res.get("reconsidered", False)})
-        note(f"  → {sub['title']}: {res.get('status')}")
-        if not res.get("accepted"):
-            note(f"Планировщик: подзадача '{sub['title']}' не сдалась даже после смены подхода — эскалирую.")
-            return {"status": "failed", "accepted": False, "subtasks": sub_results,
-                    "summary": f"Subtask '{sub['title']}' failed: {res.get('summary','')}",
-                    "artifacts": res.get("artifacts", []), "checks": top_spec["checks"]}
+        # independent subtasks in one wave run in parallel, each in its own isolated
+        # worktree (child executor). With a single Qwen slot they still serialise on the
+        # model, but the isolation + merge is ready for multi-slot / a stronger model.
+        results = _run_wave_parallel(wave, executor, task_id, goal, note, per, ask_fn, cancel_fn)
+        for sub, res in zip(wave, results):
+            sub_results.append({"title": sub["title"], "status": res.get("status"),
+                                "accepted": res.get("accepted"), "reconsidered": res.get("reconsidered", False)})
+            note(f"  → {sub['title']}: {res.get('status')}")
+            if res.get("status") == "cancelled":
+                return {"status": "cancelled", "accepted": False, "subtasks": sub_results,
+                        "summary": "cancelled", "artifacts": [], "checks": top_spec["checks"]}
+            if not res.get("accepted"):
+                note(f"Планировщик: подзадача '{sub['title']}' не сдалась — эскалирую.")
+                return {"status": "failed", "accepted": False, "subtasks": sub_results,
+                        "summary": f"Subtask '{sub['title']}' failed: {res.get('summary','')}",
+                        "artifacts": res.get("artifacts", []), "checks": top_spec["checks"]}
 
     # whole-task acceptance: re-run the top-level checks against the combined project
     acceptance = accept(executor, top_spec["deliverables"], top_spec["checks"])
