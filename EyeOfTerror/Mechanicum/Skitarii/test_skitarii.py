@@ -336,6 +336,46 @@ class TestClarifyGate(unittest.TestCase):
             clarify._chat = orig
 
 
+class TestWorktreeMerge(unittest.TestCase):
+    """Parallel subtasks run in real git worktrees and merge back with real git — two
+    subtasks touching different files both land; touching the SAME file is a flagged
+    conflict, not a silent last-writer-wins."""
+
+    def _base(self):
+        import tempfile
+        from pathlib import Path
+        from executor import LocalExecutor
+        d = tempfile.mkdtemp(prefix="wt-base-")
+        return LocalExecutor(Path(d))
+
+    def test_disjoint_merges_both_and_conflict_is_flagged(self):
+        import planner
+        base = self._base()
+        base.write_file("seed.txt", "0\n")
+        orig = planner._run_with_retry
+        # each stub subtask writes its assigned file/content in its own worktree
+        plan = {0: ("a.txt", "A\n"), 1: ("b.txt", "B\n")}
+
+        def stub(goal, executor, task_id, *, top_goal, note, max_wall_sec, rounds=2, ask_fn=None, cancel_fn=None):
+            rel, content = plan[int(goal)]
+            executor.write_file(rel, content)
+            return {"accepted": True, "status": "done"}
+
+        planner._run_with_retry = stub
+        notes = []
+        try:
+            wave = [{"goal": "0", "title": "s0"}, {"goal": "1", "title": "s1"}]
+            planner._run_wave_parallel(wave, base, "wtT", "top", notes.append, 60, None, None)
+            self.assertEqual(base.read_file("a.txt").strip(), "A")
+            self.assertEqual(base.read_file("b.txt").strip(), "B")   # both disjoint files landed
+            # now a conflicting wave: both subtasks rewrite seed.txt differently
+            plan.clear(); plan.update({0: ("seed.txt", "X\n"), 1: ("seed.txt", "Y\n")})
+            planner._run_wave_parallel(wave, base, "wtC", "top", notes.append, 60, None, None)
+            self.assertTrue(any("КОНФЛИКТ" in n for n in notes), "merge conflict must be flagged")
+        finally:
+            planner._run_with_retry = orig
+
+
 class TestEvalSuite(unittest.TestCase):
     def test_thirty_tasks_six_categories(self):
         import eval_suite

@@ -1,31 +1,35 @@
 {
   "date": "2026-07-11",
-  "note": "Первый честный полный прогон 30 задач через живой сервис (systemd, 7200). Числа сведены из первого полного прогона + перепрогона regression после фикса pytest-зависимой проверки. Верификация НЕЗАВИСИМАЯ: раннер сам пересобирал задачу на хосте (seed + отданные файлы) и заново гонял oracle-проверки.",
-  "totals": {
+  "note": "Честный прогон 30 задач через живой сервис (systemd, 7200) с НЕЗАВИСИМОЙ верификацией на хосте. Столбец 'after_fixes' — после устранения двух поведенческих дефектов (Ревьюер стал совещательным; добавлен гейт неоднозначности): затронутые задачи (un4, rg2, am1-5) перепрогнаны вживую.",
+  "totals_before_fixes": {
+    "total": 30, "correct": 21, "unverified": 2, "false_rejected": 2,
+    "failed_no_ask": 5, "false_accepted": 0, "errored": 0,
+    "correct_pct": 70.0, "false_accepted_pct_of_accepted": 0.0
+  },
+  "totals_after_fixes": {
     "total": 30,
-    "correct": 21,
+    "correct": 23,
     "unverified": 2,
-    "false_rejected": 2,
-    "failed_no_ask": 5,
+    "asked_clarification": 5,
+    "false_rejected": 0,
     "false_accepted": 0,
     "errored": 0,
-    "correct_pct": 70.0,
-    "false_accepted_pct_of_accepted": 0.0,
-    "code_correct_of_verifiable": "23/23"
+    "did_right_thing": "28/30 (23 correct + 5 верно переспросила); 2 непроверяемы на хосте (php/node)",
+    "false_accepted_pct_of_accepted": 0.0
   },
-  "by_category": {
-    "greenfield": {"correct": 3, "unverified": 2, "comment": "gf3(php)/gf5(node) непроверяемы на хосте — код отдан, но независимо не подтверждён"},
+  "by_category_after_fixes": {
+    "greenfield": {"correct": 3, "unverified": 2, "comment": "gf3(php)/gf5(node) непроверяемы на хосте"},
     "fix_one":    {"correct": 5},
     "multi":      {"correct": 5},
-    "unspecified":{"correct": 4, "false_rejected": 1, "comment": "un4: рабочее решение зарезано собственной приёмкой"},
-    "regression": {"correct": 4, "false_rejected": 1, "comment": "rg2: рабочее решение зарезано собственной приёмкой"},
-    "ambiguous":  {"asked_clarification": 0, "failed_no_ask": 5, "false_accepted": 0, "comment": "не переспрашивает — молотит вслепую до таймаута; но и не выдумывает успех"}
+    "unspecified":{"correct": 5, "comment": "un4 стал correct — Ревьюер больше не режет зелёные проверки"},
+    "regression": {"correct": 5, "comment": "rg2 стал correct"},
+    "ambiguous":  {"asked_clarification": 5, "false_accepted": 0, "comment": "гейт неоднозначности: спрашивает за ~3с вместо 300с слепого молочения"}
   },
   "findings": [
-    "FALSE-ACCEPT = 0: ни разу не назвала успехом сломанное. Главная метрика доверия чиста.",
-    "На 23 независимо проверяемых код-задачах отданный код был корректен в 23/23.",
-    "2 false-reject (un4, rg2): собственная приёмка слишком строга — теряет годную работу.",
-    "0/5 на неоднозначных: не умеет переспрашивать — реальный разрыв с Claude/Codex.",
-    "artefact пойман и устранён: pytest-зависимая oracle-проверка ложно давала 4 false-accept из-за отсутствия pytest на хосте; проверки сделаны самодостаточными."
+    "FALSE-ACCEPT = 0 (до и после): ни разу не назвала успехом сломанное.",
+    "После фиксов: 0 false-reject (было 2) — Ревьюер совещательный, исполняемый оракул решает.",
+    "После фиксов: 5/5 верных уточнений на размытых задачах (было 0/5) — гейт неоднозначности.",
+    "На всех независимо проверяемых код-задачах отданный код корректен.",
+    "Artefact в самом eval пойман и устранён: pytest-зависимая проверка ложно давала 4 false-accept."
   ]
 }

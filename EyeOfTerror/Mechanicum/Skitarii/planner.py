@@ -132,47 +132,87 @@ def _dependency_waves(subtasks: list[dict[str, Any]]) -> list[list[dict[str, Any
     return waves
 
 
+_GIT_ID = "git -c user.email=b@x -c user.name=skitarii"
+
+
+def _ensure_git(ex) -> bool:
+    """Make the base workdir a git repo with a baseline commit, so children can be real
+    `git worktree`s and merges are real merges. Returns False if git is unavailable."""
+    r = ex.bash(f"git rev-parse --git-dir >/dev/null 2>&1 || "
+                f"(git init -q . && git add -A && {_GIT_ID} commit -qm baseline --allow-empty); "
+                f"command -v git >/dev/null && echo GIT_OK", timeout=60)
+    return "GIT_OK" in (r.get("stdout") or "")
+
+
 def _run_wave_parallel(wave, base_executor, task_id, top_goal, note, per, ask_fn, cancel_fn):
     """Run one wave. A single subtask runs in the shared workdir. Several independent
-    subtasks each run in an isolated worktree (child executor, seeded from the current
-    project state), then their changes are merged back. Concurrency is capped."""
+    subtasks each run in a real `git worktree` off the base repo (own branch), then their
+    branches are MERGED back with git — a real 3-way merge, so a file changed by two
+    subtasks is a genuine merge conflict we surface, not a silent last-writer-wins copy.
+    Concurrency is capped. Falls back to cp -a only if git is unavailable."""
     if len(wave) == 1:
         return [_run_with_retry(wave[0]["goal"], base_executor, task_id, top_goal=top_goal,
                                 note=note, max_wall_sec=per, ask_fn=ask_fn, cancel_fn=cancel_fn)]
     import concurrent.futures as _f
-    base = getattr(base_executor, "workdir", "")
+    base = str(getattr(base_executor, "workdir", ""))   # may be Path (Local) or str (VM)
     limit = max(1, int(os.environ.get("SKITARII_PARALLEL", "2")))
+    use_git = _ensure_git(base_executor)
 
-    def _one(idx_sub):
-        idx, sub = idx_sub
+    def _branch(idx: int) -> str:
+        return f"wt/{task_id}-s{idx}".replace(" ", "_")
+
+    # 1) create every isolated workspace SERIALLY — git operations on the shared repo
+    # (worktree add, branch, index) are not thread-safe and race on index.lock.
+    children: dict[int, Any] = {}
+    dirs: dict[int, str] = {}
+    for idx in range(len(wave)):
         child = base_executor.child(f"{task_id}-s{idx}")
-        cdir = getattr(child, "workdir", "")
-        # seed the child with the current project so it has context
-        base_executor.bash(f"rm -rf {cdir!r}; mkdir -p {cdir!r}; cp -a {base!r}/. {cdir!r}/ 2>/dev/null || true", timeout=60)
-        # parallel fighters don't ask the user (can't interleave questions); cancel still applies
-        res = _run_with_retry(sub["goal"], child, task_id, top_goal=top_goal, note=note,
-                              max_wall_sec=per, ask_fn=None, cancel_fn=cancel_fn)
-        return idx, cdir, res
+        cdir = str(getattr(child, "workdir", ""))
+        if use_git:
+            base_executor.bash(
+                f"git worktree remove --force {cdir!r} 2>/dev/null; git branch -D {_branch(idx)} 2>/dev/null; "
+                f"rm -rf {cdir!r}; git worktree prune; "  # worktree add refuses a pre-existing dir
+                f"git worktree add -q --detach {cdir!r} && git -C {cdir!r} checkout -q -b {_branch(idx)}",
+                timeout=60)
+        else:
+            base_executor.bash(f"rm -rf {cdir!r}; mkdir -p {cdir!r}; cp -a {base!r}/. {cdir!r}/ 2>/dev/null || true", timeout=60)
+        children[idx] = child
+        dirs[idx] = cdir
+
+    # 2) run the fighters in PARALLEL — each writes only inside its own worktree (no git,
+    # so no shared-repo race). Parallel fighters don't ask the user; cancel still applies.
+    def _one(idx):
+        res = _run_with_retry(wave[idx]["goal"], children[idx], task_id, top_goal=top_goal,
+                              note=note, max_wall_sec=per, ask_fn=None, cancel_fn=cancel_fn)
+        return idx, res
 
     results: dict[int, dict] = {}
-    dirs: dict[int, str] = {}
     with _f.ThreadPoolExecutor(max_workers=min(limit, len(wave))) as pool:
-        for idx, cdir, res in pool.map(_one, list(enumerate(wave))):
+        for idx, res in pool.map(_one, list(range(len(wave)))):
             results[idx] = res
-            dirs[idx] = cdir
-    # merge each child's changes back into the shared project, in order; a file touched
-    # by two children is flagged as a conflict for a follow-up integrator.
-    seen: dict[str, int] = {}
+    # merge each child's branch back into the base, in order. A real git merge: a file two
+    # subtasks both changed becomes a CONFLICT we flag (and skip, keeping the base), instead
+    # of silently letting the last copy win.
     for idx in range(len(wave)):
         cdir = dirs[idx]
-        changed = (base_executor.bash(
-            f"cd {cdir!r} && find . -type f -not -path './.git/*' -not -path './.bg/*' -newer . 2>/dev/null; "
-            f"cd {cdir!r} && ls -1 2>/dev/null", timeout=30).get("stdout") or "")
-        base_executor.bash(f"cp -a {cdir!r}/. {base!r}/ 2>/dev/null || true", timeout=60)
-        for f in set(changed.split()):
-            if f in seen and seen[f] != idx:
-                note(f"Интеграция: файл {f} менялся в нескольких подзадачах — беру последнюю версию (нужен интегратор при конфликте).")
-            seen[f] = idx
+        if use_git:
+            # commit the fighter's work on its branch, then merge it into the base. Use the
+            # identity so a real (non-fast-forward) merge commit can actually be created —
+            # a plain `git merge` fails with no committer identity, which is NOT a conflict.
+            children[idx].bash(f"git add -A && {_GIT_ID} commit -qm {('sub-' + str(idx))!r} --allow-empty", timeout=60)
+            m = base_executor.bash(f"{_GIT_ID} merge --no-edit -m {('merge-s' + str(idx))!r} {_branch(idx)} 2>&1", timeout=90)
+            if m.get("returncode"):
+                # a real conflict shows up as unmerged (--diff-filter=U) paths — locale-proof,
+                # unlike grepping the message for "CONFLICT".
+                conflicted = (base_executor.bash("git diff --name-only --diff-filter=U 2>/dev/null",
+                                                 timeout=30).get("stdout") or "").split()
+                kind = "КОНФЛИКТ" if conflicted else "сбой"
+                note(f"Интеграция: {kind} слияния подзадачи s{idx} ({conflicted or 'см. git'}) — "
+                     f"откатываю её, база сохранена; нужен интегратор.")
+                base_executor.bash("git merge --abort 2>/dev/null || git reset --hard HEAD 2>/dev/null", timeout=30)
+            base_executor.bash(f"git worktree remove --force {cdir!r} 2>/dev/null; git branch -D {_branch(idx)} 2>/dev/null", timeout=30)
+        else:
+            base_executor.bash(f"cp -a {cdir!r}/. {base!r}/ 2>/dev/null || true", timeout=60)
     return [results[i] for i in range(len(wave))]
 
 
