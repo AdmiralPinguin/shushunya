@@ -117,7 +117,10 @@ def check_worker_manifests(errors: list[str]) -> int:
     if isinstance(services, dict):
         for service in services.values():
             if isinstance(service, dict) and service.get("module_path"):
-                metadata_paths.add(REPO_ROOT / str(service["module_path"]) / "worker.json")
+                manifest = REPO_ROOT / str(service["module_path"]) / "worker.json"
+                if manifest.exists():   # guard like the ports.json branch — a stale
+                    metadata_paths.add(manifest)   # registry entry is reported by
+                    # check_worker_services, it must not crash the whole doctor run.
     metadata_paths = sorted(metadata_paths)
     for metadata_path in metadata_paths:
         metadata = load_json(metadata_path)
