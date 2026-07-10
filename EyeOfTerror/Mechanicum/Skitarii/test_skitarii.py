@@ -294,6 +294,48 @@ class TestToolRegistry(unittest.TestCase):
         self.assertIsNone(tools.dispatch_extra("does_not_exist", {}, _ex()))
 
 
+class TestClarifyGate(unittest.TestCase):
+    def test_vague_goal_asks(self):
+        import clarify
+        orig = clarify._chat
+        clarify._chat = lambda p, max_tokens=200: '{"ready": false, "question": "Что кэшировать?"}'
+        try:
+            self.assertEqual(clarify.needs_clarification("Добавь кэш."), "Что кэшировать?")
+        finally:
+            clarify._chat = orig
+
+    def test_clear_goal_passes(self):
+        import clarify
+        orig = clarify._chat
+        clarify._chat = lambda p, max_tokens=200: '{"ready": true}'
+        try:
+            self.assertEqual(clarify.needs_clarification("Напиши fizzbuzz.py"), "")
+        finally:
+            clarify._chat = orig
+
+    def test_workspace_short_circuits_without_llm(self):
+        import clarify
+        orig = clarify._chat
+        def _boom(p, max_tokens=200):
+            raise AssertionError("LLM must not be called when workspace is present")
+        clarify._chat = _boom
+        try:
+            self.assertEqual(clarify.needs_clarification("anything", has_workspace=True), "")
+        finally:
+            clarify._chat = orig
+
+    def test_gate_fails_open_on_error(self):
+        import clarify
+        orig = clarify._chat
+        def _boom(p, max_tokens=200):
+            raise RuntimeError("llm down")
+        clarify._chat = _boom
+        try:
+            self.assertEqual(clarify.needs_clarification("Ускорь обработку."), "")
+        finally:
+            clarify._chat = orig
+
+
 class TestEvalSuite(unittest.TestCase):
     def test_thirty_tasks_six_categories(self):
         import eval_suite

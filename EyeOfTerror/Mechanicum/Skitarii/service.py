@@ -24,6 +24,7 @@ from planner import plan_and_run  # noqa: E402
 from executor import VmExecutor  # noqa: E402
 from explorer import explore, brief_for_fighter  # noqa: E402
 from reviewer import review  # noqa: E402
+from clarify import needs_clarification  # noqa: E402
 import mission_store  # noqa: E402
 
 VM_KEY = os.environ.get("SKITARII_VM_KEY",
@@ -85,6 +86,20 @@ def execute_mission(payload: dict, mission=None) -> dict:
     cancel_fn = (lambda: mission.cancelled.is_set()) if mission is not None else None
     note = (lambda m: (mission.record("note", {"text": m}) if mission is not None else None)) or (lambda m: None)
 
+    # Pre-flight ambiguity gate: on a hopelessly vague goal, ask ONE question instead of
+    # grinding blind (the eval showed 0/5 clarifications). Skip when explicit checks are
+    # given (a checked task is grounded by construction). Fails open.
+    if not checks:
+        clar = needs_clarification(goal, has_workspace=bool(workspace_files))
+        if clar:
+            note("Задача размыта — спрашиваю уточнение вместо слепой работы.")
+            answer = (ask_fn(clar) if ask_fn is not None else "") or ""
+            answer = answer.strip()
+            if not answer:
+                return {"status": "needs_user", "accepted": False, "question": clar,
+                        "summary": clar, "needs_user": True, "task_id": task_id, "files": {}}
+            goal += f"\n\nУточнение пользователя: {answer}"
+
     ex = _mission_executor(task_id)
     if not ex.alive():
         return {"status": "blocked", "accepted": False, "error": "sandbox VM is not reachable"}
@@ -132,11 +147,15 @@ def execute_mission(payload: dict, mission=None) -> dict:
             last_acc = verdict["acceptance"]
         rev = review(goal, diff, last_acc, invariants=exploration.get("invariants"))
         verdict["review"] = rev
+        # ADVISORY, not a veto. The executable oracle (behavioural checks) is the source of
+        # truth — an LLM reviewer's opinion must NOT overturn green checks (that produced
+        # real false-rejects: it killed working code on un4/rg2). Surface its concerns as a
+        # warning for the user; only genuine check failures (accepted already False) fail a
+        # mission.
         if verdict.get("accepted") and not rev["approved"]:
-            verdict["accepted"] = False
-            verdict["status"] = "needs_revision"
-            verdict["summary"] = "Ревьюер завернул: " + "; ".join(rev["issues"])[:400]
-            note("Ревьюер завернул патч.")
+            verdict["review_warning"] = rev["issues"]
+            note("Ревьюер отметил замечания (совещательно — проверки зелёные, приёмку не отменяю): "
+                 + "; ".join(rev["issues"])[:300])
         verdict["patch_bundle"] = {"base_commit": base_commit, "changed_files": changed,
                                    "unified_diff": diff[:400_000], "rollback": "git apply -R <patch>",
                                    "apply_gate": "accepted" if verdict.get("accepted") else "blocked"}
