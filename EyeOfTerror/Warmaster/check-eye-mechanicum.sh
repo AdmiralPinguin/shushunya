@@ -1,39 +1,49 @@
 #!/usr/bin/env bash
-# EyeOfTerror integration barrier — updated for the Skitarii brigade.
-# The retired paper brigades (Mechanicum/CodeBrigade/Workers, Mechanicum/PlanningBrigade)
-# were removed; their self-tests no longer exist. This barrier now REQUIRES the active
-# Skitarii brigade to be green and runs the surviving Warmaster/Scriptorium suites
-# best-effort, printing a summary instead of dying on a retired dependency.
+# EyeOfTerror integration barrier — the active code brigade is the Skitarii Warband.
+#
+# This barrier no longer hides failures under a blanket "SKIP legacy". Suites are split
+# by CAUSE, measured (2026-07-11):
+#   REQUIRED    — Skitarii + the Warmaster suites that actually pass headless; a break
+#                 here turns the barrier RED.
+#   ENV-GATED   — need a dependency (pydantic) or a LIVE service/HTTP; reported, skipped
+#                 without failing when the env isn't up (they run for real in the live stack).
+#   QUARANTINED — reference retired brigades or carry known contract drift; reported as
+#                 known-obsolete and tracked separately (do NOT fake them green).
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 fail=0
 
-# ---- REQUIRED: active code brigade ----
-echo "== REQUIRED: Skitarii =="
+echo "== REQUIRED: Skitarii Warband =="
 python3 EyeOfTerror/Mechanicum/Skitarii/test_skitarii.py || fail=1
 python3 -m py_compile EyeOfTerror/Mechanicum/Skitarii/*.py EyeOfTerror/Warmaster/eye_of_terror/skitarii_bridge.py || fail=1
 
-# ---- BEST-EFFORT: surviving Warmaster / Scriptorium suites ----
-echo "== BEST-EFFORT: Warmaster & Scriptorium =="
-ok=0; skip=0
-run() {  # run() <pythonpath> <script> — each capped so one hang can't block the barrier
-  if PYTHONPATH="$1" timeout 25 python3 "$2" >/dev/null 2>&1; then
-    ok=$((ok+1))
+echo "== REQUIRED: Warmaster suites (must stay green) =="
+for s in research_modes_self_test.py research_revision_loop_self_test.py routing_self_test.py \
+         ledger_self_test.py governor_api_contract_self_test.py http_executor_self_test.py; do
+  if PYTHONPATH=".:EyeOfTerror/Warmaster" timeout 60 python3 "EyeOfTerror/Warmaster/$s" >/dev/null 2>&1; then
+    echo "   OK   $s"
   else
-    skip=$((skip+1)); echo "   SKIP $(basename "$2") (legacy dependency, error, or timeout)"
+    echo "   FAIL $s (REQUIRED)"; fail=1
   fi
-}
-for s in doctor.py self_test.py research_modes_self_test.py research_revision_loop_self_test.py \
-         governors_self_test.py routing_self_test.py ledger_self_test.py \
-         warmaster_api_contract_self_test.py governor_api_contract_self_test.py \
-         iskandar_service_self_test.py ceraxia_service_self_test.py \
-         warmaster_gateway_governor_http_self_test.py local_executor_self_test.py \
-         http_executor_self_test.py; do
-  [ -f "EyeOfTerror/Warmaster/$s" ] && run ".:EyeOfTerror/Warmaster" "EyeOfTerror/Warmaster/$s"
 done
 
-echo "== summary: best-effort ok=$ok skip=$skip =="
-if [ "$fail" -ne 0 ]; then echo "eye barrier: RED (Skitarii required suite failed)"; exit 1; fi
-echo "eye barrier: GREEN (Skitarii required; legacy best-effort)"
+echo "== ENV-GATED: need a dep or a live service (reported, not required) =="
+for s in governors_self_test.py iskandar_service_self_test.py ceraxia_service_self_test.py \
+         warmaster_gateway_governor_http_self_test.py local_executor_self_test.py; do
+  [ -f "EyeOfTerror/Warmaster/$s" ] || continue
+  if PYTHONPATH=".:EyeOfTerror/Warmaster" timeout 20 python3 "EyeOfTerror/Warmaster/$s" >/dev/null 2>&1; then
+    echo "   OK   $s (env present)"
+  else
+    echo "   GATED $s (missing dep / live service down)"
+  fi
+done
+
+echo "== QUARANTINED: obsolete refs / known drift — tracked, not gating =="
+for s in doctor.py self_test.py warmaster_api_contract_self_test.py; do
+  [ -f "EyeOfTerror/Warmaster/$s" ] && echo "   KNOWN $s (retired-brigade ref or contract drift — see backlog)"
+done
+
+if [ "$fail" -ne 0 ]; then echo "eye barrier: RED (a REQUIRED suite failed)"; exit 1; fi
+echo "eye barrier: GREEN (Skitarii + required Warmaster suites)"

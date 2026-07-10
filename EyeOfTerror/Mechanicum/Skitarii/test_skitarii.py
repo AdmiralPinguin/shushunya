@@ -184,6 +184,26 @@ class TestExplorerReviewer(unittest.TestCase):
         self.assertIn("mul stays correct", exp["invariants"])
         self.assertIn("Recon", explorer.brief_for_fighter(exp))
 
+    def test_explorer_sees_full_working_copy_via_executor(self):
+        import explorer, tempfile
+        from pathlib import Path
+        from executor import LocalExecutor
+        ex = LocalExecutor(Path(tempfile.mkdtemp(prefix="expl-")))
+        ex.write_file("a.py", "def add(): pass\n")
+        ex.write_file("helper.py", "def h(): pass\n")   # NOT in the preloaded slice
+        seen = {}
+        orig = explorer._chat
+        def cap(p, max_tokens=900):
+            seen["prompt"] = p
+            return '{"target_files":["helper.py"],"related_files":[],"tests":[],"invariants":[],"risks":[]}'
+        explorer._chat = cap
+        try:
+            exp = explorer.explore("fix helper", {"a.py": "def add(): pass\n"}, ex)
+        finally:
+            explorer._chat = orig
+        self.assertIn("helper.py", seen["prompt"])          # recon saw the un-preloaded file
+        self.assertIn("helper.py", exp["target_files"])     # and could target it
+
     def test_reviewer_vetoes_empty_diff(self):
         import reviewer
         r = reviewer.review("fix bug", "", {"results": []})
@@ -212,6 +232,30 @@ class TestMissionStore(unittest.TestCase):
             _t.sleep(0.05)
         self.assertEqual(m.status, "done")
         self.assertTrue(m.result["accepted"])
+
+    def test_resume_reruns_a_failed_mission(self):
+        import mission_store, time as _t
+        m = mission_store.create("t-resume-1", "goal")
+        mission_store.run_async(m, lambda mm: {"status": "failed", "accepted": False})
+        for _ in range(50):
+            if m.status == "failed":
+                break
+            _t.sleep(0.05)
+        self.assertEqual(m.status, "failed")
+        # can't resume an active mission; can resume a stopped one
+        self.assertTrue(mission_store.resume("t-resume-1", lambda mm: {"status": "done", "accepted": True}))
+        for _ in range(50):
+            if m.status == "done":
+                break
+            _t.sleep(0.05)
+        self.assertEqual(m.status, "done")
+        self.assertTrue(m.result["accepted"])
+
+    def test_resume_refuses_active_mission(self):
+        import mission_store
+        m = mission_store.create("t-resume-2", "goal")
+        m.status = "running"
+        self.assertFalse(mission_store.resume("t-resume-2", lambda mm: {"status": "done"}))
 
     def test_ask_user_blocks_then_answers(self):
         import mission_store, threading, time as _t

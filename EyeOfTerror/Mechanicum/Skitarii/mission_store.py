@@ -124,6 +124,24 @@ def run_async(m: Mission, fn: Callable[[Mission], dict[str, Any]]) -> None:
     threading.Thread(target=_run, daemon=True, name=f"mission-{m.id}").start()
 
 
+def resume(mission_id: str, fn: Callable[["Mission"], dict[str, Any]]) -> bool:
+    """Re-run a STOPPED mission (failed/blocked/cancelled/done) from its goal as a fresh
+    attempt, keeping the same id and journal. Refuses to touch a mission that is still
+    active (running/queued/needs_user) — use answer/cancel for those."""
+    m = _MISSIONS.get(mission_id)
+    if not m or m.status in ("running", "queued", "needs_user"):
+        return False
+    # fresh sync primitives so a stale cancel/answer can't poison the new attempt
+    m.cancelled = threading.Event()
+    m._answer_ev = threading.Event()
+    m.answer = None
+    m.question = None
+    m.result = None
+    m.record("resume", {"from_status": m.status})
+    run_async(m, fn)
+    return True
+
+
 def cancel(mission_id: str) -> bool:
     m = _MISSIONS.get(mission_id)
     if not m or m.status in ("done", "failed", "cancelled", "blocked"):

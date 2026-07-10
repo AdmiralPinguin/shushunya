@@ -120,7 +120,7 @@ def execute_mission(payload: dict, mission=None) -> dict:
                  "каталоге с их путями — читай и правь их, НЕ переписывай с нуля.)")
     _memory(task_id, f"Загружено {preloaded} файлов проекта." if preloaded else f"Старт: {goal[:200]}")
 
-    exploration = explore(goal, workspace_files) if workspace_files else {}
+    exploration = explore(goal, workspace_files, ex) if workspace_files else {}
     brief = brief_for_fighter(exploration) if exploration else ""
     if brief:
         goal += brief; note("Explorer наметил цели/инварианты.")
@@ -230,6 +230,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "goal is required"}); return
             mid = str(payload.get("task_id") or f"m{int(time.time()*1000)}")
             m = mission_store.create(mid, goal)
+            m.payload = payload   # remembered so the mission can be resumed later
             m.record("created", {"goal": goal[:300]})
             mission_store.run_async(m, lambda mm: execute_mission(payload, mm))
             self._send(202, {"mission_id": mid, "status": m.status}); return
@@ -242,6 +243,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200 if ok else 409, {"ok": ok, "status": m.status}); return
             if parts[2] == "cancel":           # POST /missions/{id}/cancel
                 self._send(200, {"ok": mission_store.cancel(parts[1]), "status": m.status}); return
+            if parts[2] == "resume":           # POST /missions/{id}/resume -> retry a stopped mission
+                ok = mission_store.resume(
+                    parts[1], lambda mm: execute_mission(getattr(mm, "payload", None) or {"goal": mm.goal}, mm))
+                self._send(200 if ok else 409, {"ok": ok, "status": m.status}); return
         self._send(404, {"error": "not found"})
 
 

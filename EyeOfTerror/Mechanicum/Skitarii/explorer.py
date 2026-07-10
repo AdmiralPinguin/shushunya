@@ -39,30 +39,72 @@ def _extract_json(text: str) -> dict[str, Any]:
         return {}
 
 
-def explore(goal: str, workspace: dict[str, str] | None) -> dict[str, Any]:
+_CODE_SUFFIX = ("py", "php", "js", "ts", "go", "java", "rb", "rs", "c", "h", "cpp", "sh", "json")
+
+
+def _full_working_copy(executor: Any, workspace: dict[str, str]) -> tuple[list[str], dict[str, str]]:
+    """Enumerate the ACTUAL working copy in the sandbox (not just the caller's preloaded
+    slice), so recon reasons over the whole tree. Returns (all_files, heads) where heads
+    holds file contents for the preloaded files plus a bounded number of newly-found ones."""
+    all_files: list[str] = []
+    heads = dict(workspace)
+    if executor is None:
+        return sorted(heads.keys()), heads
+    try:
+        out = executor.bash("find . -type f -not -path './.git/*' -not -path './.bg/*' 2>/dev/null | head -400",
+                            timeout=30).get("stdout") or ""
+    except Exception:  # noqa: BLE001
+        return sorted(heads.keys()), heads
+    for line in out.splitlines():
+        rel = line[2:] if line.startswith("./") else line.strip()
+        if rel:
+            all_files.append(rel)
+    # read heads for code files we don't already have content for, bounded to keep it fast
+    budget = 40 - len(heads)
+    for rel in all_files:
+        if budget <= 0:
+            break
+        if rel in heads or rel.rsplit(".", 1)[-1] not in _CODE_SUFFIX:
+            continue
+        try:
+            heads[rel] = executor.read_file(rel, max_bytes=4000)
+            budget -= 1
+        except Exception:  # noqa: BLE001
+            pass
+    return (sorted(set(all_files) | set(heads.keys())), heads)
+
+
+def explore(goal: str, workspace: dict[str, str] | None, executor: Any = None) -> dict[str, Any]:
     """Return {target_files, related_files, tests, invariants, risks}. Empty-ish for a
-    greenfield task (no workspace) — the fighter just builds from scratch."""
-    if not workspace:
+    greenfield task (no workspace) — the fighter just builds from scratch. When an
+    executor is given, recon sees the FULL working copy in the sandbox, not just the
+    caller's preloaded slice."""
+    if not workspace and executor is None:
         return {"target_files": [], "related_files": [], "tests": [], "invariants": [], "risks": []}
-    # keep the prompt bounded: list files + short heads
+    all_files, heads = _full_working_copy(executor, workspace or {})
+    if not heads and not all_files:
+        return {"target_files": [], "related_files": [], "tests": [], "invariants": [], "risks": []}
+    # keep the prompt bounded: full file tree (names) + short heads of the important ones
     listing = []
-    for path, content in list(workspace.items())[:40]:
-        head = "\n".join(content.splitlines()[:25])
+    for path, content in list(heads.items())[:40]:
+        head = "\n".join((content or "").splitlines()[:25])
         listing.append(f"### {path}\n{head}")
+    tree = "\n".join(all_files[:400])
     prompt = (
-        "You are the recon head of a coding warband. Given the TASK and the loaded project files, "
-        "work out where the change goes. Return ONE strict JSON object and nothing else:\n"
+        "You are the recon head of a coding warband. Given the TASK, the full file tree of the "
+        "working copy, and the heads of the key files, work out where the change goes. Return ONE "
+        "strict JSON object and nothing else:\n"
         '{"target_files": ["files to edit"], "related_files": ["files to read/respect but likely not edit"], '
         '"tests": ["existing test files that cover this"], "invariants": ["behaviours that must NOT break"], '
         '"risks": ["what could go wrong"]}\n'
-        "Only use paths that appear in the files below. Be concise.\n\n"
-        f"TASK:\n{goal}\n\nPROJECT FILES:\n" + "\n\n".join(listing)
+        "Only use paths that appear in the tree below. Be concise.\n\n"
+        f"TASK:\n{goal}\n\nFILE TREE:\n{tree}\n\nKEY FILE HEADS:\n" + "\n\n".join(listing)
     )
     try:
         parsed = _extract_json(_chat(prompt))
     except Exception:
         parsed = {}
-    known = set(workspace.keys())
+    known = set(all_files) | set(heads.keys())
     def _keep(xs: Any) -> list[str]:
         return [str(x) for x in xs if isinstance(x, str)][:12] if isinstance(xs, list) else []
     return {
