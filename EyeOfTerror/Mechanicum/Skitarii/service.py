@@ -72,19 +72,35 @@ def _collect_files(ex: VmExecutor, artifacts: list[str]) -> dict[str, str]:
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code: int, obj: dict) -> None:
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionError):
+            # client hung up (e.g. curl timed out) — never let it crash the server
+            pass
+
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionError):
+            self.close_connection = True
 
     def log_message(self, *a):  # quiet
         pass
 
     def do_GET(self):
         if self.path == "/health":
-            ex = VmExecutor(host="127.0.0.1", port=VM_PORT, user="skitarii", key=VM_KEY)
-            self._send(200, {"status": "ok", "service": "Skitarii", "vm_alive": ex.alive()})
+            # cheap health: does not block on the VM (that could take seconds over SSH
+            # and make a client time out). Report VM reachability only if asked.
+            probe = "vm" in (self.path.split("?", 1)[1] if "?" in self.path else "")
+            payload = {"status": "ok", "service": "Skitarii"}
+            if probe:
+                payload["vm_alive"] = VmExecutor(host="127.0.0.1", port=VM_PORT,
+                                                 user="skitarii", key=VM_KEY).alive()
+            self._send(200, payload)
         else:
             self._send(404, {"error": "not found"})
 
@@ -148,6 +164,7 @@ def main():
     host = os.environ.get("SKITARII_HOST", "127.0.0.1")
     port = int(os.environ.get("SKITARII_PORT", "7200"))
     srv = ThreadingHTTPServer((host, port), Handler)
+    srv.daemon_threads = True          # a crashing request thread never takes the server down
     print(f"Skitarii brigade listening on http://{host}:{port}", flush=True)
     srv.serve_forever()
 
