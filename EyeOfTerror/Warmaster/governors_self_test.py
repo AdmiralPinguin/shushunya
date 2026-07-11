@@ -45,9 +45,8 @@ def main() -> int:
     iskandar_capabilities = service_capabilities()
     if sorted(iskandar_capabilities.get("task_kinds", [])) != sorted(iskandar.task_kinds):
         raise AssertionError(f"Iskandar task kinds disagree with registry: {iskandar_capabilities}")
-    code = governor_by_name("CogitatorCodewrightGovernor")
-    if not code or code.active():
-        raise AssertionError(code)
+    if governor_by_name("CogitatorCodewrightGovernor") is not None:
+        raise AssertionError("retired code governor must not remain in the registry")
     ceraxia = governor_by_name("Ceraxia")
     if not ceraxia or not ceraxia.active() or ceraxia.port != 7104:
         raise AssertionError(ceraxia)

@@ -9,13 +9,14 @@ from start_worker import load_services, load_worker_aliases, resolve_worker_name
 
 
 REQUIRED_METADATA_KEYS = {"name", "port", "role", "status", "capabilities", "api_contract"}
-CERAXIA_ROLE_CONTRACTS = {
-    "LogisRepository": ("repository_survey", "MagosStrategos"),
-    "MagosStrategos": ("change_planning", "FerrumPatchwright"),
-    "FerrumPatchwright": ("implementation", "OrdinatusVerifier"),
-    "OrdinatusVerifier": ("verification", "JudicatorCodicis"),
-    "JudicatorCodicis": ("code_review", "SealwrightFinalis"),
-    "SealwrightFinalis": ("finalize", ""),
+RETIRED_CODE_WORKERS = {
+    "CogitatorCodewright",
+    "LogisRepository",
+    "MagosStrategos",
+    "FerrumPatchwright",
+    "OrdinatusVerifier",
+    "JudicatorCodicis",
+    "SealwrightFinalis",
 }
 
 
@@ -30,12 +31,15 @@ class WorkerAliasResolutionTests(unittest.TestCase):
             self.assertIn(worker, services)
             self.assertEqual(resolve_worker_name(alias, services, aliases), worker)
 
-    def test_concrete_worker_names_still_work_and_unknown_alias_fails_closed(self) -> None:
+    def test_code_workers_and_aliases_are_absent_from_legacy_runtime(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
         services = load_services(repo_root)
         aliases = load_worker_aliases(repo_root)
-        self.assertEqual(resolve_worker_name("JudicatorCodicis", services, aliases), "JudicatorCodicis")
-        self.assertEqual(resolve_worker_name("code.reviewer", services, aliases), "JudicatorCodicis")
+        self.assertTrue(RETIRED_CODE_WORKERS.isdisjoint(services))
+        self.assertFalse(any(alias.startswith("code.") for alias in aliases))
+        self.assertEqual(resolve_worker_name("Lexmechanic", services, aliases), "Lexmechanic")
+        with self.assertRaises(SystemExit):
+            resolve_worker_name("code.reviewer", services, aliases)
         with self.assertRaises(SystemExit):
             resolve_worker_name("missing.alias", services, aliases)
 
@@ -57,25 +61,6 @@ def load_worker_metadata(path: Path) -> dict:
         raise AssertionError(f"worker metadata capabilities must be non-empty strings: {path}")
     if payload["api_contract"] != "EyeOfTerror/Warmaster/contracts/worker_api.md":
         raise AssertionError(f"worker metadata points to wrong API contract: {path}")
-    if payload["name"] in CERAXIA_ROLE_CONTRACTS:
-        role_contract = payload.get("role_contract")
-        if not isinstance(role_contract, dict):
-            raise AssertionError(f"Ceraxia worker metadata must include role_contract: {path}")
-        expected_step, expected_handoff = CERAXIA_ROLE_CONTRACTS[payload["name"]]
-        if role_contract.get("owned_step") != expected_step:
-            raise AssertionError(f"Ceraxia worker role_contract has wrong owned_step: {path}")
-        handoff_to = role_contract.get("handoff_to")
-        if not isinstance(handoff_to, list) or not all(isinstance(item, str) for item in handoff_to):
-            raise AssertionError(f"Ceraxia worker role_contract handoff_to must be a string list: {path}")
-        if expected_handoff and handoff_to != [expected_handoff]:
-            raise AssertionError(f"Ceraxia worker role_contract has wrong handoff_to: {path}")
-        if not expected_handoff and handoff_to:
-            raise AssertionError(f"Ceraxia final worker should not hand off further: {path}")
-        expected_artifacts = role_contract.get("expected_artifacts")
-        if not isinstance(expected_artifacts, list) or not all(isinstance(item, str) and item for item in expected_artifacts):
-            raise AssertionError(f"Ceraxia worker role_contract expected_artifacts must be non-empty strings: {path}")
-        if not isinstance(role_contract.get("authority"), str) or not role_contract.get("authority"):
-            raise AssertionError(f"Ceraxia worker role_contract authority must be a non-empty string: {path}")
     return payload
 
 
@@ -102,6 +87,12 @@ def main() -> int:
     port_registry = load_port_registry(repo_root)
     if not aliases:
         raise AssertionError("worker_aliases.json must define runtime aliases")
+    code_aliases = sorted(alias for alias in aliases if alias.startswith("code."))
+    if code_aliases:
+        raise AssertionError(f"retired code aliases remain in legacy registry: {code_aliases}")
+    retired_services = sorted(RETIRED_CODE_WORKERS.intersection(services))
+    if retired_services:
+        raise AssertionError(f"retired code workers remain in legacy registry: {retired_services}")
     for alias, worker in aliases.items():
         if alias in services:
             raise AssertionError(f"worker alias must not shadow a concrete service name: {alias}")
@@ -109,16 +100,15 @@ def main() -> int:
             raise AssertionError(f"worker alias points at unknown service: {alias} -> {worker}")
         if resolve_worker_name(alias, services, aliases) != worker:
             raise AssertionError(f"worker alias does not resolve to target: {alias} -> {worker}")
-    if resolve_worker_name("code.reviewer", services, aliases) != "JudicatorCodicis":
-        raise AssertionError(f"code.reviewer alias drifted: {aliases}")
-    if resolve_worker_name("JudicatorCodicis", services, aliases) != "JudicatorCodicis":
-        raise AssertionError("concrete worker names must remain valid alongside aliases")
-    try:
-        resolve_worker_name("missing.alias", services, aliases)
-    except SystemExit:
-        pass
-    else:
-        raise AssertionError("unknown aliases must fail closed")
+    for retired_name in ("code.reviewer", "JudicatorCodicis"):
+        try:
+            resolve_worker_name(retired_name, services, aliases)
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError(f"retired code worker name must fail closed: {retired_name}")
+    if resolve_worker_name("Lexmechanic", services, aliases) != "Lexmechanic":
+        raise AssertionError("concrete legacy worker names must remain valid alongside aliases")
     metadata_paths = {
         path
         for path in (repo_root / "LegacyMechanicum").glob("*/worker.json")

@@ -9,40 +9,443 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 from .actions import run_preflight_actions
-from .gateway_util import resolve_run_child_path, validate_service_host
+from .gateway_util import resolve_run_child_path, valid_task_id, validate_service_host
 from .http_executor import execute_run as execute_http_run, preflight_workers as preflight_http_workers
 from .ledger import TaskLedger
 from .local_executor import WORKER_COMMANDS, execute_run as execute_local_run, input_artifact_errors, ordered_dispatch_paths
-from .mission_control import link_run_to_mission, open_mission, record_warmaster_acceptance
+from .mission_control import (
+    link_run_to_mission,
+    mission_id_for,
+    open_mission,
+    record_warmaster_acceptance,
+    task_id_for_message,
+)
 from .run_package import load_json_file, load_json_object, load_ledger_dict, run_oversight, sandbox_artifact_file_status
 from .run_state import list_runs, orchestration_state, run_progress, run_snapshot, run_summary
 from .run_validation import revision_plan_summary, run_oversight_summary, validate_oversight_against_run, validate_revision_plan
 from .runtime_state import ACTIVE_RUNS, ACTIVE_RUNS_LOCK, REPO_ROOT
-from .skitarii_bridge import run_via_skitarii, should_handle as skitarii_should_handle
+from .skitarii_bridge import run_via_skitarii
 from .task_prepare import prepare_task, preflight_task
 from .views import executable_client_action, orchestration_view_fields, recovery_candidate_display
 
 
-def _skitarii_preflight_failures(timeout_sec: int) -> list[dict[str, Any]]:
-    """Health-check the Skitarii warband service (the actual executor of brigade-v2
-    code runs). Returns [] when healthy, or one failure entry in the same shape the
-    legacy per-worker preflight uses."""
-    import urllib.request as _rq
-    from .skitarii_bridge import SKITARII_URL
+NATIVE_EXECUTION_DESCRIPTOR = {
+    "kind": "skitarii_mission",
+    "step_id": "skitarii",
+    "backend": "SkitariiWarband",
+}
+
+_ORCHESTRATE_LOCKS_GUARD = threading.Lock()
+_ORCHESTRATE_LOCKS: dict[str, tuple[threading.RLock, int]] = {}
+
+
+@contextmanager
+def _orchestrate_task_reservation(run_root: Path, task_key: str):
+    """Serialize check/create/link for one task id inside the gateway process."""
+    key = f"{run_root.resolve()}\0{task_key}"
+    with _ORCHESTRATE_LOCKS_GUARD:
+        lock, users = _ORCHESTRATE_LOCKS.get(key, (threading.RLock(), 0))
+        _ORCHESTRATE_LOCKS[key] = (lock, users + 1)
     try:
-        with _rq.urlopen(f"{SKITARII_URL}/health", timeout=max(3, min(timeout_sec, 15))) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-        if str(payload.get("status") or "") == "ok":
-            return []
-        return [{"worker": "SkitariiWarband", "service": SKITARII_URL,
-                 "error": f"unhealthy: {str(payload)[:200]}"}]
-    except Exception as exc:  # noqa: BLE001 - preflight reports, never raises
-        return [{"worker": "SkitariiWarband", "service": SKITARII_URL, "error": str(exc)[:200]}]
+        with lock:
+            yield
+    finally:
+        with _ORCHESTRATE_LOCKS_GUARD:
+            current = _ORCHESTRATE_LOCKS.get(key)
+            if current is not None and current[0] is lock:
+                remaining = current[1] - 1
+                if remaining <= 0:
+                    _ORCHESTRATE_LOCKS.pop(key, None)
+                else:
+                    _ORCHESTRATE_LOCKS[key] = (lock, remaining)
+
+
+def _skitarii_backend_health(timeout_sec: int) -> dict[str, Any]:
+    """Attest the exact Skitarii instance before native execution.
+
+    Ceraxia and the executor must use the same deep readiness definition.  A
+    shallow HTTP 200 is not authority to start code execution: the VM/process
+    boundary, hidden-verifier policy, model roster, instance identity, and
+    source SHA all have to match the source mounted by this checkout.
+    """
+    from .inner_circle.ceraxia_service import skitarii_backend_health
+
+    attestation = skitarii_backend_health(max(3, min(timeout_sec, 15)))
+    health = attestation.get("health") if isinstance(attestation.get("health"), dict) else {}
+    return {
+        "ok": attestation.get("healthy") is True,
+        "backend": "SkitariiWarband",
+        "service": str(attestation.get("endpoint") or ""),
+        "status": str(attestation.get("status") or "unavailable"),
+        "health": health,
+        "identity": health.get("identity") if isinstance(health.get("identity"), dict) else {},
+        "error": str(attestation.get("error") or "")[:300],
+    }
+
+
+def _reprepare_action(run_dir: Path, contract: dict[str, Any]) -> dict[str, Any]:
+    stem = run_dir.name[:119].rstrip(".-_") or "ceraxia-code-run"
+    fresh_task_id = f"{stem}-native"
+    suffix = 2
+    while (run_dir.parent / fresh_task_id).exists():
+        suffix_text = f"-native-{suffix}"
+        fresh_task_id = f"{stem[:127 - len(suffix_text)].rstrip('.-_')}{suffix_text}"
+        suffix += 1
+    return {
+        "kind": "legacy_ceraxia_reprepare_required",
+        "method": "POST",
+        "endpoint": "POST /orchestrate_run",
+        "body": {
+            "message": str(contract.get("goal") or ""),
+            "task_id": fresh_task_id,
+            "governor_transport": "http",
+            "run_mode": "http",
+            "auto_start": True,
+            "reuse_existing": False,
+        },
+        "reason": (
+            "this legacy Ceraxia package has no native execution descriptor; "
+            "create a fresh run through the live Ceraxia service"
+        ),
+    }
+
+
+def _route_failure(
+    run_dir: Path,
+    *,
+    phase: str,
+    error: str,
+    error_code: str,
+    next_action: dict[str, Any],
+    validation_errors: list[str] | None = None,
+) -> dict[str, Any]:
+    task_id = run_dir.name
+    payload = {
+        "ok": False,
+        "phase": phase,
+        "status": phase,
+        "task_id": task_id,
+        "run_dir": str(run_dir),
+        "error": error,
+        "error_code": error_code,
+        "actions": {"next_action": next_action},
+        "next_action": next_action,
+        "client_action": executable_client_action(task_id, next_action),
+    }
+    if validation_errors:
+        payload["native_validation_errors"] = validation_errors
+    return payload
+
+
+def execution_backend_route(run_dir: Path) -> dict[str, Any]:
+    """Resolve exactly one execution backend from the persisted run contract.
+
+    New code runs opt in through ``contract['execution']``. Governor names are
+    consulted only to quarantine old Ceraxia six-worker packages; they never opt
+    a new run into the native backend.
+    """
+    raw_contract, contract_error = load_json_object(run_dir / "contract.json", "contract")
+    if contract_error:
+        # Generic package validation owns missing/corrupt contracts, preserving its
+        # existing diagnostics instead of changing non-code behaviour here.
+        return {
+            "ok": True,
+            "kind": "generic_pipeline",
+            "backend": "legacy_pipeline",
+            "execution": {},
+            "contract_error": contract_error,
+        }
+
+    native_detection_error = ""
+    try:
+        from . import native_code_run as native_code_run_api
+        is_native_code_run = native_code_run_api.is_native_code_run
+        load_native_code_run = native_code_run_api.load_native_code_run
+        validate_native_code_run = getattr(
+            native_code_run_api,
+            "validate_native_code_run",
+            None,
+        ) or native_code_run_api.validate_native_code_run_package
+    except ImportError as exc:
+        if raw_contract.get("execution") == NATIVE_EXECUTION_DESCRIPTOR:
+            action = {
+                "kind": "inspect_native_code_run",
+                "method": "GET",
+                "endpoint": "GET /runs/{task_id}/package",
+                "body": {},
+                "reason": "native execution support is unavailable",
+            }
+            return _route_failure(
+                run_dir,
+                phase="native_code_run_invalid",
+                error=str(exc),
+                error_code="native_code_run_invalid",
+                next_action=action,
+                validation_errors=[str(exc)],
+            )
+        is_native = False
+    else:
+        try:
+            is_native = bool(is_native_code_run(run_dir))
+        except Exception as exc:  # noqa: BLE001 - malformed native packages fail closed.
+            is_native = False
+            native_detection_error = str(exc)
+        else:
+            native_detection_error = ""
+
+    explicit_native = raw_contract.get("execution") == NATIVE_EXECUTION_DESCRIPTOR
+    if is_native or explicit_native:
+        validation_errors: list[str] = []
+        if native_detection_error:
+            validation_errors.append(native_detection_error)
+        try:
+            raw_errors = validate_native_code_run(run_dir)
+            if isinstance(raw_errors, list):
+                validation_errors.extend(str(item) for item in raw_errors if str(item))
+        except Exception as exc:  # noqa: BLE001 - validation is an executor trust boundary.
+            validation_errors.append(str(exc))
+        validated_contract: dict[str, Any] = {}
+        if not validation_errors:
+            try:
+                loaded_native = load_native_code_run(run_dir)
+                load_errors = (
+                    loaded_native.get("errors")
+                    if isinstance(loaded_native.get("errors"), list)
+                    else []
+                )
+                validation_errors.extend(str(item) for item in load_errors if str(item))
+                validated_contract = (
+                    loaded_native.get("contract")
+                    if isinstance(loaded_native.get("contract"), dict)
+                    else loaded_native
+                )
+            except Exception as exc:  # noqa: BLE001 - loading must fail closed too.
+                validation_errors.append(str(exc))
+        execution = (
+            validated_contract.get("execution")
+            if isinstance(validated_contract.get("execution"), dict)
+            else raw_contract.get("execution")
+        )
+        if execution != NATIVE_EXECUTION_DESCRIPTOR:
+            validation_errors.append("contract.execution is not the native Skitarii descriptor")
+        if validation_errors:
+            action = {
+                "kind": "inspect_native_code_run",
+                "method": "GET",
+                "endpoint": "GET /runs/{task_id}/package",
+                "body": {},
+                "reason": "native code-run contract or Ceraxia directive is invalid",
+            }
+            return _route_failure(
+                run_dir,
+                phase="native_code_run_invalid",
+                error="native code-run validation failed",
+                error_code="native_code_run_invalid",
+                next_action=action,
+                validation_errors=validation_errors,
+            )
+        return {
+            "ok": True,
+            "kind": "native_code_run",
+            "backend": "SkitariiWarband",
+            "execution": dict(execution),
+            "native_validation_errors": [],
+        }
+
+    if (
+        str(raw_contract.get("assigned_governor") or "") == "Ceraxia"
+        and str(raw_contract.get("kind") or "").lower() == "code"
+    ):
+        action = _reprepare_action(run_dir, raw_contract)
+        return _route_failure(
+            run_dir,
+            phase="legacy_ceraxia_reprepare_required",
+            error="legacy Ceraxia code packages cannot be executed",
+            error_code="legacy_ceraxia_reprepare_required",
+            next_action=action,
+        )
+
+    return {
+        "ok": True,
+        "kind": "generic_pipeline",
+        "backend": "legacy_pipeline",
+        "execution": {},
+    }
+
+
+def _native_mission_ref_errors(run_dir: Path) -> list[str]:
+    """Validate the durable protocol link required before native execution."""
+    errors: list[str] = []
+    ref_path = run_dir / "mission_ref.json"
+    if ref_path.is_symlink() or not ref_path.is_file():
+        return ["mission_ref.json is missing or not a regular file"]
+    mission_ref, ref_error = load_json_object(ref_path, "mission_ref")
+    if ref_error:
+        return [ref_error]
+
+    contract, contract_error = load_json_object(run_dir / "contract.json", "contract")
+    if contract_error:
+        return [contract_error]
+    expected_mission_id = str(contract.get("mission_id") or "").strip()
+    linked_mission_id = str(mission_ref.get("mission_id") or "").strip()
+    if not expected_mission_id or linked_mission_id != expected_mission_id:
+        errors.append("mission_ref mission_id does not match the native contract")
+
+    raw_mission_dir = str(mission_ref.get("mission_dir") or "").strip()
+    mission_dir = Path(raw_mission_dir) if raw_mission_dir else None
+    if mission_dir is None or mission_dir.is_symlink() or not mission_dir.is_dir():
+        errors.append("mission_ref mission_dir does not exist as a real directory")
+        return errors
+
+    mission_path = mission_dir / "mission.json"
+    if mission_path.is_symlink() or not mission_path.is_file():
+        errors.append("linked mission.json is missing or not a regular file")
+        return errors
+    mission, mission_error = load_json_object(mission_path, "mission")
+    if mission_error:
+        errors.append(mission_error)
+    elif str(mission.get("mission_id") or "").strip() != expected_mission_id:
+        errors.append("linked mission.json mission_id does not match the native contract")
+    return errors
+
+
+def _native_preflight(
+    run_dir: Path,
+    route: dict[str, Any],
+    *,
+    mode: str,
+    timeout_sec: int,
+    force: bool = False,
+) -> dict[str, Any]:
+    health = _skitarii_backend_health(timeout_sec)
+    mission_ref_errors = _native_mission_ref_errors(run_dir)
+    preflight = {
+        "ok": (
+            bool(route.get("ok"))
+            and bool(health.get("ok"))
+            and not mission_ref_errors
+        ),
+        "task_id": run_dir.name,
+        "mode": mode,
+        "run_dir": str(run_dir),
+        "backend_route": route,
+        "execution": route.get("execution", {}),
+        "native_validation_errors": route.get("native_validation_errors", []),
+        "backend_health": health,
+        "mission_ref_errors": mission_ref_errors,
+        "step_ids": ["skitarii"],
+        "steps": [{"step_id": "skitarii", "backend": "SkitariiWarband"}],
+        # Native packages never enter dispatch, artifact-dependency, local-command,
+        # oversight, or per-worker preflight.
+        "dispatch_errors": [],
+        "oversight_errors": [],
+        "oversight_summary": {},
+        "input_failures": [],
+        "missing_local_commands": [],
+        "worker_preflight_failures": [],
+    }
+    summary = run_summary(run_dir)
+    run_status = str(summary.get("status") or "")
+    preflight["run_status"] = run_status
+    run_actions = summary.get("actions") if isinstance(summary.get("actions"), dict) else {}
+    run_next_action = (
+        run_actions.get("next_action")
+        if isinstance(run_actions.get("next_action"), dict)
+        else {}
+    )
+    preflight["run_next_action"] = run_next_action
+    # Native terminal evidence is immutable.  A second attempt must be a fresh
+    # Ceraxia mission (or the terminal result's own apply/clarification action),
+    # never an in-place forced rewrite of the old ledger and protocol trail.
+    del force
+    immutable_terminal = run_status in {"blocked", "completed", "failed", "cancelled", "corrupt"}
+    force_required = bool(run_actions.get("force_required_for_rerun")) and not immutable_terminal
+    can_start_run = not mission_ref_errors and bool(health.get("ok")) and (
+        bool(run_actions.get("can_start"))
+        or bool(run_actions.get("can_resume"))
+        or bool(run_actions.get("can_start_revision"))
+        or bool(run_actions.get("can_execute_revision"))
+    ) and not immutable_terminal
+    if can_start_run:
+        start_action = {
+            "kind": "start_native_code_run",
+            "method": "POST",
+            "endpoint": (
+                "POST /runs/{task_id}/start_local"
+                if mode == "local"
+                else "POST /runs/{task_id}/start_http"
+            ),
+            "body": {},
+            "reason": "native contract, Ceraxia directive, mission link, and Skitarii health passed",
+        }
+        preflight["actions"] = {
+            "can_start_run": True,
+            "can_inspect_package": True,
+            "force_required_for_rerun": force_required,
+            "terminal_run_immutable": immutable_terminal,
+            "next_action": start_action,
+        }
+    elif mission_ref_errors:
+        inspect_action = {
+            "kind": "inspect_mission_link",
+            "method": "GET",
+            "endpoint": "GET /runs/{task_id}/package",
+            "body": {},
+            "reason": "native execution requires a durable matching mission_ref",
+        }
+        preflight["actions"] = {
+            "can_start_run": False,
+            "can_inspect_package": True,
+            "force_required_for_rerun": force_required,
+            "terminal_run_immutable": immutable_terminal,
+            "next_action": inspect_action,
+        }
+    elif not health.get("ok"):
+        retry_action = {
+            "kind": "retry_native_preflight",
+            "method": "POST",
+            "endpoint": "POST /runs/{task_id}/preflight_http",
+            "body": {},
+            "reason": "the declared Skitarii backend is unavailable",
+        }
+        preflight["actions"] = {
+            "can_start_run": False,
+            "can_inspect_package": True,
+            "force_required_for_rerun": force_required,
+            "terminal_run_immutable": immutable_terminal,
+            "next_action": retry_action,
+        }
+    elif immutable_terminal:
+        terminal_action = run_next_action
+        if not terminal_action:
+            contract, _ = load_json_object(run_dir / "contract.json", "contract")
+            terminal_action = _reprepare_action(run_dir, contract)
+            terminal_action["kind"] = "reprepare_ceraxia_run"
+            terminal_action["reason"] = (
+                "native terminal evidence is immutable; create a fresh Ceraxia mission"
+            )
+        preflight["actions"] = {
+            "can_start_run": False,
+            "can_inspect_package": True,
+            "force_required_for_rerun": False,
+            "terminal_run_immutable": True,
+            "next_action": terminal_action,
+        }
+    else:
+        preflight["actions"] = {
+            "can_start_run": False,
+            "can_inspect_package": True,
+            "force_required_for_rerun": force_required,
+            "terminal_run_immutable": immutable_terminal,
+            "next_action": run_next_action,
+        }
+    return preflight
 
 
 def run_execution_preflight(
@@ -52,10 +455,37 @@ def run_execution_preflight(
     host: str = "127.0.0.1",
     timeout_sec: int = 10,
     step_ids: list[str] | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     if mode not in {"local", "http"}:
         raise ValueError("mode must be local or http")
     host = validate_service_host(host)
+    backend_route = execution_backend_route(run_dir)
+    if not backend_route.get("ok"):
+        return {
+            **backend_route,
+            "mode": mode,
+            "host": host if mode == "http" else "",
+            "workspace_root": str(workspace_root) if workspace_root is not None else "",
+            "step_ids": [],
+            "steps": [],
+            "dispatch_errors": [],
+            "oversight_errors": [],
+            "oversight_summary": {},
+            "input_failures": [],
+            "missing_local_commands": [],
+            "worker_preflight_failures": [],
+            "backend_route": backend_route,
+        }
+    if backend_route.get("backend") == "SkitariiWarband":
+        return _native_preflight(
+            run_dir,
+            backend_route,
+            mode=mode,
+            timeout_sec=timeout_sec,
+            force=force,
+        )
+
     status = load_json_file(run_dir / "status.json")
     planned_steps = status.get("steps") if isinstance(status.get("steps"), list) else []
     selected = set(step_ids or [])
@@ -130,12 +560,7 @@ def run_execution_preflight(
                 "input_artifact_status": input_status,
             }
         )
-    if mode == "http" and skitarii_should_handle(run_dir):
-        # Brigade v2: this run is executed end-to-end by the Skitarii warband, not by
-        # the retired per-step CodeBrigade services the dispatch packets still name —
-        # probing those would fail forever. Preflight the warband service instead.
-        worker_failures = _skitarii_preflight_failures(timeout_sec)
-    elif mode == "http":
+    if mode == "http":
         worker_failures = preflight_http_workers(run_dir, host, timeout_sec, step_ids=step_ids)
     else:
         worker_failures = []
@@ -199,6 +624,16 @@ def record_run_preflight_event(run_dir: Path, preflight: dict[str, Any]) -> None
         "input_failures": len(preflight.get("input_failures") if isinstance(preflight.get("input_failures"), list) else []),
         "missing_local_commands": len(preflight.get("missing_local_commands") if isinstance(preflight.get("missing_local_commands"), list) else []),
         "worker_preflight_failures": len(preflight.get("worker_preflight_failures") if isinstance(preflight.get("worker_preflight_failures"), list) else []),
+        "backend": str(
+            (preflight.get("backend_route") or {}).get("backend")
+            if isinstance(preflight.get("backend_route"), dict)
+            else ""
+        ),
+        "backend_health_ok": bool(
+            (preflight.get("backend_health") or {}).get("ok")
+            if isinstance(preflight.get("backend_health"), dict)
+            else False
+        ),
     }
     TaskLedger.load(ledger_path).record_event("run_preflight_recorded", payload)
 
@@ -216,6 +651,7 @@ def orchestrate_prepare_task(
     forced_governor: str | None = None,
     commander_order: dict[str, Any] | None = None,
     require_commander_order: bool = True,
+    mission: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if run_mode not in {"local", "http"}:
         raise ValueError("run_mode must be local or http")
@@ -281,6 +717,34 @@ def orchestrate_prepare_task(
             "next_action": next_action,
             "client_action": executable_client_action(str(task.get("task_id") or task_id or ""), next_action),
         }
+    mission_linked = False
+    if mission is not None:
+        try:
+            link_run_to_mission(run_dir, mission)
+            mission_linked = True
+        except Exception as exc:  # noqa: BLE001 - no native preflight may run against an unlinked mission.
+            next_action = {
+                "kind": "inspect_commander_intake",
+                "method": "GET",
+                "endpoint": "GET /runs/{task_id}/package",
+                "body": {},
+                "reason": "run preflight was not attempted because its mission link could not be persisted",
+            }
+            return {
+                "ok": False,
+                "phase": "mission_link_failed",
+                "error_code": "mission_link_failed",
+                "error": str(exc),
+                "task_id": str(task.get("task_id") or task_id or ""),
+                "run_dir": str(run_dir),
+                "trace": trace,
+                "task_preflight": task_preflight,
+                "task": task,
+                "next_action": next_action,
+                "client_action": executable_client_action(
+                    str(task.get("task_id") or task_id or ""), next_action,
+                ),
+            }
     preflight_workspace = resolve_run_child_path(run_dir, "", "work") if run_mode == "local" else None
     run_preflight = run_execution_preflight(
         run_dir,
@@ -310,6 +774,7 @@ def orchestrate_prepare_task(
         "trace": trace,
         "task_preflight": task_preflight,
         "task": task,
+        "mission_linked": mission_linked,
         "run_preflight": run_preflight,
         "actions": run_preflight_actions,
         "next_action": next_action,
@@ -317,7 +782,7 @@ def orchestrate_prepare_task(
     }
 
 
-def orchestrate_run_task(
+def _orchestrate_run_task_locked(
     message: str,
     task_id: str | None,
     run_root: Path,
@@ -332,6 +797,100 @@ def orchestrate_run_task(
     reuse_existing: bool = True,
 ) -> dict[str, Any]:
     prepare_timeout_sec = max(1, min(int(timeout_sec), 7200))
+    if task_id is not None and not valid_task_id(task_id):
+        return {
+            "ok": False,
+            "phase": "task_preflight",
+            "task_id": task_id,
+            "error": "invalid task_id",
+            "error_code": "invalid_task_id",
+            "next_action": {},
+            "client_action": {},
+        }
+    existing_run = run_root / task_id if task_id else None
+    if existing_run is not None and existing_run.is_dir():
+        # A task id owns one immutable mission protocol.  Never call
+        # open_mission() or relink a durable run that already exists: doing so
+        # would overwrite terminal evidence before start authorization runs.
+        state = orchestration_state(existing_run, event_limit=5, events_after=0)
+        decision = state.get("decision") if isinstance(state.get("decision"), dict) else {}
+        next_action = (
+            state.get("next_action")
+            if isinstance(state.get("next_action"), dict)
+            else {}
+        )
+        if not reuse_existing:
+            return {
+                "ok": False,
+                "phase": "task_preflight",
+                "task_id": task_id,
+                "run_dir": str(existing_run),
+                "error": "task_id already exists; use a fresh task_id",
+                "error_code": "task_exists",
+                "reused_existing": False,
+                "orchestration": state,
+                "decision": decision,
+                "display": state.get("display", {}),
+                "display_events": state.get("display_events", []),
+                "next_action": next_action,
+                "client_action": state.get("client_action", {}),
+            }
+        should_start = auto_start and (
+            bool(decision.get("can_start"))
+            or bool(decision.get("can_resume"))
+            or bool(decision.get("can_execute_revision"))
+            or force
+        )
+        if should_start:
+            started = orchestrate_start_run(
+                run_root,
+                task_id,
+                run_mode=run_mode,
+                host=host,
+                timeout_sec=prepare_timeout_sec,
+                force=force,
+            )
+            state = orchestration_state(existing_run, event_limit=5, events_after=0)
+            return {
+                "ok": bool(started.get("ok")),
+                "phase": "started" if started.get("ok") else "existing_run",
+                "task_id": task_id,
+                "run_dir": str(existing_run),
+                "run_mode": run_mode,
+                "reused_existing": True,
+                "trace": [{
+                    "stage": "existing_run",
+                    "ok": bool(started.get("ok")),
+                    "task_id": task_id,
+                    "next_action": started.get("next_action", {}),
+                }],
+                "start": started,
+                "orchestration": state,
+                "decision": state.get("decision", {}),
+                "display": state.get("display", {}),
+                "display_events": state.get("display_events", []),
+                "next_action": (
+                    started.get("next_action")
+                    if isinstance(started.get("next_action"), dict)
+                    else state.get("next_action", {})
+                ),
+                "client_action": state.get("client_action", {}),
+            }
+        return {
+            "ok": True,
+            "phase": "existing_run",
+            "task_id": task_id,
+            "run_dir": str(existing_run),
+            "run_mode": run_mode,
+            "reused_existing": True,
+            "trace": [{"stage": "existing_run", "ok": True, "task_id": task_id}],
+            "orchestration": state,
+            "decision": decision,
+            "display": state.get("display", {}),
+            "display_events": state.get("display_events", []),
+            "next_action": next_action,
+            "client_action": state.get("client_action", {}),
+        }
     warmaster_root = Path(__file__).resolve().parents[1]
     mission = open_mission(warmaster_root, message, task_id, source_channel="main_chat")
     if not mission.get("ok"):
@@ -366,6 +925,7 @@ def orchestrate_run_task(
         forced_governor=str(command.get("to") or "") or None,
         commander_order=command,
         require_commander_order=True,
+        mission=mission,
     )
     trace = list(prepared.get("trace") if isinstance(prepared.get("trace"), list) else [])
     trace.insert(
@@ -407,6 +967,15 @@ def orchestrate_run_task(
                         "next_action": started.get("next_action") if isinstance(started.get("next_action"), dict) else {},
                     }
                 )
+                if started.get("error_code") == "legacy_ceraxia_reprepare_required":
+                    return {
+                        **started,
+                        "run_mode": run_mode,
+                        "reused_existing": True,
+                        "trace": trace,
+                        "prepare": prepared,
+                        "start": started,
+                    }
                 state = orchestration_state(run_dir, event_limit=5, events_after=0) if run_dir.exists() else {}
                 return {
                     "ok": bool(started.get("ok")),
@@ -448,9 +1017,30 @@ def orchestrate_run_task(
             "next_action": prepared.get("next_action") if isinstance(prepared.get("next_action"), dict) else {},
             "client_action": prepared.get("client_action") if isinstance(prepared.get("client_action"), dict) else {},
         }
+    run_dir = run_root / run_task_id
+    try:
+        if not run_task_id:
+            raise ValueError("prepared run did not return a task_id")
+        if prepared.get("mission_linked") is not True:
+            link_run_to_mission(run_dir, mission)
+    except Exception as exc:  # noqa: BLE001 - execution must not race an unlinked mission.
+        return {
+            "ok": False,
+            "phase": "mission_link_failed",
+            "error_code": "mission_link_failed",
+            "error": str(exc),
+            "task_id": run_task_id,
+            "trace": trace,
+            "prepare": prepared,
+            "next_action": {
+                "kind": "inspect_commander_intake",
+                "method": "GET",
+                "endpoint": "GET /runs/{task_id}/package",
+                "body": {},
+                "reason": "run was not started because its mission link could not be persisted",
+            },
+        }
     if not auto_start:
-        if run_task_id:
-            link_run_to_mission(run_root / run_task_id, mission)
         state = orchestration_state(run_root / run_task_id, event_limit=5, events_after=0)
         return {
             "ok": True,
@@ -480,8 +1070,6 @@ def orchestrate_run_task(
         timeout_sec=prepare_timeout_sec,
         force=force,
     )
-    if run_task_id:
-        link_run_to_mission(run_root / run_task_id, mission)
     trace.append(
         {
             "stage": "orchestrate_start",
@@ -490,7 +1078,15 @@ def orchestrate_run_task(
             "next_action": started.get("next_action") if isinstance(started.get("next_action"), dict) else {},
         }
     )
-    run_dir = run_root / run_task_id
+    if started.get("error_code") == "legacy_ceraxia_reprepare_required":
+        return {
+            **started,
+            "mission_id": str(mission.get("mission_id") or ""),
+            "run_mode": run_mode,
+            "trace": trace,
+            "prepare": prepared,
+            "start": started,
+        }
     state = orchestration_state(run_dir, event_limit=5, events_after=0) if run_dir.exists() else {}
     return {
         "ok": bool(started.get("ok")),
@@ -513,6 +1109,39 @@ def orchestrate_run_task(
         "next_action": started.get("next_action") if isinstance(started.get("next_action"), dict) else {},
         "client_action": state.get("client_action", {}) if isinstance(state, dict) else {},
     }
+
+
+def orchestrate_run_task(
+    message: str,
+    task_id: str | None,
+    run_root: Path,
+    governor_transport: str = "local",
+    governor_host: str = "127.0.0.1",
+    run_mode: str = "http",
+    host: str = "127.0.0.1",
+    timeout_sec: int = 1800,
+    include_brigade_health: bool = False,
+    auto_start: bool = True,
+    force: bool = False,
+    reuse_existing: bool = True,
+) -> dict[str, Any]:
+    resolved_task_id = task_id or task_id_for_message(message)
+    reservation_key = mission_id_for(resolved_task_id, message)
+    with _orchestrate_task_reservation(run_root, reservation_key):
+        return _orchestrate_run_task_locked(
+            message,
+            resolved_task_id,
+            run_root,
+            governor_transport=governor_transport,
+            governor_host=governor_host,
+            run_mode=run_mode,
+            host=host,
+            timeout_sec=timeout_sec,
+            include_brigade_health=include_brigade_health,
+            auto_start=auto_start,
+            force=force,
+            reuse_existing=reuse_existing,
+        )
 
 
 def revision_step_ids_from_run(run_dir: Path) -> list[str]:
@@ -578,27 +1207,109 @@ def record_research_loop_event(run_dir: Path, event_type: str, payload: dict[str
         pass
 
 
-def execute_run_cycle(
+def execute_routed_run(
     run_dir: Path,
+    *,
     run_mode: str,
     host: str,
     timeout_sec: int,
-    operation: str,
+    workspace_root: Path | None = None,
+    step_ids: list[str] | None = None,
+    execution_mode: str = "full",
 ) -> dict[str, Any]:
-    workspace_root = resolve_run_child_path(run_dir, "", "work")
-    step_ids: list[str] | None = None
-    execution_mode = "full"
-    if operation == "revision":
-        step_ids = revision_step_ids_from_run(run_dir)
-        execution_mode = "revision"
-    elif operation == "resume":
-        step_ids = resume_step_ids_from_run(run_dir)
-        execution_mode = "resume"
+    """The sole backend switch for run execution.
+
+    Public start, resume, revision, recovery, and research-loop paths all call
+    this function. Raw executors remain implementation details for generic runs.
+    """
+    if run_mode not in {"local", "http"}:
+        raise ValueError("run_mode must be local or http")
+    route = execution_backend_route(run_dir)
+    if not route.get("ok"):
+        return route
+    if route.get("backend") == "SkitariiWarband":
+        mission_ref_errors = _native_mission_ref_errors(run_dir)
+        if mission_ref_errors:
+            action = {
+                "kind": "inspect_mission_link",
+                "method": "GET",
+                "endpoint": "GET /runs/{task_id}/package",
+                "body": {},
+                "reason": "native execution requires a durable matching mission_ref",
+            }
+            failure = _route_failure(
+                run_dir,
+                phase="native_mission_link_invalid",
+                error="; ".join(mission_ref_errors),
+                error_code="native_mission_link_invalid",
+                next_action=action,
+                validation_errors=mission_ref_errors,
+            )
+            failure["backend_route"] = route
+            failure["mission_ref_errors"] = mission_ref_errors
+            return failure
+        current_status = str(run_summary(run_dir).get("status") or "")
+        if current_status in {"blocked", "completed", "failed", "cancelled", "corrupt"}:
+            action = _reprepare_action(
+                run_dir,
+                load_json_object(run_dir / "contract.json", "contract")[0],
+            )
+            action["kind"] = "reprepare_ceraxia_run"
+            action["reason"] = (
+                "native terminal evidence is immutable; create a fresh Ceraxia mission"
+            )
+            failure = _route_failure(
+                run_dir,
+                phase="native_terminal_immutable",
+                error=f"native run is already terminal: {current_status}",
+                error_code="native_terminal_immutable",
+                next_action=action,
+            )
+            failure["backend_route"] = route
+            return failure
+        health = _skitarii_backend_health(timeout_sec)
+        if not health.get("ok"):
+            action = {
+                "kind": "retry_native_preflight",
+                "method": "POST",
+                "endpoint": "POST /runs/{task_id}/preflight_http",
+                "body": {},
+                "reason": "the declared Skitarii backend is unavailable",
+            }
+            failure = _route_failure(
+                run_dir,
+                phase="native_backend_unavailable",
+                error=str(health.get("error") or "Skitarii backend is unavailable"),
+                error_code="native_backend_unavailable",
+                next_action=action,
+            )
+            failure["backend_route"] = route
+            failure["backend_health"] = health
+            ledger_path = run_dir / "task_ledger.json"
+            if ledger_path.exists():
+                try:
+                    ledger = TaskLedger.load(ledger_path)
+                    ledger.record_event("native_backend_preflight_failed", health)
+                    ledger.set_result(failure)
+                    ledger.set_status("failed")
+                except Exception:  # noqa: BLE001 - failure payload remains authoritative.
+                    pass
+            return failure
+        result = run_via_skitarii(run_dir, run_dir.name, timeout_sec=timeout_sec)
+        routed = dict(result) if isinstance(result, dict) else {
+            "ok": False,
+            "status": "failed",
+            "error": "Skitarii backend returned a non-object result",
+        }
+        routed["backend_route"] = route
+        routed["requested_execution_mode"] = execution_mode
+        return routed
     if run_mode == "local":
+        local_workspace = workspace_root or resolve_run_child_path(run_dir, "", "work")
         return execute_local_run(
             REPO_ROOT,
             run_dir,
-            workspace_root,
+            local_workspace,
             timeout_sec=timeout_sec,
             step_ids=step_ids,
             execution_mode=execution_mode,
@@ -607,7 +1318,45 @@ def execute_run_cycle(
         run_dir,
         host=host,
         timeout_sec=timeout_sec,
-        workspace_root=None,
+        workspace_root=workspace_root,
+        step_ids=step_ids,
+        execution_mode=execution_mode,
+    )
+
+
+def execute_run_cycle(
+    run_dir: Path,
+    run_mode: str,
+    host: str,
+    timeout_sec: int,
+    operation: str,
+) -> dict[str, Any]:
+    workspace_root = resolve_run_child_path(run_dir, "", "work")
+    backend_route = execution_backend_route(run_dir)
+    if not backend_route.get("ok"):
+        return backend_route
+    if backend_route.get("backend") == "SkitariiWarband":
+        return execute_routed_run(
+            run_dir,
+            run_mode=run_mode,
+            host=host,
+            timeout_sec=timeout_sec,
+            execution_mode=operation if operation in {"revision", "resume"} else "full",
+        )
+    step_ids: list[str] | None = None
+    execution_mode = "full"
+    if operation == "revision":
+        step_ids = revision_step_ids_from_run(run_dir)
+        execution_mode = "revision"
+    elif operation == "resume":
+        step_ids = resume_step_ids_from_run(run_dir)
+        execution_mode = "resume"
+    return execute_routed_run(
+        run_dir,
+        run_mode=run_mode,
+        host=host,
+        timeout_sec=timeout_sec,
+        workspace_root=workspace_root if run_mode == "local" else None,
         step_ids=step_ids,
         execution_mode=execution_mode,
     )
@@ -647,10 +1396,17 @@ def research_loop_run(
     revision_cycles = 0
     stop_reason = "unknown"
     try:
-        # Brigade v2: hand Ceraxia code missions to the Skitarii sandbox brigade
-        # instead of the retired six-worker paper pipeline.
-        if skitarii_should_handle(run_dir):
-            return run_via_skitarii(run_dir, task_id, timeout_sec=timeout_sec)
+        backend_route = execution_backend_route(run_dir)
+        if not backend_route.get("ok"):
+            return backend_route
+        if backend_route.get("backend") == "SkitariiWarband":
+            return execute_routed_run(
+                run_dir,
+                run_mode=run_mode,
+                host=host,
+                timeout_sec=timeout_sec,
+                execution_mode="full",
+            )
         record_research_loop_event(
             run_dir,
             "research_loop_started",
@@ -906,17 +1662,39 @@ def recovery_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
     candidates: list[dict[str, Any]] = []
     for run in runs:
         actions = run.get("actions") if isinstance(run.get("actions"), dict) else {}
-        if run.get("status") != "interrupted" or not actions.get("can_resume"):
+        if run.get("status") != "interrupted":
             continue
-        next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
+        run_dir = Path(str(run.get("run_dir") or ""))
+        backend_route = execution_backend_route(run_dir)
+        native_backend = backend_route.get("backend") == "SkitariiWarband"
+        if backend_route.get("ok") and not native_backend and not actions.get("can_resume"):
+            continue
+        next_action = (
+            backend_route.get("next_action")
+            if not backend_route.get("ok") and isinstance(backend_route.get("next_action"), dict)
+            else actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
+        )
         resume_ready = False
         resume_errors: list[str] = []
         pending_step_ids = run.get("progress", {}).get("pending_step_ids", []) if isinstance(run.get("progress"), dict) else []
-        try:
-            pending_step_ids = resume_step_ids_from_run(Path(str(run.get("run_dir") or "")))
+        if native_backend and backend_route.get("ok"):
+            pending_step_ids = ["skitarii"]
             resume_ready = True
-        except Exception as exc:  # noqa: BLE001 - recovery listing should diagnose malformed run packages.
-            resume_errors.append(str(exc))
+            next_action = {
+                "kind": "resume_native_code_run",
+                "method": "POST",
+                "endpoint": "POST /runs/{task_id}/start_resume_http",
+                "body": {},
+                "reason": "resume the atomic Skitarii mission",
+            }
+        elif not backend_route.get("ok"):
+            resume_errors.append(str(backend_route.get("error") or backend_route.get("error_code") or "run cannot resume"))
+        else:
+            try:
+                pending_step_ids = resume_step_ids_from_run(run_dir)
+                resume_ready = True
+            except Exception as exc:  # noqa: BLE001 - recovery listing should diagnose malformed run packages.
+                resume_errors.append(str(exc))
         task_id = str(run.get("task_id") or "")
         candidates.append(
             {
@@ -926,6 +1704,7 @@ def recovery_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
                 "pending_step_ids": pending_step_ids,
                 "resume_ready": resume_ready,
                 "resume_errors": resume_errors,
+                "backend_route": backend_route,
                 "next_action": next_action,
                 "client_action": executable_client_action(task_id, next_action),
                 "display": recovery_candidate_display(run, resume_ready, resume_errors, pending_step_ids),
@@ -990,22 +1769,66 @@ def orchestrate_start_run(
     run_dir = run_root / task_id
     if not run_dir.exists():
         return {"ok": False, "phase": "missing_run", "task_id": task_id, "error": "run not found"}
+    backend_route = execution_backend_route(run_dir)
+    if not backend_route.get("ok"):
+        return backend_route
     summary = run_summary(run_dir)
     actions = summary.get("actions") if isinstance(summary.get("actions"), dict) else {}
     next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
     execution_mode = "full"
     step_ids: list[str] | None = None
-    if actions.get("can_start"):
+    native_backend = backend_route.get("backend") == "SkitariiWarband"
+    if native_backend:
+        start_preflight = _native_preflight(
+            run_dir,
+            backend_route,
+            mode=run_mode,
+            timeout_sec=timeout_sec,
+            force=force,
+        )
+        start_actions = (
+            start_preflight.get("actions")
+            if isinstance(start_preflight.get("actions"), dict)
+            else {}
+        )
+        if not start_preflight.get("ok") or start_actions.get("can_start_run") is not True:
+            blocked_action = (
+                start_actions.get("next_action")
+                if isinstance(start_actions.get("next_action"), dict)
+                else {}
+            )
+            return {
+                "ok": False,
+                "phase": "native_preflight",
+                "error_code": "native_preflight_failed",
+                "error": "native run is not startable under its current durable state",
+                "task_id": task_id,
+                "backend_route": backend_route,
+                "run_preflight": start_preflight,
+                "next_action": blocked_action,
+                "client_action": executable_client_action(task_id, blocked_action),
+                "snapshot": run_snapshot(run_dir, event_limit=5, events_after=0),
+            }
+    ledger_data, ledger_error = load_ledger_dict(run_dir / "task_ledger.json")
+    native_status = str(ledger_data.get("status") or "") if not ledger_error else ""
+    if native_backend and native_status in {"created", "assigned"}:
+        operation = "start"
+    elif native_backend and native_status == "interrupted":
+        operation = "resume"
+        execution_mode = "resume"
+    elif actions.get("can_start"):
         operation = "start"
     elif actions.get("can_resume"):
         operation = "resume"
         execution_mode = "resume"
-        step_ids = resume_step_ids_from_run(run_dir)
+        if backend_route.get("backend") != "SkitariiWarband":
+            step_ids = resume_step_ids_from_run(run_dir)
     elif actions.get("can_start_revision"):
         operation = "revision"
         execution_mode = "revision"
-        step_ids = revision_step_ids_from_run(run_dir)
-    elif force and actions.get("force_required_for_rerun"):
+        if backend_route.get("backend") != "SkitariiWarband":
+            step_ids = revision_step_ids_from_run(run_dir)
+    elif not native_backend and force and actions.get("force_required_for_rerun"):
         operation = "force_rerun"
     else:
         return {
@@ -1019,36 +1842,28 @@ def orchestrate_start_run(
         }
 
     workspace_root = resolve_run_child_path(run_dir, "", "work")
-    if run_mode == "local":
-        executor = lambda: execute_with_ledger_failure_guard(
+    executor = lambda: execute_with_ledger_failure_guard(
+        run_dir,
+        lambda: execute_routed_run(
             run_dir,
-            lambda: execute_local_run(
-                REPO_ROOT,
-                run_dir,
-                workspace_root,
-                timeout_sec=timeout_sec,
-                step_ids=step_ids,
-                execution_mode=execution_mode,
-            ),
-        )
-    else:
-        executor = lambda: execute_with_ledger_failure_guard(
-            run_dir,
-            lambda: execute_http_run(
-                run_dir,
-                host=host,
-                timeout_sec=timeout_sec,
-                workspace_root=None,
-                step_ids=step_ids,
-                execution_mode=execution_mode,
-            ),
-        )
+            run_mode=run_mode,
+            host=host,
+            timeout_sec=timeout_sec,
+            workspace_root=workspace_root if run_mode == "local" else None,
+            step_ids=step_ids,
+            execution_mode=execution_mode,
+        ),
+    )
     ledger_path = run_dir / "task_ledger.json"
     if ledger_path.exists():
         ledger = TaskLedger.load(ledger_path)
         if operation == "resume":
             ledger.record_event("resume_execution_requested", {"mode": f"orchestrate_start_{run_mode}", "step_ids": step_ids or []})
-        event_payload: dict[str, Any] = {"mode": f"orchestrate_start_{run_mode}", "operation": operation}
+        event_payload: dict[str, Any] = {
+            "mode": f"orchestrate_start_{run_mode}",
+            "operation": operation,
+            "backend": str(backend_route.get("backend") or ""),
+        }
         if step_ids:
             event_payload["step_ids"] = step_ids
         if force:
@@ -1069,6 +1884,7 @@ def orchestrate_start_run(
         "task_id": task_id,
         "run_mode": run_mode,
         "operation": operation,
+        "backend_route": backend_route,
         "step_ids": step_ids or [],
         "next_action": poll_action,
         "client_action": executable_client_action(task_id, poll_action),
@@ -1094,36 +1910,54 @@ def start_recoverable_runs(run_root: Path, mode: str, host: str = "127.0.0.1", t
         run_dir = run_root / task_id
         ledger_path = run_dir / "task_ledger.json"
         try:
-            step_ids = resume_step_ids_from_run(run_dir)
+            backend_route = execution_backend_route(run_dir)
+            if not backend_route.get("ok"):
+                results.append(backend_route)
+                continue
+            if backend_route.get("backend") == "SkitariiWarband":
+                started = orchestrate_start_run(
+                    run_root,
+                    task_id,
+                    run_mode=mode,
+                    host=host,
+                    timeout_sec=timeout_sec,
+                )
+                if started.get("ok"):
+                    started_count += 1
+                results.append(
+                    {
+                        **started,
+                        "status": "started" if started.get("ok") else "skipped",
+                    }
+                )
+                continue
+            step_ids = (
+                resume_step_ids_from_run(run_dir)
+            )
             if ledger_path.exists():
                 ledger = TaskLedger.load(ledger_path)
                 ledger.record_event("resume_execution_requested", {"mode": f"bulk_start_resume_{mode}"})
-                ledger.record_event("background_start_requested", {"mode": f"bulk_start_resume_{mode}", "step_ids": step_ids})
+                ledger.record_event(
+                    "background_start_requested",
+                    {
+                        "mode": f"bulk_start_resume_{mode}",
+                        "step_ids": step_ids,
+                        "backend": str(backend_route.get("backend") or ""),
+                    },
+                )
             workspace_root = resolve_run_child_path(run_dir, "", "work")
-            if mode == "local":
-                executor = lambda run_dir=run_dir, workspace_root=workspace_root, step_ids=step_ids: execute_with_ledger_failure_guard(
+            executor = lambda run_dir=run_dir, workspace_root=workspace_root, step_ids=step_ids: execute_with_ledger_failure_guard(
+                run_dir,
+                lambda: execute_routed_run(
                     run_dir,
-                    lambda: execute_local_run(
-                        REPO_ROOT,
-                        run_dir,
-                        workspace_root,
-                        timeout_sec=timeout_sec,
-                        step_ids=step_ids,
-                        execution_mode="resume",
-                    ),
-                )
-            else:
-                executor = lambda run_dir=run_dir, step_ids=step_ids: execute_with_ledger_failure_guard(
-                    run_dir,
-                    lambda: execute_http_run(
-                        run_dir,
-                        host=host,
-                        timeout_sec=timeout_sec,
-                        workspace_root=None,
-                        step_ids=step_ids,
-                        execution_mode="resume",
-                    ),
-                )
+                    run_mode=mode,
+                    host=host,
+                    timeout_sec=timeout_sec,
+                    workspace_root=workspace_root if mode == "local" else None,
+                    step_ids=step_ids or None,
+                    execution_mode="resume",
+                ),
+            )
             if not start_background(task_id, executor):
                 already_active_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {"events_after": 0}, "reason": "run is already active"}
                 results.append(
@@ -1142,6 +1976,7 @@ def start_recoverable_runs(run_root: Path, mode: str, host: str = "127.0.0.1", t
                     "task_id": task_id,
                     "ok": True,
                     "status": "started",
+                    "backend_route": backend_route,
                     "step_ids": step_ids,
                     "next_action": poll_action,
                     "client_action": executable_client_action(task_id, poll_action),

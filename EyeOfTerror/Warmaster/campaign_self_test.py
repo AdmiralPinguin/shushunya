@@ -7,7 +7,11 @@ import threading
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
+from eye_of_terror import campaigns as campaigns_module
+from eye_of_terror import mission_control, task_prepare, warmaster_gateway
 from eye_of_terror.campaigns import (
     FINAL_REPORT_FILE,
     campaign_preflight,
@@ -20,8 +24,15 @@ from eye_of_terror.campaigns import (
     prepare_campaign,
     validate_campaign_plan,
 )
+from eye_of_terror.inner_circle import ceraxia_service
 from eye_of_terror.ledger import TaskLedger
 from eye_of_terror.mission_control import record_warmaster_acceptance
+from eye_of_terror.native_code_run import (
+    NATIVE_EXECUTION,
+    is_native_code_run,
+    validate_native_code_run_package,
+)
+from eye_of_terror.routing import RouteDecision
 from eye_of_terror.warmaster_gateway import make_handler
 
 
@@ -46,6 +57,167 @@ def request_json(url: str, payload: dict | None = None) -> dict:
     if not isinstance(data, dict):
         raise AssertionError(f"response is not an object: {data}")
     return data
+
+
+def route_for_self_test(message: str) -> RouteDecision:
+    if "evidence-grounded" in message:
+        governor = "IskandarKhayon"
+        kind = "research"
+        supporting: list[dict] = []
+        decomposition = False
+    elif "senior engineer" in message or "handoff" in message:
+        governor = "Ceraxia"
+        kind = "code"
+        supporting = []
+        decomposition = False
+    else:
+        governor = "Ceraxia"
+        kind = "code"
+        supporting = [{"name": "IskandarKhayon", "active": True, "kind": "research"}]
+        decomposition = True
+    matched = [{"name": governor, "active": True, "kind": kind}]
+    return RouteDecision(
+        True,
+        governor,
+        kind,
+        "self-test deterministic route",
+        matched_governors=matched,
+        supporting_governors=supporting,
+        requires_decomposition=decomposition,
+        model_brain={"ok": True, "status": "self_test"},
+        llm_route={"ok": True, "governor": governor, "kind": kind},
+    )
+
+
+def command_model_answer(owner: str, _role: str, payload: dict, **_kwargs: object) -> dict:
+    if owner == "WarmasterAcceptance":
+        content = {
+            "accepted": True,
+            "reason": "Self-test evidence satisfies the commander order.",
+            "required_revision": {},
+            "escalate_to_user": False,
+        }
+    else:
+        goal = str(payload.get("user_request") or payload.get("mission_request") or "self-test goal")
+        content = {
+            "commander_intent": "Complete the bounded campaign subrun.",
+            "primary_goal": goal,
+            "success_conditions": ["Executable evidence is accepted."],
+            "constraints": ["Preserve unrelated changes."],
+            "escalate_to_user_if": ["A product decision is required."],
+        }
+    return {"ok": True, "content": json.dumps(content, ensure_ascii=False)}
+
+
+def ceraxia_model_answer() -> dict:
+    return {
+        "ok": True,
+        "content": json.dumps(
+            {
+                "decision": "delegate",
+                "mission_intent": "Implement the campaign code subrun without scope drift.",
+                "priorities": ["Correct behavior", "Executable verification"],
+                "constraints": ["Consume the campaign handoff."],
+                "success_conditions": ["The requested behavior is verified."],
+                "tradeoffs": ["Prefer a bounded change."],
+                "escalation_conditions": ["A product decision is required."],
+            },
+            ensure_ascii=False,
+        ),
+    }
+
+
+def healthy_skitarii_backend() -> dict:
+    return {
+        "name": "SkitariiWarband",
+        "kind": "vm_isolated_code_warband",
+        "endpoint": "http://127.0.0.1:7200",
+        "healthy": True,
+        "status": "healthy",
+        "lifecycle": "active",
+        "health": {"status": "ok", "vm_alive": True, "process_boundary_ready": True},
+        "error": "",
+    }
+
+
+def open_test_mission(run_root: Path):
+    protocol_root = run_root / "_mission_protocol"
+
+    def opener(_warmaster_root: Path, message: str, task_id: str | None, source_channel: str = "main_chat") -> dict:
+        return mission_control.open_mission(protocol_root, message, task_id, source_channel=source_channel)
+
+    return opener
+
+
+def prepare_with_test_ceraxia(service_port: int):
+    original_prepare = campaigns_module.prepare_task
+    governor = SimpleNamespace(name="Ceraxia", port=service_port)
+
+    def prepare(
+        message: str,
+        task_id: str | None,
+        run_root: Path,
+        governor_transport: str = "local",
+        governor_host: str = "127.0.0.1",
+        forced_governor: str | None = None,
+        commander_order: dict | None = None,
+        require_commander_order: bool = False,
+    ) -> dict:
+        if forced_governor == "Ceraxia":
+            if governor_transport != "http":
+                raise AssertionError("campaign bypassed the live Ceraxia leadership service")
+            return task_prepare.prepare_native_ceraxia_via_service(
+                message,
+                task_id,
+                run_root,
+                governor,
+                host=governor_host,
+                port=service_port,
+                commander_order=commander_order,
+                require_commander_order=require_commander_order,
+            )
+        return original_prepare(
+            message,
+            task_id,
+            run_root,
+            governor_transport=governor_transport,
+            governor_host=governor_host,
+            forced_governor=forced_governor,
+            commander_order=commander_order,
+            require_commander_order=require_commander_order,
+        )
+
+    return prepare
+
+
+def portable_campaign_artifact_status(original):
+    """Keep this campaign test runnable on Windows where dir_fd is absent.
+
+    The hardened artifact reader has its own Linux barriers.  Here we only need
+    to prove that the campaign consumes Skitarii's dynamic logical paths.
+    """
+
+    def status(ledger: dict) -> dict:
+        result = ledger.get("result") if isinstance(ledger.get("result"), dict) else {}
+        if result.get("final_step") != "skitarii":
+            return original(ledger)
+        root = Path(str(result.get("artifact_root") or ""))
+        items = []
+        for raw_path in result.get("artifacts") if isinstance(result.get("artifacts"), list) else []:
+            logical = str(raw_path)
+            target = root.joinpath(*Path(logical).parts)
+            items.append(
+                {
+                    "path": logical,
+                    "exists": target.is_file(),
+                    "bytes": target.stat().st_size if target.is_file() else 0,
+                    "errors": [] if target.is_file() else ["artifact is missing"],
+                    "source": "result",
+                }
+            )
+        return {"artifacts": items}
+
+    return status
 
 
 def make_completed_research_run(run_root: Path, task_id: str) -> None:
@@ -98,17 +270,30 @@ def make_completed_research_run(run_root: Path, task_id: str) -> None:
 
 def make_completed_code_run(run_root: Path, task_id: str) -> None:
     run_dir = run_root / task_id
-    workspace = run_dir / "work"
-    write_json(run_dir / "status.json", {"task_id": task_id, "status": "completed", "governor": "Ceraxia", "steps": []})
-    write_json(workspace / "ceraxia" / "final_manifest.json", {"status": "ready", "approved": True, "files": []})
-    ledger = TaskLedger.create(run_dir / "task_ledger.json", task_id, "code goal", "Ceraxia")
+    if not is_native_code_run(run_dir) or validate_native_code_run_package(run_dir):
+        raise AssertionError("code campaign fixture is not a valid native Ceraxia-to-Skitarii run")
+    patch_path = run_dir / "work" / "skitarii.patch"
+    patch_path.parent.mkdir(parents=True, exist_ok=True)
+    patch_path.write_text("diff --git a/demo.py b/demo.py\n", encoding="utf-8")
+    ledger = TaskLedger.load(run_dir / "task_ledger.json")
     ledger.set_result(
         {
             "ok": True,
             "status": "completed",
-            "summary": "done",
-            "workspace_root": str(workspace),
-            "artifacts": ["/work/ceraxia/final_manifest.json"],
+            "phase": "completed",
+            "summary": "Verified Skitarii patch applied successfully.",
+            "final_step": "skitarii",
+            "artifact_root": str(run_dir.resolve()),
+            "artifacts": ["work/skitarii.patch"],
+            "patch_stage": {
+                "applies_to_live": True,
+                "tests_pass_in_worktree": True,
+                "applied_to_live": True,
+                "post_apply_tests_passed": True,
+                "rolled_back": False,
+            },
+            "ready_to_apply": False,
+            "next_action": {},
         }
     )
     ledger.set_status("completed")
@@ -116,6 +301,15 @@ def make_completed_code_run(run_root: Path, task_id: str) -> None:
 
 def main() -> int:
     message = "собери обзор источников по RISC-V и реализуй python демо код"
+    campaigns_module.route_message = route_for_self_test
+    mission_control.route_message = route_for_self_test
+    mission_control.request_model_decision = command_model_answer
+    warmaster_gateway.request_model_decision = (
+        lambda *_args, **_kwargs: {"ok": True, "content": "{}", "status": "self_test"}
+    )
+    campaigns_module.artifact_status = portable_campaign_artifact_status(
+        campaigns_module.artifact_status,
+    )
     plan = decompose_task(message, campaign_id="campaign-self-test")
     if validate_campaign_plan(plan):
         raise AssertionError(f"campaign plan should validate: {validate_campaign_plan(plan)}")
@@ -123,6 +317,14 @@ def main() -> int:
         raise AssertionError(f"unexpected subrun order: {plan['subruns']}")
     if plan["subruns"][1]["depends_on"] != ["research"]:
         raise AssertionError(f"implementation must depend on research: {plan['subruns'][1]}")
+    implementation_plan = plan["subruns"][1]
+    if (
+        implementation_plan.get("execution") != NATIVE_EXECUTION
+        or implementation_plan.get("expected_artifacts") != []
+        or implementation_plan.get("result_contract", {}).get("kind") != "skitarii_bridge_result"
+        or "/work/ceraxia/" in json.dumps(implementation_plan)
+    ):
+        raise AssertionError(f"implementation is not a native Skitarii result boundary: {implementation_plan}")
 
     preflight = campaign_preflight(message, campaign_id="campaign-self-test")
     if not preflight.get("ok") or preflight.get("next_action", {}).get("endpoint") != "POST /campaign":
@@ -130,6 +332,14 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as temp_dir:
         run_root = Path(temp_dir)
+        campaigns_module.open_mission = open_test_mission(run_root)
+        ceraxia_handler = ceraxia_service.make_handler(run_root)
+        ceraxia_server = ThreadingHTTPServer(("127.0.0.1", 0), ceraxia_handler)
+        ceraxia_thread = threading.Thread(target=ceraxia_server.serve_forever, daemon=True)
+        ceraxia_service.skitarii_backend_health = lambda *_args, **_kwargs: healthy_skitarii_backend()
+        ceraxia_service.request_model_decision = lambda *_args, **_kwargs: ceraxia_model_answer()
+        ceraxia_thread.start()
+        campaigns_module.prepare_task = prepare_with_test_ceraxia(ceraxia_server.server_port)
         prepared = prepare_campaign(run_root, message, campaign_id="campaign-self-test")
         if not prepared.get("ok") or prepared.get("state", {}).get("status") != "planned":
             raise AssertionError(f"bad prepared campaign: {prepared}")
@@ -172,7 +382,15 @@ def main() -> int:
 
         code_created = create_subrun(run_root, "campaign-self-test", "implementation")
         code_ledger = json.loads((run_root / "campaign-self-test-code" / "task_ledger.json").read_text(encoding="utf-8"))
-        if not code_created.get("ok") or "research_to_implementation.json" not in code_ledger.get("goal", ""):
+        code_run_dir = run_root / "campaign-self-test-code"
+        if (
+            not code_created.get("ok")
+            or code_created.get("governor_transport") != "http"
+            or "research_to_implementation.json" not in code_ledger.get("goal", "")
+            or not is_native_code_run(code_run_dir)
+            or validate_native_code_run_package(code_run_dir)
+            or (code_run_dir / "dispatch").exists()
+        ):
             raise AssertionError(f"implementation subrun did not receive handoff: {code_created}")
         code_ref = json.loads((run_root / "campaign-self-test-code" / "mission_ref.json").read_text(encoding="utf-8"))
         if code_ref.get("mission_id") != code_created.get("mission", {}).get("mission_id"):
@@ -193,12 +411,24 @@ def main() -> int:
         report = final_review(run_root, "campaign-self-test", final_state["plan"], final_state["state"])
         if report.get("status") != "completed":
             raise AssertionError(f"final review failed: {report}")
+        native_deliverable = report.get("deliverables", {}).get("implementation", {})
+        if (
+            native_deliverable.get("kind") != "skitarii_bridge_result"
+            or native_deliverable.get("result", {}).get("final_step") != "skitarii"
+            or native_deliverable.get("artifact_status", [{}])[0].get("exists") is not True
+            or "/work/ceraxia/" in json.dumps(native_deliverable)
+        ):
+            raise AssertionError(f"campaign final report did not consume native artifacts: {native_deliverable}")
         explicit_handoff = create_handoff(run_root, "campaign-self-test", final_state["plan"], final_state["state"], "research_to_implementation")
         if explicit_handoff.get("status") != "ready":
             raise AssertionError(f"explicit handoff failed: {explicit_handoff}")
+        ceraxia_server.shutdown()
+        ceraxia_server.server_close()
+        ceraxia_thread.join(timeout=5)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         run_root = Path(temp_dir)
+        campaigns_module.open_mission = open_test_mission(run_root)
         server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(run_root))
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()

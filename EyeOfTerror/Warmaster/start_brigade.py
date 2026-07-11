@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,14 @@ def model_env_defaults() -> dict[str, str]:
     }
 
 
+def canonical_run_root(repo_root: Path, requested: Path) -> Path:
+    """Resolve launcher-owned run roots independently of the caller's cwd."""
+    candidate = requested.expanduser()
+    if not candidate.is_absolute():
+        candidate = repo_root / candidate
+    return candidate.resolve()
+
+
 def worker_service_plan(repo_root: Path, host: str) -> list[dict[str, object]]:
     path = repo_root / "LegacyMechanicum" / "worker_services.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -86,6 +95,46 @@ def worker_service_plan(repo_root: Path, host: str) -> list[dict[str, object]]:
     return workers
 
 
+def warband_service_plan(repo_root: Path, host: str) -> list[dict[str, object]]:
+    """Describe externally supervised warbands without turning them into workers.
+
+    Warbands own their internal lifecycle and are deliberately absent from
+    ``brigade_commands``.  The brigade launcher only verifies their readiness
+    before exposing the gateway.
+    """
+    path = repo_root / "EyeOfTerror" / "Warmaster" / "registry" / "ports.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    entries = payload.get("warbands") if isinstance(payload, dict) else None
+    if not isinstance(entries, dict):
+        raise ValueError("ports.json must contain a warbands object")
+    warbands: list[dict[str, object]] = []
+    for raw_port, item in sorted(entries.items(), key=lambda pair: int(pair[0])):
+        if not isinstance(item, dict):
+            raise ValueError(f"warband registry entry must be an object: {raw_port}")
+        try:
+            port = int(raw_port)
+        except ValueError as exc:
+            raise ValueError(f"warband registry entry has invalid port: {raw_port}") from exc
+        name = str(item.get("name") or "").strip()
+        role = str(item.get("role") or "").strip()
+        module_path = str(item.get("path") or "").strip()
+        supervisor = str(item.get("supervisor") or "").strip()
+        if port <= 0 or not name or not role or not module_path or not supervisor:
+            raise ValueError(f"warband registry entry is incomplete: {raw_port}")
+        warbands.append(
+            {
+                "name": name,
+                "role": role,
+                "port": port,
+                "path": module_path,
+                "supervisor": supervisor,
+                "health_url": f"http://{host}:{port}/health?vm=1",
+                "lifecycle": "externally_managed",
+            }
+        )
+    return warbands
+
+
 def registry_port(repo_root: Path, section: str, service_name: str, default: int) -> int:
     path = repo_root / "EyeOfTerror" / "Warmaster" / "registry" / "ports.json"
     try:
@@ -113,10 +162,23 @@ def brigade_commands(
     ceraxia_run_root: Path | None = None,
 ) -> list[CommandSpec]:
     env = {"PYTHONPATH": pythonpath(repo_root), **model_env_defaults()}
+    resolved_warmaster_run_root = canonical_run_root(repo_root, warmaster_run_root)
+    resolved_ceraxia_run_root = (
+        canonical_run_root(repo_root, ceraxia_run_root)
+        if ceraxia_run_root is not None
+        else resolved_warmaster_run_root
+    )
+    if resolved_ceraxia_run_root != resolved_warmaster_run_root:
+        raise ValueError(
+            "Ceraxia and the Warmaster gateway must share one canonical run root",
+        )
+    warmaster_env = {
+        **env,
+        "WARMMASTER_RUN_ROOT": str(resolved_warmaster_run_root),
+    }
     warmaster_port = registry_port(repo_root, "eye_of_terror", "WarmasterGateway", 7000)
     iskandar_port = registry_port(repo_root, "eye_of_terror", "IskandarKhayon", 7101)
     ceraxia_port = registry_port(repo_root, "eye_of_terror", "Ceraxia", 7104)
-    resolved_ceraxia_run_root = ceraxia_run_root or Path("runtime/ceraxia-runs")
     return [
         CommandSpec(
             "mechanicum-workers",
@@ -175,7 +237,7 @@ def brigade_commands(
                 "--default-run-root",
                 str(resolved_ceraxia_run_root),
             ],
-            env,
+            warmaster_env,
         ),
         CommandSpec(
             "warmaster-gateway",
@@ -193,18 +255,22 @@ def brigade_commands(
                 "--port",
                 str(warmaster_port),
                 "--run-root",
-                str(warmaster_run_root),
+                str(resolved_warmaster_run_root),
                 "--governor-transport",
                 "http",
                 "--governor-host",
                 host,
             ],
-            env,
+            warmaster_env,
         ),
     ]
 
 
-def startup_stages(commands: list[CommandSpec], workers: list[dict[str, object]]) -> list[dict[str, object]]:
+def startup_stages(
+    commands: list[CommandSpec],
+    workers: list[dict[str, object]],
+    warbands: list[dict[str, object]] | None = None,
+) -> list[dict[str, object]]:
     pending = {command.name: command for command in commands}
     completed: set[str] = set()
     stages: list[dict[str, object]] = []
@@ -224,6 +290,12 @@ def startup_stages(commands: list[CommandSpec], workers: list[dict[str, object]]
                 health_urls.append(command.health_url)
             if command.name == "mechanicum-workers":
                 health_urls.extend(str(worker["health_url"]) for worker in workers if worker.get("health_url"))
+        if not completed:
+            health_urls.extend(
+                str(warband["health_url"])
+                for warband in (warbands or [])
+                if warband.get("health_url")
+            )
         stages.append(
             {
                 "stage": len(stages) + 1,
@@ -237,7 +309,12 @@ def startup_stages(commands: list[CommandSpec], workers: list[dict[str, object]]
     return stages
 
 
-def brigade_worker_contract(commands: list[CommandSpec], workers: list[dict[str, object]], readiness_urls: list[str]) -> dict[str, object]:
+def brigade_worker_contract(
+    commands: list[CommandSpec],
+    workers: list[dict[str, object]],
+    readiness_urls: list[str],
+    warbands: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
     return {
         "kind": "eye_of_terror_brigade_worker_contract",
         "contract_version": 1,
@@ -245,6 +322,7 @@ def brigade_worker_contract(commands: list[CommandSpec], workers: list[dict[str,
         "consumers": ["warmaster-gateway", "inner-circle-governors", "mechanicum-supervisor"],
         "top_level_service_required_fields": ["name", "role", "host", "port", "depends_on", "health_url", "command", "env"],
         "mechanicum_worker_required_fields": ["name", "port", "module_path", "module", "health_url"],
+        "external_warband_required_fields": ["name", "role", "port", "path", "supervisor", "health_url", "lifecycle"],
         "dependency_edges": [
             {"service": command.name, "depends_on": command.depends_on}
             for command in commands
@@ -252,6 +330,7 @@ def brigade_worker_contract(commands: list[CommandSpec], workers: list[dict[str,
         "readiness_url_count": len(readiness_urls),
         "readiness_urls": readiness_urls,
         "worker_count": len(workers),
+        "external_warband_count": len(warbands or []),
     }
 
 
@@ -263,12 +342,22 @@ def brigade_plan(
     iskandar_run_root: Path,
     ceraxia_run_root: Path | None = None,
 ) -> dict[str, object]:
-    resolved_ceraxia_run_root = ceraxia_run_root or Path("runtime/ceraxia-runs")
-    commands = brigade_commands(repo_root, host, workspace_root, warmaster_run_root, iskandar_run_root, resolved_ceraxia_run_root)
+    resolved_warmaster_run_root = canonical_run_root(repo_root, warmaster_run_root)
+    resolved_ceraxia_run_root = resolved_warmaster_run_root
+    commands = brigade_commands(
+        repo_root,
+        host,
+        workspace_root,
+        resolved_warmaster_run_root,
+        iskandar_run_root,
+        ceraxia_run_root,
+    )
     workers = worker_service_plan(repo_root, host)
+    warbands = warband_service_plan(repo_root, host)
     top_level_health_urls = {command.name: command.health_url for command in commands if command.health_url}
     worker_health_urls = {str(worker["name"]): str(worker["health_url"]) for worker in workers if worker.get("health_url")}
-    readiness_urls = list(top_level_health_urls.values()) + list(worker_health_urls.values())
+    warband_health_urls = {str(warband["name"]): str(warband["health_url"]) for warband in warbands if warband.get("health_url")}
+    readiness_urls = list(top_level_health_urls.values()) + list(worker_health_urls.values()) + list(warband_health_urls.values())
     return {
         "ok": True,
         "stack": "EyeOfTerror",
@@ -279,19 +368,21 @@ def brigade_plan(
             "iskandar_khayon": next((command.port for command in commands if command.name == "iskandar-khayon"), 7101),
             "ceraxia": next((command.port for command in commands if command.name == "ceraxia"), 7104),
             "mechanicum_workers": [worker["port"] for worker in workers],
+            "warbands": {str(warband["name"]): int(warband["port"]) for warband in warbands},
         },
         "repo_root": str(repo_root),
         "workspace_root": str(workspace_root),
-        "warmaster_run_root": str(warmaster_run_root),
+        "warmaster_run_root": str(resolved_warmaster_run_root),
         "iskandar_run_root": str(iskandar_run_root),
         "ceraxia_run_root": str(resolved_ceraxia_run_root),
         "mechanicum_workers": workers,
+        "warbands": warbands,
         "services": [command.to_dict() for command in commands],
         "dependencies": {command.name: command.depends_on for command in commands},
-        "startup_stages": startup_stages(commands, workers),
-        "health_urls": {**top_level_health_urls, **worker_health_urls},
+        "startup_stages": startup_stages(commands, workers, warbands),
+        "health_urls": {**top_level_health_urls, **worker_health_urls, **warband_health_urls},
         "readiness_urls": readiness_urls,
-        "worker_contract": brigade_worker_contract(commands, workers, readiness_urls),
+        "worker_contract": brigade_worker_contract(commands, workers, readiness_urls, warbands),
         "model_brain": {
             "required": True,
             "base_url": env_value(commands, "EYE_MODEL_BASE_URL"),
@@ -307,13 +398,29 @@ def env_value(commands: list[CommandSpec], key: str) -> str:
     return ""
 
 
+def health_payload_is_ready(url: str, payload: object) -> bool:
+    """Apply the health contract declared by the endpoint being probed."""
+    if not isinstance(payload, dict):
+        return False
+    parsed = urlsplit(url)
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    skitarii_probe = "vm" in query or payload.get("service") == "Skitarii"
+    if skitarii_probe:
+        return (
+            payload.get("status") == "ok"
+            and payload.get("vm_alive") is True
+            and payload.get("process_boundary_ready") is True
+        )
+    return payload.get("ok") is True
+
+
 def url_is_ready(url: str, timeout_sec: float = 1.0) -> bool:
     try:
         with urllib.request.urlopen(url, timeout=timeout_sec) as response:
             if response.status >= 400:
                 return False
             payload = json.loads(response.read().decode("utf-8"))
-        return bool(isinstance(payload, dict) and payload.get("ok"))
+        return health_payload_is_ready(url, payload)
     except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
         return False
 
@@ -413,9 +520,16 @@ def main() -> int:
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--workspace-root", default="runtime/mechanicum-work")
-    parser.add_argument("--warmaster-run-root", default="runtime/warmaster-runs")
+    parser.add_argument(
+        "--warmaster-run-root",
+        default="EyeOfTerror/Warmaster/runtime/warmaster-runs",
+    )
     parser.add_argument("--iskandar-run-root", default="runtime/iskandar-runs")
-    parser.add_argument("--ceraxia-run-root", default="runtime/ceraxia-runs")
+    parser.add_argument(
+        "--ceraxia-run-root",
+        default=None,
+        help="Deprecated alias; when provided it must equal --warmaster-run-root.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true", help="Print a machine-readable startup plan and exit.")
     parser.add_argument("--wait-ready", action="store_true", help="Wait for top-level service health URLs after starting.")
@@ -427,7 +541,7 @@ def main() -> int:
     workspace_root = Path(args.workspace_root)
     warmaster_run_root = Path(args.warmaster_run_root)
     iskandar_run_root = Path(args.iskandar_run_root)
-    ceraxia_run_root = Path(args.ceraxia_run_root)
+    ceraxia_run_root = Path(args.ceraxia_run_root) if args.ceraxia_run_root else None
     commands = brigade_commands(
         repo_root=repo_root,
         host=args.host,
@@ -453,7 +567,11 @@ def main() -> int:
         return 0
 
     if not args.skip_port_check:
-        ports = [7000, 7101] + [int(port) for port in plan.get("ports", {}).get("mechanicum_workers", [])]
+        # Externally supervised warbands are expected to be listening already;
+        # checking their ports for *availability* would incorrectly reject the
+        # healthy lifecycle state that startup readiness requires.
+        ports = [command.port for command in commands if command.port > 0]
+        ports.extend(int(port) for port in plan.get("ports", {}).get("mechanicum_workers", []))
         preflight = port_preflight(args.host, ports)
         if not preflight["ok"]:
             print(json.dumps({"ok": False, "port_preflight": preflight}, ensure_ascii=False, indent=2), file=sys.stderr)

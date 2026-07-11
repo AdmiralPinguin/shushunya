@@ -10,6 +10,7 @@ import re
 import shutil
 import stat
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -17,23 +18,33 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+REPO_ROOT = next(
+    candidate
+    for candidate in Path(__file__).resolve().parents
+    if (candidate / "EyeOfTerror" / "model_brain.py").is_file()
+)
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from EyeOfTerror.model_brain import model_contract, request_model_decision
-from EyeOfTerror.common_protocol import governor_plan_from_contract, validate_protocol_payload
+from EyeOfTerror.common_protocol import validate_protocol_payload
 from EyeOfTerror.common_protocol.ceraxia_directive import (
     CeraxiaDirectiveError,
     build_ceraxia_directive,
     directive_model_instructions,
     directive_request_payload,
+    validate_directive_for_commander,
 )
 
 from ..command_text import task_text_from_commander_order
-from ..contracts import build_code_task_contract, code_worker_plan
-from ..pipeline import write_pipeline_run
-from .ceraxia import executable_client_action, oversight_plan, patch_contract_capabilities, payload_with_plan_view, plan_code_task
+from ..native_code_run import (
+    build_native_code_contract,
+    load_native_code_run,
+    native_governor_plan,
+    validate_native_code_run_package,
+    write_native_code_run,
+)
+from .ceraxia import executable_client_action, patch_contract_capabilities
 
 
 SKITARII_SOURCE_FILES = (
@@ -47,6 +58,106 @@ SKITARII_SHARED_SOURCE_FILES = (
 MAX_CERAXIA_REQUEST_BYTES = int(os.environ.get("CERAXIA_MAX_REQUEST_BYTES", "2000000"))
 CERAXIA_TRUSTED_ORIGINS_ENV = "CERAXIA_TRUSTED_ORIGINS"
 _TASK_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
+_PREPARE_LOCK = threading.RLock()
+
+
+class PrepareIdentityConflict(ValueError):
+    """An existing run cannot be proven to belong to this prepare request."""
+
+
+def _prepare_request_sha256(task: str, task_id: str, command: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        {
+            "task": task,
+            "task_id": task_id,
+            "mission_id": str(command.get("mission_id") or f"mission-{task_id}"),
+            "commander_order": command,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _load_prepare_replay(
+    run_dir: Path,
+    request_sha256: str,
+    command: dict[str, Any],
+) -> dict[str, Any]:
+    receipt_path = run_dir / "native_run_receipt.json"
+    if receipt_path.is_symlink() or not receipt_path.is_file():
+        raise PrepareIdentityConflict(
+            "existing run has no native Ceraxia prepare receipt; create a fresh run",
+        )
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PrepareIdentityConflict(f"prepare receipt is unreadable: {exc}") from exc
+    if not isinstance(receipt, dict):
+        raise PrepareIdentityConflict("prepare receipt must be an object")
+    if receipt.get("kind") != "native_code_run_receipt" or receipt.get("version") != 1:
+        raise PrepareIdentityConflict("existing run has an unsupported prepare receipt")
+    if not hmac.compare_digest(
+        str(receipt.get("prepare_request_sha256") or ""),
+        request_sha256,
+    ):
+        raise PrepareIdentityConflict("existing run belongs to a different prepare request")
+    errors = validate_native_code_run_package(run_dir)
+    if errors:
+        raise PrepareIdentityConflict("existing native run is invalid: " + "; ".join(errors))
+    package = load_native_code_run(run_dir)
+    contract = package.get("contract") if isinstance(package.get("contract"), dict) else {}
+    task_id = str(contract.get("task_id") or "")
+    mission_id = str(contract.get("mission_id") or "")
+    directive_path = run_dir / "ceraxia_directive.json"
+    try:
+        directive_payload = json.loads(directive_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PrepareIdentityConflict(f"persisted directive is unreadable: {exc}") from exc
+    directive = validate_directive_for_commander(
+        directive_payload,
+        command,
+        expected_task_id=task_id,
+        expected_mission_id=mission_id,
+        require_delegation=True,
+    )
+    plan_payload = native_plan_payload(
+        contract["goal"],
+        task_id,
+        command,
+        backend=skitarii_backend_health(),
+    )
+    governor_plan_payload = package.get("governor_plan")
+    status_payload = package.get("status")
+    return _with_execution_contract({
+        "ok": True,
+        "governor": "Ceraxia",
+        "model_brain": {
+            "status": "persisted",
+            "reason": "idempotent replay of the original leadership decision",
+        },
+        "contract": contract,
+        "governor_plan": governor_plan_payload,
+        "leadership_directive": directive,
+        "status": status_payload,
+        "phase": "run_prepared",
+        "prepare_replayed": True,
+        "decision": {
+            "can_handoff_to_abaddon": True,
+            "delegated_to": "SkitariiWarband",
+            "recommended_kind": "start_native_code_run",
+        },
+        "display": {
+            "headline": "Native code run already prepared",
+            "detail": "The original persisted Ceraxia decision was replayed safely",
+            "severity": "info",
+            "task_id": task_id,
+        },
+        "next_action": {},
+        "client_action": {},
+        "pipeline": plan_payload.get("pipeline", {}),
+    }, plan_payload.get("active_execution_backend"))
 
 
 def expected_skitarii_source_sha256() -> str:
@@ -70,22 +181,13 @@ def expected_skitarii_source_sha256() -> str:
 
 
 def required_workers() -> list[str]:
-    workers: list[str] = []
-    for step in code_worker_plan("capabilities"):
-        if step.worker not in workers:
-            workers.append(step.worker)
-    return workers
+    # Skitarii is a warband backend, not a synthetic Mechanicum worker.  Its
+    # readiness is attested separately by ``skitarii_backend_health``.
+    return []
 
 
 def skitarii_backend_health(timeout_sec: float = 1.0) -> dict[str, Any]:
-    """Probe the real code execution backend without making it a registry worker.
-
-    Warmaster still prepares the established six-worker contract. Its Skitarii
-    bridge consumes that compatibility contract and hands execution to the
-    warband on port 7200. Keeping the two roles separate prevents registry
-    preflight from looking for a synthetic ``SkitariiWarband`` worker while
-    still reporting whether the actual execution backend is reachable.
-    """
+    """Attest the native Skitarii warband backend used by every code run."""
     endpoint = os.environ.get(
         "SKITARII_URL",
         os.environ.get("SKITARII_WARBAND_URL", "http://127.0.0.1:7200"),
@@ -146,20 +248,20 @@ def skitarii_backend_health(timeout_sec: float = 1.0) -> dict[str, Any]:
         "status": "healthy" if healthy else "unavailable",
         "health": payload,
         "error": error,
-        "dispatch_owner": "Warmaster skitarii_bridge",
-        "contract_relation": "executes the six-worker Ceraxia compatibility contract",
+        "dispatch_owner": "native_code_backend_router",
+        "contract_relation": "executes one native Ceraxia-delegated code mission",
     }
 
 
-def _compatibility_pipeline(pipeline: dict[str, Any]) -> dict[str, Any]:
+def _native_pipeline(pipeline: dict[str, Any]) -> dict[str, Any]:
     enriched = dict(pipeline)
     enriched.update(
         {
-            "mode": "legacy_six_worker_compatibility_adapter",
-            "authoritative": False,
-            "purpose": "registry_preflight_only",
+            "mode": "native_skitarii_mission",
+            "authoritative": True,
+            "purpose": "one leadership handoff to one warband mission",
             "active_execution_backend": "SkitariiWarband",
-            "execution_handoff": "Warmaster skitarii_bridge",
+            "execution_handoff": "native_code_backend_router",
         }
     )
     return enriched
@@ -174,23 +276,23 @@ def _with_execution_contract(payload: dict[str, Any], backend: dict[str, Any] | 
     if not pipeline and isinstance(nested_plan, dict) and isinstance(nested_plan.get("pipeline"), dict):
         pipeline = nested_plan["pipeline"]
     if pipeline:
-        enriched["pipeline"] = _compatibility_pipeline(pipeline)
+        enriched["pipeline"] = _native_pipeline(pipeline)
     enriched.update(
         {
             "api_version": 2,
-            "contract_mode": "legacy_six_worker_compatibility_adapter",
+            "contract_mode": "native_skitarii_mission_v2",
             "required_workers": required_workers(),
             "active_execution_backend": backend_payload,
             "execution_contract": {
-                "planning_and_preflight": "six_worker_registry_compatibility_adapter",
+                "planning_and_preflight": "ceraxia_leadership_only",
                 "execution": "SkitariiWarband",
-                "handoff": "Warmaster skitarii_bridge",
+                "handoff": "native_code_backend_router",
                 "backend_healthy": bool(backend_payload.get("healthy")),
                 "leadership": "Ceraxia",
                 "detailed_planning": "SkitariiWarband",
                 "native_directive_artifact": "ceraxia_directive.json",
                 "leadership_contract": "native_ceraxia_directive_v1",
-                "compatibility_plan_authoritative": False,
+                "legacy_worker_plan_present": False,
             },
         }
     )
@@ -198,11 +300,11 @@ def _with_execution_contract(payload: dict[str, Any], backend: dict[str, Any] | 
         nested = dict(nested_plan)
         nested_pipeline = nested.get("pipeline") if isinstance(nested.get("pipeline"), dict) else {}
         if nested_pipeline:
-            nested["pipeline"] = _compatibility_pipeline(nested_pipeline)
+            nested["pipeline"] = _native_pipeline(nested_pipeline)
         nested.update(
             {
                 "api_version": 2,
-                "contract_mode": "legacy_six_worker_compatibility_adapter",
+                "contract_mode": "native_skitarii_mission_v2",
                 "required_workers": required_workers(),
                 "active_execution_backend": backend_payload,
                 "execution_contract": enriched["execution_contract"],
@@ -231,27 +333,42 @@ def _bind_commander_order(payload: dict[str, Any], command: dict[str, Any]) -> d
 
 
 def pipeline_summary() -> dict[str, Any]:
-    steps = [step.to_dict() for step in code_worker_plan("capabilities")]
     return {
-        "kind": "code_task",
-        "step_count": len(steps),
-        "required_workers": required_workers(),
+        "kind": "native_code_run",
+        "step_count": 1,
+        "required_workers": [],
         "steps": [
             {
-                "step_id": step["step_id"],
-                "worker": step["worker"],
-                "depends_on": step["depends_on"],
-                "expected_artifacts": step["expected_artifacts"],
-                "expected_artifact_count": len(step["expected_artifacts"]),
+                "step_id": "skitarii",
+                "backend": "SkitariiWarband",
+                "depends_on": [],
+                "ownership": (
+                    "repository exploration, detailed planning, implementation, "
+                    "verification, and internal repair"
+                ),
             }
-            for step in steps
         ],
     }
 
 
 def oversight_template() -> dict[str, Any]:
-    contract = build_code_task_contract("capabilities", task_id="capabilities")
-    return oversight_plan(contract)
+    return {
+        "governor": "Ceraxia",
+        "kind": "native_code_leadership_oversight",
+        "leader_owns": [
+            "delegation decision",
+            "mission intent",
+            "priorities and constraints",
+            "success and escalation conditions",
+        ],
+        "warband_owns": [
+            "repository exploration",
+            "detailed planning",
+            "implementation",
+            "verification",
+            "internal repair",
+        ],
+    }
 
 
 def _header_values(headers: Any, name: str) -> list[str]:
@@ -482,12 +599,65 @@ def request_leadership_directive(
     return directive, model_decision
 
 
-def protocol_governor_plan(plan_payload: dict[str, Any], command: dict[str, Any]) -> dict[str, Any]:
-    contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else {}
-    mission_id = str(command.get("mission_id") or f"mission-{contract.get('task_id') or 'unassigned'}")
-    payload = governor_plan_from_contract(mission_id, contract, command)
-    validate_protocol_payload(payload, expected_type="governor_plan")
-    return payload
+def native_plan_payload(
+    task: str,
+    task_id: str | None,
+    command: dict[str, Any],
+    *,
+    backend: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the structural one-mission shape without asking the leader model."""
+    mission_id = str(command.get("mission_id") or "")
+    contract = build_native_code_contract(task, task_id, mission_id=mission_id)
+    plan = native_governor_plan(contract, command)
+    backend_payload = backend or skitarii_backend_health()
+    pipeline = _native_pipeline(pipeline_summary())
+    ready = bool(backend_payload.get("healthy"))
+    next_action = {
+        "kind": "prepare_run" if ready else "inspect_capabilities",
+        "method": "POST" if ready else "GET",
+        "endpoint": "POST /prepare_run" if ready else "GET /capabilities",
+        "body": {"task_id": contract["task_id"]} if ready else {},
+        "requires": ["commander_order"] if ready else [],
+        "reason": (
+            "native run shape is valid; ask Ceraxia for one leadership decision"
+            if ready else "SkitariiWarband backend is not ready"
+        ),
+    }
+    payload = {
+        "ok": ready,
+        "governor": "Ceraxia",
+        "api_version": 3,
+        "contract": contract,
+        "governor_plan": plan,
+        "pipeline": pipeline,
+        "oversight": oversight_template(),
+        "leadership_authorization": "pending_prepare",
+        "validation": {"ok": True, "errors": []},
+        "missing_workers": [],
+        "unavailable_workers": [],
+        "actions": {
+            "can_prepare_run": ready,
+            "can_inspect_capabilities": True,
+            "next_action": next_action,
+        },
+        "phase": "native_plan_ready" if ready else "native_plan_blocked",
+        "decision": {
+            "can_prepare_run": ready,
+            "recommended_kind": str(next_action.get("kind") or ""),
+            "recommended_endpoint": str(next_action.get("endpoint") or ""),
+        },
+        "display": {
+            "headline": "Native Skitarii mission is ready" if ready else "Skitarii backend is unavailable",
+            "detail": str(next_action.get("reason") or ""),
+            "severity": "info" if ready else "warning",
+            "task_id": contract["task_id"],
+            "step_count": 1,
+        },
+        "next_action": next_action,
+        "client_action": executable_client_action(contract["task_id"], next_action),
+    }
+    return _with_execution_contract(payload, backend_payload)
 
 
 _REPO_MARKER = re.compile(r"(?mi)^\s*CERAXIA_TARGET_REPO:\s*(.+?)\s*$")
@@ -524,146 +694,90 @@ def task_with_repo_marker(task: str, repo_path: str) -> str:
 def callable_contract_payload(task: str, task_id: str | None, repo_path: str = "", constraints: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_task = task_with_repo_marker(task, repo_path)
     backend = skitarii_backend_health()
-    plan_payload = _with_execution_contract(
-        payload_with_plan_view(plan_code_task(normalized_task, task_id=task_id).to_dict()),
-        backend,
-    )
-    final_package_schema = {
-        "kind": "skitarii_bridge_result",
-        "required_fields": [
-            "ok",
-            "phase",
-            "status",
-            "summary",
-            "artifacts",
-            "patch_stage",
-            "ready_to_apply",
-        ],
-        "completed_requires": [
-            "ok == true",
-            "phase == completed",
-            "patch_stage.applied_to_live == true for repository mutations",
-            "patch_stage.post_apply_tests_passed == true for repository mutations",
-        ],
-        "ready_to_apply_requires": [
-            "ok == false",
-            "phase == ready_to_apply",
-            "patch_stage.ready_to_apply == true",
-            "artifacts contains work/skitarii.patch",
-            "next_action.endpoint == POST /runs/{task_id}/apply_patch",
-        ],
-        "legacy_final_manifest_schema": "not binding on the active Skitarii backend",
-    }
+    contract = build_native_code_contract(normalized_task, task_id)
     return _with_execution_contract({
-        "ok": bool(plan_payload.get("ok")),
+        "ok": bool(backend.get("healthy")),
         "governor": "Ceraxia",
-        "api_version": 2,
-        "callable_kind": "specialized_code_brigade",
+        "api_version": 3,
+        "callable_kind": "native_code_warband",
         "model_brain": model_contract("Ceraxia", "Inner Circle code task governor", layer="governor_callable"),
-        "task_id": plan_payload.get("contract", {}).get("task_id", task_id or ""),
+        "task_id": contract["task_id"],
         "normalized_task": normalized_task,
+        "contract": contract,
         "input_contract": {
             "required": ["commander_order"],
             "optional": ["task_id", "repo_path", "run_dir"],
             "repo_scope": "configured_repository_only",
             "configured_repo_path": str(REPO_ROOT.resolve()),
-            "run_dir_scope": (
-                "exact_nonexistent_<configured_run_root>/<task_id>_or_"
-                "<WARMMASTER_RUN_ROOT>/<task_id>"
-            ),
-            "constraints_status": "informational_only_not_enforced",
+            "run_dir_scope": "exact task child of a configured run root",
+            "prepare_semantics": "idempotent by canonical commander request hash",
+            "constraints_status": "preserved by the Ceraxia directive validator",
             "received_constraints": constraints or {},
         },
         "execution_flow": [
-            {"step": 1, "method": "POST", "endpoint": "/callable_contract", "purpose": "inspect callable package contract"},
-            {"step": 2, "method": "POST", "endpoint": "/prepare_run", "purpose": "write dispatch and oversight package"},
-            {"step": 3, "method": "POST", "endpoint": "Warmaster /runs/{task_id}/start_*", "purpose": "execute pipeline"},
-            {"step": 4, "method": "GET", "endpoint": "Warmaster /runs/{task_id}/final", "purpose": "retrieve native Skitarii result"},
-            {"step": 5, "method": "POST", "endpoint": "Warmaster /runs/{task_id}/apply_patch", "purpose": "conditionally apply a fingerprint-matched ready patch"},
+            {"step": 1, "method": "POST", "endpoint": "/prepare_run", "purpose": "make one Ceraxia leadership decision and persist one native run"},
+            {"step": 2, "method": "POST", "endpoint": "Abaddon /runs/{task_id}/start_*", "purpose": "execute the declared Skitarii backend"},
+            {"step": 3, "method": "GET", "endpoint": "Abaddon /runs/{task_id}/final", "purpose": "retrieve the verified terminal result"},
         ],
-        "final_package_schema": final_package_schema,
-        "task_profile": plan_payload.get("task_profile", {}),
-        "worker_specialization_briefs": plan_payload.get("worker_specialization_briefs", []),
-        "patch_contract": plan_payload.get("patch_contract", {}),
-        "plan": plan_payload,
+        "pipeline": _native_pipeline(pipeline_summary()),
+        "patch_contract": patch_contract_capabilities(),
         "next_action": {
-        "kind": "prepare_run",
-        "method": "POST",
-        "endpoint": "POST /prepare_run",
-        "body": {
-            "task_id": plan_payload.get("contract", {}).get("task_id", task_id or ""),
-            "repo_path": repo_path,
+            "kind": "prepare_run",
+            "method": "POST",
+            "endpoint": "POST /prepare_run",
+            "body": {"task_id": contract["task_id"], "repo_path": repo_path},
+            "requires": ["commander_order"],
+            "reason": "ask Ceraxia for the single authoritative leadership decision",
         },
-        "requires": ["commander_order"],
-        "reason": "callable contract is ready; prepare a concrete Ceraxia run package",
-    },
     }, backend)
 
 
 def service_capabilities() -> dict[str, Any]:
-    capability_plan = plan_code_task("capabilities", task_id="capabilities").to_dict()
-    pipeline = _compatibility_pipeline(pipeline_summary())
-    oversight = oversight_template()
+    pipeline = _native_pipeline(pipeline_summary())
     backend = skitarii_backend_health()
-    adapter_available = not capability_plan.get("missing_workers") and not capability_plan.get("unavailable_workers")
     next_action = {
         "kind": "plan_task",
         "method": "POST",
         "endpoint": "POST /plan",
         "body": {},
         "body_schema": {"commander_order": "protocol object", "task_id": "optional string"},
-        "reason": "inspect a Ceraxia code plan for a Warmaster commander_order",
+        "reason": "inspect the native one-mission code run shape without invoking the leader model",
     }
     return _with_execution_contract({
-        "ok": True,
+        "ok": bool(backend.get("healthy")),
         "governor": "Ceraxia",
-        "api_version": 2,
+        "api_version": 3,
         "task_kinds": ["code"],
-        "required_workers": required_workers(),
+        "required_workers": [],
         "worker_availability": {
-            "ok": adapter_available,
-            "scope": "legacy_six_worker_compatibility_adapter",
-            "missing_workers": capability_plan.get("missing_workers", []),
-            "unavailable_workers": capability_plan.get("unavailable_workers", []),
-            "resolved_workers": capability_plan.get("resolved_workers", {}),
+            "ok": bool(backend.get("healthy")),
+            "scope": "native_warband_backend",
+            "missing_workers": [],
+            "unavailable_workers": [],
         },
         "model_brain": model_contract("Ceraxia", "Inner Circle code task governor", layer="governor_service"),
         "pipeline": pipeline,
         "patch_contract": patch_contract_capabilities(),
-        "oversight": oversight,
-        "task_profile": capability_plan.get("task_profile", {}),
-        "worker_specialization_briefs": capability_plan.get("worker_specialization_briefs", []),
+        "oversight": oversight_template(),
         "summary": {
             "pipeline_kind": str(pipeline.get("kind") or ""),
-            "step_count": int(pipeline.get("step_count") or 0),
-            "required_worker_count": len(required_workers()),
-            "quality_gate_count": len(oversight.get("quality_gates") if isinstance(oversight.get("quality_gates"), list) else []),
-            "handoff_count": len(oversight.get("handoffs") if isinstance(oversight.get("handoffs"), list) else []),
-            "step_quality_matrix_count": len(oversight.get("step_quality_matrix") if isinstance(oversight.get("step_quality_matrix"), list) else []),
-            "worker_availability_ok": adapter_available,
+            "step_count": 1,
+            "required_worker_count": 0,
+            "worker_availability_ok": bool(backend.get("healthy")),
             "active_backend_healthy": bool(backend.get("healthy")),
-            "task_profile_complexity": str(capability_plan.get("task_profile", {}).get("complexity", "")) if isinstance(capability_plan.get("task_profile"), dict) else "",
         },
         "display": {
             "headline": "Ceraxia capabilities",
-            "detail": (
-                f"{int(pipeline.get('step_count') or 0)} compatibility steps; "
-                f"Skitarii Warband backend {backend.get('status')}"
-            ),
-            "severity": "info" if adapter_available and backend.get("healthy") else "warning",
+            "detail": f"One native Skitarii mission; backend {backend.get('status')}",
+            "severity": "info" if backend.get("healthy") else "warning",
         },
         "next_action": next_action,
         "client_action": executable_client_action("", next_action),
         "capabilities": [
-            "model_backed_governor_planning",
+            "single_authoritative_leadership_decision",
             "validated_leadership_directive",
             "ceraxia_to_skitarii_delegation",
-            "code_task_planning",
-            "repository_survey",
-            "patch_manifest_preparation",
-            "verification_planning",
-            "code_review_coordination",
-            "safe_final_handoff",
+            "idempotent_native_run_prepare",
             "bounded_exact_snapshot_with_hashed_external_assets",
             "vm_isolated_agentic_execution",
             "private_held_out_behavioral_verification",
@@ -682,18 +796,17 @@ def service_capabilities() -> dict[str, Any]:
     }, backend)
 
 
-def resolve_run_dir(default_run_root: Path, requested: str, task_id: str) -> Path:
+def resolve_run_dir(
+    default_run_root: Path,
+    requested: str,
+    task_id: str,
+    *,
+    allow_existing: bool = False,
+) -> Path:
     root = default_run_root.resolve()
     if not _TASK_ID_RE.fullmatch(str(task_id or "")) or ".." in task_id:
         raise ValueError("task_id is not safe for a run directory")
-    handoff_root = Path(
-        os.environ.get(
-            "WARMMASTER_RUN_ROOT",
-            str(REPO_ROOT / "EyeOfTerror" / "Warmaster" / "runtime" / "warmaster-runs"),
-        ),
-    ).expanduser().resolve()
-    allowed_roots = {root, handoff_root}
-    expected_paths = {allowed_root / task_id for allowed_root in allowed_roots}
+    expected_paths = {root / task_id}
     candidate = Path(requested).expanduser() if requested else root / task_id
     if not candidate.is_absolute():
         candidate = root / candidate
@@ -708,7 +821,11 @@ def resolve_run_dir(default_run_root: Path, requested: str, task_id: str) -> Pat
     if resolved not in expected_paths:
         raise ValueError("run_dir resolves outside its exact task-scoped location")
     if os.path.lexists(resolved):
-        raise FileExistsError("task-scoped run directory already exists")
+        metadata = os.lstat(resolved)
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError("existing task-scoped run path is not a real directory")
+        if not allow_existing:
+            raise FileExistsError("task-scoped run directory already exists")
     return resolved
 
 
@@ -793,149 +910,149 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                 repo_path = str(payload.get("repo_path") or "").strip()
                 task = task_with_repo_marker(task, repo_path)
                 task_id = str(payload.get("task_id") or "").strip() or None
-                plan = plan_code_task(task, task_id=task_id)
-                prepared_run_dir = None
-                if self.path == "/prepare_run":
-                    prepared_run_dir = resolve_run_dir(
-                        default_run_root,
-                        str(payload.get("run_dir") or ""),
-                        plan.contract.task_id,
-                    )
-                try:
-                    leadership_directive, model_decision = request_leadership_directive(
-                        task,
-                        plan.contract.task_id,
-                        command,
-                    )
-                except CeraxiaDirectiveError as exc:
-                    response(
-                        self,
-                        502,
-                        {
-                            "ok": False,
-                            "governor": "Ceraxia",
-                            "error": str(exc),
-                            "error_code": "invalid_leadership_directive",
-                        },
-                    )
-                    return
-                if self.path == "/prepare_run" and leadership_directive["decision"] != "delegate":
-                    response(
-                        self,
-                        409,
-                        {
-                            "ok": False,
-                            "governor": "Ceraxia",
-                            "error": "Ceraxia did not authorize delegation to Skitarii",
-                            "error_code": "delegation_not_authorized",
-                            "leadership_directive": leadership_directive,
-                            "model_brain": model_decision,
-                        },
-                    )
-                    return
                 if self.path == "/plan":
-                    plan_payload = _with_execution_contract(payload_with_plan_view(plan.to_dict()))
-                    plan_payload["governor_plan"] = protocol_governor_plan(plan_payload, command)
-                    plan_payload["leadership_directive"] = leadership_directive
-                    plan_payload["model_brain"] = model_decision
+                    plan_payload = native_plan_payload(task, task_id, command)
                     plan_payload = _bind_commander_order(plan_payload, command)
                     response(self, 200, plan_payload)
                     return
                 if self.path == "/callable_contract":
                     constraints = payload.get("constraints") if isinstance(payload.get("constraints"), dict) else {}
                     contract_payload = callable_contract_payload(task, task_id, repo_path=repo_path, constraints=constraints)
-                    contract_payload["leadership_directive"] = leadership_directive
-                    contract_payload["model_brain"] = model_decision
                     contract_payload = _bind_commander_order(contract_payload, command)
                     response(self, 200, contract_payload)
                     return
                 if self.path == "/prepare_run":
-                    if prepared_run_dir is None:
-                        raise ValueError("task-scoped run directory was not validated")
-                    run_dir = prepared_run_dir
-                    run_dir.parent.mkdir(parents=True, exist_ok=True)
-                    try:
-                        os.mkdir(run_dir, mode=0o700)
-                    except FileExistsError:
-                        response(
-                            self, 409,
-                            {"ok": False, "error": "task-scoped run directory already exists"},
-                        )
-                        return
-                    reserved_metadata = os.lstat(run_dir)
-                    reserved_identity = (
-                        reserved_metadata.st_dev, reserved_metadata.st_ino,
+                    plan_payload = native_plan_payload(task, task_id, command)
+                    contract = plan_payload["contract"]
+                    run_dir = resolve_run_dir(
+                        default_run_root,
+                        str(payload.get("run_dir") or ""),
+                        contract["task_id"],
+                        allow_existing=True,
                     )
-                    try:
-                        mission_id = str(command.get("mission_id") or f"mission-{plan.contract.task_id}")
-                        status = write_pipeline_run(
-                            plan.contract, run_dir, oversight=oversight_plan(plan.contract),
-                            mission_id=mission_id,
-                        )
-                        (run_dir / "ceraxia_directive.json").write_text(
-                            json.dumps(
-                                leadership_directive,
-                                ensure_ascii=False,
-                                indent=2,
-                                sort_keys=True,
-                            ) + "\n",
-                            encoding="utf-8",
-                        )
+                    request_sha256 = _prepare_request_sha256(
+                        task,
+                        contract["task_id"],
+                        command,
+                    )
+                    with _PREPARE_LOCK:
+                        if run_dir.exists():
+                            replay = _load_prepare_replay(
+                                run_dir,
+                                request_sha256,
+                                command,
+                            )
+                            response(self, 200, replay)
+                            return
                         backend = skitarii_backend_health()
-                        plan_payload = _with_execution_contract(
-                            payload_with_plan_view(plan.to_dict()), backend,
-                        )
-                        governor_plan_payload = protocol_governor_plan(plan_payload, command)
-                        (run_dir / "governor_plan.json").write_text(
-                            json.dumps(
-                                governor_plan_payload, ensure_ascii=False,
-                                indent=2, sort_keys=True,
-                            ) + "\n",
-                            encoding="utf-8",
-                        )
-                        response_payload = _with_execution_contract({
-                            "ok": status["ok"],
-                            "governor": "Ceraxia",
-                            "model_brain": model_decision,
-                            "governor_plan": governor_plan_payload,
-                            "leadership_directive": leadership_directive,
-                            "status": status,
-                            "phase": "run_prepared" if status.get("ok") else "prepare_failed",
-                            "decision": {
-                                "can_handoff_to_warmaster": bool(status.get("ok")),
-                                "delegated_to": "SkitariiWarband",
-                                "recommended_kind": "handoff_run_package" if status.get("ok") else "",
-                                "recommended_endpoint": "",
-                            },
-                            "display": {
-                                "headline": "Code run package prepared" if status.get("ok") else "Code run package preparation failed",
-                                "detail": str(status.get("error") or "Run package was written for Warmaster verification"),
-                                "severity": "info" if status.get("ok") else "error",
-                                "task_id": plan.contract.task_id,
-                            },
-                            "next_action": {},
-                            "client_action": {},
-                            "pipeline": plan_payload.get("pipeline", {}),
-                        }, backend)
-                    except Exception:
-                        # This process created the directory atomically above.  Never
-                        # leave a half-prepared package that a retry could mistake for
-                        # an existing valid run; shutil does not follow a replaced
-                        # top-level symlink.
+                        if not backend.get("healthy"):
+                            response(
+                                self,
+                                503,
+                                {
+                                    "ok": False,
+                                    "governor": "Ceraxia",
+                                    "error": "SkitariiWarband backend is not ready",
+                                    "error_code": "skitarii_backend_unavailable",
+                                    "backend": backend,
+                                },
+                            )
+                            return
                         try:
-                            current = os.lstat(run_dir)
-                            current_identity = (current.st_dev, current.st_ino)
-                            if (
-                                stat.S_ISDIR(current.st_mode)
-                                and current_identity == reserved_identity
-                            ):
-                                shutil.rmtree(run_dir)
-                        except OSError:
-                            pass
-                        raise
+                            leadership_directive, model_decision = request_leadership_directive(
+                                task,
+                                contract["task_id"],
+                                command,
+                            )
+                        except CeraxiaDirectiveError as exc:
+                            response(
+                                self,
+                                502,
+                                {
+                                    "ok": False,
+                                    "governor": "Ceraxia",
+                                    "error": str(exc),
+                                    "error_code": "invalid_leadership_directive",
+                                },
+                            )
+                            return
+                        if leadership_directive["decision"] != "delegate":
+                            response(
+                                self,
+                                409,
+                                {
+                                    "ok": False,
+                                    "governor": "Ceraxia",
+                                    "error": "Ceraxia did not authorize delegation to Skitarii",
+                                    "error_code": "delegation_not_authorized",
+                                    "leadership_directive": leadership_directive,
+                                    "model_brain": model_decision,
+                                },
+                            )
+                            return
+                        run_dir.parent.mkdir(parents=True, exist_ok=True)
+                        os.mkdir(run_dir, mode=0o755)
+                        reserved_metadata = os.lstat(run_dir)
+                        reserved_identity = (reserved_metadata.st_dev, reserved_metadata.st_ino)
+                        try:
+                            governor_plan_payload = native_governor_plan(contract, command)
+                            status = write_native_code_run(
+                                run_dir,
+                                contract,
+                                leadership_directive,
+                                governor_plan_payload,
+                                prepare_request_sha256=request_sha256,
+                            )
+                            response_payload = _with_execution_contract({
+                                "ok": True,
+                                "governor": "Ceraxia",
+                                "model_brain": model_decision,
+                                "contract": contract,
+                                "governor_plan": governor_plan_payload,
+                                "leadership_directive": leadership_directive,
+                                "status": status,
+                                "phase": "run_prepared",
+                                "prepare_replayed": False,
+                                "decision": {
+                                    "can_handoff_to_abaddon": True,
+                                    "delegated_to": "SkitariiWarband",
+                                    "recommended_kind": "start_native_code_run",
+                                },
+                                "display": {
+                                    "headline": "Native code run prepared",
+                                    "detail": "One Ceraxia directive and one Skitarii mission were persisted",
+                                    "severity": "info",
+                                    "task_id": contract["task_id"],
+                                },
+                                "next_action": {},
+                                "client_action": {},
+                                "pipeline": plan_payload.get("pipeline", {}),
+                            }, backend)
+                        except Exception:
+                            try:
+                                current = os.lstat(run_dir)
+                                if (
+                                    stat.S_ISDIR(current.st_mode)
+                                    and (current.st_dev, current.st_ino) == reserved_identity
+                                ):
+                                    shutil.rmtree(run_dir)
+                            except OSError:
+                                pass
+                            raise
                     response(self, 200, response_payload)
                     return
                 response(self, 404, {"ok": False, "error": "not found"})
+            except PrepareIdentityConflict as exc:
+                response(
+                    self,
+                    409,
+                    {
+                        "ok": False,
+                        "governor": "Ceraxia",
+                        "error": str(exc),
+                        "error_code": "prepare_identity_conflict",
+                    },
+                )
             except FileExistsError as exc:
                 response(self, 409, {"ok": False, "governor": "Ceraxia", "error": str(exc)})
             except ValueError as exc:
@@ -971,7 +1088,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Serve Ceraxia as an Inner Circle code governor.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7104)
-    parser.add_argument("--default-run-root", default="runtime/ceraxia-runs")
+    parser.add_argument(
+        "--default-run-root",
+        default=os.environ.get("WARMMASTER_RUN_ROOT", "runtime/warmaster-runs"),
+    )
     args = parser.parse_args()
     serve(args.host, args.port, Path(args.default_run_root))
     return 0

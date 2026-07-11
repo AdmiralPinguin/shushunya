@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Mechanicum barrier — the active code brigade is the Skitarii Warband. The retired paper
-# brigades (CodeBrigade/Workers, PlanningBrigade) and their self-tests were removed, so
-# there is no "best-effort legacy" theatre here any more: this barrier is fully REQUIRED.
+# Mechanicum barrier — one native Ceraxia-to-Skitarii architecture, fully required.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"

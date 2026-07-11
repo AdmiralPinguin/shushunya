@@ -11,6 +11,11 @@ from .command_text import task_text_from_commander_order
 from .gateway_util import valid_task_id, validate_service_host
 from .ledger import TaskLedger, now_iso
 from .mission_control import link_run_to_mission, mission_protocol_audit, open_mission
+from .native_code_run import (
+    NATIVE_EXECUTION,
+    is_native_code_run,
+    validate_native_code_run_package,
+)
 from .orchestrator import cancel_http_worker_tasks, research_loop_run
 from .routing import route_message
 from .run_package import load_ledger_dict
@@ -23,6 +28,25 @@ STATE_FILE = "campaign_state.json"
 FINAL_REPORT_FILE = "campaign_final_report.json"
 TERMINAL_CAMPAIGN_STATUSES = {"completed", "blocked", "cancelled"}
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "blocked", "corrupt"}
+NATIVE_CODE_RESULT_FIELDS = {
+    "ok",
+    "status",
+    "phase",
+    "summary",
+    "final_step",
+    "artifacts",
+    "artifact_root",
+    "patch_stage",
+    "ready_to_apply",
+    "next_action",
+}
+NATIVE_CODE_RESULT_CONTRACT = {
+    "kind": "skitarii_bridge_result",
+    "final_step": "skitarii",
+    "artifact_list": "task_ledger.result.artifacts",
+    "artifact_root": "task_ledger.result.artifact_root",
+    "required_fields": sorted(NATIVE_CODE_RESULT_FIELDS),
+}
 
 
 def generated_campaign_id(message: str) -> str:
@@ -130,6 +154,8 @@ def decompose_task(message: str, campaign_id: str | None = None, route: dict[str
             "research subrun completes with source-backed brief and final manifest",
             "implementation subrun is created only after research handoff is available",
             "implementation task references the campaign handoff input",
+            "implementation completes through one native Ceraxia-to-Skitarii mission",
+            "implementation deliverables come from the verified Skitarii result artifact list",
             "all required subruns complete without unresolved blockers",
             "Abaddon final review verifies original task coverage and handoff usage",
         ],
@@ -157,14 +183,12 @@ def decompose_task(message: str, campaign_id: str | None = None, route: dict[str
                 "kind": "code",
                 "depends_on": ["research"],
                 "task": campaign_task_text(goal, "implementation", "{handoff_path}"),
-                "expected_artifacts": [
-                    "/work/ceraxia/repo_survey.json",
-                    "/work/ceraxia/change_plan.md",
-                    "/work/ceraxia/patch_manifest.json",
-                    "/work/ceraxia/verification_report.json",
-                    "/work/ceraxia/code_review.json",
-                    "/work/ceraxia/final_manifest.json",
-                ],
+                "execution": dict(NATIVE_EXECUTION),
+                # Skitarii owns detailed planning and therefore determines the
+                # concrete deliverable paths.  Campaigns consume the bounded
+                # result.artifacts list instead of inventing Ceraxia paperwork.
+                "expected_artifacts": [],
+                "result_contract": dict(NATIVE_CODE_RESULT_CONTRACT),
                 "requires_handoffs": ["research_to_implementation"],
             },
         ],
@@ -226,6 +250,24 @@ def validate_campaign_plan(plan: dict[str, Any]) -> list[str]:
         depends_on = subrun.get("depends_on")
         if not isinstance(depends_on, list):
             errors.append(f"subrun {subrun_id or index} depends_on must be a list")
+        if subrun.get("kind") == "code" or subrun.get("governor") == "Ceraxia":
+            if subrun.get("kind") != "code" or subrun.get("governor") != "Ceraxia":
+                errors.append(
+                    f"subrun {subrun_id or index} code missions must be owned by Ceraxia",
+                )
+            if subrun.get("execution") != NATIVE_EXECUTION:
+                errors.append(
+                    f"subrun {subrun_id or index} must use the native Skitarii execution boundary",
+                )
+            if subrun.get("expected_artifacts") != []:
+                errors.append(
+                    f"subrun {subrun_id or index} must not pre-plan Skitarii artifact paths",
+                )
+            result_contract = subrun.get("result_contract")
+            if result_contract != NATIVE_CODE_RESULT_CONTRACT:
+                errors.append(
+                    f"subrun {subrun_id or index} must consume the Skitarii bridge result contract",
+                )
     for subrun in subruns:
         if not isinstance(subrun, dict):
             continue
@@ -475,6 +517,95 @@ def run_artifact_names(summary: dict[str, Any]) -> set[str]:
     return names
 
 
+def native_code_result_completion(run_root: Path, task_id: str) -> dict[str, Any]:
+    """Audit the native Ceraxia -> Skitarii boundary used by a campaign.
+
+    A completed ledger is not enough: the run package must still be the native
+    one-step package and every artifact advertised by Skitarii must resolve
+    through its bounded artifact root.  A patch-bearing result additionally
+    has to prove the controlled live apply and post-apply verification.
+    """
+    run_dir = run_root / task_id
+    errors: list[str] = []
+    if not is_native_code_run(run_dir):
+        errors.append("run is not a native Ceraxia-to-Skitarii package")
+    package_errors = validate_native_code_run_package(run_dir)
+    errors.extend(f"native package: {error}" for error in package_errors)
+
+    ledger, ledger_error = load_ledger_dict(run_dir / "task_ledger.json")
+    if ledger_error:
+        errors.append(f"task ledger: {ledger_error}")
+        ledger = {}
+    result = ledger.get("result") if isinstance(ledger.get("result"), dict) else {}
+    missing_fields = sorted(NATIVE_CODE_RESULT_FIELDS - set(result))
+    if missing_fields:
+        errors.append(f"Skitarii result is missing fields: {missing_fields}")
+    if result.get("ok") is not True:
+        errors.append("Skitarii result is not accepted")
+    if result.get("status") != "completed" or result.get("phase") != "completed":
+        errors.append("Skitarii result is not completed")
+    if result.get("final_step") != "skitarii":
+        errors.append("Skitarii result final_step is not skitarii")
+    if result.get("ready_to_apply") is not False:
+        errors.append("completed Skitarii result still requires patch apply")
+    if result.get("next_action") not in ({}, None):
+        errors.append("completed Skitarii result still exposes a next action")
+
+    artifact_root = str(result.get("artifact_root") or "")
+    if not artifact_root:
+        errors.append("Skitarii result artifact_root is missing")
+    else:
+        try:
+            if Path(artifact_root).resolve() != run_dir.resolve():
+                errors.append("Skitarii result artifact_root is not the campaign run directory")
+        except OSError as exc:
+            errors.append(f"Skitarii result artifact_root is invalid: {exc}")
+
+    artifacts = result.get("artifacts")
+    if not isinstance(artifacts, list) or any(not isinstance(item, str) or not item for item in artifacts):
+        errors.append("Skitarii result artifacts must be a list of non-empty logical paths")
+        artifacts = []
+    artifact_items = artifact_status(ledger).get("artifacts", []) if ledger else []
+    artifact_by_path = {
+        str(item.get("path") or ""): item
+        for item in artifact_items
+        if isinstance(item, dict) and item.get("path")
+    }
+    for artifact in artifacts:
+        item = artifact_by_path.get(artifact, {})
+        if item.get("exists") is not True:
+            detail = item.get("errors") if isinstance(item.get("errors"), list) else []
+            errors.append(f"Skitarii artifact is unavailable: {artifact}: {detail}")
+
+    patch_stage = result.get("patch_stage")
+    if patch_stage not in ({}, None):
+        if not isinstance(patch_stage, dict):
+            errors.append("Skitarii patch_stage must be an object")
+        else:
+            for field in (
+                "applies_to_live",
+                "tests_pass_in_worktree",
+                "applied_to_live",
+                "post_apply_tests_passed",
+            ):
+                if patch_stage.get(field) is not True:
+                    errors.append(f"Skitarii patch_stage {field} is not true")
+            if patch_stage.get("rolled_back"):
+                errors.append("Skitarii patch was rolled back")
+
+    return {
+        "ok": not errors,
+        "kind": "skitarii_bridge_result",
+        "task_id": task_id,
+        "final_step": str(result.get("final_step") or ""),
+        "status": str(result.get("status") or ""),
+        "package_errors": package_errors,
+        "artifact_status": artifact_items,
+        "patch_stage": patch_stage if isinstance(patch_stage, dict) else {},
+        "errors": errors,
+    }
+
+
 def subrun_protocol_completion(run_root: Path, task_id: str) -> dict[str, Any]:
     run_dir = run_root / task_id
     ref = read_json_object(run_dir / "mission_ref.json") if (run_dir / "mission_ref.json").exists() else {}
@@ -585,6 +716,7 @@ def create_handoff(run_root: Path, campaign_id: str, plan: dict[str, Any], state
 
 def final_review(run_root: Path, campaign_id: str, plan: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
+    native_results: dict[str, dict[str, Any]] = {}
     subrun_states = state.get("subruns") if isinstance(state.get("subruns"), dict) else {}
     handoff_states = state.get("handoffs") if isinstance(state.get("handoffs"), dict) else {}
     for subrun in plan.get("subruns", []) if isinstance(plan.get("subruns"), list) else []:
@@ -601,6 +733,18 @@ def final_review(run_root: Path, campaign_id: str, plan: dict[str, Any], state: 
                 "errors": protocol_completion.get("errors", []),
             }
         )
+        if subrun.get("kind") == "code":
+            native_completion = native_code_result_completion(run_root, task_id)
+            native_results[subrun_id] = native_completion
+            checks.append(
+                {
+                    "name": f"native_skitarii_result:{subrun_id}",
+                    "ok": native_completion.get("ok") is True,
+                    "final_step": native_completion.get("final_step", ""),
+                    "status": native_completion.get("status", ""),
+                    "errors": native_completion.get("errors", []),
+                }
+            )
         for handoff_id in subrun.get("requires_handoffs", []) if isinstance(subrun.get("requires_handoffs"), list) else []:
             task_text = str(subrun.get("task") or "")
             handoff_state = handoff_states.get(str(handoff_id), {}) if isinstance(handoff_states, dict) else {}
@@ -615,6 +759,21 @@ def final_review(run_root: Path, campaign_id: str, plan: dict[str, Any], state: 
     for handoff_id, handoff_state in handoff_states.items() if isinstance(handoff_states, dict) else []:
         checks.append({"name": f"handoff_ready:{handoff_id}", "ok": handoff_state.get("status") == "ready", "status": handoff_state.get("status", "")})
     ok = all(bool(check.get("ok")) for check in checks)
+    deliverables: dict[str, Any] = {}
+    for subrun_id, subrun_state in subrun_states.items():
+        if not isinstance(subrun_state, dict):
+            continue
+        summary = subrun_state.get("run_summary") if isinstance(subrun_state.get("run_summary"), dict) else {}
+        result = summary.get("result") if isinstance(summary.get("result"), dict) else {}
+        if subrun_id in native_results:
+            deliverables[subrun_id] = {
+                "kind": "skitarii_bridge_result",
+                "result": result,
+                "artifact_status": native_results[subrun_id].get("artifact_status", []),
+                "patch_stage": native_results[subrun_id].get("patch_stage", {}),
+            }
+        else:
+            deliverables[subrun_id] = result
     report = {
         "schema_version": 1,
         "campaign_id": campaign_id,
@@ -625,11 +784,7 @@ def final_review(run_root: Path, campaign_id: str, plan: dict[str, Any], state: 
         "subruns": subrun_states,
         "handoffs": handoff_states,
         "blockers": [check for check in checks if not check.get("ok")],
-        "deliverables": {
-            subrun_id: (subrun_state.get("run_summary", {}).get("result", {}) if isinstance(subrun_state.get("run_summary"), dict) else {})
-            for subrun_id, subrun_state in subrun_states.items()
-            if isinstance(subrun_state, dict)
-        },
+        "deliverables": deliverables,
         "created_at": now_iso(),
     }
     write_json(campaign_dir(run_root, campaign_id) / FINAL_REPORT_FILE, report)
@@ -819,11 +974,16 @@ def create_subrun(run_root: Path, campaign_id: str, subrun_id: str, governor_tra
             "mission": mission,
             "error_code": "campaign_subrun_governor_mismatch",
         }
+    # Ceraxia is a live leadership service: its single delegation decision and
+    # signed directive cannot be synthesized by the old local planner path.
+    effective_governor_transport = (
+        "http" if (assigned_governor or expected_governor) == "Ceraxia" else governor_transport
+    )
     prepared = prepare_task(
         str(mission.get("governor_task") or subrun["task"]),
         str(subrun["task_id"]),
         run_root,
-        governor_transport=governor_transport,
+        governor_transport=effective_governor_transport,
         governor_host=governor_host,
         forced_governor=assigned_governor or expected_governor,
         commander_order=command,
@@ -849,6 +1009,7 @@ def create_subrun(run_root: Path, campaign_id: str, subrun_id: str, governor_tra
             "assigned_governor": assigned_governor,
             "mission_dir": str(mission.get("mission_dir") or ""),
         },
+        "governor_transport": effective_governor_transport,
         "task": prepared,
     }
 

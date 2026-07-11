@@ -8,15 +8,19 @@ This folder contains the active coding warband and its evaluation boundary.
   `7200` and owns clarification, repository exploration, planning, isolated VM
   execution, fighter/reviewer loops, behavioural acceptance, patch bundling,
   and async mission lifecycle.
-- `Ceraxia/` retains historical governor evaluations and review material. It is
-  not the active worker implementation.
-- Warmaster's Ceraxia service on port `7104` preserves the established six-step
-  code contract for compatibility. The old CodeBrigade worker names are virtual
-  contract adapters only; `skitarii_bridge.py` hands actual execution to the
-  Skitarii Warband.
+- Ceraxia lives in `Warmaster/eye_of_terror/inner_circle/`. Her service on port
+  `7104` makes one leadership decision and emits mission intent, priorities,
+  success conditions, and quality gates.
+- `native_code_run.py` persists exactly one `skitarii_mission` execution step.
+  Native code contracts reject `worker_plan`, dispatch packets, file lists,
+  commands, and detailed implementation steps at the Ceraxia boundary.
+- `skitarii_bridge.py` is the only gateway from an Abaddon run into Skitarii.
+  Skitarii rejects direct production missions without a valid persisted Ceraxia
+  directive.
 
-The retired `CodeBrigade/Workers` and `PlanningBrigade` implementations must not
-be reported as live services or extended as a second coding architecture.
+There is no compatibility code brigade. The former Ceraxia/PlanningBrigade/
+CodeBrigade implementation and ports `7014-7020` are retired and absent from
+the runtime registry.
 
 ## Safety and Acceptance
 

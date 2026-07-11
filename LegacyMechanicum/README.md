@@ -8,7 +8,9 @@ Current ownership:
 - Warmaster/mobile API: `EyeOfTerror/Warmaster/eye_of_terror/warmaster_gateway.py`
 - Search service: `EyeOfTerror/Services/Search/SearXNG`
 - Scriptorium render worker: `EyeOfTerror/Scriptorium/Brigade/OcularisRenderium`
-- Ceraxia code workers: `EyeOfTerror/Mechanicum/CodeBrigade/Workers`
+- Ceraxia delegates code missions to the native Skitarii warband at
+  `EyeOfTerror/Mechanicum/Skitarii`; it is outside this legacy worker runtime
+  and is not registered in `worker_services.json` or `worker_aliases.json`.
 
 This directory remains as a compatibility and runtime layer for:
 

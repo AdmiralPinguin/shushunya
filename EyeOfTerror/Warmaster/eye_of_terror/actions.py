@@ -139,13 +139,21 @@ def run_actions(
     package_errors: list[str] | None = None,
     oversight_errors: list[str] | None = None,
     research_loop_blocked: bool = False,
+    result_next_action: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    terminal_locked = status in {"completed", "running", "cancelling", "queued", "corrupt"}
+    terminal_locked = status in {
+        "blocked", "completed", "running", "cancelling", "queued", "corrupt",
+    }
     preflightable = status != "corrupt"
     revision_required = bool(revision_plan.get("required"))
     revision_valid = not (revision_plan_errors or [])
     package_valid = not (package_errors or [])
     oversight_valid = not (oversight_errors or [])
+    explicit_next_action = (
+        dict(result_next_action)
+        if isinstance(result_next_action, dict) and result_next_action.get("kind")
+        else {}
+    )
     resume_required = status == "interrupted"
     runnable = not terminal_locked and not revision_required and not resume_required and package_valid and oversight_valid
     revision_runnable = (
@@ -154,10 +162,8 @@ def run_actions(
         and package_valid
         and oversight_valid
         and not research_loop_blocked
-        # "blocked" is NOT excluded: ledger_status_for_execution routes runs that
-        # need revision into "blocked" (instead of "failed"), so revision must be
-        # startable from it. True user-decision blockers carry revision_plan.required
-        # False and stay non-runnable via revision_required above.
+        # A blocked run is restartable only through an explicit, valid revision
+        # plan.  Without one it must never fall through to the generic start path.
         and status not in {"running", "cancelling", "queued", "corrupt"}
     )
     loop_runnable = runnable or revision_runnable or (resume_required and package_valid and oversight_valid)
@@ -190,6 +196,8 @@ def run_actions(
         next_action = {"kind": "inspect_blockers", "method": "GET", "endpoint": "GET /runs/{task_id}/summary", "body": {}, "reason": "research loop stopped on a stable blocker"}
     elif revision_runnable:
         next_action = {"kind": "execute_revision", "method": "POST", "endpoint": "POST /runs/{task_id}/start_revision_http", "body": {}, "reason": "revision_plan requires selected steps to rerun"}
+    elif status == "blocked" and explicit_next_action:
+        next_action = explicit_next_action
     elif resume_required:
         next_action = {"kind": "resume", "method": "POST", "endpoint": "POST /runs/{task_id}/start_resume_http", "body": {}, "reason": "run is interrupted and has pending steps"}
     elif actions["force_required_for_rerun"]:

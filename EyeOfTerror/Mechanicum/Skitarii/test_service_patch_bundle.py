@@ -64,6 +64,24 @@ def _http_request(method: str, path: str, *, body: bytes | None = None,
         thread.join(timeout=5)
 
 
+def _leadership_directive(task_id: str) -> dict:
+    return {
+        "kind": "ceraxia_leadership_directive",
+        "version": 1,
+        "task_id": task_id,
+        "mission_id": f"mission-{task_id}",
+        "leader": "Ceraxia",
+        "decision": "delegate",
+        "delegated_to": "SkitariiWarband",
+        "mission_intent": "Deliver a verified code result",
+        "priorities": ["correctness"],
+        "constraints": [],
+        "success_conditions": ["requested behavior is verified"],
+        "tradeoffs": [],
+        "escalation_conditions": [],
+    }
+
+
 class TestPatchBundle(unittest.TestCase):
     def test_skitarii_validates_and_renders_ceraxia_leadership_context(self):
         directive = {
@@ -396,6 +414,13 @@ class TestHealthRoute(unittest.TestCase):
         self.assertEqual(len(identity["source_sha256"]), 64)
         self.assertTrue(identity["instance_id"])
         self.assertTrue(identity["held_out_required"])
+        authorization = identity["execution_authorization"]
+        self.assertTrue(authorization["ceraxia_leadership_directive_required"])
+        self.assertTrue(authorization["standalone_test_payload_flag_required"])
+        self.assertIs(
+            authorization["standalone_test_mode_enabled"],
+            os.environ.get("SKITARII_STANDALONE_TEST_MODE", "0") == "1",
+        )
         self.assertEqual(
             set(identity["models"]),
             {"planner", "reviewer", "spec", "fighter", "held_out"},
@@ -702,6 +727,7 @@ class TestHealthRoute(unittest.TestCase):
         with patch.object(service, "_mission_executor", side_effect=ProcessBoundaryBusy("busy")):
             verdict = service.execute_mission({
                 "goal": "fix app.py", "task_id": "busy-unit",
+                "leadership_directive": _leadership_directive("busy-unit"),
                 "checks": [{"cmd": "python3 app.py"}],
             })
         self.assertEqual(verdict["status"], "blocked")
@@ -715,6 +741,7 @@ class TestHealthRoute(unittest.TestCase):
         ):
             verdict = service.execute_mission({
                 "goal": "fix app.py", "task_id": "uncertain-init",
+                "leadership_directive": _leadership_directive("uncertain-init"),
                 "checks": [{"cmd": "true"}],
             })
         self.assertEqual(verdict["status"], "blocked")
@@ -965,8 +992,139 @@ class TestHttpRequestGate(unittest.TestCase):
         self.assertEqual(denied, 401)
         self.assertEqual(allowed, 200)
 
+    def test_http_mission_endpoints_reject_undirected_execution_by_default(self):
+        with (
+            patch.dict(os.environ, {"SKITARII_STANDALONE_TEST_MODE": "0"}),
+            patch.object(service, "execute_mission") as execute,
+        ):
+            sync_code, sync_payload = _http_request(
+                "POST", "/mission",
+                body=b'{"goal":"fix","task_id":"undirected-sync"}',
+                headers={"Content-Type": "application/json"},
+            )
+            async_code, async_payload = _http_request(
+                "POST", "/missions",
+                body=b'{"goal":"fix","task_id":"undirected-async"}',
+                headers={"Content-Type": "application/json"},
+            )
+        self.assertEqual(sync_code, 403)
+        self.assertEqual(async_code, 403)
+        self.assertEqual(
+            sync_payload["error_code"],
+            "ceraxia_leadership_directive_required",
+        )
+        self.assertEqual(
+            async_payload["error_code"],
+            "ceraxia_leadership_directive_required",
+        )
+        execute.assert_not_called()
+
+    def test_standalone_http_execution_requires_both_env_and_payload_flags(self):
+        base = {"goal": "fix", "task_id": "standalone-matrix"}
+        with patch.dict(os.environ, {"SKITARII_STANDALONE_TEST_MODE": "1"}):
+            env_only, _ = _http_request(
+                "POST", "/mission",
+                body=json.dumps(base).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+        with patch.dict(os.environ, {"SKITARII_STANDALONE_TEST_MODE": "0"}):
+            payload_only, _ = _http_request(
+                "POST", "/mission",
+                body=json.dumps({**base, "standalone_test": True}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+        self.assertEqual(env_only, 403)
+        self.assertEqual(payload_only, 403)
+
+        accepted = {"status": "done", "accepted": True, "task_id": "standalone-ok"}
+        with (
+            patch.dict(os.environ, {"SKITARII_STANDALONE_TEST_MODE": "1"}),
+            patch.object(service, "execute_mission", return_value=accepted) as execute,
+        ):
+            allowed, body = _http_request(
+                "POST", "/mission",
+                body=json.dumps({
+                    "goal": "fix",
+                    "task_id": "standalone-ok",
+                    "standalone_test": True,
+                }).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+        self.assertEqual(allowed, 200)
+        self.assertEqual(body, accepted)
+        self.assertIs(execute.call_args.args[0]["standalone_test"], True)
+
+    def test_internal_execution_repeats_the_explicit_standalone_gate(self):
+        completed = {
+            "status": "done", "accepted": True, "task_id": "internal-standalone",
+        }
+        with (
+            patch.dict(os.environ, {"SKITARII_STANDALONE_TEST_MODE": "0"}),
+            patch.object(service, "_execute_mission_body", return_value=completed) as body,
+        ):
+            denied = service.execute_mission({
+                "goal": "fix", "task_id": "internal-standalone",
+                "standalone_test": True,
+            })
+        self.assertEqual(denied["status"], "blocked")
+        self.assertEqual(
+            denied["error_code"],
+            "ceraxia_leadership_directive_required",
+        )
+        body.assert_not_called()
+
+        with (
+            patch.dict(os.environ, {"SKITARII_STANDALONE_TEST_MODE": "1"}),
+            patch.object(service, "_execute_mission_body", return_value=completed) as body,
+        ):
+            allowed = service.execute_mission({
+                "goal": "fix", "task_id": "internal-standalone",
+                "standalone_test": True,
+            })
+        self.assertEqual(allowed["status"], "done")
+        body.assert_called_once()
+
+    def test_valid_ceraxia_directive_allows_sync_and_async_http_execution(self):
+        sync_payload = {
+            "goal": "fix",
+            "task_id": "directed-sync",
+            "leadership_directive": _leadership_directive("directed-sync"),
+        }
+        async_payload = {
+            "goal": "fix",
+            "task_id": "directed-async",
+            "leadership_directive": _leadership_directive("directed-async"),
+        }
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.dict(os.environ, {"SKITARII_STANDALONE_TEST_MODE": "0"}),
+            patch.object(service, "execute_mission", return_value={
+                "status": "done", "accepted": True, "task_id": "directed-sync",
+            }) as execute,
+            patch.object(service.mission_store, "STORE_ROOT", Path(temporary)),
+            patch.object(service.mission_store, "_MISSIONS", {}),
+            patch.object(service.mission_store, "run_async"),
+        ):
+            sync_code, _ = _http_request(
+                "POST", "/mission",
+                body=json.dumps(sync_payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            async_code, async_body = _http_request(
+                "POST", "/missions",
+                body=json.dumps(async_payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+        self.assertEqual(sync_code, 200)
+        self.assertEqual(async_code, 202)
+        self.assertEqual(async_body["mission_id"], "directed-async")
+        self.assertEqual(execute.call_count, 1)
+
     def test_async_create_get_and_duplicate_share_exact_request_hash(self):
-        payload = {"goal": "fix", "task_id": "hash-http", "mode": "patch", "z": 1}
+        payload = {
+            "goal": "fix", "task_id": "hash-http", "mode": "patch", "z": 1,
+            "standalone_test": True,
+        }
         encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         expected = service.mission_store.request_sha256(payload)
         with (
@@ -974,6 +1132,7 @@ class TestHttpRequestGate(unittest.TestCase):
             patch.object(service.mission_store, "STORE_ROOT", Path(temporary)),
             patch.object(service.mission_store, "_MISSIONS", {}),
             patch.object(service.mission_store, "run_async"),
+            patch.dict(os.environ, {"SKITARII_STANDALONE_TEST_MODE": "1"}),
         ):
             created, create_body = _http_request(
                 "POST", "/missions", body=encoded,
@@ -982,7 +1141,10 @@ class TestHttpRequestGate(unittest.TestCase):
             fetched, fetch_body = _http_request("GET", "/missions/hash-http")
             duplicate, duplicate_body = _http_request(
                 "POST", "/missions",
-                body=json.dumps({"goal": "different", "task_id": "hash-http"}).encode("utf-8"),
+                body=json.dumps({
+                    "goal": "different", "task_id": "hash-http",
+                    "standalone_test": True,
+                }).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
             )
             invalid, _ = _http_request(
@@ -1004,9 +1166,10 @@ class TestHttpRequestGate(unittest.TestCase):
             patch.object(service.mission_store, "_MISSIONS", {}),
             patch.object(service.mission_store, "run_async"),
             patch.object(service.time, "time", return_value=1234.567),
+            patch.dict(os.environ, {"SKITARII_STANDALONE_TEST_MODE": "1"}),
         ):
             created, body = _http_request(
-                "POST", "/missions", body=b'{"goal":"fix"}',
+                "POST", "/missions", body=b'{"goal":"fix","standalone_test":true}',
                 headers={"Content-Type": "application/json"},
             )
             mission = service.mission_store.get("m1234567")
@@ -1077,7 +1240,11 @@ class TestMissionLifecycleRaces(unittest.TestCase):
             patch.object(service, "_cleanup_workspace_processes") as cleanup,
         ):
             verdict = service.execute_mission(
-                {"goal": "x", "task_id": "cancel-before-attach", "checks": [{"cmd": "true"}]},
+                {
+                    "goal": "x", "task_id": "cancel-before-attach",
+                    "leadership_directive": _leadership_directive("cancel-before-attach"),
+                    "checks": [{"cmd": "true"}],
+                },
                 mission,
             )
         self.assertEqual(verdict["status"], "cancelled")
@@ -1127,10 +1294,16 @@ class TestMissionLifecycleRaces(unittest.TestCase):
             raise RuntimeError("injected after attach")
 
         with patch.object(service, "_execute_mission_body", side_effect=explode):
-            verdict1 = service.execute_mission({"goal": "one", "task_id": "one"}, missions[0])
+            verdict1 = service.execute_mission({
+                "goal": "one", "task_id": "one",
+                "leadership_directive": _leadership_directive("one"),
+            }, missions[0])
             # A second ownership attempt starts only after the first release.
             self.assertEqual(first.releases, 1)
-            verdict2 = service.execute_mission({"goal": "two", "task_id": "two"}, missions[1])
+            verdict2 = service.execute_mission({
+                "goal": "two", "task_id": "two",
+                "leadership_directive": _leadership_directive("two"),
+            }, missions[1])
 
         for verdict in (verdict1, verdict2):
             self.assertEqual(verdict["status"], "blocked")
@@ -1278,6 +1451,7 @@ class TestHeldOutLifecycle(unittest.TestCase):
         ):
             return service.execute_mission({
                 "goal": "fix app.py", "task_id": "heldout-unit",
+                "leadership_directive": _leadership_directive("heldout-unit"),
                 "checks": [{"cmd": "python3 app.py", "expect_stdout": "candidate"}],
                 "workspace_files": baseline or {"app.py": "print('baseline')\n"},
             })

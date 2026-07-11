@@ -26,19 +26,27 @@ from EyeOfTerror.model_brain import attach_model_brain, request_model_decision
 from .contracts import validate_task_contract_payload
 from .inner_circle.ceraxia import plan_code_task
 from .inner_circle.iskandar import plan_lore_reconstruction
+from .native_code_run import NATIVE_EXECUTION, is_native_code_run
 from doctor import run_doctor
-from .http_executor import execute_run as execute_http_run, preflight_workers as preflight_http_workers
 from .governors import governor_by_name, governor_refs
 from .ledger import TaskLedger
-from .local_executor import WORKER_COMMANDS, execute_run as execute_local_run, input_artifact_errors, ordered_dispatch_paths
 from .pipeline import write_pipeline_run
 from .registry import worker_refs
 from .routing import route_message
-from .mission_control import build_commander_order, governor_task_from_order, link_run_to_mission, list_missions, mission_id_for, mission_state, open_mission
+from .mission_control import (
+    build_commander_order,
+    governor_task_from_order,
+    list_missions,
+    mission_id_for,
+    mission_state,
+    task_id_for_message,
+)
 from .orchestrator import (
     cancel_http_worker_tasks,
+    execute_routed_run,
     execute_run_cycle,
     execute_with_ledger_failure_guard,
+    execution_backend_route,
     orchestrate_prepare_task,
     orchestrate_run_task,
     orchestrate_start_run,
@@ -60,7 +68,6 @@ from .orchestrator import (
 from .task_prepare import (
     cleanup_unregistered_run_dir,
     preflight_task,
-    prepare_task,
     prepare_task_via_governor_service,
     route_failure_payload,
 )
@@ -194,7 +201,6 @@ from .runtime_state import (
     ALLOWED_SERVICE_HOSTS,
     MAX_ARTIFACT_TEXT_BYTES,
     MAX_LIST_LIMIT,
-    REPO_ROOT,
     TASK_ID_RE,
 )
 
@@ -749,7 +755,17 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     response(self, 200 if payload.get("ok") else status_code, payload)
                     return
                 if len(parts) == 3 and parts[2] == "dispatch":
-                    payload = run_dispatch_packets(run_dir)
+                    payload = (
+                        {
+                            "ok": True,
+                            "native": True,
+                            "execution": dict(NATIVE_EXECUTION),
+                            "dispatch": [],
+                            "dispatch_count": 0,
+                        }
+                        if is_native_code_run(run_dir)
+                        else run_dispatch_packets(run_dir)
+                    )
                     payload = payload_with_run_view(payload, run_dir, task_id)
                     response(self, 200 if payload.get("ok") else 404, payload)
                     return
@@ -905,7 +921,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     if not message:
                         response(self, 400, {"ok": False, "error": "message is required"})
                         return
-                    task_id = str(payload.get("task_id") or "").strip() or None
+                    task_id = str(payload.get("task_id") or "").strip() or task_id_for_message(message)
                     governor_transport = str(payload.get("governor_transport") or default_governor_transport).strip() or default_governor_transport
                     governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
                     run_mode = str(payload.get("run_mode") or "http").strip() or "http"
@@ -964,7 +980,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     if not message:
                         response(self, 400, {"ok": False, "error": "message is required"})
                         return
-                    task_id = str(payload.get("task_id") or "").strip() or None
+                    task_id = str(payload.get("task_id") or "").strip() or task_id_for_message(message)
                     governor_transport = str(payload.get("governor_transport") or default_governor_transport).strip() or default_governor_transport
                     governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
                     run_mode = str(payload.get("run_mode") or "http").strip() or "http"
@@ -992,47 +1008,6 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     else:
                         response(self, 200 if submitted.get("ok") else 409, submitted)
                     return
-                if self.path == "/task":
-                    model_decision = gateway_model_decision("task", payload)
-                    if not model_decision.get("ok"):
-                        response(self, 503, gateway_model_required_payload(model_decision))
-                        return
-                    message = str(payload.get("message") or payload.get("task") or "").strip()
-                    if not message:
-                        response(self, 400, {"ok": False, "error": "message is required"})
-                        return
-                    task_id = str(payload.get("task_id") or "").strip() or None
-                    governor_transport = str(payload.get("governor_transport") or default_governor_transport).strip() or default_governor_transport
-                    governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
-                    warmaster_root = Path(__file__).resolve().parents[1]
-                    mission = open_mission(warmaster_root, message, task_id, source_channel="main_chat")
-                    if not mission.get("ok"):
-                        failed = attach_model_brain(mission, model_decision)
-                        response(self, 400, failed)
-                        return
-                    command = mission.get("commander_order") if isinstance(mission.get("commander_order"), dict) else {}
-                    prepared = prepare_task(
-                        governor_task_from_order(command),
-                        task_id,
-                        run_root,
-                        governor_transport=governor_transport,
-                        governor_host=governor_host,
-                        forced_governor=str(command.get("to") or "") or None,
-                        commander_order=command,
-                        require_commander_order=True,
-                    )
-                    if prepared.get("ok") and prepared.get("run_dir"):
-                        link_run_to_mission(Path(str(prepared.get("run_dir"))), mission)
-                    prepared = payload_with_task_view(prepared, fallback_task_id=task_id or "")
-                    prepared["protocol_mode"] = "commander_order"
-                    prepared["mission"] = {
-                        "mission_id": str(mission.get("mission_id") or ""),
-                        "assigned_governor": str(command.get("to") or ""),
-                        "mission_dir": str(mission.get("mission_dir") or ""),
-                    }
-                    prepared = attach_model_brain(prepared, model_decision)
-                    response(self, 409 if prepared.get("error_code") == "task_exists" else (200 if prepared.get("ok") else 400), prepared)
-                    return
                 if self.path == "/task_preflight":
                     model_decision = gateway_model_decision("task_preflight", payload)
                     if not model_decision.get("ok"):
@@ -1042,7 +1017,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     if not message:
                         response(self, 400, {"ok": False, "error": "message is required"})
                         return
-                    task_id = str(payload.get("task_id") or "").strip() or None
+                    task_id = str(payload.get("task_id") or "").strip() or task_id_for_message(message)
                     governor_transport = str(payload.get("governor_transport") or default_governor_transport).strip() or default_governor_transport
                     governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
                     include_brigade_health = bool(payload.get("include_brigade_health"))
@@ -1559,6 +1534,11 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     if not run_dir.exists():
                         response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
                         return
+                    backend_route = execution_backend_route(run_dir)
+                    if not backend_route.get("ok"):
+                        response(self, 409, backend_route)
+                        return
+                    native_backend = backend_route.get("backend") == "SkitariiWarband"
                     ledger_path = run_dir / "task_ledger.json"
                     force = bool(payload.get("force"))
                     preflight_mode = parts[2] in {"preflight_local", "preflight_http"}
@@ -1592,12 +1572,20 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         if resume_mode:
                             ledger.record_event("resume_execution_requested", {"mode": parts[2]})
                     requested_step_ids = requested_step_ids_from_payload(payload)
-                    mode_step_ids = revision_step_ids_from_run(run_dir) if revision_mode else (resume_step_ids_from_run(run_dir) if resume_mode else None)
-                    if requested_step_ids:
-                        validate_requested_step_ids(run_dir, requested_step_ids, allowed=mode_step_ids)
-                        restricted_step_ids = requested_step_ids
+                    if native_backend:
+                        if requested_step_ids:
+                            raise ValueError(
+                                "native code runs are atomic Skitarii missions and do not accept step_ids"
+                            )
+                        mode_step_ids = None
+                        restricted_step_ids = None
                     else:
-                        restricted_step_ids = mode_step_ids
+                        mode_step_ids = revision_step_ids_from_run(run_dir) if revision_mode else (resume_step_ids_from_run(run_dir) if resume_mode else None)
+                        if requested_step_ids:
+                            validate_requested_step_ids(run_dir, requested_step_ids, allowed=mode_step_ids)
+                            restricted_step_ids = requested_step_ids
+                        else:
+                            restricted_step_ids = mode_step_ids
                     workspace_root = resolve_run_child_path(run_dir, str(payload.get("workspace_root") or ""), "work")
                     timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
                     execution_mode = "revision" if revision_mode else ("resume" if resume_mode else "full")
@@ -1612,6 +1600,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                                 host=host,
                                 timeout_sec=timeout_sec,
                                 step_ids=restricted_step_ids,
+                                force=force,
                             )
                         else:
                             preflight = run_execution_preflight(
@@ -1620,6 +1609,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                                 workspace_root=workspace_root,
                                 timeout_sec=timeout_sec,
                                 step_ids=restricted_step_ids,
+                                force=force,
                             )
                         record_run_preflight_event(run_dir, preflight)
                         post_summary = run_summary(run_dir)
@@ -1638,36 +1628,86 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         }
                         response(self, 200 if preflight.get("ok") else 409, preflight)
                         return
-                    if parts[2] in {"execute_local", "start_local", "execute_revision_local", "start_revision_local", "resume_local", "start_resume_local"}:
-                        executor = lambda: execute_with_ledger_failure_guard(
+                    local_execution = parts[2] in {
+                        "execute_local",
+                        "start_local",
+                        "execute_revision_local",
+                        "start_revision_local",
+                        "resume_local",
+                        "start_resume_local",
+                    }
+                    routed_run_mode = "local" if local_execution else "http"
+                    routed_host = (
+                        "127.0.0.1"
+                        if local_execution
+                        else validate_service_host(str(payload.get("host") or "127.0.0.1"))
+                    )
+                    routed_workspace = (
+                        workspace_root
+                        if local_execution or "workspace_root" in payload
+                        else None
+                    )
+                    if backend_route.get("backend") == "SkitariiWarband":
+                        native_preflight = run_execution_preflight(
                             run_dir,
-                            lambda: execute_local_run(
-                                REPO_ROOT,
-                                run_dir,
-                                workspace_root,
-                                timeout_sec=timeout_sec,
-                                step_ids=restricted_step_ids,
-                                execution_mode=execution_mode,
-                            ),
+                            mode=routed_run_mode,
+                            workspace_root=routed_workspace,
+                            host=routed_host,
+                            timeout_sec=timeout_sec,
+                            force=force,
                         )
-                    else:
-                        host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
-                        http_workspace_root = workspace_root if "workspace_root" in payload else None
-                        executor = lambda: execute_with_ledger_failure_guard(
+                        record_run_preflight_event(run_dir, native_preflight)
+                        native_actions = (
+                            native_preflight.get("actions")
+                            if isinstance(native_preflight.get("actions"), dict)
+                            else {}
+                        )
+                        if (
+                            not native_preflight.get("ok")
+                            or native_actions.get("can_start_run") is not True
+                        ):
+                            next_action = (
+                                native_actions.get("next_action")
+                                if isinstance(native_actions.get("next_action"), dict)
+                                else {}
+                            )
+                            response(
+                                self,
+                                409,
+                                {
+                                    **native_preflight,
+                                    "ok": False,
+                                    "error_code": "native_preflight_failed",
+                                    "error": (
+                                        "native run is not startable under its current durable state"
+                                    ),
+                                    "task_id": task_id,
+                                    "backend_route": backend_route,
+                                    "run_preflight": native_preflight,
+                                    "next_action": next_action,
+                                    "client_action": executable_client_action(task_id, next_action),
+                                },
+                            )
+                            return
+                    executor = lambda: execute_with_ledger_failure_guard(
+                        run_dir,
+                        lambda: execute_routed_run(
                             run_dir,
-                            lambda: execute_http_run(
-                                run_dir,
-                                host=host,
-                                timeout_sec=timeout_sec,
-                                workspace_root=http_workspace_root,
-                                step_ids=restricted_step_ids,
-                                execution_mode=execution_mode,
-                            ),
-                        )
+                            run_mode=routed_run_mode,
+                            host=routed_host,
+                            timeout_sec=timeout_sec,
+                            workspace_root=routed_workspace,
+                            step_ids=restricted_step_ids,
+                            execution_mode=execution_mode,
+                        ),
+                    )
                     if parts[2].startswith("start_"):
                         if ledger_path.exists():
                             try:
-                                event_payload: dict[str, Any] = {"mode": parts[2]}
+                                event_payload: dict[str, Any] = {
+                                    "mode": parts[2],
+                                    "backend": str(backend_route.get("backend") or ""),
+                                }
                                 if restricted_step_ids:
                                     event_payload["step_ids"] = restricted_step_ids
                                 TaskLedger.load(ledger_path).record_event("background_start_requested", event_payload)
@@ -1696,17 +1736,13 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                                 "ok": True,
                                 "task_id": task_id,
                                 "status": "started",
+                                "backend_route": backend_route,
                                 "next_action": poll_action,
                                 "client_action": executable_client_action(task_id, poll_action),
                             },
                         )
                         return
-                    if parts[2] in {"execute_local", "execute_revision_local", "resume_local"}:
-                        summary = execute_local_run(REPO_ROOT, run_dir, workspace_root, timeout_sec=timeout_sec, step_ids=restricted_step_ids, execution_mode=execution_mode)
-                    else:
-                        host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
-                        http_workspace_root = workspace_root if "workspace_root" in payload else None
-                        summary = execute_http_run(run_dir, host=host, timeout_sec=timeout_sec, workspace_root=http_workspace_root, step_ids=restricted_step_ids, execution_mode=execution_mode)
+                    summary = executor()
                     post_summary = run_summary(run_dir)
                     post_view = orchestration_view_fields(post_summary, task_id=task_id)
                     response(
@@ -1715,6 +1751,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         {
                             "ok": bool(summary.get("ok")),
                             "summary": summary,
+                            "backend_route": backend_route,
                             "run_summary": post_summary,
                             "phase": post_view.get("phase", ""),
                             "status": post_view.get("status", ""),

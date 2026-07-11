@@ -143,8 +143,10 @@ governor service on its registry port, keeping the planning boundary compatible
 with future Inner Circle services.
 Before preparing an HTTP-governor run, Abaddon checks reachable governor
 `required_workers` against the Mechanicum registry.
-Abaddon also rejects any produced task contract whose `worker_plan` references
-workers absent from the Mechanicum registry.
+For worker-planned domains, Abaddon rejects contracts whose `worker_plan`
+references workers absent from the Mechanicum registry. Native Ceraxia code
+missions have no `worker_plan`: Abaddon instead validates the single
+`SkitariiWarband` execution backend and the signed leadership directive.
 
 Abaddon can also be started with `--governor-transport http` and
 `--governor-host 127.0.0.1` so ordinary `POST /orchestrate_run` submissions use

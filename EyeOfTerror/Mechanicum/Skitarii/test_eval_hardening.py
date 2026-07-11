@@ -72,6 +72,7 @@ class TestEvalHardening(unittest.TestCase):
         self.assertNotIn("oracle_checks", seen)
         self.assertNotIn("held_out_checks", seen)
         self.assertNotIn("secret", repr(seen))
+        self.assertIs(seen["standalone_test"], True)
 
     def test_seed_tests_and_forbid_touch_are_immutable(self):
         task = {
@@ -576,6 +577,11 @@ class TestEvalHardening(unittest.TestCase):
             "instance_id": "daemon-instance",
             "started_at": 123456,
             "held_out_required": True,
+            "execution_authorization": {
+                "ceraxia_leadership_directive_required": True,
+                "standalone_test_mode_enabled": True,
+                "standalone_test_payload_flag_required": True,
+            },
             "models": models,
         }
         checked_row = {
@@ -623,6 +629,14 @@ class TestEvalHardening(unittest.TestCase):
             "missing instance": lambda start, end: start["identity"].update(instance_id=""),
             "daemon restart": lambda start, end: end["identity"].update(instance_id="other"),
             "missing model": lambda start, end: start["identity"]["models"]["held_out"].update(model=""),
+            "standalone mode disabled": lambda start, end: (
+                start["identity"]["execution_authorization"].update(
+                    standalone_test_mode_enabled=False,
+                ),
+                end["identity"]["execution_authorization"].update(
+                    standalone_test_mode_enabled=False,
+                ),
+            ),
             "wrong service": lambda start, end: start.update(service="NotSkitarii"),
             "vm unavailable": lambda start, end: end.update(vm_alive=False),
             "boundary unavailable": lambda start, end: start.update(process_boundary_ready=False),

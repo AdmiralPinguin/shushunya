@@ -61,7 +61,32 @@ def get_json(url: str, timeout_sec: int) -> dict[str, Any]:
     return decoded
 
 
+def _reject_native_code_run(run_dir: Path) -> None:
+    """Raw worker HTTP dispatch is never a native code-run backend."""
+    from .native_code_run import is_native_code_run
+
+    contract = load_json(run_dir / "contract.json") if (run_dir / "contract.json").exists() else {}
+    explicit_native = contract.get("execution") == {
+        "kind": "skitarii_mission",
+        "step_id": "skitarii",
+        "backend": "SkitariiWarband",
+    }
+    try:
+        native = bool(is_native_code_run(run_dir))
+    except Exception as exc:  # noqa: BLE001 - explicit native packages fail closed.
+        if explicit_native:
+            raise RuntimeError(
+                "native code run must use the centralized Skitarii backend router"
+            ) from exc
+        return
+    if native or explicit_native:
+        raise RuntimeError(
+            "native code run must use the centralized Skitarii backend router"
+        )
+
+
 def preflight_workers(run_dir: Path, host: str, timeout_sec: int, step_ids: list[str] | None = None) -> list[dict[str, Any]]:
+    _reject_native_code_run(run_dir)
     failures: list[dict[str, Any]] = []
     for dispatch_path in ordered_dispatch_paths(run_dir, step_ids=step_ids):
         try:
@@ -174,6 +199,7 @@ def execute_run(
     step_ids: list[str] | None = None,
     execution_mode: str = "full",
 ) -> dict[str, Any]:
+    _reject_native_code_run(run_dir)
     contract = load_json(run_dir / "contract.json") if (run_dir / "contract.json").exists() else {}
     ledger_path = run_dir / "task_ledger.json"
     ledger = (

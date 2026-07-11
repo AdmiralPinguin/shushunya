@@ -1865,8 +1865,10 @@ def _mission_dir(run_dir: Path) -> Path | None:
 def _finalize_linked_completion(run_dir: Path, ledger: Any, result: dict[str, Any]) -> None:
     """Write a protocol-complete deterministic Ceraxia/Skitarii acceptance trail."""
     mission_dir = _mission_dir(run_dir)
-    if not mission_dir or not mission_dir.exists():
-        return
+    if not mission_dir:
+        raise RuntimeError("native run is missing mission_ref.json")
+    if not mission_dir.exists():
+        raise RuntimeError(f"linked mission directory does not exist: {mission_dir}")
     from . import mission_control as mc
 
     mission = _read_json(mission_dir / "mission.json")
@@ -1947,11 +1949,27 @@ def _finalize_linked_blocked(
     question: str = "",
 ) -> None:
     mission_dir = _mission_dir(run_dir)
-    if not mission_dir or not mission_dir.exists():
-        return
+    if not mission_dir:
+        raise RuntimeError("native run is missing mission_ref.json")
+    if not mission_dir.exists():
+        raise RuntimeError(f"linked mission directory does not exist: {mission_dir}")
     from . import mission_control as mc
 
     mission_id = str(_read_json(mission_dir / "mission.json").get("mission_id") or mission_dir.name)
+    # Result phases are deliberately more specific than the public progress
+    # protocol.  Keep that diagnostic value in the durable result/state, but
+    # never leak it into progress_event.phase where only PROGRESS_PHASES are
+    # valid.  Building the event before any writes also prevents a validation
+    # error from leaving a partially finalized mission.
+    terminal_event = mc.progress_event(
+        mission_id,
+        "Ceraxia",
+        "governor",
+        "blocked",
+        "blocked",
+        "Варбанда Skitarii остановила код-миссию",
+        (question or summary)[:400],
+    )
     final = mc.final_response(mission_id, "blocked", summary, artifacts=artifacts or [])
     final["phase"] = phase
     final["needs_user"] = needs_user
@@ -1963,15 +1981,7 @@ def _finalize_linked_blocked(
     mc.record_mission_state(mission_dir, "blocked", run_status="blocked", phase=phase)
     mc.append_progress_event(
         mission_dir / "progress_events.jsonl",
-        mc.progress_event(
-            mission_id,
-            "Ceraxia",
-            "governor",
-            phase,
-            "blocked",
-            "Варбанда Skitarii остановила код-миссию",
-            (question or summary)[:400],
-        ),
+        terminal_event,
     )
     ledger.record_event("skitarii_protocol_blocked_recorded", {"mission_id": mission_id, "phase": phase})
 
@@ -2005,6 +2015,25 @@ def _bridge_failure(
     if error:
         payload["error"] = error
     return payload
+
+
+def _ceraxia_reprepare_action(message: str = "") -> dict[str, Any]:
+    """Describe the only safe recovery for a pre-directive Ceraxia run."""
+    return {
+        "kind": "reprepare_ceraxia_run",
+        "method": "POST",
+        "endpoint": "POST /orchestrate_run",
+        "body": {
+            "message": message,
+            "governor_transport": "http",
+            "run_mode": "http",
+            "auto_start": True,
+        },
+        "reason": (
+            "this historical run predates native Ceraxia leadership; create a "
+            "fresh mission instead of mutating execution evidence"
+        ),
+    }
 
 
 def _skitarii_json_request(
@@ -2631,6 +2660,7 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
         leadership_directive = _load_ceraxia_directive(run_dir, task_id)
     except CeraxiaDirectiveError as exc:
         msg = f"Skitarii blocked: Ceraxia leadership directive is invalid ({exc})."
+        reprepare_action = _ceraxia_reprepare_action(goal)
         ledger.record_event("ceraxia_directive_blocked", {"error": str(exc)[:300]})
         failure = _bridge_failure(
             run_dir,
@@ -2639,6 +2669,7 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
             phase="ceraxia_directive_invalid",
             error=str(exc),
         )
+        failure["next_action"] = reprepare_action
         ledger.set_result(failure)
         ledger.force_status("blocked", reason="Ceraxia leadership directive is invalid")
         try:
@@ -2647,6 +2678,7 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
                 ledger,
                 msg,
                 phase="ceraxia_directive_invalid",
+                next_action=reprepare_action,
             )
         except Exception as finalize_exc:  # noqa: BLE001
             ledger.record_event("skitarii_finalize_error", {"error": str(finalize_exc)[:300]})

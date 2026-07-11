@@ -14,41 +14,6 @@
     "module_path": "EyeOfTerror/Scriptorium/Brigade/CorpusIngestor",
     "module": "corpus_ingestor"
   },
-  "CogitatorCodewright": {
-    "port": 7014,
-    "module_path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/CogitatorCodewright",
-    "module": "cogitator_codewright"
-  },
-  "LogisRepository": {
-    "port": 7015,
-    "module_path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/LogisRepository",
-    "module": "logis_repository"
-  },
-  "MagosStrategos": {
-    "port": 7016,
-    "module_path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/MagosStrategos",
-    "module": "magos_strategos"
-  },
-  "FerrumPatchwright": {
-    "port": 7017,
-    "module_path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/FerrumPatchwright",
-    "module": "ferrum_patchwright"
-  },
-  "OrdinatusVerifier": {
-    "port": 7018,
-    "module_path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/OrdinatusVerifier",
-    "module": "ordinatus_verifier"
-  },
-  "JudicatorCodicis": {
-    "port": 7019,
-    "module_path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/JudicatorCodicis",
-    "module": "judicator_codicis"
-  },
-  "SealwrightFinalis": {
-    "port": 7020,
-    "module_path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/SealwrightFinalis",
-    "module": "sealwright_finalis"
-  },
   "OcularisRenderium": {
     "port": 7012,
     "module_path": "EyeOfTerror/Scriptorium/Brigade/OcularisRenderium",

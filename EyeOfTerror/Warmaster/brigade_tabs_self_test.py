@@ -127,6 +127,21 @@ def main() -> int:
         raise AssertionError(f"run-summary diagnostics should remain separate from brigade activity: {activity}")
     if not iskandar.get("active"):
         raise AssertionError(f"running worker event should mark brigade tab active: {iskandar}")
+    blocked_summary = dict(summary)
+    blocked_summary["status"] = "blocked"
+    blocked_activity = governor_activity_report(
+        blocked_summary,
+        {**ledger, "status": "blocked"},
+    )
+    blocked_tabs = (
+        blocked_activity.get("brigade_tabs")
+        if isinstance(blocked_activity.get("brigade_tabs"), list)
+        else []
+    )
+    if any(bool(tab.get("active")) for tab in blocked_tabs if isinstance(tab, dict)):
+        raise AssertionError(
+            f"canonical blocked status must dominate stale running events: {blocked_tabs}",
+        )
     if activity.get("log_text"):
         raise AssertionError(f"brigade activity should stay structured, not log_text: {activity}")
     print("[ok] Abaddon brigade tabs and Warmaster actor compatibility")

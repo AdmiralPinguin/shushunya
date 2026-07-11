@@ -16,11 +16,30 @@ if str(WARM_ROOT) not in sys.path:
 from EyeOfTerror.common_protocol import commander_order, validate_protocol_payload
 from eye_of_terror.ledger import TaskLedger
 from eye_of_terror.mission_control import record_warmaster_acceptance
+from eye_of_terror.native_code_run import build_native_code_contract, native_governor_plan, write_native_code_run
 
 
 def write_json(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def leadership_directive(task_id: str, mission_id: str) -> dict[str, object]:
+    return {
+        "kind": "ceraxia_leadership_directive",
+        "version": 1,
+        "task_id": task_id,
+        "mission_id": mission_id,
+        "leader": "Ceraxia",
+        "decision": "delegate",
+        "delegated_to": "SkitariiWarband",
+        "mission_intent": "Deliver the requested verified code outcome.",
+        "priorities": ["correctness", "preserve unrelated behavior"],
+        "constraints": ["keep the public contract compatible"],
+        "success_conditions": ["the requested behavior passes executable checks"],
+        "tradeoffs": [],
+        "escalation_conditions": ["a product decision changes observable behavior"],
+    }
 
 
 def write_acceptance_fixture(root: Path) -> tuple[Path, Path, str]:
@@ -45,32 +64,22 @@ def write_acceptance_fixture(root: Path) -> tuple[Path, Path, str]:
     write_json(mission_dir / "mission.json", {"mission_id": mission_id, "status": "assigned", "assigned_governor": "Ceraxia"})
     write_json(mission_dir / "commander_order.json", order)
     write_json(run_dir / "mission_ref.json", {"mission_id": mission_id, "mission_dir": str(mission_dir), "assigned_governor": "Ceraxia"})
-    write_json(
-        run_dir / "status.json",
-        {
-            "task_id": task_id,
-            "steps": [{"step_id": "finalize", "worker": "SealwrightFinalis"}],
-        },
-    )
-    write_json(
-        run_dir / "oversight.json",
-        {
-            "revision_policy": {
-                "source_step": "finalize",
-                "final_steps": ["finalize"],
-                "allowed_steps": ["finalize"],
-                "requires_downstream_rerun": True,
-            }
-        },
+    contract = build_native_code_contract(str(order["user_request"]), task_id)
+    write_native_code_run(
+        run_dir,
+        contract,
+        leadership_directive(task_id, mission_id),
+        native_governor_plan(contract, order),
+        prepare_request_sha256="a" * 64,
     )
     ledger = TaskLedger.create(run_dir / "task_ledger.json", task_id, "Acceptance live LLM gate", "Ceraxia")
     ledger.set_result(
         {
             "ok": True,
-            "final_step": "finalize",
-            "artifacts": ["/work/acceptance/final_manifest.json"],
+            "final_step": "skitarii",
+            "artifacts": ["/work/skitarii.patch"],
             "workspace_root": str(run_dir / "work"),
-            "status": "ready",
+            "status": "ready_to_apply",
             "summary": (
                 "Губернатор подготовил короткий проверочный отчет: итог понятен, "
                 "условия приемки перечислены, внутренняя ревизия не требуется."

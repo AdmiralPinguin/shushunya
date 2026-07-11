@@ -8,6 +8,9 @@ decide truth), and optional flags (expects_clarification, forbid_touch). Oracle 
 are intentionally never sent to the service under evaluation.
 
 Run a subset live (needs the Skitarii service up):
+    SKITARII_STANDALONE_TEST_MODE=1 must be set on the service daemon.
+    The runner marks every request with standalone_test=true; both gates are
+    required so evaluation cannot become a production bypass.
     python3 eval_suite.py --n 3
 
 Run one clean complete smoke suite (the only suitable source for a raw result file):
@@ -846,7 +849,12 @@ def _run_in_fresh_verifier_vm(
 
 def _run_checked(t: dict) -> dict:
     """A task with a ground-truth oracle. Run it, then INDEPENDENTLY re-verify."""
-    payload = {"goal": t["goal"], "task_id": f"eval-{t['id']}", "max_wall_sec": 900}
+    payload = {
+        "goal": t["goal"],
+        "task_id": f"eval-{t['id']}",
+        "max_wall_sec": 900,
+        "standalone_test": True,
+    }
     if t.get("seed"):
         payload["workspace_files"] = t["seed"]; payload["mode"] = "patch"
     # Deliberately do not send oracle_checks (or a held-out alias) to the system under
@@ -1009,7 +1017,12 @@ def _run_ambiguous(t: dict) -> dict:
     eval_task_id = f"eval-{t['id']}-{uuid.uuid4().hex[:12]}"
     row = {"id": t["id"], "cat": t["category"], "service_task_id": eval_task_id}
     try:
-        r = _post("/missions", {"goal": t["goal"], "task_id": eval_task_id, "max_wall_sec": 300})
+        r = _post("/missions", {
+            "goal": t["goal"],
+            "task_id": eval_task_id,
+            "max_wall_sec": 300,
+            "standalone_test": True,
+        })
     except Exception as exc:  # noqa: BLE001
         return {**row, "verdict": "error", "errored": 1, "detail": str(exc)[:180]}
     reported_mid = str(r.get("mission_id") or "")
@@ -1168,6 +1181,16 @@ def run_eval(tasks: list[dict]) -> dict:
         and bool(attested_models[role].get("base_url"))
         for role in ("planner", "reviewer", "spec", "fighter", "held_out")
     )
+    execution_authorization = (
+        start_identity.get("execution_authorization")
+        if isinstance(start_identity.get("execution_authorization"), dict)
+        else {}
+    )
+    standalone_eval_authorized = (
+        execution_authorization.get("ceraxia_leadership_directive_required") is True
+        and execution_authorization.get("standalone_test_mode_enabled") is True
+        and execution_authorization.get("standalone_test_payload_flag_required") is True
+    )
     identity_matches = (
         bool(start_identity)
         and start_identity == end_identity
@@ -1177,6 +1200,7 @@ def run_eval(tasks: list[dict]) -> dict:
         and start_identity.get("started_at", 0) > 0
         and start_identity.get("held_out_required") is True
         and models_attested
+        and standalone_eval_authorized
     )
     healthy_endpoints = (
         (m.get("service_health") or {}).get("status") == "ok"
@@ -1200,6 +1224,7 @@ def run_eval(tasks: list[dict]) -> dict:
         "healthy_skitarii_endpoints": healthy_endpoints,
         "process_boundary_ready_at_start_and_end": process_boundary_ready,
         "daemon_models_attested": models_attested,
+        "standalone_eval_double_gate_attested": standalone_eval_authorized,
         "held_out_gate_evidenced_per_checked_task": gate_evidence,
         "checked_task_count": len(checked_rows),
     }

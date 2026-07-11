@@ -35,7 +35,6 @@ POST /campaigns/{campaign_id}/cancel
 POST /orchestrate
 POST /orchestrate_start
 POST /orchestrate_run
-POST /task
 GET  /runs
 GET  /runs?limit=20
 GET  /runs/{task_id}
@@ -61,6 +60,8 @@ GET  /runs/{task_id}/final
 GET  /runs/{task_id}/final?max_bytes=1000
 GET  /runs/{task_id}/artifact_text?path=/work/...
 GET  /runs/{task_id}/artifact_text?path=/work/...&max_bytes=1000
+GET  /runs/{task_id}/artifact_text?path=work/skitarii.patch
+POST /runs/{task_id}/apply_patch
 POST /runs/{task_id}/preflight_local
 POST /runs/{task_id}/preflight_http
 POST /runs/{task_id}/execute_local
@@ -168,13 +169,9 @@ an existing run after a `task_id` conflict, or inspect brigade/governor
 diagnostics after validation failures. HTTP responses also expose top-level
 `phase`, `decision`, `display`, `next_action`, and executable `client_action`
 fields for the same recommendation.
-Normal clients must submit work through `POST /orchestrate_run`. `POST /task`
-is a legacy diagnostic entrypoint only: without
-`allow_legacy_direct_task=true`, it returns
-`error_code=legacy_direct_task_requires_explicit_opt_in` and a
-`use_command_protocol` action pointing to `POST /orchestrate_run`. When that
-explicit legacy flag is present, `/task` responses use the same action hint
-vocabulary for successful legacy creation and rejected creation attempts.
+Clients submit work through `POST /orchestrate_run`. There is no direct task
+creation endpoint that bypasses Abaddon's commander-order and orchestration
+boundary.
 When task preflight is run with explicit or default HTTP governor transport,
 its `create_task` and retry action bodies preserve `governor_transport` and
 `governor_host` so clients can follow `actions.next_action` without switching
@@ -288,28 +285,30 @@ Warmaster ledger after the governor prepares the run package. `governor_host`
 must be loopback. If the gateway was started with `--governor-transport http`,
 clients can omit this field and still use the service-separated path.
 
-For HTTP governor planning, Warmaster reads reachable governor capabilities and
-rejects the task with `error_code=governor_workers_missing` when
-`required_workers` are absent from the Mechanicum registry. If all unknown
-workers are known but `planned` and not runnable, the response uses
-`error_code=governor_workers_unavailable` and includes `unavailable_workers`.
+For worker-planned governor domains, Warmaster reads reachable governor
+capabilities and rejects the task with `error_code=governor_workers_missing`
+when `required_workers` are absent from the Mechanicum registry. Native Ceraxia
+missions declare a warband backend instead; readiness is checked against the
+Skitarii service and its loaded-source identity.
 
-For every planning path, Warmaster rejects a produced task contract with
+For worker-planned domains, Warmaster rejects a produced task contract with
 `error_code=contract_workers_missing` when `worker_plan` references workers that
 are absent from the Mechanicum registry. If all unresolved workers are known but
 `planned` and not runnable, the response uses
 `error_code=contract_workers_unavailable` and includes `unavailable_workers`.
 
-For every planning path, Warmaster rejects task creation with
+For worker-planned domains, Warmaster rejects task creation with
 `error_code=invalid_oversight` when the governor plan omits oversight or the
 oversight does not match the task contract. This prevents creating run packages
 that cannot later pass run preflight.
 
 For HTTP governor preparation, Warmaster verifies the written run package before
-creating the Warmaster ledger. If `contract.json`, `oversight.json`, or
-`status.json` is missing, corrupt, or differs from the governor's `/plan`
-response, or if dispatch packets are missing, unexpected, corrupt, or disagree
-with the written status step ids/workers, task creation fails with
+creating the ledger. Worker-planned domains verify contract, oversight, status,
+and dispatch consistency. Native Ceraxia code runs instead verify
+`contract.json`, `ceraxia_directive.json`, `governor_plan.json`, `status.json`,
+and their SHA-bound prepare receipt; the package must contain exactly one
+`skitarii_mission` execution step and must not contain `worker_plan` or a
+`dispatch/` directory. Any mismatch fails with
 `error_code=governor_prepare_invalid_run`.
 When a governor prepare failure leaves an unregistered run directory without
 `task_ledger.json`, Warmaster attempts to remove that directory and reports the
@@ -382,6 +381,10 @@ Aggregate `/events` responses include the same cursor shape plus `task_id`,
 - `/runs/{task_id}/artifact_text` and `/runs/{task_id}/worker_tasks` include the
   same run detail client-view fields so artifact and worker-task screens can
   render the current run state without a follow-up summary request.
+- `/runs/{task_id}/apply_patch` is the explicit live-repository mutation gate
+  for a completed Skitarii mission. It requires the recorded repository
+  fingerprint, reapplies and verifies the staged patch under the repository
+  lock, and never runs implicitly as part of ordinary orchestration.
 - `/runs/{task_id}/package` for run-package diagnostics across
   `contract.json`, `oversight.json`, `status.json`, and dispatch packets. The
   response also includes `run_summary`, `phase`, `decision`, `display`,
@@ -392,13 +395,10 @@ Aggregate `/events` responses include the same cursor shape plus `task_id`,
   debugging. Focused run inspection responses include the same `run_summary`,
   `phase`, `decision`, `display`, `next_action`, and executable
   `client_action` fields as package diagnostics.
-- `/runs/{task_id}/oversight` for the immutable governor oversight plan saved
-  with the run package. This lets clients and higher-level governors inspect the
-  specific run's artifact roles, handoffs, quality gates, step quality matrix,
-  and final review expectations even if the governor service changes later. The
-  response also includes a compact `summary` and `validation` diagnostics
-  against the current contract and status files, plus the focused run inspection
-  client-view fields.
+- `/runs/{task_id}/oversight` for immutable governor supervision saved with the
+  run package. Worker-planned domains expose their oversight plan. Native code
+  runs expose Ceraxia's leadership directive and the single-delegation governor
+  plan, with validation against the SHA-bound native package.
 - `/runs/{task_id}/worker_tasks?live=1` when worker services are running and
   live worker task state is needed.
 
@@ -527,6 +527,10 @@ Synchronous execution endpoints such as `POST /runs/{task_id}/execute_local`,
 Local and HTTP executors must convert malformed dispatch packets into
 structured failed or preflight-failed run results instead of crashing before the
 ledger can record the failure.
+
+Native Ceraxia code runs never enter either generic executor. All normal start,
+resume, revision, recovery, and default auto-start decisions pass through the
+central backend router and delegate the single native mission to Skitarii.
 
 Execution endpoints also accept optional `step_ids` for orchestrator-controlled
 step subsets. `step_ids` must be a list of unique non-empty strings and every

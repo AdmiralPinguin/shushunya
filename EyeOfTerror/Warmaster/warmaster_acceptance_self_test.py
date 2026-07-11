@@ -17,12 +17,31 @@ from EyeOfTerror.common_protocol import commander_order, validate_protocol_paylo
 import eye_of_terror.mission_control as mission_control
 from eye_of_terror.ledger import TaskLedger
 from eye_of_terror.mission_control import mission_state, record_warmaster_acceptance
+from eye_of_terror.native_code_run import build_native_code_contract, native_governor_plan, write_native_code_run
 from eye_of_terror.run_state import run_summary
 
 
 def write_json(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def leadership_directive(task_id: str, mission_id: str) -> dict[str, object]:
+    return {
+        "kind": "ceraxia_leadership_directive",
+        "version": 1,
+        "task_id": task_id,
+        "mission_id": mission_id,
+        "leader": "Ceraxia",
+        "decision": "delegate",
+        "delegated_to": "SkitariiWarband",
+        "mission_intent": "Deliver the requested verified code outcome.",
+        "priorities": ["correctness", "preserve unrelated behavior"],
+        "constraints": ["keep the public contract compatible"],
+        "success_conditions": ["the requested behavior passes executable checks"],
+        "tradeoffs": [],
+        "escalation_conditions": ["a product decision changes observable behavior"],
+    }
 
 
 def write_acceptance_fixture(root: Path, suffix: str, result_payload: dict[str, object]) -> tuple[Path, Path, str]:
@@ -45,37 +64,13 @@ def write_acceptance_fixture(root: Path, suffix: str, result_payload: dict[str, 
     write_json(mission_dir / "mission.json", {"mission_id": mission_id, "status": "assigned", "assigned_governor": "Ceraxia"})
     write_json(mission_dir / "commander_order.json", order)
     write_json(run_dir / "mission_ref.json", {"mission_id": mission_id, "mission_dir": str(mission_dir), "assigned_governor": "Ceraxia"})
-    write_json(
-        run_dir / "status.json",
-        {
-            "task_id": suffix,
-            "steps": [{"step_id": "finalize", "worker": "SealwrightFinalis"}],
-        },
-    )
-    write_json(
-        run_dir / "dispatch" / "finalize.json",
-        {
-            "step_id": "finalize",
-            "worker": "SealwrightFinalis",
-            "depends_on": [],
-            "request": {
-                "task_id": f"{suffix}:finalize",
-                "worker": "SealwrightFinalis",
-                "input_artifacts": [],
-                "quality_expectations": {},
-            },
-        },
-    )
-    write_json(
-        run_dir / "oversight.json",
-        {
-            "revision_policy": {
-                "source_step": "finalize",
-                "final_steps": ["finalize"],
-                "allowed_steps": ["finalize"],
-                "requires_downstream_rerun": True,
-            }
-        },
+    contract = build_native_code_contract(str(order["user_request"]), suffix)
+    write_native_code_run(
+        run_dir,
+        contract,
+        leadership_directive(suffix, mission_id),
+        native_governor_plan(contract, order),
+        prepare_request_sha256="a" * 64,
     )
     ledger = TaskLedger.create(run_dir / "task_ledger.json", suffix, "Acceptance live smoke", "Ceraxia")
     ledger.set_result(result_payload)
@@ -91,10 +86,10 @@ def main() -> int:
             "acceptance-live-smoke",
             {
                 "ok": True,
-                "final_step": "finalize",
+                "final_step": "skitarii",
                 "artifacts": [],
                 "workspace_root": str(root / "runs" / "acceptance-live-smoke" / "work"),
-                "status": "ready",
+                "status": "ready_to_apply",
                 "summary": "Минимальный финальный отчет готов для приемки.",
                 "revision_plan": {"required": False, "steps": []},
             },
@@ -155,7 +150,7 @@ def main() -> int:
             "acceptance-needs-revision",
             {
                 "ok": False,
-                "final_step": "finalize",
+                "final_step": "skitarii",
                 "artifacts": [],
                 "workspace_root": str(root / "runs" / "acceptance-needs-revision" / "work"),
                 "status": "needs_revision",
@@ -164,8 +159,8 @@ def main() -> int:
                     "required": True,
                     "steps": [
                         {
-                            "step_id": "finalize",
-                            "worker": "SealwrightFinalis",
+                            "step_id": "skitarii",
+                            "worker": "SkitariiWarband",
                             "reason": "Финальный пакет неполный.",
                             "source": "governor_review",
                             "priority": "blocker",

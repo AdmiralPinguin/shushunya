@@ -11,11 +11,6 @@
       "role": "lore research and reconstruction governor",
       "path": "EyeOfTerror/Scriptorium/IskandarKhayon"
     },
-    "7102": {
-      "name": "CogitatorCodewrightGovernor",
-      "role": "code task governor",
-      "path": "EyeOfTerror/Warmaster/InnerCircle/CogitatorCodewright"
-    },
     "7103": {
       "name": "Moriana",
       "role": "Pictorium image generation governor",
@@ -23,8 +18,8 @@
     },
     "7104": {
       "name": "Ceraxia",
-      "role": "code task governor",
-      "path": "EyeOfTerror/Mechanicum/Ceraxia"
+      "role": "code-warband leadership governor",
+      "path": "EyeOfTerror/Warmaster/eye_of_terror/inner_circle/ceraxia_service.py"
     }
   },
   "mechanicum": {
@@ -85,41 +80,6 @@
       "role": "local corpus indexer",
       "path": "EyeOfTerror/Scriptorium/Brigade/CorpusIngestor"
     },
-    "7014": {
-      "name": "CogitatorCodewright",
-      "role": "code task worker",
-      "path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/CogitatorCodewright"
-    },
-    "7015": {
-      "name": "LogisRepository",
-      "role": "code repository surveyor",
-      "path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/LogisRepository"
-    },
-    "7016": {
-      "name": "MagosStrategos",
-      "role": "code change planner",
-      "path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/MagosStrategos"
-    },
-    "7017": {
-      "name": "FerrumPatchwright",
-      "role": "code patch manifest builder",
-      "path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/FerrumPatchwright"
-    },
-    "7018": {
-      "name": "OrdinatusVerifier",
-      "role": "code verification planner",
-      "path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/OrdinatusVerifier"
-    },
-    "7019": {
-      "name": "JudicatorCodicis",
-      "role": "code review critic",
-      "path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/JudicatorCodicis"
-    },
-    "7020": {
-      "name": "SealwrightFinalis",
-      "role": "code final handoff packager",
-      "path": "EyeOfTerror/Mechanicum/CodeBrigade/Workers/SealwrightFinalis"
-    },
     "7021": {
       "name": "ScriptoriumArchitect",
       "role": "research synthesis planner",
@@ -174,6 +134,14 @@
       "name": "LayoutFinalis",
       "role": "comic layout and final manifest builder",
       "path": "EyeOfTerror/Pictorium/Brigades/Comics/Workers/LayoutFinalis"
+    }
+  },
+  "warbands": {
+    "7200": {
+      "name": "SkitariiWarband",
+      "role": "native coding warband for detailed planning, implementation, verification, and repair",
+      "path": "EyeOfTerror/Mechanicum/Skitarii",
+      "supervisor": "skitarii-warband.service"
     }
   }
 }

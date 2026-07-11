@@ -473,19 +473,6 @@ def build_lore_reconstruction_contract(user_task: str, task_id: str | None = Non
     return contract
 
 
-def code_required_artifacts(slug: str) -> list[str]:
-    base = f"/work/{slug}"
-    return [
-        f"{base}/repo_survey.json",
-        f"{base}/change_plan.md",
-        f"{base}/patch_manifest.json",
-        f"{base}/verification_report.json",
-        f"{base}/repair_loop_state.json",
-        f"{base}/code_review.json",
-        f"{base}/final_manifest.json",
-    ]
-
-
 def image_required_artifacts(slug: str) -> list[str]:
     base = f"/work/{slug}"
     return [
@@ -655,86 +642,6 @@ def build_comics_generation_contract(user_task: str, task_id: str | None = None)
             "image_brigade_execution_layer_used",
         ],
         worker_plan=plan,
-    )
-
-
-def code_worker_plan(slug: str) -> list[WorkerPlanStep]:
-    base = f"/work/{slug}"
-    return [
-        WorkerPlanStep(
-            step_id="repository_survey",
-            worker="LogisRepository",
-            purpose="Inspect repository shape, likely ownership boundaries, risky files, and available test surfaces.",
-            expected_artifacts=[f"{base}/repo_survey.json"],
-        ),
-        WorkerPlanStep(
-            step_id="change_planning",
-            worker="MagosStrategos",
-            purpose="Turn the user task and repository survey into a scoped implementation plan.",
-            depends_on=["repository_survey"],
-            expected_artifacts=[f"{base}/change_plan.md"],
-        ),
-        WorkerPlanStep(
-            step_id="implementation",
-            worker="FerrumPatchwright",
-            purpose="Prepare an auditable patch manifest and implementation handoff for code changes.",
-            depends_on=["change_planning"],
-            expected_artifacts=[f"{base}/patch_manifest.json"],
-        ),
-        WorkerPlanStep(
-            step_id="verification",
-            worker="OrdinatusVerifier",
-            purpose="Define and record the verification commands or blockers for the implementation.",
-            depends_on=["implementation"],
-            expected_artifacts=[f"{base}/verification_report.json", f"{base}/repair_loop_state.json"],
-        ),
-        WorkerPlanStep(
-            step_id="code_review",
-            worker="JudicatorCodicis",
-            purpose="Review the implementation package for scope, test evidence, and unsafe assumptions.",
-            depends_on=["verification"],
-            expected_artifacts=[f"{base}/code_review.json"],
-        ),
-        WorkerPlanStep(
-            step_id="finalize",
-            worker="SealwrightFinalis",
-            purpose="Package the coding task result, blockers, changed-file intent, and next actions.",
-            depends_on=["code_review"],
-            expected_artifacts=[f"{base}/final_manifest.json"],
-        ),
-    ]
-
-
-def build_code_task_contract(user_task: str, task_id: str | None = None) -> TaskContract:
-    slug = slugify(user_task)
-    resolved_task_id = task_id or f"ceraxia-{slug}-code-task"
-    return TaskContract(
-        task_id=resolved_task_id,
-        kind="code",
-        goal=user_task.strip(),
-        assigned_governor="Ceraxia",
-        non_goals=[
-            "Do not make broad unrelated refactors while solving a narrow code task.",
-            "Do not hide missing test evidence or unsafe assumptions.",
-            "Do not overwrite user changes without an explicit reviewable handoff.",
-        ],
-        required_artifacts=code_required_artifacts(slug),
-        completion_criteria=[
-            "Repository survey, change plan, patch manifest, verification report, repair loop state, review, and final manifest exist.",
-            "The plan names files or modules likely to be touched and records test commands or blockers.",
-            "The review records whether the implementation package is ready, blocked, or needs a stronger worker.",
-            "Final manifest exposes the next safe action for Warmaster or a human/code agent.",
-        ],
-        quality_gates=[
-            "repo_survey_created",
-            "change_plan_scoped",
-            "patch_manifest_auditable",
-            "verification_report_present",
-            "repair_loop_state_present",
-            "code_review_passed_or_blocked",
-            "final_manifest_created",
-        ],
-        worker_plan=code_worker_plan(slug),
     )
 
 

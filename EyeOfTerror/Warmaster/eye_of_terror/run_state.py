@@ -14,6 +14,7 @@ from EyeOfTerror.common_protocol import LIFECYCLE_STATUSES, TERMINAL_LIFECYCLE_S
 from .actions import run_actions
 from .artifacts import artifact_status, final_manifest_summary, final_package
 from .gateway_util import validate_service_host
+from .native_code_run import is_native_code_run
 from .run_package import load_ledger_dict, load_json_object, run_dispatch_packets, sandbox_artifact_file_status
 from .run_validation import (
     revision_plan_summary,
@@ -355,6 +356,33 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         "last_preflight": last_run_preflight(ledger),
     }
     summary["mission_state"] = mission_state_view(summary)
+    result_next_action = (
+        result.get("next_action")
+        if isinstance(result.get("next_action"), dict)
+        else {}
+    )
+    if (
+        not result_next_action
+        and str(summary["status"]) == "blocked"
+        and str(summary.get("governor") or "") == "Ceraxia"
+        and not is_native_code_run(run_dir)
+        and (
+            str(result.get("phase") or "") == "ceraxia_directive_invalid"
+            or "ceraxia_directive" in str(result.get("error") or "").lower()
+        )
+    ):
+        result_next_action = {
+            "kind": "reprepare_ceraxia_run",
+            "method": "POST",
+            "endpoint": "POST /orchestrate_run",
+            "body": {
+                "message": str(ledger.get("goal") or ""),
+                "governor_transport": "http",
+                "run_mode": "http",
+                "auto_start": True,
+            },
+            "reason": "historical Ceraxia evidence cannot be revised as a native run; create a fresh mission",
+        }
     summary["actions"] = run_actions(
         str(summary["status"]),
         revision_plan,
@@ -362,6 +390,7 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         package_errors=package_errors,
         oversight_errors=oversight_errors,
         research_loop_blocked=bool(result.get("research_loop_blocked")),
+        result_next_action=result_next_action,
     )
     if status_error:
         summary["status_error"] = status_error
@@ -485,13 +514,7 @@ WORKER_GOVERNOR_HINTS = {
     "ScriptoriumDaemon": "IskandarKhayon",
     "ReductorVerifier": "IskandarKhayon",
     "FabricatorFinalis": "IskandarKhayon",
-    "CogitatorCodewright": "Ceraxia",
-    "LogisRepository": "Ceraxia",
-    "MagosStrategos": "Ceraxia",
-    "FerrumPatchwright": "Ceraxia",
-    "OrdinatusVerifier": "Ceraxia",
-    "JudicatorCodicis": "Ceraxia",
-    "SealwrightFinalis": "Ceraxia",
+    "SkitariiWarband": "Ceraxia",
     "Promptwright": "Moriana",
     "Canvaswright": "Moriana",
     "Compositionwright": "Moriana",
@@ -775,6 +798,18 @@ def _brigade_tabs(
     protocol = summary.get("mission_protocol") if isinstance(summary.get("mission_protocol"), dict) else {}
     worker_governors = _worker_governor_map(protocol)
     fallback_governor = str(summary.get("governor") or ledger.get("governor") or "")
+    canonical_active = str(
+        summary.get("status") or ledger.get("status") or "",
+    ).strip().lower() in {"running", "queued", "cancelling"}
+    mission_state = (
+        summary.get("mission_state")
+        if isinstance(summary.get("mission_state"), dict)
+        else {}
+    )
+    if str(mission_state.get("status") or "").strip().lower() in {
+        "blocked", "cancelled", "completed", "failed",
+    }:
+        canonical_active = False
     events_by_index = {
         index: event
         for index, event in enumerate(mission_events)
@@ -813,7 +848,9 @@ def _brigade_tabs(
         status = str(card.get("status") or "").strip()
         if status:
             tab["status"] = status
-        tab["active"] = status in {"started", "running"} or str(card.get("phase") or "") in {"planning", "executing", "reviewing", "revising", "finalizing"}
+        # Historical progress is append-only and may end in a stale `running`
+        # card after a finalization failure.  Canonical run status dominates it.
+        tab["active"] = canonical_active and status in {"started", "running"}
 
     ordered = sorted(
         tabs.values(),
@@ -948,6 +985,29 @@ def payload_with_run_view(payload: dict[str, Any], run_dir: Path, task_id: str =
 
 def run_worker_tasks(run_dir: Path, include_health: bool = False, host: str = "127.0.0.1") -> dict[str, Any]:
     host = validate_service_host(host)
+    if is_native_code_run(run_dir):
+        ledger, ledger_error = load_ledger_dict(run_dir / "task_ledger.json")
+        if ledger_error:
+            return {"ok": False, "error": ledger_error}
+        mission = ledger.get("skitarii_mission") if isinstance(ledger.get("skitarii_mission"), dict) else {}
+        service_mission_id = str(mission.get("id") or "")
+        task: dict[str, Any] = {
+            "step_id": "skitarii",
+            "worker": "SkitariiWarband",
+            "port": 7200,
+            "task_id": service_mission_id,
+            "status": str(mission.get("status") or "not_started"),
+            "request_sha256": str(mission.get("request_sha256") or ""),
+        }
+        if include_health and service_mission_id:
+            try:
+                endpoint = f"http://{host}:7200/missions/{quote(service_mission_id, safe='')}"
+                with urllib.request.urlopen(endpoint, timeout=1.0) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                task["runtime"] = payload if isinstance(payload, dict) else {"ok": False, "error": "mission response is not a JSON object"}
+            except Exception as exc:  # noqa: BLE001 - mission lookup is best-effort.
+                task["runtime"] = {"ok": False, "error": str(exc)}
+        return {"ok": True, "native": True, "worker_tasks": [task]}
     dispatch_payload = run_dispatch_packets(run_dir)
     if not dispatch_payload.get("ok"):
         return dispatch_payload

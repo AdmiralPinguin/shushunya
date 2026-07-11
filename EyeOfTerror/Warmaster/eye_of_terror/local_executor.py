@@ -32,13 +32,6 @@ WORKER_COMMANDS = {
     "ScriptoriumDaemon": ("EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon", "EyeOfTerror/Scriptorium/Brigade/ScriptoriumDaemon/scriptorium_daemon.py"),
     "ReductorVerifier": ("EyeOfTerror/Scriptorium/Brigade/ReductorVerifier", "EyeOfTerror/Scriptorium/Brigade/ReductorVerifier/reductor_verifier.py"),
     "FabricatorFinalis": ("EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis", "EyeOfTerror/Scriptorium/Brigade/FabricatorFinalis/fabricator_finalis.py"),
-    "CogitatorCodewright": ("EyeOfTerror/Mechanicum/CodeBrigade/Workers/CogitatorCodewright", "EyeOfTerror/Mechanicum/CodeBrigade/Workers/CogitatorCodewright/cogitator_codewright.py"),
-    "LogisRepository": ("EyeOfTerror/Mechanicum/CodeBrigade/Workers/LogisRepository", "EyeOfTerror/Mechanicum/CodeBrigade/Workers/LogisRepository/logis_repository.py"),
-    "MagosStrategos": ("EyeOfTerror/Mechanicum/CodeBrigade/Workers/MagosStrategos", "EyeOfTerror/Mechanicum/CodeBrigade/Workers/MagosStrategos/magos_strategos.py"),
-    "FerrumPatchwright": ("EyeOfTerror/Mechanicum/CodeBrigade/Workers/FerrumPatchwright", "EyeOfTerror/Mechanicum/CodeBrigade/Workers/FerrumPatchwright/ferrum_patchwright.py"),
-    "OrdinatusVerifier": ("EyeOfTerror/Mechanicum/CodeBrigade/Workers/OrdinatusVerifier", "EyeOfTerror/Mechanicum/CodeBrigade/Workers/OrdinatusVerifier/ordinatus_verifier.py"),
-    "JudicatorCodicis": ("EyeOfTerror/Mechanicum/CodeBrigade/Workers/JudicatorCodicis", "EyeOfTerror/Mechanicum/CodeBrigade/Workers/JudicatorCodicis/judicator_codicis.py"),
-    "SealwrightFinalis": ("EyeOfTerror/Mechanicum/CodeBrigade/Workers/SealwrightFinalis", "EyeOfTerror/Mechanicum/CodeBrigade/Workers/SealwrightFinalis/sealwright_finalis.py"),
 }
 
 
@@ -388,6 +381,30 @@ def ledger_status_for_execution(summary: dict[str, Any], final_payload: dict[str
     return "failed"
 
 
+def _reject_native_code_run(run_dir: Path) -> None:
+    """Raw local worker dispatch is never a native code-run backend."""
+    from .native_code_run import is_native_code_run
+
+    contract = load_json(run_dir / "contract.json") if (run_dir / "contract.json").exists() else {}
+    explicit_native = contract.get("execution") == {
+        "kind": "skitarii_mission",
+        "step_id": "skitarii",
+        "backend": "SkitariiWarband",
+    }
+    try:
+        native = bool(is_native_code_run(run_dir))
+    except Exception as exc:  # noqa: BLE001 - explicit native packages fail closed.
+        if explicit_native:
+            raise RuntimeError(
+                "native code run must use the centralized Skitarii backend router"
+            ) from exc
+        return
+    if native or explicit_native:
+        raise RuntimeError(
+            "native code run must use the centralized Skitarii backend router"
+        )
+
+
 def execute_run(
     repo_root: Path,
     run_dir: Path,
@@ -397,6 +414,7 @@ def execute_run(
     execution_mode: str = "full",
     timeout_retries: int = 1,
 ) -> dict[str, Any]:
+    _reject_native_code_run(run_dir)
     contract = load_json(run_dir / "contract.json") if (run_dir / "contract.json").exists() else {}
     ledger_path = run_dir / "task_ledger.json"
     ledger = (

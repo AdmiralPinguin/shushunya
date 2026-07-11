@@ -4,10 +4,15 @@ The single door the governor knocks on for a code mission. Replaces the old
 six paper-workers: one POST runs the whole warband (spec -> fighter loop -> accept)
 inside the sandbox VM and returns an honest verdict.
 
-  POST /mission  {"goal": "...", "task_id": "...", "checks": [...optional...]}
+  POST /mission  {"goal": "...", "task_id": "...", "leadership_directive": {...}}
       -> {"status": "done|failed", "accepted": bool, "summary", "artifacts",
           "checks", "rounds":[...], "files": {path: content}}
   GET  /health
+
+Production HTTP execution requires a valid Ceraxia leadership directive.  The
+only undirected HTTP path is deliberately double-gated for evaluation/dev:
+SKITARII_STANDALONE_TEST_MODE=1 on the daemon and standalone_test=true in the
+individual request.
 """
 from __future__ import annotations
 
@@ -110,6 +115,13 @@ def service_identity() -> dict:
         "process_boundary_helper": BOUNDARY_HELPER_VERSION,
         "process_boundary_helper_sha256": BOUNDARY_HELPER_SHA256,
         "bearer_auth_required": bool(BEARER_TOKEN),
+        "execution_authorization": {
+            "ceraxia_leadership_directive_required": True,
+            "standalone_test_mode_enabled": (
+                os.environ.get("SKITARII_STANDALONE_TEST_MODE", "0") == "1"
+            ),
+            "standalone_test_payload_flag_required": True,
+        },
         "models": {
             "planner": {"model": planner_model, "base_url": planner_base},
             "reviewer": {
@@ -939,6 +951,46 @@ def leadership_context_from_payload(
     return directive, leadership_context_text(directive)
 
 
+def standalone_test_execution_allowed(payload: dict) -> bool:
+    """The explicit two-key escape hatch for eval/dev HTTP missions."""
+    return (
+        os.environ.get("SKITARII_STANDALONE_TEST_MODE", "0") == "1"
+        and payload.get("standalone_test") is True
+    )
+
+
+def execution_authorization_error(
+    payload: dict,
+    task_id: str,
+) -> tuple[int, dict] | None:
+    """Return an HTTP error unless Ceraxia delegated or test mode is double-gated."""
+    if payload.get("leadership_directive") is not None:
+        try:
+            leadership_context_from_payload(payload, task_id)
+        except CeraxiaDirectiveError as exc:
+            return 400, {
+                "error": f"invalid Ceraxia leadership_directive: {exc}",
+                "error_code": "ceraxia_leadership_directive_invalid",
+                "leadership_directive_status": "invalid",
+            }
+        return None
+    if standalone_test_execution_allowed(payload):
+        return None
+    test_requested = payload.get("standalone_test") is True
+    test_mode_enabled = os.environ.get("SKITARII_STANDALONE_TEST_MODE", "0") == "1"
+    return 403, {
+        "error": (
+            "Ceraxia leadership_directive is required; undirected execution is "
+            "available only when SKITARII_STANDALONE_TEST_MODE=1 and "
+            "standalone_test=true"
+        ),
+        "error_code": "ceraxia_leadership_directive_required",
+        "leadership_directive_status": "missing",
+        "standalone_test_requested": test_requested,
+        "standalone_test_mode_enabled": test_mode_enabled,
+    }
+
+
 def _execute_mission_body(payload: dict, mission=None) -> dict:
     """Run one mission end to end and return the verdict. If `mission` is given it is an
     async mission_store.Mission: the fighter can ask it questions and be cancelled, and
@@ -1345,13 +1397,41 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
 
 
 def execute_mission(payload: dict, mission=None) -> dict:
-    """Own one executor attempt from creation through proven cleanup."""
+    """Own one executor attempt from creation through proven cleanup.
+
+    HTTP handlers authorize before reserving async state so they can return an
+    honest 4xx. This internal boundary repeats the check, preventing a future
+    call site from silently becoming a bypass. Eval/dev callers use the same
+    explicit standalone-test double gate.
+    """
+    task_id = str(payload.get("task_id") or "") if isinstance(payload, dict) else ""
+    authorization_error = (
+        execution_authorization_error(payload, task_id)
+        if isinstance(payload, dict)
+        else (400, {"error": "mission payload must be an object"})
+    )
+    if authorization_error is not None:
+        _code, authorization_payload = authorization_error
+        return {
+            "status": "blocked",
+            "accepted": False,
+            "task_id": task_id,
+            "summary": "Blocked: Ceraxia leadership authorization is required.",
+            "error": str(authorization_payload.get("error") or "unauthorized mission")[:500],
+            "error_code": str(
+                authorization_payload.get("error_code") or "mission_unauthorized"
+            ),
+            "leadership_directive_status": str(
+                authorization_payload.get("leadership_directive_status") or "missing"
+            ),
+            "cleanup_complete": True,
+            "files": {},
+        }
     token = uuid.uuid4().hex
     previous_executor = getattr(_EXECUTION_LOCAL, "executor", None)
     previous_token = getattr(_EXECUTION_LOCAL, "attempt_token", None)
     _EXECUTION_LOCAL.executor = None
     _EXECUTION_LOCAL.attempt_token = token
-    task_id = str(payload.get("task_id") or "") if isinstance(payload, dict) else ""
     verdict: dict | None = None
     pipeline_error: Exception | None = None
     cleanup_error: Exception | None = None
@@ -1520,6 +1600,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "goal is required"}); return
             if payload.get("task_id") is not None and not _valid_task_id(payload.get("task_id")):
                 self._send(400, {"error": "invalid task_id"}); return
+            task_id = str(payload.get("task_id") or f"m{int(time.time())}")
+            payload = {**payload, "task_id": task_id}
+            authorization_error = execution_authorization_error(payload, task_id)
+            if authorization_error is not None:
+                code, error_payload = authorization_error
+                self._send(code, error_payload); return
             self._send(200, execute_mission(payload)); return
 
         # async lifecycle
@@ -1531,6 +1617,10 @@ class Handler(BaseHTTPRequestHandler):
             if not _valid_task_id(mid):
                 self._send(400, {"error": "invalid task_id"}); return
             payload = {**payload, "task_id": mid}
+            authorization_error = execution_authorization_error(payload, mid)
+            if authorization_error is not None:
+                code, error_payload = authorization_error
+                self._send(code, error_payload); return
             with _ASYNC_CREATE_LOCK:
                 existing = mission_store.get(mid)
                 if existing is not None:
@@ -1595,6 +1685,10 @@ class Handler(BaseHTTPRequestHandler):
                     }); return
                 self._send(200, {"ok": ok, "status": m.status}); return
             if parts[2] == "resume":           # POST /missions/{id}/resume -> retry a stopped mission
+                authorization_error = execution_authorization_error(m.payload, m.id)
+                if authorization_error is not None:
+                    code, error_payload = authorization_error
+                    self._send(code, error_payload); return
                 ok = mission_store.resume(
                     parts[1],
                     lambda mm: execute_mission(mm.payload, mm),

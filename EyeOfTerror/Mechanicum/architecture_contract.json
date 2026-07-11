@@ -1,15 +1,19 @@
 {
   "kind": "eye_mechanicum_architecture_contract",
-  "contract_version": "eye-mechanicum.v1",
+  "contract_version": "eye-mechanicum.v2",
   "governance_root": "EyeOfTerror/Mechanicum",
   "legacy_runtime_root": "LegacyMechanicum",
   "ownership": {
-    "EyeOfTerror/Mechanicum/Ceraxia": "code-governance brigadier",
-    "EyeOfTerror/Mechanicum/PlanningBrigade": "planning department for Ceraxia",
-    "EyeOfTerror/Mechanicum/CodeBrigade": "code-worker handoff and verification contracts"
+    "EyeOfTerror/Warmaster/eye_of_terror/inner_circle/ceraxia.py": "code-warband leadership governor",
+    "EyeOfTerror/Warmaster/eye_of_terror/native_code_run.py": "native code mission package and validation boundary",
+    "EyeOfTerror/Mechanicum/Skitarii": "autonomous coding warband"
   },
   "rules": [
-    "new brigade governance and contracts live under EyeOfTerror/Mechanicum",
+    "Ceraxia owns intent, priorities, constraints, and mission success conditions only",
+    "Skitarii owns repository exploration, detailed planning, implementation, verification, and repair",
+    "native code runs contain exactly one skitarii_mission execution step and no worker_plan or dispatch directory",
+    "production Skitarii missions require a valid persisted Ceraxia leadership directive",
+    "legacy code-worker ports 7014-7020 and compatibility code brigades must not be registered or started",
     "LegacyMechanicum remains compatibility/shared runtime until a legacy worker or relay is intentionally migrated",
     "EyeOfTerror/Mechanicum must not import LegacyMechanicum runtime directly",
     "worker migration requires an explicit adapter contract and local boundary test"

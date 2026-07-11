@@ -31,9 +31,20 @@ def mission_id_for(task_id: str | None, message: str) -> str:
     if task_id:
         safe_task_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", task_id.strip()).strip("-")
         if safe_task_id:
-            return f"mission-{safe_task_id}"[:128]
+            if len(safe_task_id) <= 120:
+                return f"mission-{safe_task_id}"
+            digest = hashlib.sha256(safe_task_id.encode("utf-8")).hexdigest()
+            return f"mission-{safe_task_id[:55]}-{digest}"
     digest = hashlib.sha256(message.encode("utf-8")).hexdigest()[:16]
     return f"mission-{digest}"
+
+
+def task_id_for_message(message: str) -> str:
+    """Return one stable, readable, collision-resistant implicit task id."""
+    words = re.findall(r"[A-Za-z0-9]+", message.lower())[:6]
+    slug = "-".join(words)[:72] or "task"
+    digest = hashlib.sha256(message.encode("utf-8")).hexdigest()[:16]
+    return f"task-{slug}-{digest}"
 
 
 def mission_root_for(warmaster_root: Path) -> Path:

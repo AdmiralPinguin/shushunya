@@ -79,7 +79,7 @@ def check_port_registry(errors: list[str]) -> int:
     registry = load_json(REPO_ROOT / "EyeOfTerror" / "Warmaster" / "registry" / "ports.json")
     count = 0
     seen_ports: dict[int, str] = {}
-    for section in ("eye_of_terror", "mechanicum"):
+    for section in ("eye_of_terror", "mechanicum", "warbands"):
         entries = registry.get(section)
         require(isinstance(entries, dict), f"port registry section missing: {section}", errors)
         if not isinstance(entries, dict):

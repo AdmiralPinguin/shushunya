@@ -1,7 +1,7 @@
-"""Task preparation: route a user message to a governor, build and validate
-the run package (contract, oversight, dispatch), and run task preflight."""
+"""Route tasks and validate either native-warband or worker-planned packages."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -25,9 +25,13 @@ from .command_text import task_text_from_commander_order
 from .contracts import validate_task_contract_payload
 from .gateway_util import post_json, valid_task_id, validate_service_host
 from .governors import governor_by_name
-from .inner_circle.ceraxia import plan_code_task
 from .inner_circle.iskandar import plan_research_writing as plan_lore_reconstruction
 from .ledger import TaskLedger
+from .native_code_run import (
+    load_native_code_run,
+    validate_native_code_contract,
+    validate_native_code_run_package,
+)
 from .oversight_guard import compact_oversight_summary
 from .pipeline import write_pipeline_run
 from .routing import route_message
@@ -36,7 +40,6 @@ from .views import payload_with_task_view
 from EyeOfTerror.common_protocol import governor_plan_from_contract, validate_protocol_payload
 from EyeOfTerror.common_protocol.ceraxia_directive import (
     CeraxiaDirectiveError,
-    validate_ceraxia_directive,
     validate_directive_for_commander,
 )
 
@@ -108,6 +111,28 @@ def mission_id_from_commander(task_id: str | None, commander_order: dict[str, An
     return f"mission-{task_id or 'unassigned'}"
 
 
+def _ceraxia_prepare_request_sha256(
+    task: str,
+    task_id: str,
+    commander_order: dict[str, Any],
+) -> str:
+    """Recompute the native receipt identity at the Warmaster trust boundary."""
+    canonical = json.dumps(
+        {
+            "task": task,
+            "task_id": task_id,
+            "mission_id": str(
+                commander_order.get("mission_id") or f"mission-{task_id}"
+            ),
+            "commander_order": commander_order,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def governor_payload_for(message: str, task_id: str | None, commander_order: dict[str, Any] | None = None) -> dict[str, Any]:
     if commander_order:
         validate_protocol_payload(commander_order, expected_type="commander_order")
@@ -123,39 +148,6 @@ def governor_task_text(message: str, commander_order: dict[str, Any] | None = No
         validate_protocol_payload(commander_order, expected_type="commander_order")
         return task_text_from_commander_order(commander_order)
     return message
-
-
-def validated_prepared_ceraxia_directive(
-    run_dir: Path,
-    prepared_payload: dict[str, Any],
-    task_id: str,
-    mission_id: str,
-    expected_directive: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Trust only the directive persisted by the authoritative prepare call."""
-    path = run_dir / "ceraxia_directive.json"
-    if path.is_symlink() or not path.is_file():
-        raise CeraxiaDirectiveError("prepared Ceraxia run is missing ceraxia_directive.json")
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise CeraxiaDirectiveError(f"prepared Ceraxia directive is unreadable: {exc}") from exc
-    directive = validate_ceraxia_directive(
-        payload,
-        expected_task_id=task_id,
-        expected_mission_id=mission_id,
-        require_delegation=True,
-    )
-    response_directive = prepared_payload.get("leadership_directive")
-    if response_directive != directive:
-        raise CeraxiaDirectiveError(
-            "prepare response and persisted Ceraxia directive do not match",
-        )
-    if expected_directive is not None and expected_directive != directive:
-        raise CeraxiaDirectiveError(
-            "planned and persisted Ceraxia directives do not match",
-        )
-    return directive
 
 
 def attach_governor_plan_payload(
@@ -186,6 +178,273 @@ def attach_governor_plan_payload(
     return payload
 
 
+def prepare_native_ceraxia_via_service(
+    message: str,
+    task_id: str | None,
+    run_root: Path,
+    governor: Any,
+    host: str = "127.0.0.1",
+    port: int | None = None,
+    commander_order: dict[str, Any] | None = None,
+    require_commander_order: bool = False,
+) -> dict[str, Any]:
+    """Prepare one native Ceraxia -> Skitarii mission.
+
+    The structural ``/plan`` endpoint is used only to allocate a missing task id.
+    The leader model is called exactly once by ``/prepare_run``.  A persisted
+    prepare receipt makes the latter safe to replay after a lost HTTP response.
+    """
+    if require_commander_order and not commander_order:
+        return commander_order_required_payload(task_id, "http", host, message)
+    if not isinstance(commander_order, dict) or not commander_order:
+        return commander_order_required_payload(task_id, "http", host, message)
+    validate_protocol_payload(commander_order, expected_type="commander_order")
+    host = validate_service_host(host)
+    service_port = int(port or governor.port)
+    base = f"http://{host}:{service_port}"
+    resolved_task_id = str(task_id or "").strip()
+    if not resolved_task_id:
+        try:
+            preview = _post_governor_json(
+                base + "/plan",
+                governor_payload_for(message, None, commander_order=commander_order),
+                governor.name,
+            )
+            preview_contract = preview.get("contract") if isinstance(preview.get("contract"), dict) else {}
+            resolved_task_id = str(preview_contract.get("task_id") or "").strip()
+        except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+            return {
+                "ok": False,
+                "gateway": "WarmasterGateway",
+                "governor": "Ceraxia",
+                "error": f"Ceraxia structural preview unavailable: {exc}",
+                "error_code": "governor_service_unavailable",
+                "actions": task_preflight_actions(
+                    False, "governor_service_unavailable", "",
+                    governor_transport="http", governor_host=host, message=message,
+                ),
+            }
+    if not valid_task_id(resolved_task_id):
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "governor": "Ceraxia",
+            "task_id": resolved_task_id,
+            "error": "Ceraxia returned an invalid task_id",
+            "error_code": "invalid_governor_task_id",
+            "actions": task_preflight_actions(
+                False, "invalid_governor_task_id", resolved_task_id,
+                governor_transport="http", governor_host=host, message=message,
+            ),
+        }
+    root = run_root.resolve()
+    run_dir = (root / resolved_task_id).resolve()
+    if run_dir == root or root not in run_dir.parents:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "governor": "Ceraxia",
+            "task_id": resolved_task_id,
+            "error": "native code run escaped run_root",
+            "error_code": "invalid_run_dir",
+            "actions": task_preflight_actions(
+                False, "invalid_run_dir", resolved_task_id,
+                governor_transport="http", governor_host=host, message=message,
+            ),
+        }
+    request_payload = {
+        **governor_payload_for(
+            message,
+            resolved_task_id,
+            commander_order=commander_order,
+        ),
+        "run_dir": str(run_dir),
+    }
+    try:
+        prepared = _post_governor_json(
+            base + "/prepare_run",
+            request_payload,
+            governor.name,
+        )
+    except urllib.error.HTTPError as exc:
+        error_payload = _bounded_http_error_payload(exc)
+        error_code = str(error_payload.get("error_code") or "")
+        if error_code == "delegation_not_authorized":
+            public_code = "ceraxia_delegation_not_authorized"
+        elif error_code == "prepare_identity_conflict":
+            public_code = "ceraxia_prepare_identity_conflict"
+        else:
+            public_code = "governor_service_unavailable"
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "governor": "Ceraxia",
+            "task_id": resolved_task_id,
+            "error": str(error_payload.get("error") or f"Ceraxia returned HTTP {exc.code}"),
+            "error_code": public_code,
+            "leadership_directive": error_payload.get("leadership_directive", {}),
+            "response": error_payload,
+            "actions": task_preflight_actions(
+                False, public_code, resolved_task_id,
+                governor_transport="http", governor_host=host, message=message,
+            ),
+        }
+    except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "governor": "Ceraxia",
+            "task_id": resolved_task_id,
+            "error": f"Ceraxia prepare unavailable: {exc}",
+            "error_code": "governor_service_unavailable",
+            "actions": task_preflight_actions(
+                False, "governor_service_unavailable", resolved_task_id,
+                governor_transport="http", governor_host=host, message=message,
+            ),
+        }
+    if prepared.get("ok") is not True:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "governor": "Ceraxia",
+            "task_id": resolved_task_id,
+            "error": str(prepared.get("error") or "Ceraxia did not prepare the native run"),
+            "error_code": str(prepared.get("error_code") or "governor_prepare_failed"),
+            "response": prepared,
+            "actions": task_preflight_actions(
+                False, str(prepared.get("error_code") or "governor_prepare_failed"),
+                resolved_task_id, governor_transport="http", governor_host=host,
+                message=message,
+            ),
+        }
+    try:
+        contract_payload = prepared.get("contract")
+        if not isinstance(contract_payload, dict):
+            raise ValueError("prepare response omitted the native contract")
+        contract_payload = validate_native_code_contract(
+            contract_payload,
+            expected_task_id=resolved_task_id,
+            expected_mission_id=mission_id_from_commander(resolved_task_id, commander_order),
+        )
+        persisted_package = load_native_code_run(run_dir)
+        if persisted_package.get("ok") is not True:
+            load_errors = persisted_package.get("errors")
+            detail = "; ".join(load_errors) if isinstance(load_errors, list) else ""
+            raise ValueError(
+                "persisted native package could not be loaded"
+                + (f": {detail}" if detail else "")
+            )
+        persisted_contract = (
+            persisted_package.get("contract")
+            if isinstance(persisted_package.get("contract"), dict)
+            else {}
+        )
+        if persisted_contract != contract_payload:
+            raise ValueError("prepare response and persisted native contract differ")
+        package_errors = validate_native_code_run_package(run_dir)
+        if package_errors:
+            raise ValueError("; ".join(package_errors))
+        persisted_receipt = (
+            persisted_package.get("receipt")
+            if isinstance(persisted_package.get("receipt"), dict)
+            else {}
+        )
+        expected_request_sha256 = _ceraxia_prepare_request_sha256(
+            str(contract_payload.get("goal") or ""),
+            resolved_task_id,
+            commander_order,
+        )
+        if persisted_receipt.get("prepare_request_sha256") != expected_request_sha256:
+            raise ValueError("persisted native receipt belongs to a different prepare request")
+        directive = validate_directive_for_commander(
+            prepared.get("leadership_directive"),
+            commander_order,
+            expected_task_id=resolved_task_id,
+            expected_mission_id=mission_id_from_commander(resolved_task_id, commander_order),
+            require_delegation=True,
+        )
+        persisted_directive = validate_directive_for_commander(
+            persisted_package.get("leadership_directive"),
+            commander_order,
+            expected_task_id=resolved_task_id,
+            expected_mission_id=mission_id_from_commander(resolved_task_id, commander_order),
+            require_delegation=True,
+        )
+        if directive != persisted_directive:
+            raise ValueError("prepare response and persisted Ceraxia directive differ")
+        persisted_governor_plan = (
+            persisted_package.get("governor_plan")
+            if isinstance(persisted_package.get("governor_plan"), dict)
+            else {}
+        )
+        persisted_status = (
+            persisted_package.get("status")
+            if isinstance(persisted_package.get("status"), dict)
+            else {}
+        )
+        if prepared.get("governor_plan") != persisted_governor_plan:
+            raise ValueError("prepare response and persisted governor plan differ")
+        if prepared.get("status") != persisted_status:
+            raise ValueError("prepare response and persisted native status differ")
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, CeraxiaDirectiveError) as exc:
+        cleanup = cleanup_unregistered_run_dir(run_root, run_dir)
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "governor": "Ceraxia",
+            "task_id": resolved_task_id,
+            "error": f"Ceraxia prepared an invalid native code run: {exc}",
+            "error_code": "governor_prepare_invalid_run",
+            "cleanup": cleanup,
+            "actions": task_preflight_actions(
+                False, "governor_prepare_invalid_run", resolved_task_id,
+                governor_transport="http", governor_host=host, message=message,
+            ),
+        }
+    ledger_path = run_dir / "task_ledger.json"
+    if ledger_path.exists():
+        ledger = TaskLedger.load(ledger_path)
+        ledger_data = ledger.to_dict()
+        if (
+            str(ledger_data.get("task_id") or "") != resolved_task_id
+            or str(ledger_data.get("governor") or "") != "Ceraxia"
+        ):
+            return {
+                "ok": False,
+                "gateway": "WarmasterGateway",
+                "governor": "Ceraxia",
+                "task_id": resolved_task_id,
+                "error": "existing ledger does not belong to this Ceraxia prepare request",
+                "error_code": "ceraxia_prepare_identity_conflict",
+                "actions": task_preflight_actions(
+                    False, "ceraxia_prepare_identity_conflict", resolved_task_id,
+                    governor_transport="http", governor_host=host, message=message,
+                ),
+            }
+    else:
+        TaskLedger.create(
+            ledger_path,
+            resolved_task_id,
+            str(contract_payload.get("goal") or message),
+            "Ceraxia",
+        )
+    return {
+        "ok": True,
+        "gateway": "WarmasterGateway",
+        "governor": "Ceraxia",
+        "governor_transport": "http",
+        "protocol_mode": "commander_order",
+        "task_id": resolved_task_id,
+        "run_dir": str(run_dir),
+        "status": persisted_status,
+        "contract": contract_payload,
+        "governor_plan": persisted_governor_plan,
+        "leadership_directive": directive,
+        "prepare_replayed": bool(prepared.get("prepare_replayed")),
+        "actions": created_task_actions(resolved_task_id),
+    }
+
+
 def prepare_task_via_governor_service(
     message: str,
     task_id: str | None,
@@ -196,6 +455,17 @@ def prepare_task_via_governor_service(
     commander_order: dict[str, Any] | None = None,
     require_commander_order: bool = False,
 ) -> dict[str, Any]:
+    if governor.name == "Ceraxia":
+        return prepare_native_ceraxia_via_service(
+            message,
+            task_id,
+            run_root,
+            governor,
+            host=host,
+            port=port,
+            commander_order=commander_order,
+            require_commander_order=require_commander_order,
+        )
     if require_commander_order and not commander_order:
         return commander_order_required_payload(task_id, "http", host, message)
     host = validate_service_host(host)
@@ -286,34 +556,6 @@ def prepare_task_via_governor_service(
             "task_id": service_task_id,
             "actions": task_preflight_actions(False, "invalid_governor_task_id", service_task_id, governor_transport="http", governor_host=host, message=message),
         }
-    planned_ceraxia_directive: dict[str, Any] = {}
-    if governor.name == "Ceraxia":
-        try:
-            planned_ceraxia_directive = validate_directive_for_commander(
-                plan.get("leadership_directive"),
-                commander_order if isinstance(commander_order, dict) else {},
-                expected_task_id=service_task_id,
-                expected_mission_id=mission_id_from_commander(service_task_id, commander_order),
-                require_delegation=True,
-            )
-        except CeraxiaDirectiveError as exc:
-            return {
-                "ok": False,
-                "gateway": "WarmasterGateway",
-                "error": f"Ceraxia did not authorize a valid Skitarii delegation: {exc}",
-                "error_code": "ceraxia_delegation_not_authorized",
-                "governor": governor.name,
-                "task_id": service_task_id,
-                "leadership_directive": plan.get("leadership_directive", {}),
-                "actions": task_preflight_actions(
-                    False,
-                    "ceraxia_delegation_not_authorized",
-                    service_task_id,
-                    governor_transport="http",
-                    governor_host=host,
-                    message=message,
-                ),
-            }
     validation_errors = validate_task_contract_payload(contract)
     if validation_errors:
         return {
@@ -384,31 +626,6 @@ def prepare_task_via_governor_service(
         )
     except urllib.error.HTTPError as exc:
         error_payload = _bounded_http_error_payload(exc)
-        if (
-            exc.code == 409
-            and error_payload.get("error_code") == "delegation_not_authorized"
-        ):
-            return {
-                "ok": False,
-                "gateway": "WarmasterGateway",
-                "error": str(
-                    error_payload.get("error")
-                    or "Ceraxia did not authorize delegation to Skitarii"
-                ),
-                "error_code": "ceraxia_delegation_not_authorized",
-                "governor": governor.name,
-                "task_id": service_task_id,
-                "leadership_directive": error_payload.get("leadership_directive", {}),
-                "response": error_payload,
-                "actions": task_preflight_actions(
-                    False,
-                    "ceraxia_delegation_not_authorized",
-                    service_task_id,
-                    governor_transport="http",
-                    governor_host=host,
-                    message=message,
-                ),
-            }
         return {
             "ok": False,
             "gateway": "WarmasterGateway",
@@ -449,35 +666,6 @@ def prepare_task_via_governor_service(
             "cleanup": cleanup,
             "actions": task_preflight_actions(False, "governor_prepare_failed", service_task_id, governor_transport="http", governor_host=host, message=message),
         }
-    authoritative_directive: dict[str, Any] = {}
-    if governor.name == "Ceraxia":
-        try:
-            authoritative_directive = validated_prepared_ceraxia_directive(
-                run_dir,
-                prepared,
-                service_task_id,
-                mission_id_from_commander(service_task_id, commander_order),
-                expected_directive=planned_ceraxia_directive,
-            )
-        except CeraxiaDirectiveError as exc:
-            cleanup = cleanup_unregistered_run_dir(run_root, run_dir)
-            return {
-                "ok": False,
-                "gateway": "WarmasterGateway",
-                "error": f"governor service prepared an invalid leadership directive: {exc}",
-                "error_code": "governor_prepare_invalid_directive",
-                "governor": governor.name,
-                "task_id": service_task_id,
-                "cleanup": cleanup,
-                "actions": task_preflight_actions(
-                    False,
-                    "governor_prepare_invalid_directive",
-                    service_task_id,
-                    governor_transport="http",
-                    governor_host=host,
-                    message=message,
-                ),
-            }
     planned_oversight = plan.get("oversight") if isinstance(plan.get("oversight"), dict) else {}
     planned_governor_plan = plan.get("governor_plan") if isinstance(plan.get("governor_plan"), dict) else {}
     package_errors = verify_prepared_run_package(run_dir, contract, planned_oversight)
@@ -507,7 +695,6 @@ def prepare_task_via_governor_service(
         "run_dir": str(run_dir),
         "status": prepared.get("status", {}),
         "governor_plan": planned_governor_plan,
-        "leadership_directive": authoritative_directive,
         "actions": created_task_actions(service_task_id),
     }
 
@@ -712,9 +899,7 @@ def prepare_task(
             "actions": task_preflight_actions(False, "invalid_governor_transport", task_id or "", governor_transport=governor_transport, governor_host=governor_host, message=message),
         }
     task_text = governor_task_text(message, commander_order)
-    if governor == "Ceraxia":
-        plan = plan_code_task(task_text, task_id=task_id)
-    elif governor == "Moriana":
+    if governor == "Moriana":
         plan = plan_image_task(task_text, task_id=task_id)
     else:
         plan = plan_lore_reconstruction(task_text, task_id=task_id)
@@ -911,7 +1096,12 @@ def preflight_task(
                 governor_payload_for(message, task_id, commander_order=commander_order),
                 governor_ref.name,
             )
-            plan_payload = attach_governor_plan_payload(plan_payload, mission_id_from_commander(task_id, commander_order), commander_order)
+            if governor_ref.name != "Ceraxia":
+                plan_payload = attach_governor_plan_payload(
+                    plan_payload,
+                    mission_id_from_commander(task_id, commander_order),
+                    commander_order,
+                )
         except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
             return {
                 "ok": False,
@@ -923,11 +1113,80 @@ def preflight_task(
             }
         contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else {}
         oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else {}
+        if governor_ref.name == "Ceraxia":
+            resolved_task_id = str(contract.get("task_id") or "").strip()
+            errors: list[str] = []
+            try:
+                contract = validate_native_code_contract(
+                    contract,
+                    expected_task_id=str(task_id or ""),
+                    expected_mission_id=mission_id_from_commander(
+                        resolved_task_id or task_id,
+                        commander_order,
+                    ),
+                )
+            except ValueError as exc:
+                errors.append(str(exc))
+            run_dir = run_root / resolved_task_id if resolved_task_id else run_root / "_invalid"
+            backend = (
+                plan_payload.get("active_execution_backend")
+                if isinstance(plan_payload.get("active_execution_backend"), dict)
+                else {}
+            )
+            backend_ready = backend.get("healthy") is True
+            if not backend_ready:
+                errors.append("SkitariiWarband backend is not ready")
+            if resolved_task_id and run_dir.exists():
+                errors.append("task_id already exists")
+            ok = not errors
+            if resolved_task_id and run_dir.exists():
+                error_code = "task_exists"
+            elif not backend_ready:
+                error_code = "skitarii_backend_unavailable"
+            elif errors:
+                error_code = "invalid_native_code_contract"
+            else:
+                error_code = ""
+            payload = {
+                "ok": ok,
+                "gateway": "WarmasterGateway",
+                "governor": "Ceraxia",
+                "governor_transport": "http",
+                "protocol_mode": "commander_order" if commander_order else "commander_order_missing",
+                "task_id": resolved_task_id,
+                "route": route_payload.get("route") if isinstance(route_payload.get("route"), dict) else {},
+                "contract_summary": contract_summary(contract),
+                "governor_plan": plan_payload.get("governor_plan") if isinstance(plan_payload.get("governor_plan"), dict) else {},
+                "leadership_authorization": "pending_prepare",
+                "active_execution_backend": backend,
+                "validation": {"ok": not errors, "errors": errors},
+                "missing_workers": [],
+                "unavailable_workers": [],
+                "worker_availability": {
+                    "ok": backend_ready,
+                    "required_workers": [],
+                    "available_workers": [],
+                    "missing_workers": [],
+                    "unavailable_workers": [],
+                },
+                "would_create_run_dir": str(run_dir) if resolved_task_id else "",
+                "error_code": error_code,
+                "actions": task_preflight_actions(
+                    ok,
+                    error_code,
+                    resolved_task_id,
+                    include_brigade_health,
+                    "http",
+                    governor_host,
+                    message,
+                ),
+            }
+            if include_brigade_health:
+                payload["brigade_readiness"] = compact_brigade_readiness(host=governor_host)
+            return payload
     else:
         task_text = governor_task_text(message, commander_order)
-        if governor_ref.name == "Ceraxia":
-            plan = plan_code_task(task_text, task_id=task_id)
-        elif governor_ref.name == "Moriana":
+        if governor_ref.name == "Moriana":
             plan = plan_image_task(task_text, task_id=task_id)
         else:
             plan = plan_lore_reconstruction(task_text, task_id=task_id)
@@ -936,36 +1195,6 @@ def preflight_task(
         contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else plan.contract.to_dict()
         oversight = plan_payload.get("oversight") if isinstance(plan_payload.get("oversight"), dict) else {}
     resolved_task_id = str(contract.get("task_id") or "").strip()
-    preflight_ceraxia_directive: dict[str, Any] = {}
-    if governor_ref.name == "Ceraxia":
-        try:
-            preflight_ceraxia_directive = validate_directive_for_commander(
-                plan_payload.get("leadership_directive"),
-                commander_order if isinstance(commander_order, dict) else {},
-                expected_task_id=resolved_task_id,
-                expected_mission_id=mission_id_from_commander(resolved_task_id, commander_order),
-                require_delegation=True,
-            )
-        except CeraxiaDirectiveError as exc:
-            return {
-                "ok": False,
-                "gateway": "WarmasterGateway",
-                "governor": "Ceraxia",
-                "governor_transport": "http",
-                "error": f"Ceraxia did not authorize a valid Skitarii delegation: {exc}",
-                "error_code": "ceraxia_delegation_not_authorized",
-                "task_id": resolved_task_id,
-                "leadership_directive": plan_payload.get("leadership_directive", {}),
-                "actions": task_preflight_actions(
-                    False,
-                    "ceraxia_delegation_not_authorized",
-                    resolved_task_id,
-                    include_brigade_health,
-                    "http",
-                    governor_host,
-                    message,
-                ),
-            }
     run_dir = run_root / resolved_task_id if resolved_task_id else run_root / "_invalid"
     if resolved_task_id and run_dir.exists():
         return {
@@ -1003,7 +1232,6 @@ def preflight_task(
         "contract_summary": contract_summary(contract),
         "governor_plan": plan_payload.get("governor_plan") if isinstance(plan_payload.get("governor_plan"), dict) else {},
         "governor_plan_actions": plan_payload.get("actions") if isinstance(plan_payload.get("actions"), dict) else {},
-        "leadership_directive": preflight_ceraxia_directive,
         "oversight_summary": compact_oversight_summary(oversight) if oversight else {},
         "oversight_validation": {"ok": not oversight_errors, "errors": oversight_errors},
         "validation": {"ok": not validation_errors, "errors": validation_errors},

@@ -1318,7 +1318,25 @@ class TestBridge(unittest.TestCase):
         (run_dir / "contract.json").write_text(
             json.dumps({"kind": "code", "goal": "fix a.py so it prints 2"}), encoding="utf-8",
         )
-        (run_dir / "mission_ref.json").write_text("{}", encoding="utf-8")
+        mission_dir = Path(tempfile.mkdtemp(prefix="bridge-mission-"))
+        (mission_dir / "mission.json").write_text(
+            json.dumps({
+                "mission_id": "mission-bridge-fixture",
+                "task_id": "bridge-fixture",
+                "status": "planning",
+                "assigned_governor": "Ceraxia",
+                "source_channel": "self_test",
+            }),
+            encoding="utf-8",
+        )
+        (run_dir / "mission_ref.json").write_text(
+            json.dumps({
+                "mission_id": "mission-bridge-fixture",
+                "mission_dir": str(mission_dir),
+                "assigned_governor": "Ceraxia",
+            }),
+            encoding="utf-8",
+        )
         (run_dir / "governor_plan.json").write_text(
             json.dumps({"mission_id": "mission-bridge-fixture"}),
             encoding="utf-8",
@@ -1424,8 +1442,104 @@ class TestBridge(unittest.TestCase):
             result = self.b.run_via_skitarii(run_dir, "missing-directive", timeout_sec=30)
         self.assertEqual(result["phase"], "ceraxia_directive_invalid")
         self.assertIn("missing", result["summary"])
+        self.assertEqual(
+            result["next_action"]["kind"],
+            "reprepare_ceraxia_run",
+        )
         collect.assert_not_called()
         dispatch.assert_not_called()
+
+    def test_missing_directive_finalizes_linked_mission_as_canonical_blocked(self):
+        from eye_of_terror.ledger import TaskLedger
+
+        root = Path(tempfile.mkdtemp())
+        run_dir = root / "run"
+        mission_dir = root / "missions" / "mission-legacy-directive"
+        run_dir.mkdir(parents=True)
+        mission_dir.mkdir(parents=True)
+        (run_dir / "contract.json").write_text(
+            json.dumps({"kind": "code", "goal": "fix a.py"}),
+            encoding="utf-8",
+        )
+        (run_dir / "mission_ref.json").write_text(
+            json.dumps({
+                "mission_id": "mission-legacy-directive",
+                "mission_dir": str(mission_dir),
+                "assigned_governor": "Ceraxia",
+            }),
+            encoding="utf-8",
+        )
+        (mission_dir / "mission.json").write_text(
+            json.dumps({
+                "mission_id": "mission-legacy-directive",
+                "task_id": "legacy-directive",
+                "assigned_governor": "Ceraxia",
+                "status": "revision",
+            }),
+            encoding="utf-8",
+        )
+        stale_event = {
+            "type": "progress_event",
+            "protocol_version": 1,
+            "mission_id": "mission-legacy-directive",
+            "created_at": "2026-07-09T00:00:00Z",
+            "actor": "Warmaster",
+            "role": "commander",
+            "phase": "revising",
+            "status": "running",
+            "title": "Revision assigned",
+            "body": "Old revision event",
+            "visible_to_user": True,
+        }
+        (mission_dir / "progress_events.jsonl").write_text(
+            json.dumps(stale_event) + "\n",
+            encoding="utf-8",
+        )
+        TaskLedger.create(
+            run_dir / "task_ledger.json",
+            "legacy-directive",
+            "fix",
+            "Ceraxia",
+        )
+
+        with (
+            patch.object(self.b, "_collect_workspace") as collect,
+            patch.object(self.b, "_await_async_skitarii_mission") as dispatch,
+        ):
+            result = self.b.run_via_skitarii(
+                run_dir,
+                "legacy-directive",
+                timeout_sec=30,
+            )
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["phase"], "ceraxia_directive_invalid")
+        self.assertEqual(result["next_action"]["kind"], "reprepare_ceraxia_run")
+        collect.assert_not_called()
+        dispatch.assert_not_called()
+
+        ledger = json.loads((run_dir / "task_ledger.json").read_text(encoding="utf-8"))
+        self.assertEqual(ledger["status"], "blocked")
+        self.assertNotIn(
+            "skitarii_finalize_error",
+            [event.get("type") for event in ledger.get("events", [])],
+        )
+        final = json.loads((mission_dir / "final_response.json").read_text(encoding="utf-8"))
+        self.assertEqual(final["status"], "blocked")
+        self.assertEqual(final["phase"], "ceraxia_directive_invalid")
+        self.assertEqual(final["next_action"]["kind"], "reprepare_ceraxia_run")
+        state = json.loads((mission_dir / "mission_state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["status"], "blocked")
+        self.assertFalse(state["active"])
+        events = [
+            json.loads(line)
+            for line in (mission_dir / "progress_events.jsonl").read_text(
+                encoding="utf-8",
+            ).splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(events[-1]["phase"], "blocked")
+        self.assertEqual(events[-1]["status"], "blocked")
 
     def test_bridge_blocks_malformed_or_mismatched_directives_before_http(self):
         from eye_of_terror.ledger import TaskLedger

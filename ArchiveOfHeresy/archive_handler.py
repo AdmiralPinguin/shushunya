@@ -768,7 +768,13 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         activity = activity if isinstance(activity, dict) else self.warmaster_activity_from_payload(run)
         status = str(run.get("status") or "").lower()
         task_id = str(run.get("task_id") or "").strip()
-        running = bool(active) or status in {"running", "queued", "cancelling"}
+        terminal_statuses = {
+            "blocked", "cancelled", "completed", "corrupt", "failed", "preflight_failed",
+        }
+        running = (
+            status not in terminal_statuses
+            and (bool(active) or status in {"running", "queued", "cancelling"})
+        )
         cancelled = status == "cancelled"
         success = status == "completed"
         progress = run.get("progress") if isinstance(run.get("progress"), dict) else {}
@@ -789,9 +795,22 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         mission_state = run.get("mission_state") if isinstance(run.get("mission_state"), dict) else {}
         if not mission_state:
             mission_state = activity.get("mission_state") if isinstance(activity.get("mission_state"), dict) else {}
-        if activity_entries:
+        if str(mission_state.get("status") or "").strip().lower() in terminal_statuses:
+            running = False
+        if running and activity_entries:
             last_entry = activity_entries[-1] if isinstance(activity_entries[-1], dict) else {}
             current_step = str(last_entry.get("headline") or current_step).strip()
+        elif not running:
+            # A terminal canonical state must not inherit an old `revising`
+            # headline merely because progress events are append-only.
+            current_step = ""
+            if summary_cards:
+                final_card = summary_cards[-1] if isinstance(summary_cards[-1], dict) else {}
+                current_step = str(final_card.get("headline") or "").strip()
+            brigade_tabs = [
+                {**tab, "active": False} if isinstance(tab, dict) else tab
+                for tab in brigade_tabs
+            ]
         return {
             "backend": "warmaster",
             "task_id": task_id,

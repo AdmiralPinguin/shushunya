@@ -124,6 +124,17 @@ def contract_summary(contract: dict[str, Any]) -> dict[str, Any]:
         for step in worker_plan
         if isinstance(step, dict)
     ]
+    execution = contract.get("execution") if isinstance(contract.get("execution"), dict) else {}
+    if not steps and execution.get("kind") == "skitarii_mission":
+        steps = [
+            {
+                "step_id": str(execution.get("step_id") or "skitarii"),
+                "worker": str(execution.get("backend") or "SkitariiWarband"),
+                "depends_on": [],
+                "expected_artifacts": [],
+                "expected_artifact_count": 0,
+            }
+        ]
     return {
         "kind": str(contract.get("kind") or ""),
         "goal": str(contract.get("goal") or ""),
@@ -131,6 +142,7 @@ def contract_summary(contract: dict[str, Any]) -> dict[str, Any]:
         "steps": steps,
         "step_count": len(steps),
         "required_artifacts": len(contract.get("required_artifacts") if isinstance(contract.get("required_artifacts"), list) else []),
+        "execution": execution,
     }
 
 
