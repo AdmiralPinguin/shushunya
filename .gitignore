@@ -194,3 +194,22 @@ CoreOfMadness/vm-sandbox/*.qcow2
 CoreOfMadness/vm-sandbox/*.iso
 CoreOfMadness/vm-sandbox/*.img
 CoreOfMadness/vm-sandbox/*.log
+
+# Generated Android signing sidecars
+*.idsig
+
+# Local archive payloads and task runtime state
+ArchiveOfHeresy/archive/assets/
+ArchiveOfHeresy/archive/task_journal_state.json
+
+# Local voice references and generated audio previews
+WarpWails/refs/
+WarpWails/preview/
+WarpWails/sfx/
+
+# Local benchmark outputs
+CoreOfMadness/*-bench-*.json
+
+# One-off local patch handoff scratch
+patch_manifest_generator.py
+prepareanauditablepatchmanifestandimplementationhandoffforcodechanges.txt
