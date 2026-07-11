@@ -28,6 +28,23 @@ from .task_prepare import prepare_task, preflight_task
 from .views import executable_client_action, orchestration_view_fields, recovery_candidate_display
 
 
+def _skitarii_preflight_failures(timeout_sec: int) -> list[dict[str, Any]]:
+    """Health-check the Skitarii warband service (the actual executor of brigade-v2
+    code runs). Returns [] when healthy, or one failure entry in the same shape the
+    legacy per-worker preflight uses."""
+    import urllib.request as _rq
+    from .skitarii_bridge import SKITARII_URL
+    try:
+        with _rq.urlopen(f"{SKITARII_URL}/health", timeout=max(3, min(timeout_sec, 15))) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        if str(payload.get("status") or "") == "ok":
+            return []
+        return [{"worker": "SkitariiWarband", "service": SKITARII_URL,
+                 "error": f"unhealthy: {str(payload)[:200]}"}]
+    except Exception as exc:  # noqa: BLE001 - preflight reports, never raises
+        return [{"worker": "SkitariiWarband", "service": SKITARII_URL, "error": str(exc)[:200]}]
+
+
 def run_execution_preflight(
     run_dir: Path,
     mode: str,
@@ -113,7 +130,15 @@ def run_execution_preflight(
                 "input_artifact_status": input_status,
             }
         )
-    worker_failures = preflight_http_workers(run_dir, host, timeout_sec, step_ids=step_ids) if mode == "http" else []
+    if mode == "http" and skitarii_should_handle(run_dir):
+        # Brigade v2: this run is executed end-to-end by the Skitarii warband, not by
+        # the retired per-step CodeBrigade services the dispatch packets still name —
+        # probing those would fail forever. Preflight the warband service instead.
+        worker_failures = _skitarii_preflight_failures(timeout_sec)
+    elif mode == "http":
+        worker_failures = preflight_http_workers(run_dir, host, timeout_sec, step_ids=step_ids)
+    else:
+        worker_failures = []
     preflight = {
         "ok": not dispatch_errors and not input_failures and not missing_local_commands and not worker_failures and not oversight_errors,
         "task_id": run_dir.name,
