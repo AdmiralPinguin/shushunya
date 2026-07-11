@@ -29,6 +29,11 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from EyeOfTerror.common_protocol.ceraxia_directive import (
+    CeraxiaDirectiveError,
+    validate_ceraxia_directive,
+)
+
 SKITARII_URL = os.environ.get(
     "SKITARII_URL", os.environ.get("SKITARII_WARBAND_URL", "http://127.0.0.1:7200"),
 )
@@ -964,6 +969,37 @@ def _read_json(path: Path) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+def _load_ceraxia_directive(run_dir: Path, task_id: str) -> dict[str, Any]:
+    """Load the authoritative Ceraxia-to-Skitarii handoff and fail closed."""
+    path = run_dir / "ceraxia_directive.json"
+    if path.is_symlink() or not path.is_file():
+        raise CeraxiaDirectiveError("ceraxia_directive.json is missing or not a regular file")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CeraxiaDirectiveError(f"ceraxia_directive.json is unreadable: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise CeraxiaDirectiveError("ceraxia_directive.json must contain an object")
+    governor_plan_path = run_dir / "governor_plan.json"
+    if governor_plan_path.is_symlink() or not governor_plan_path.is_file():
+        raise CeraxiaDirectiveError("governor_plan.json is missing or not a regular file")
+    try:
+        governor_plan = json.loads(governor_plan_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CeraxiaDirectiveError(f"governor_plan.json is unreadable: {exc}") from exc
+    if not isinstance(governor_plan, dict):
+        raise CeraxiaDirectiveError("governor_plan.json must contain an object")
+    expected_mission_id = str(governor_plan.get("mission_id") or "").strip()
+    if not expected_mission_id:
+        raise CeraxiaDirectiveError("governor_plan.json does not bind a mission_id")
+    return validate_ceraxia_directive(
+        payload,
+        expected_task_id=task_id,
+        expected_mission_id=expected_mission_id,
+        require_delegation=True,
+    )
 
 
 _TARGET_REPO_MARKER = re.compile(r"(?mi)^\s*CERAXIA_TARGET_REPO:\s*(.+?)\s*$")
@@ -2096,12 +2132,29 @@ def _await_async_skitarii_mission(
     except (TypeError, ValueError):
         old_attempt = 0
     old_status = str(old_meta.get("status") or "")
+    active_statuses = {"planned", "queued", "running", "needs_user", "cancelling"}
+    unresolved_statuses = {
+        "cancel_cleanup_unproven",
+        "identity_mismatch",
+        "service_mismatch",
+    }
+    if old_attempt > 0 and (
+        old_status in unresolved_statuses
+        or old_meta.get("cleanup_complete") is False
+        or bool(str(old_meta.get("identity_error") or ""))
+    ):
+        raise RuntimeError(
+            "previous Skitarii mission identity or cleanup is unresolved; reconcile it before retrying",
+        )
     if (
         old_attempt > 0
-        and old_status in {"planned", "queued", "running", "needs_user"}
+        and old_status in active_statuses
         and str(old_meta.get("service") or "") != SKITARII_URL
     ):
-        current_ledger.data["skitarii_mission"] = {**old_meta, "status": "service_mismatch"}
+        current_ledger.data["skitarii_mission"] = {
+            **old_meta,
+            "identity_error": "service_mismatch",
+        }
         current_ledger.save()
         raise RuntimeError("active Skitarii mission belongs to a different service endpoint")
     expected_old_id = _service_mission_id(task_id, old_attempt) if old_attempt else ""
@@ -2109,8 +2162,17 @@ def _await_async_skitarii_mission(
         old_attempt > 0
         and str(old_meta.get("id") or "") == expected_old_id
         and str(old_meta.get("request_sha256") or "") == request_sha256
-        and old_status in {"planned", "queued", "running", "needs_user"}
+        and old_status in active_statuses
     )
+    if old_attempt > 0 and old_status in active_statuses and not reuse_active_attempt:
+        current_ledger.data["skitarii_mission"] = {
+            **old_meta,
+            "identity_error": "request_identity_mismatch",
+        }
+        current_ledger.save()
+        raise RuntimeError(
+            "active Skitarii mission has a different request identity; cancel it and prove cleanup before retrying",
+        )
     attempt = old_attempt if reuse_active_attempt else max(1, old_attempt + 1)
     requested_id = _service_mission_id(task_id, attempt)
     creation_body["task_id"] = requested_id
@@ -2403,10 +2465,53 @@ def cancel_skitarii_mission_for_run(run_dir: Path, task_id: str) -> dict[str, An
         or mission_id != _service_mission_id(task_id, attempt)
         or str(meta.get("service") or "") != SKITARII_URL
         or not re.fullmatch(r"[0-9a-f]{64}", request_sha256)
-        or str(meta.get("status") or "") not in {"planned", "queued", "running", "needs_user", "cancelling"}
+        or str(meta.get("status") or "") not in {
+            "planned", "queued", "running", "needs_user", "cancelling",
+            "cancel_cleanup_unproven",
+        }
     ):
         return {"ok": False, "status": "not_active", "error": "run has no active Skitarii mission"}
-    if str(meta.get("status") or "") != "cancelling":
+    meta_status = str(meta.get("status") or "")
+    if meta_status == "cancel_cleanup_unproven":
+        snapshot = _skitarii_json_request(
+            "GET", f"/missions/{mission_id}", timeout=15.0,
+        )
+        if str(snapshot.get("request_sha256") or "") != request_sha256:
+            return {
+                "ok": False,
+                "status": "identity_mismatch",
+                "error": "cancelled mission identity changed",
+            }
+        recovered_status = str(snapshot.get("status") or "")
+        if (
+            recovered_status in {"done", "failed", "blocked", "cancelled"}
+            and snapshot.get("inflight") is False
+            and snapshot.get("cleanup_complete") is True
+        ):
+            recovered_meta = dict(meta)
+            recovered_meta.update({
+                "status": recovered_status,
+                "inflight": False,
+                "cleanup_complete": True,
+            })
+            recovered_meta.pop("identity_error", None)
+            ledger.data["skitarii_mission"] = recovered_meta
+            ledger.save()
+            ledger.record_event(
+                "skitarii_cancel_cleanup_reconciled",
+                {"mission_id": mission_id, "status": recovered_status},
+            )
+            if recovered_status == "cancelled":
+                _cancelled_bridge_result(run_dir, task_id)
+                return {"ok": True, "status": "cancelled", "mission_id": mission_id}
+            return {
+                "ok": False,
+                "status": recovered_status,
+                "mission_id": mission_id,
+                "cleanup_complete": True,
+                "error": "mission reached a non-cancelled terminal state after cancellation timeout",
+            }
+    if meta_status != "cancelling":
         response = _skitarii_json_request(
             "POST", f"/missions/{mission_id}/cancel", body=b"{}", timeout=15.0,
         )
@@ -2441,6 +2546,8 @@ def cancel_skitarii_mission_for_run(run_dir: Path, task_id: str) -> dict[str, An
                 "inflight": False,
                 "cleanup_complete": cleanup_complete,
             })
+            if cleanup_complete is True:
+                terminal_meta.pop("identity_error", None)
             ledger = TaskLedger.load(run_dir / "task_ledger.json")
             ledger.data["skitarii_mission"] = terminal_meta
             ledger.save()
@@ -2521,6 +2628,30 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
     goal = str(contract.get("goal") or "")
     ledger = TaskLedger.load(run_dir / "task_ledger.json")
     try:
+        leadership_directive = _load_ceraxia_directive(run_dir, task_id)
+    except CeraxiaDirectiveError as exc:
+        msg = f"Skitarii blocked: Ceraxia leadership directive is invalid ({exc})."
+        ledger.record_event("ceraxia_directive_blocked", {"error": str(exc)[:300]})
+        failure = _bridge_failure(
+            run_dir,
+            task_id,
+            msg,
+            phase="ceraxia_directive_invalid",
+            error=str(exc),
+        )
+        ledger.set_result(failure)
+        ledger.force_status("blocked", reason="Ceraxia leadership directive is invalid")
+        try:
+            _finalize_linked_blocked(
+                run_dir,
+                ledger,
+                msg,
+                phase="ceraxia_directive_invalid",
+            )
+        except Exception as finalize_exc:  # noqa: BLE001
+            ledger.record_event("skitarii_finalize_error", {"error": str(finalize_exc)[:300]})
+        return failure
+    try:
         goal = _normalize_goal_repo_scope(goal)
         workspace, is_patch = _collect_workspace(goal)
         # A Warmaster code mission targets the configured repository even when it
@@ -2560,12 +2691,23 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
             ledger.record_event("skitarii_finalize_error", {"error": str(finalize_exc)[:300]})
         return failure
     inventory = getattr(workspace, "inventory", sorted(workspace.keys()))
+    ledger.record_event(
+        "ceraxia_delegated_to_skitarii",
+        {
+            "decision": leadership_directive["decision"],
+            "mission_id": leadership_directive["mission_id"],
+            "priority_count": len(leadership_directive["priorities"]),
+            "success_condition_count": len(leadership_directive["success_conditions"]),
+        },
+    )
     ledger.record_event("skitarii_dispatch", {"service": SKITARII_URL, "mode": mode,
                                               "preloaded_file_count": len(inventory),
                                               "preloaded_file_sample": inventory[:50]})
     ledger.set_status("running")
 
-    body = json.dumps({"goal": goal, "task_id": task_id, "max_wall_sec": timeout_sec,
+    body = json.dumps({"goal": goal, "task_id": task_id,
+                       "delegating_task_id": task_id, "max_wall_sec": timeout_sec,
+                       "leadership_directive": leadership_directive,
                        "mode": mode, "workspace_files": workspace,
                        "workspace_blobs": getattr(workspace, "blobs", {}),
                        "workspace_external_assets": getattr(workspace, "external_assets", {}),

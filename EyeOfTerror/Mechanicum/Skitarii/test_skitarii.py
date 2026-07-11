@@ -703,6 +703,102 @@ class TestBridge(unittest.TestCase):
                 )
         request.assert_not_called()
 
+    def test_active_attempt_with_different_request_identity_blocks_new_attempt(self):
+        from eye_of_terror.ledger import TaskLedger
+
+        run_dir = Path(tempfile.mkdtemp())
+        task_id = "active-identity"
+        ledger = TaskLedger.create(run_dir / "task_ledger.json", task_id, "fix", "Ceraxia")
+        ledger.data["skitarii_mission"] = {
+            "id": self.b._service_mission_id(task_id, 1),
+            "attempt": 1,
+            "request_sha256": "0" * 64,
+            "status": "running",
+            "service": self.b.SKITARII_URL,
+        }
+        ledger.save()
+        body = json.dumps({"goal": "changed request", "task_id": task_id}).encode("utf-8")
+        with patch.object(self.b, "_skitarii_json_request") as request:
+            for attempt in range(2):
+                with self.subTest(retry=attempt), self.assertRaisesRegex(
+                    RuntimeError,
+                    "different request identity|unresolved",
+                ):
+                    self.b._await_async_skitarii_mission(
+                        body,
+                        run_dir,
+                        task_id,
+                        ledger,
+                        30,
+                    )
+        request.assert_not_called()
+        persisted = TaskLedger.load(run_dir / "task_ledger.json").to_dict()["skitarii_mission"]
+        self.assertEqual(persisted["status"], "running")
+        self.assertEqual(persisted["identity_error"], "request_identity_mismatch")
+
+    def test_unproven_cancel_cleanup_cannot_start_a_new_attempt(self):
+        from eye_of_terror.ledger import TaskLedger
+
+        run_dir = Path(tempfile.mkdtemp())
+        task_id = "cleanup-unproven"
+        ledger = TaskLedger.create(run_dir / "task_ledger.json", task_id, "fix", "Ceraxia")
+        ledger.data["skitarii_mission"] = {
+            "id": self.b._service_mission_id(task_id, 1),
+            "attempt": 1,
+            "request_sha256": "1" * 64,
+            "status": "cancel_cleanup_unproven",
+            "cleanup_complete": False,
+            "service": self.b.SKITARII_URL,
+        }
+        ledger.save()
+        with patch.object(self.b, "_skitarii_json_request") as request:
+            with self.assertRaisesRegex(RuntimeError, "cleanup is unresolved"):
+                self.b._await_async_skitarii_mission(
+                    json.dumps({"goal": "retry", "task_id": task_id}).encode("utf-8"),
+                    run_dir,
+                    task_id,
+                    ledger,
+                    30,
+                )
+        request.assert_not_called()
+
+    def test_cancel_reconciles_late_cleanup_proof_without_new_attempt(self):
+        from eye_of_terror.ledger import TaskLedger
+
+        run_dir = Path(tempfile.mkdtemp())
+        task_id = "late-cleanup"
+        mission_id = self.b._service_mission_id(task_id, 1)
+        request_sha = "2" * 64
+        ledger = TaskLedger.create(run_dir / "task_ledger.json", task_id, "fix", "Ceraxia")
+        ledger.request_cancel("test")
+        ledger.data["skitarii_mission"] = {
+            "id": mission_id,
+            "attempt": 1,
+            "request_sha256": request_sha,
+            "status": "cancel_cleanup_unproven",
+            "cleanup_complete": False,
+            "service": self.b.SKITARII_URL,
+        }
+        ledger.save()
+        with patch.object(
+            self.b,
+            "_skitarii_json_request",
+            return_value={
+                "status": "cancelled",
+                "request_sha256": request_sha,
+                "inflight": False,
+                "cleanup_complete": True,
+                "result": {"status": "cancelled", "accepted": False},
+            },
+        ) as request:
+            result = self.b.cancel_skitarii_mission_for_run(run_dir, task_id)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "cancelled")
+        self.assertEqual(request.call_args.args[:2], ("GET", f"/missions/{mission_id}"))
+        persisted = TaskLedger.load(run_dir / "task_ledger.json").to_dict()["skitarii_mission"]
+        self.assertEqual(persisted["status"], "cancelled")
+        self.assertTrue(persisted["cleanup_complete"])
+
     def test_answer_resumes_the_existing_service_mission(self):
         from eye_of_terror.ledger import TaskLedger
 
@@ -1223,6 +1319,28 @@ class TestBridge(unittest.TestCase):
             json.dumps({"kind": "code", "goal": "fix a.py so it prints 2"}), encoding="utf-8",
         )
         (run_dir / "mission_ref.json").write_text("{}", encoding="utf-8")
+        (run_dir / "governor_plan.json").write_text(
+            json.dumps({"mission_id": "mission-bridge-fixture"}),
+            encoding="utf-8",
+        )
+        (run_dir / "ceraxia_directive.json").write_text(
+            json.dumps({
+                "kind": "ceraxia_leadership_directive",
+                "version": 1,
+                "task_id": "bridge-fixture",
+                "mission_id": "mission-bridge-fixture",
+                "leader": "Ceraxia",
+                "decision": "delegate",
+                "delegated_to": "SkitariiWarband",
+                "mission_intent": "Repair the requested behavior safely",
+                "priorities": ["correctness"],
+                "constraints": ["preserve unrelated behavior"],
+                "success_conditions": ["the requested behavior is verified"],
+                "tradeoffs": [],
+                "escalation_conditions": [],
+            }),
+            encoding="utf-8",
+        )
         TaskLedger.create(run_dir / "task_ledger.json", "bridge-fixture", "fix", "Ceraxia")
         patch_text = """diff --git a/a.py b/a.py
 --- a/a.py
@@ -1254,8 +1372,9 @@ class TestBridge(unittest.TestCase):
             os.environ["SKITARII_AUTOAPPLY"] = "1"
         self.b.REPO_ROOT = root
         try:
-            with patch.object(self.b, "_await_async_skitarii_mission", return_value=verdict):
+            with patch.object(self.b, "_await_async_skitarii_mission", return_value=verdict) as await_mission:
                 result = self.b.run_via_skitarii(run_dir, "bridge-fixture", timeout_sec=30)
+                self.last_bridge_request = json.loads(await_mission.call_args.args[0])
         finally:
             self.b.REPO_ROOT = original_root
             os.environ.pop("SKITARII_AUTOAPPLY", None)
@@ -1265,6 +1384,11 @@ class TestBridge(unittest.TestCase):
 
     def test_bridge_reports_ready_to_apply_without_claiming_completion(self):
         root, run_dir, result = self._run_bridge_fixture(autoapply=False)
+        self.assertEqual(
+            self.last_bridge_request["leadership_directive"]["leader"],
+            "Ceraxia",
+        )
+        self.assertEqual(self.last_bridge_request["delegating_task_id"], "bridge-fixture")
         self.assertFalse(result["ok"])
         self.assertEqual(result["phase"], "ready_to_apply")
         self.assertEqual(result["status"], "ready_to_apply")
@@ -1283,6 +1407,84 @@ class TestBridge(unittest.TestCase):
         self.assertTrue(body["confirm_apply"])
         self.assertEqual(body["expected_patch_sha256"], ledger["result"]["patch_stage"]["patch_sha256"])
         self.assertEqual(body["expected_checks_sha256"], ledger["result"]["patch_stage"]["checks_sha256"])
+
+    def test_bridge_blocks_before_snapshot_when_ceraxia_directive_is_missing(self):
+        from eye_of_terror.ledger import TaskLedger
+
+        run_dir = Path(tempfile.mkdtemp())
+        (run_dir / "contract.json").write_text(
+            json.dumps({"kind": "code", "goal": "fix a.py"}),
+            encoding="utf-8",
+        )
+        TaskLedger.create(run_dir / "task_ledger.json", "missing-directive", "fix", "Ceraxia")
+        with (
+            patch.object(self.b, "_collect_workspace") as collect,
+            patch.object(self.b, "_await_async_skitarii_mission") as dispatch,
+        ):
+            result = self.b.run_via_skitarii(run_dir, "missing-directive", timeout_sec=30)
+        self.assertEqual(result["phase"], "ceraxia_directive_invalid")
+        self.assertIn("missing", result["summary"])
+        collect.assert_not_called()
+        dispatch.assert_not_called()
+
+    def test_bridge_blocks_malformed_or_mismatched_directives_before_http(self):
+        from eye_of_terror.ledger import TaskLedger
+
+        base_directive = {
+            "kind": "ceraxia_leadership_directive",
+            "version": 1,
+            "task_id": "directive-check",
+            "mission_id": "mission-directive-check",
+            "leader": "Ceraxia",
+            "decision": "delegate",
+            "delegated_to": "SkitariiWarband",
+            "mission_intent": "Deliver a verified repair",
+            "priorities": ["correctness"],
+            "constraints": [],
+            "success_conditions": ["behavior is verified"],
+            "tradeoffs": [],
+            "escalation_conditions": [],
+        }
+        cases = {
+            "unknown detailed field": ({**base_directive, "files": ["app.py"]}, True),
+            "mismatched task": ({**base_directive, "task_id": "another-task"}, True),
+            "mismatched mission": ({**base_directive, "mission_id": "another-mission"}, True),
+            "missing governor plan": (base_directive, False),
+        }
+        for label, (directive, write_governor_plan) in cases.items():
+            with self.subTest(case=label):
+                run_dir = Path(tempfile.mkdtemp())
+                (run_dir / "contract.json").write_text(
+                    json.dumps({"kind": "code", "goal": "fix a.py"}),
+                    encoding="utf-8",
+                )
+                (run_dir / "ceraxia_directive.json").write_text(
+                    json.dumps(directive),
+                    encoding="utf-8",
+                )
+                if write_governor_plan:
+                    (run_dir / "governor_plan.json").write_text(
+                        json.dumps({"mission_id": "mission-directive-check"}),
+                        encoding="utf-8",
+                    )
+                TaskLedger.create(
+                    run_dir / "task_ledger.json",
+                    "directive-check",
+                    "fix",
+                    "Ceraxia",
+                )
+                with (
+                    patch.object(self.b, "_collect_workspace") as collect,
+                    patch.object(self.b, "_skitarii_json_request") as http,
+                ):
+                    result = self.b.run_via_skitarii(
+                        run_dir,
+                        "directive-check",
+                        timeout_sec=30,
+                    )
+                self.assertEqual(result["phase"], "ceraxia_directive_invalid")
+                collect.assert_not_called()
+                http.assert_not_called()
 
     def test_bridge_rejects_malformed_or_contradictory_verdicts(self):
         for malformed, expected in (

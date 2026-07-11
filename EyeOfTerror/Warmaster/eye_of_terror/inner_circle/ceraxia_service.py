@@ -23,6 +23,12 @@ if str(REPO_ROOT) not in sys.path:
 
 from EyeOfTerror.model_brain import model_contract, request_model_decision
 from EyeOfTerror.common_protocol import governor_plan_from_contract, validate_protocol_payload
+from EyeOfTerror.common_protocol.ceraxia_directive import (
+    CeraxiaDirectiveError,
+    build_ceraxia_directive,
+    directive_model_instructions,
+    directive_request_payload,
+)
 
 from ..command_text import task_text_from_commander_order
 from ..contracts import build_code_task_contract, code_worker_plan
@@ -34,6 +40,9 @@ SKITARII_SOURCE_FILES = (
     "service.py", "spec.py", "acceptor.py", "warband.py", "planner.py",
     "executor.py", "explorer.py", "reviewer.py", "clarify.py",
     "mission_store.py", "tools.py", "harness.py",
+)
+SKITARII_SHARED_SOURCE_FILES = (
+    "EyeOfTerror/common_protocol/ceraxia_directive.py",
 )
 MAX_CERAXIA_REQUEST_BYTES = int(os.environ.get("CERAXIA_MAX_REQUEST_BYTES", "2000000"))
 CERAXIA_TRUSTED_ORIGINS_ENV = "CERAXIA_TRUSTED_ORIGINS"
@@ -52,6 +61,9 @@ def expected_skitarii_source_sha256() -> str:
         for name in SKITARII_SOURCE_FILES:
             digest.update(name.encode("utf-8") + b"\0")
             digest.update((source_root / name).read_bytes())
+        for relative in SKITARII_SHARED_SOURCE_FILES:
+            digest.update(relative.encode("utf-8") + b"\0")
+            digest.update((repo_root / relative).read_bytes())
     except OSError:
         return ""
     return digest.hexdigest()
@@ -144,6 +156,8 @@ def _compatibility_pipeline(pipeline: dict[str, Any]) -> dict[str, Any]:
     enriched.update(
         {
             "mode": "legacy_six_worker_compatibility_adapter",
+            "authoritative": False,
+            "purpose": "registry_preflight_only",
             "active_execution_backend": "SkitariiWarband",
             "execution_handoff": "Warmaster skitarii_bridge",
         }
@@ -172,6 +186,11 @@ def _with_execution_contract(payload: dict[str, Any], backend: dict[str, Any] | 
                 "execution": "SkitariiWarband",
                 "handoff": "Warmaster skitarii_bridge",
                 "backend_healthy": bool(backend_payload.get("healthy")),
+                "leadership": "Ceraxia",
+                "detailed_planning": "SkitariiWarband",
+                "native_directive_artifact": "ceraxia_directive.json",
+                "leadership_contract": "native_ceraxia_directive_v1",
+                "compatibility_plan_authoritative": False,
             },
         }
     )
@@ -440,6 +459,29 @@ def task_from_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     raise ValueError("commander_order is required; direct governor task input is not accepted")
 
 
+def request_leadership_directive(
+    task: str,
+    task_id: str,
+    command: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Ask Ceraxia for a leader decision, not a detailed implementation plan."""
+    mission_id = str(command.get("mission_id") or f"mission-{task_id}")
+    model_decision = request_model_decision(
+        "Ceraxia",
+        "Leader of the coding warband",
+        directive_request_payload(task, task_id, command),
+        layer="governor_service",
+        instructions=directive_model_instructions(),
+    )
+    directive = build_ceraxia_directive(
+        model_decision,
+        task_id=task_id,
+        mission_id=mission_id,
+        commander_order=command,
+    )
+    return directive, model_decision
+
+
 def protocol_governor_plan(plan_payload: dict[str, Any], command: dict[str, Any]) -> dict[str, Any]:
     contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else {}
     mission_id = str(command.get("mission_id") or f"mission-{contract.get('task_id') or 'unassigned'}")
@@ -614,6 +656,8 @@ def service_capabilities() -> dict[str, Any]:
         "client_action": executable_client_action("", next_action),
         "capabilities": [
             "model_backed_governor_planning",
+            "validated_leadership_directive",
+            "ceraxia_to_skitarii_delegation",
             "code_task_planning",
             "repository_survey",
             "patch_manifest_preparation",
@@ -757,22 +801,34 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                         str(payload.get("run_dir") or ""),
                         plan.contract.task_id,
                     )
-                model_decision = request_model_decision(
-                    "Ceraxia",
-                    "Inner Circle code task governor",
-                    payload,
-                    layer="governor_service",
-                    instructions="Plan a software engineering brigade task, identify implementation and verification risks, and keep the answer scoped to governor oversight.",
-                )
-                if not model_decision.get("ok"):
+                try:
+                    leadership_directive, model_decision = request_leadership_directive(
+                        task,
+                        plan.contract.task_id,
+                        command,
+                    )
+                except CeraxiaDirectiveError as exc:
                     response(
                         self,
-                        503,
+                        502,
                         {
                             "ok": False,
                             "governor": "Ceraxia",
-                            "error": "model brain did not answer",
-                            "error_code": "model_brain_unavailable",
+                            "error": str(exc),
+                            "error_code": "invalid_leadership_directive",
+                        },
+                    )
+                    return
+                if self.path == "/prepare_run" and leadership_directive["decision"] != "delegate":
+                    response(
+                        self,
+                        409,
+                        {
+                            "ok": False,
+                            "governor": "Ceraxia",
+                            "error": "Ceraxia did not authorize delegation to Skitarii",
+                            "error_code": "delegation_not_authorized",
+                            "leadership_directive": leadership_directive,
                             "model_brain": model_decision,
                         },
                     )
@@ -780,6 +836,7 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                 if self.path == "/plan":
                     plan_payload = _with_execution_contract(payload_with_plan_view(plan.to_dict()))
                     plan_payload["governor_plan"] = protocol_governor_plan(plan_payload, command)
+                    plan_payload["leadership_directive"] = leadership_directive
                     plan_payload["model_brain"] = model_decision
                     plan_payload = _bind_commander_order(plan_payload, command)
                     response(self, 200, plan_payload)
@@ -787,6 +844,7 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                 if self.path == "/callable_contract":
                     constraints = payload.get("constraints") if isinstance(payload.get("constraints"), dict) else {}
                     contract_payload = callable_contract_payload(task, task_id, repo_path=repo_path, constraints=constraints)
+                    contract_payload["leadership_directive"] = leadership_directive
                     contract_payload["model_brain"] = model_decision
                     contract_payload = _bind_commander_order(contract_payload, command)
                     response(self, 200, contract_payload)
@@ -814,6 +872,15 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                             plan.contract, run_dir, oversight=oversight_plan(plan.contract),
                             mission_id=mission_id,
                         )
+                        (run_dir / "ceraxia_directive.json").write_text(
+                            json.dumps(
+                                leadership_directive,
+                                ensure_ascii=False,
+                                indent=2,
+                                sort_keys=True,
+                            ) + "\n",
+                            encoding="utf-8",
+                        )
                         backend = skitarii_backend_health()
                         plan_payload = _with_execution_contract(
                             payload_with_plan_view(plan.to_dict()), backend,
@@ -831,10 +898,12 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                             "governor": "Ceraxia",
                             "model_brain": model_decision,
                             "governor_plan": governor_plan_payload,
+                            "leadership_directive": leadership_directive,
                             "status": status,
                             "phase": "run_prepared" if status.get("ok") else "prepare_failed",
                             "decision": {
                                 "can_handoff_to_warmaster": bool(status.get("ok")),
+                                "delegated_to": "SkitariiWarband",
                                 "recommended_kind": "handoff_run_package" if status.get("ok") else "",
                                 "recommended_endpoint": "",
                             },

@@ -31,6 +31,12 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from EyeOfTerror.common_protocol.ceraxia_directive import (  # noqa: E402
+    CeraxiaDirectiveError,
+    leadership_context_text,
+    validate_ceraxia_directive,
+)
 from warband import run_mission  # noqa: E402
 from planner import plan_and_run  # noqa: E402
 from executor import (  # noqa: E402
@@ -69,6 +75,9 @@ SERVICE_SOURCE_FILES = (
     "executor.py", "explorer.py", "reviewer.py", "clarify.py",
     "mission_store.py", "tools.py", "harness.py",
 )
+SHARED_SOURCE_FILES = (
+    "EyeOfTerror/common_protocol/ceraxia_directive.py",
+)
 
 
 def _service_source_sha256() -> str:
@@ -77,6 +86,10 @@ def _service_source_sha256() -> str:
     for name in SERVICE_SOURCE_FILES:
         digest.update(name.encode("utf-8") + b"\0")
         digest.update((root / name).read_bytes())
+    repo_root = root.parents[2]
+    for relative in SHARED_SOURCE_FILES:
+        digest.update(relative.encode("utf-8") + b"\0")
+        digest.update((repo_root / relative).read_bytes())
     return digest.hexdigest()
 
 
@@ -907,12 +920,48 @@ def _trusted_origin(value: str, host_authority: tuple[str, int]) -> bool:
     return authority == host_authority
 
 
+def leadership_context_from_payload(
+    payload: dict,
+    task_id: str,
+) -> tuple[dict, str]:
+    """Validate optional Ceraxia context before it can influence planning."""
+    raw = payload.get("leadership_directive")
+    if raw is None:
+        return {}, ""
+    if not isinstance(raw, dict):
+        raise CeraxiaDirectiveError("leadership_directive must be an object")
+    delegating_task_id = str(payload.get("delegating_task_id") or task_id).strip()
+    directive = validate_ceraxia_directive(
+        raw,
+        expected_task_id=delegating_task_id,
+        require_delegation=True,
+    )
+    return directive, leadership_context_text(directive)
+
+
 def _execute_mission_body(payload: dict, mission=None) -> dict:
     """Run one mission end to end and return the verdict. If `mission` is given it is an
     async mission_store.Mission: the fighter can ask it questions and be cancelled, and
     progress is journalled to it."""
     goal = str(payload.get("goal") or "").strip()
     task_id = str(payload.get("task_id") or f"m{int(time.time())}")
+    try:
+        leadership_directive, leadership_context = leadership_context_from_payload(
+            payload,
+            task_id,
+        )
+    except CeraxiaDirectiveError as exc:
+        return {
+            "status": "blocked",
+            "accepted": False,
+            "task_id": task_id,
+            "summary": "Blocked: Ceraxia leadership directive is invalid.",
+            "error": str(exc)[:500],
+            "leadership_directive_status": "invalid",
+            "files": {},
+        }
+    if leadership_context:
+        goal += "\n\n" + leadership_context
     checks = payload.get("checks") if isinstance(payload.get("checks"), list) else None
     workspace_files = payload.get("workspace_files") if isinstance(payload.get("workspace_files"), dict) else {}
     workspace_blobs = payload.get("workspace_blobs") if isinstance(payload.get("workspace_blobs"), dict) else {}
@@ -1080,6 +1129,13 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
         return verdict
     verdict["files"] = _collect_files(ex, verdict.get("artifacts") or [])
     verdict["task_id"] = task_id
+    if leadership_directive:
+        verdict["leadership"] = {
+            "leader": leadership_directive["leader"],
+            "decision": leadership_directive["decision"],
+            "mission_id": leadership_directive["mission_id"],
+            "delegating_task_id": leadership_directive["task_id"],
+        }
     verdict["held_out_required"] = held_out_required
     verdict["held_out_check_count"] = len(held_out_checks)
     if base_commit:

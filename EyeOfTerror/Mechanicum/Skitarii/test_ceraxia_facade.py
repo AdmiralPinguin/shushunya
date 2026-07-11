@@ -86,7 +86,31 @@ def _command(task_id: str) -> dict:
         primary_goal="почини python приложение",
         success_conditions=["Ceraxia publishes one consistent execution contract"],
         constraints=["Preserve the Warmaster preflight contract."],
+        escalate_to_user_if=["the requested behavior requires an irreversible product choice"],
     )
+
+
+def _directive_answer(
+    intent: str = "Deliver a verified repair without changing unrelated behavior",
+    *,
+    decision: str = "delegate",
+) -> dict:
+    return {
+        "ok": True,
+        "status": "answered",
+        "content": json.dumps(
+            {
+                "decision": decision,
+                "mission_intent": intent,
+                "priorities": ["correctness", "preserve existing behavior"],
+                "constraints": ["do not overwrite unrelated user changes"],
+                "success_conditions": ["the requested behavior is verified"],
+                "tradeoffs": ["prefer a narrow safe change over a broad rewrite"],
+                "escalation_conditions": ["a product choice changes observable behavior"],
+            },
+            ensure_ascii=False,
+        ),
+    }
 
 
 class TestCeraxiaFacade(unittest.TestCase):
@@ -110,9 +134,19 @@ class TestCeraxiaFacade(unittest.TestCase):
         self.assertEqual(payload["required_workers"], legacy_workers)
         self.assertEqual(payload["pipeline"]["required_workers"], legacy_workers)
         self.assertEqual(payload["pipeline"]["mode"], "legacy_six_worker_compatibility_adapter")
+        self.assertIs(payload["pipeline"]["authoritative"], False)
+        self.assertEqual(payload["pipeline"]["purpose"], "registry_preflight_only")
         self.assertEqual(payload["pipeline"]["active_execution_backend"], "SkitariiWarband")
         self.assertEqual(payload["execution_contract"]["planning_and_preflight"], "six_worker_registry_compatibility_adapter")
         self.assertEqual(payload["execution_contract"]["execution"], "SkitariiWarband")
+        self.assertEqual(
+            payload["execution_contract"]["leadership_contract"],
+            "native_ceraxia_directive_v1",
+        )
+        self.assertIs(
+            payload["execution_contract"]["compatibility_plan_authoritative"],
+            False,
+        )
         self.assertTrue(payload["active_execution_backend"]["healthy"])
         self.assertEqual(payload["active_execution_backend"]["lifecycle"], "active")
         self.assertEqual(payload["active_execution_backend"]["endpoint"], self.backend_url)
@@ -199,6 +233,164 @@ class TestCeraxiaFacade(unittest.TestCase):
         self.assertEqual(payload["worker_availability"]["scope"], "legacy_six_worker_compatibility_adapter")
         self.assertNotIn("SkitariiWarband", payload["worker_availability"]["resolved_workers"])
 
+    def test_leader_answer_is_authoritative_but_cannot_contain_a_file_plan(self) -> None:
+        decision = unittest.mock.Mock(return_value=_directive_answer("Use the compatibility-safe outcome"))
+        with patch.object(ceraxia_service, "request_model_decision", decision):
+            directive, _model = ceraxia_service.request_leadership_directive(
+                "fix the application",
+                "leader-contract",
+                _command("leader-contract"),
+            )
+        self.assertEqual(directive["mission_intent"], "Use the compatibility-safe outcome")
+        self.assertEqual(directive["constraints"][0], "Preserve the Warmaster preflight contract.")
+        self.assertEqual(
+            directive["success_conditions"][0],
+            "Ceraxia publishes one consistent execution contract",
+        )
+        self.assertEqual(
+            directive["escalation_conditions"][0],
+            "the requested behavior requires an irreversible product choice",
+        )
+        request_payload = decision.call_args.args[2]
+        self.assertIn("forbidden_detailed_plan_fields", request_payload)
+        instructions = decision.call_args.kwargs["instructions"]
+        self.assertIn("Skitarii owns repository exploration", instructions)
+        self.assertIn("exactly these seven literal top-level keys", instructions)
+        self.assertIn("Do not echo task_id or delegation_subject", instructions)
+
+        detailed = _directive_answer()
+        content = json.loads(detailed["content"])
+        content["files"] = ["app.py"]
+        detailed["content"] = json.dumps(content)
+        with (
+            patch.object(ceraxia_service, "request_model_decision", return_value=detailed),
+            self.assertRaisesRegex(ceraxia_service.CeraxiaDirectiveError, "detailed planning"),
+        ):
+            ceraxia_service.request_leadership_directive(
+                "fix the application",
+                "leader-contract",
+                _command("leader-contract"),
+            )
+
+        optional_order = _command("optional-boundaries")
+        optional_order.pop("constraints")
+        optional_order.pop("escalate_to_user_if")
+        optional_order["success_conditions"] *= 2
+        with patch.object(
+            ceraxia_service,
+            "request_model_decision",
+            return_value=_directive_answer(),
+        ):
+            optional_directive, _model = ceraxia_service.request_leadership_directive(
+                "fix the application",
+                "optional-boundaries",
+                optional_order,
+            )
+        self.assertEqual(
+            optional_directive["success_conditions"].count(
+                "Ceraxia publishes one consistent execution contract",
+            ),
+            1,
+        )
+
+    def test_gemma_fenced_directive_ignores_only_code_owned_echo_fields(self) -> None:
+        answer = _directive_answer()
+        content = json.loads(answer["content"])
+        content["task_id"] = "model-echo-must-not-own-identity"
+        content["delegation_subject"] = "model-echo-must-not-own-task"
+        answer["content"] = "```json\n" + json.dumps(content) + "\n```"
+        with patch.object(
+            ceraxia_service,
+            "request_model_decision",
+            return_value=answer,
+        ):
+            directive, _model = ceraxia_service.request_leadership_directive(
+                "fix the application",
+                "code-owned-task-id",
+                _command("code-owned-task-id"),
+            )
+        self.assertEqual(directive["task_id"], "code-owned-task-id")
+        self.assertEqual(directive["mission_id"], "mission-code-owned-task-id")
+        self.assertNotIn("delegation_subject", directive)
+
+        for extra_field, expected_error in (
+            ("leader", "unknown fields"),
+            ("files", "detailed planning"),
+        ):
+            invalid = dict(content, **{extra_field: "not allowed"})
+            fenced = dict(answer, content="```json\n" + json.dumps(invalid) + "\n```")
+            with (
+                patch.object(
+                    ceraxia_service,
+                    "request_model_decision",
+                    return_value=fenced,
+                ),
+                self.assertRaisesRegex(
+                    ceraxia_service.CeraxiaDirectiveError,
+                    expected_error,
+                ),
+            ):
+                ceraxia_service.request_leadership_directive(
+                    "fix the application",
+                    "code-owned-task-id",
+                    _command("code-owned-task-id"),
+                )
+
+        prose = dict(answer, content="Here is the answer:\n" + answer["content"])
+        with (
+            patch.object(
+                ceraxia_service,
+                "request_model_decision",
+                return_value=prose,
+            ),
+            self.assertRaisesRegex(
+                ceraxia_service.CeraxiaDirectiveError,
+                "without surrounding prose",
+            ),
+        ):
+            ceraxia_service.request_leadership_directive(
+                "fix the application",
+                "code-owned-task-id",
+                _command("code-owned-task-id"),
+            )
+
+    def test_non_delegation_leader_outcomes_do_not_create_a_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_root = Path(temp_dir) / "runs"
+            handler = ceraxia_service.make_handler(run_root)
+            server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{server.server_port}"
+            try:
+                for leader_decision in ("reject", "escalate"):
+                    task_id = f"leader-{leader_decision}"
+                    with (
+                        self.subTest(decision=leader_decision),
+                        patch.object(
+                            ceraxia_service,
+                            "request_model_decision",
+                            return_value=_directive_answer(decision=leader_decision),
+                        ),
+                        self.assertRaises(urllib.error.HTTPError) as caught,
+                    ):
+                        _request_json(
+                            base + "/prepare_run",
+                            {"task_id": task_id, "commander_order": _command(task_id)},
+                        )
+                    self.assertEqual(caught.exception.code, 409)
+                    response_payload = json.loads(caught.exception.read().decode("utf-8"))
+                    caught.exception.close()
+                    self.assertEqual(
+                        response_payload["leadership_directive"]["decision"],
+                        leader_decision,
+                    )
+                    self.assertFalse((run_root / task_id).exists())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
     def test_all_public_run_contract_routes_report_the_same_execution_model(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -207,17 +399,21 @@ class TestCeraxiaFacade(unittest.TestCase):
             service_thread = threading.Thread(target=service.serve_forever, daemon=True)
             service_thread.start()
             base = f"http://127.0.0.1:{service.server_port}"
-            answered = {"ok": True, "status": "answered", "content": {}}
+            answered = _directive_answer()
             try:
                 with (
                     patch.dict(os.environ, {"SKITARII_URL": self.backend_url}),
-                    patch.object(ceraxia_service, "request_model_decision", return_value=answered),
+                    patch.object(
+                        ceraxia_service,
+                        "request_model_decision",
+                        return_value=answered,
+                    ) as model_call,
                 ):
                     health = _request_json(base + "/health")
                     capabilities = _request_json(base + "/capabilities")
                     plan = _request_json(
                         base + "/plan",
-                        {"task_id": "facade-plan", "commander_order": _command("facade-plan"),
+                        {"task_id": "facade-run", "commander_order": _command("facade-run"),
                          "repo_path": str(ceraxia_service.REPO_ROOT)},
                     )
                     callable_payload = _request_json(
@@ -229,12 +425,18 @@ class TestCeraxiaFacade(unittest.TestCase):
                         {"task_id": "facade-run", "commander_order": _command("facade-run"),
                          "repo_path": str(ceraxia_service.REPO_ROOT)},
                     )
+                    persisted_directive = json.loads(
+                        (root / "runs" / "facade-run" / "ceraxia_directive.json").read_text(
+                            encoding="utf-8",
+                        ),
+                    )
             finally:
                 service.shutdown()
                 service.server_close()
                 service_thread.join(timeout=5)
 
         self.assertTrue(health["ok"])
+        self.assertEqual(model_call.call_count, 3)  # /plan, /callable, and authoritative /prepare.
         self.assertTrue(health["readiness"])
         self.assertTrue(health["backend"]["healthy"])
         for payload in (capabilities, plan, callable_payload, prepared):
@@ -242,6 +444,17 @@ class TestCeraxiaFacade(unittest.TestCase):
         self.assert_compatibility_contract(callable_payload["plan"])
         self.assertEqual(callable_payload["input_contract"]["required"], ["commander_order"])
         self.assertEqual(callable_payload["final_package_schema"]["kind"], "skitarii_bridge_result")
+        self.assertEqual(plan["leadership_directive"]["leader"], "Ceraxia")
+        self.assertEqual(plan["leadership_directive"]["delegated_to"], "SkitariiWarband")
+        self.assertEqual(plan["leadership_directive"]["mission_intent"],
+                         "Deliver a verified repair without changing unrelated behavior")
+        self.assertEqual(prepared["leadership_directive"], persisted_directive)
+        self.assertEqual(prepared["execution_contract"]["leadership"], "Ceraxia")
+        self.assertEqual(prepared["execution_contract"]["detailed_planning"], "SkitariiWarband")
+        self.assertFalse(
+            {"steps", "work_plan", "worker_plan", "files", "commands"}
+            & set(plan["leadership_directive"]),
+        )
         self.assertIsInstance(plan["next_action"]["body"]["commander_order"], dict)
         self.assertIsInstance(callable_payload["next_action"]["body"]["commander_order"], dict)
         self.assertNotIn("<commander_order>", json.dumps((plan, callable_payload)))
@@ -364,7 +577,7 @@ class TestCeraxiaFacade(unittest.TestCase):
                 self.assertIn("exceeds", oversized.read().decode("utf-8"))
                 connection.close()
 
-                answered = {"ok": True, "status": "answered", "content": {}}
+                answered = _directive_answer()
                 with (
                     patch.dict(
                         os.environ,
@@ -422,6 +635,136 @@ class TestCeraxiaFacade(unittest.TestCase):
         self.assertNotIn("Authorization", calls[1]["headers"])
         self.assertNotIn("scoped-secret", json.dumps(calls[1]))
 
+    def test_local_ceraxia_transport_cannot_bypass_leader_directive(self) -> None:
+        from eye_of_terror import task_prepare
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_root = Path(temp_dir)
+            order = _command("local-bypass")
+            prepared = task_prepare.prepare_task(
+                "raw task must not bypass Ceraxia",
+                "local-bypass",
+                run_root,
+                governor_transport="local",
+                forced_governor="Ceraxia",
+                commander_order=order,
+            )
+            preflight = task_prepare.preflight_task(
+                "raw task must not bypass Ceraxia",
+                "local-bypass",
+                run_root,
+                governor_transport="local",
+                forced_governor="Ceraxia",
+                commander_order=order,
+            )
+            self.assertFalse((run_root / "local-bypass").exists())
+        self.assertEqual(prepared["error_code"], "ceraxia_leader_service_required")
+        self.assertEqual(preflight["error_code"], "ceraxia_leader_service_required")
+
+    def test_cleanup_refuses_run_root_and_symlink(self) -> None:
+        from eye_of_terror import task_prepare
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_root = Path(temp_dir) / "runs"
+            run_root.mkdir()
+            sentinel = run_root / "keep.txt"
+            sentinel.write_text("keep", encoding="utf-8")
+
+            root_result = task_prepare.cleanup_unregistered_run_dir(run_root, run_root)
+            self.assertFalse(root_result["attempted"])
+            self.assertEqual(root_result["reason"], "run_dir is run_root")
+            self.assertTrue(sentinel.exists())
+
+            symlink = run_root / "forged-task"
+            symlink.symlink_to(run_root, target_is_directory=True)
+            symlink_result = task_prepare.cleanup_unregistered_run_dir(run_root, symlink)
+            self.assertFalse(symlink_result["attempted"])
+            self.assertEqual(symlink_result["reason"], "run_dir is a symlink")
+            self.assertTrue(sentinel.exists())
+
+    def test_http_preflight_cannot_ignore_a_reject_directive(self) -> None:
+        from eye_of_terror import task_prepare
+
+        task_id = "http-reject"
+        order = _command(task_id)
+        with patch.object(
+            ceraxia_service,
+            "request_model_decision",
+            return_value=_directive_answer(decision="reject"),
+        ):
+            directive, _model = ceraxia_service.request_leadership_directive(
+                "do not execute",
+                task_id,
+                order,
+            )
+        plan_payload = {
+            "ok": True,
+            "contract": {"task_id": task_id},
+            "leadership_directive": directive,
+        }
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            patch.object(task_prepare, "_post_governor_json", return_value=plan_payload),
+            patch.object(
+                task_prepare,
+                "attach_governor_plan_payload",
+                side_effect=lambda payload, *_args, **_kwargs: payload,
+            ),
+            patch.object(task_prepare, "fetch_service_capabilities", return_value={"ok": False}),
+        ):
+            result = task_prepare.preflight_task(
+                "do not execute",
+                task_id,
+                Path(temp_dir),
+                governor_transport="http",
+                forced_governor="Ceraxia",
+                commander_order=order,
+            )
+        self.assertEqual(result["error_code"], "ceraxia_delegation_not_authorized")
+        self.assertEqual(result["leadership_directive"]["decision"], "reject")
+
+    def test_task_prepare_trusts_the_persisted_prepare_directive(self) -> None:
+        from eye_of_terror import task_prepare
+
+        directive = {
+            "kind": "ceraxia_leadership_directive",
+            "version": 1,
+            "task_id": "prepared-directive",
+            "mission_id": "mission-prepared-directive",
+            "leader": "Ceraxia",
+            "decision": "delegate",
+            "delegated_to": "SkitariiWarband",
+            "mission_intent": "Deliver the requested verified outcome",
+            "priorities": ["correctness"],
+            "constraints": ["preserve caller constraints"],
+            "success_conditions": ["behavior is verified"],
+            "tradeoffs": [],
+            "escalation_conditions": [],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir)
+            (run_dir / "ceraxia_directive.json").write_text(
+                json.dumps(directive),
+                encoding="utf-8",
+            )
+            accepted = task_prepare.validated_prepared_ceraxia_directive(
+                run_dir,
+                {"leadership_directive": directive},
+                "prepared-directive",
+                "mission-prepared-directive",
+            )
+            self.assertEqual(accepted, directive)
+            with self.assertRaisesRegex(
+                task_prepare.CeraxiaDirectiveError,
+                "do not match",
+            ):
+                task_prepare.validated_prepared_ceraxia_directive(
+                    run_dir,
+                    {"leadership_directive": dict(directive, mission_intent="different")},
+                    "prepared-directive",
+                    "mission-prepared-directive",
+                )
+
     def test_prepare_run_is_bound_to_exact_task_scoped_roots(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base_dir = Path(temp_dir)
@@ -464,7 +807,7 @@ class TestCeraxiaFacade(unittest.TestCase):
                 thread = threading.Thread(target=service.serve_forever, daemon=True)
                 thread.start()
                 endpoint = f"http://127.0.0.1:{service.server_port}"
-                answered = {"ok": True, "status": "answered", "content": {}}
+                answered = _directive_answer()
                 decision = unittest.mock.Mock(return_value=answered)
                 try:
                     with (
@@ -516,7 +859,7 @@ class TestCeraxiaFacade(unittest.TestCase):
                 with (
                     patch.object(
                         ceraxia_service, "request_model_decision",
-                        return_value={"ok": True, "status": "answered", "content": {}},
+                        return_value=_directive_answer(),
                     ),
                     patch.object(
                         ceraxia_service, "write_pipeline_run",
@@ -545,7 +888,7 @@ class TestCeraxiaFacade(unittest.TestCase):
             try:
                 with patch.object(
                     ceraxia_service, "request_model_decision",
-                    return_value={"ok": True, "status": "answered", "content": {}},
+                    return_value=_directive_answer(),
                 ):
                     with self.assertRaises(urllib.error.HTTPError) as caught:
                         _request_json(

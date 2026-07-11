@@ -65,6 +65,44 @@ def _http_request(method: str, path: str, *, body: bytes | None = None,
 
 
 class TestPatchBundle(unittest.TestCase):
+    def test_skitarii_validates_and_renders_ceraxia_leadership_context(self):
+        directive = {
+            "kind": "ceraxia_leadership_directive",
+            "version": 1,
+            "task_id": "parent-task",
+            "mission_id": "mission-parent-task",
+            "leader": "Ceraxia",
+            "decision": "delegate",
+            "delegated_to": "SkitariiWarband",
+            "mission_intent": "Deliver a compatible verified change",
+            "priorities": ["correctness", "compatibility"],
+            "constraints": ["preserve unrelated behavior"],
+            "success_conditions": ["the requested behavior is verified"],
+            "tradeoffs": [],
+            "escalation_conditions": ["observable behavior requires a product choice"],
+        }
+        validated, context = service.leadership_context_from_payload(
+            {
+                "task_id": "wm-parent-task-a1",
+                "delegating_task_id": "parent-task",
+                "leadership_directive": directive,
+            },
+            "wm-parent-task-a1",
+        )
+        self.assertEqual(validated, directive)
+        self.assertIn("Deliver a compatible verified change", context)
+        self.assertIn("Skitarii owns repository exploration", context)
+
+        mismatched = dict(directive, task_id="another-task")
+        with self.assertRaisesRegex(service.CeraxiaDirectiveError, "does not match"):
+            service.leadership_context_from_payload(
+                {
+                    "delegating_task_id": "parent-task",
+                    "leadership_directive": mismatched,
+                },
+                "wm-parent-task-a1",
+            )
+
     def test_symlink_scan_uses_a_synchronous_trusted_inventory(self):
         class RecordingExecutor:
             def __init__(self):

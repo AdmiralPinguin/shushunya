@@ -198,10 +198,16 @@ def evaluated_source_identity() -> dict:
         "harness.py", "mission_store.py", "planner.py", "reviewer.py", "service.py",
         "spec.py", "tools.py", "warband.py",
     )
+    shared_source_names = (
+        "EyeOfTerror/common_protocol/ceraxia_directive.py",
+    )
     digest = hashlib.sha256()
     for name in source_names:
         path = Path(__file__).resolve().parent / name
         digest.update(name.encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
+    for relative in shared_source_names:
+        path = root / relative
+        digest.update(relative.encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
     service_digest = hashlib.sha256()
     for name in (
         "service.py", "spec.py", "acceptor.py", "warband.py", "planner.py",
@@ -210,6 +216,10 @@ def evaluated_source_identity() -> dict:
     ):
         path = Path(__file__).resolve().parent / name
         service_digest.update(name.encode("utf-8") + b"\0")
+        service_digest.update(path.read_bytes())
+    for relative in shared_source_names:
+        path = root / relative
+        service_digest.update(relative.encode("utf-8") + b"\0")
         service_digest.update(path.read_bytes())
     try:
         head = subprocess.run(
