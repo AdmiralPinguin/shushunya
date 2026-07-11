@@ -17,6 +17,7 @@ TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8090").rstrip("/")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "").strip()
 LLM_MODEL = os.environ.get("LLM_MODEL", os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"))
+DIRECT_MODEL_DEFAULT = os.environ.get("DIRECT_MODEL_DEFAULT", "qwen").strip().lower() or "qwen"
 MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "2048"))
 MAX_CONTINUATIONS = int(os.environ.get("MAX_CONTINUATIONS", "3"))
 CONTINUATION_TAIL_CHARS = int(os.environ.get("CONTINUATION_TAIL_CHARS", "2500"))
@@ -36,6 +37,19 @@ ARCHIVE_ALLOWLIST = {
     for item in os.environ.get("TELEGRAM_ARCHIVE_ALLOWLIST", "7791909246,@Ebuchaya_psina").split(",")
     if item.strip()
 }
+DIRECT_MODELS = {
+    "qwen": {
+        "label": "Qwen 80B Coder",
+        "base_url": os.environ.get("QWEN_LLM_BASE_URL", "http://127.0.0.1:8081").rstrip("/"),
+        "model": os.environ.get("QWEN_LLM_MODEL", "Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf"),
+    },
+    "gemma": {
+        "label": "Gemma 12B",
+        "base_url": os.environ.get("GEMMA_LLM_BASE_URL", "http://127.0.0.1:8080").rstrip("/"),
+        "model": os.environ.get("GEMMA_LLM_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"),
+    },
+}
+CHAT_MODEL_SELECTIONS = {}
 
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -48,6 +62,32 @@ NEXT_SHARED_DELIVERY_AT = 0.0
 def stop(_signum, _frame):
     global RUNNING
     RUNNING = False
+
+
+def selected_model_key(chat_id):
+    key = CHAT_MODEL_SELECTIONS.get(str(chat_id), DIRECT_MODEL_DEFAULT)
+    if key not in DIRECT_MODELS:
+        key = "qwen"
+    return key
+
+
+def selected_model(chat_id):
+    return DIRECT_MODELS[selected_model_key(chat_id)]
+
+
+def model_keyboard(active_key):
+    rows = []
+    for key, config in DIRECT_MODELS.items():
+        marker = "✓ " if key == active_key else ""
+        rows.append(
+            [
+                {
+                    "text": f"{marker}{config['label']}",
+                    "callback_data": f"model:{key}",
+                }
+            ]
+        )
+    return {"inline_keyboard": rows}
 
 
 def request_json(url, payload=None, timeout=60):
@@ -89,20 +129,20 @@ def download_telegram_file(file_id, destination):
         destination.write_bytes(response.read())
 
 
-def send_message(chat_id, text):
+def send_message(chat_id, text, reply_markup=None):
     if not text:
         text = "Модель вернула пустой ответ."
 
     chunks = [text[i : i + 3900] for i in range(0, len(text), 3900)]
     for chunk in chunks:
-        telegram(
-            "sendMessage",
-            {
+        payload = {
                 "chat_id": chat_id,
                 "text": chunk,
                 "disable_web_page_preview": True,
-            },
-        )
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        telegram("sendMessage", payload)
 
 
 def send_typing(chat_id):
@@ -367,17 +407,17 @@ class DraftStreamer:
 
 def ask_llm(chat_id, text, username=None):
     messages = [{"role": "user", "content": text}]
+    llm = selected_model(chat_id)
 
     answer_parts = []
     reason = None
     for attempt in range(MAX_CONTINUATIONS + 1):
         try:
             response = request_json(
-                f"{LLM_BASE_URL}/v1/chat/completions",
+                f"{llm['base_url']}/v1/chat/completions",
                 {
-                    "model": LLM_MODEL,
+                    "model": llm["model"],
                     "user": str(chat_id),
-                    **archive_flags(chat_id, username=username),
                     "messages": messages,
                     "max_tokens": MAX_TOKENS,
                     "temperature": TEMPERATURE,
@@ -408,10 +448,10 @@ def ask_llm(chat_id, text, username=None):
 
 
 def stream_once(messages, chat_id, username, draft_streamer, answer_parts):
+    llm = selected_model(chat_id)
     payload = {
-        "model": LLM_MODEL,
+        "model": llm["model"],
         "user": str(chat_id),
-        **archive_flags(chat_id, username=username),
         "messages": messages,
         "max_tokens": MAX_TOKENS,
         "temperature": TEMPERATURE,
@@ -419,7 +459,7 @@ def stream_once(messages, chat_id, username, draft_streamer, answer_parts):
     }
 
     reason = None
-    with open_json_stream(f"{LLM_BASE_URL}/v1/chat/completions", payload, timeout=180) as response:
+    with open_json_stream(f"{llm['base_url']}/v1/chat/completions", payload, timeout=180) as response:
         for raw_line in response:
             decoded = raw_line.decode("utf-8", errors="replace").strip()
             if not decoded.startswith("data:"):
@@ -482,6 +522,39 @@ def stream_llm(chat_id, text, username=None):
     return answer
 
 
+def send_model_picker(chat_id):
+    active_key = selected_model_key(chat_id)
+    active = DIRECT_MODELS[active_key]
+    send_message(
+        chat_id,
+        f"Сейчас выбрана: {active['label']}\nСледующие сообщения пойдут напрямую в эту модель.",
+        reply_markup=model_keyboard(active_key),
+    )
+
+
+def handle_callback_query(callback_query):
+    query_id = callback_query.get("id")
+    message = callback_query.get("message") or {}
+    chat = message.get("chat") or {}
+    chat_id = chat.get("id")
+    data = str(callback_query.get("data") or "")
+
+    if query_id:
+        telegram("answerCallbackQuery", {"callback_query_id": query_id}, timeout=10)
+
+    if not chat_id or not data.startswith("model:"):
+        return
+
+    key = data.split(":", 1)[1].strip().lower()
+    if key not in DIRECT_MODELS:
+        send_message(chat_id, f"Неизвестная модель: {key}")
+        return
+
+    CHAT_MODEL_SELECTIONS[str(chat_id)] = key
+    config = DIRECT_MODELS[key]
+    send_message(chat_id, f"Переключил на {config['label']}. Следующий запрос пойдет напрямую в нее.")
+
+
 def handle_message(message):
     chat = message.get("chat") or {}
     sender = message.get("from") or {}
@@ -502,14 +575,20 @@ def handle_message(message):
         return
 
     if text in ("/start", "/help"):
+        active = selected_model(chat_id)
         send_message(
             chat_id,
-            "Я подключён к локальной Gemma 4 12B через ArchiveOfHeresy. Напиши сообщение, и я передам его модели.",
+            f"Я подключён напрямую к локальной модели: {active['label']}. /model - выбрать модель.",
         )
         return
 
+    if text == "/model":
+        send_model_picker(chat_id)
+        return
+
     if text == "/reset":
-        send_message(chat_id, "Локальная история сообщений уже отключена. Контекст держит ArchiveOfHeresy через focus-файл.")
+        CHAT_MODEL_SELECTIONS.pop(str(chat_id), None)
+        send_message(chat_id, "Сбросил выбор модели на дефолт.")
         return
 
     send_typing(chat_id)
@@ -535,11 +614,14 @@ def main():
     signal.signal(signal.SIGINT, stop)
 
     offset = None
-    print(f"Telegram bot started. LLM: {LLM_BASE_URL}, model: {LLM_MODEL}", flush=True)
+    models_summary = ", ".join(
+        f"{key}={config['base_url']}:{config['model']}" for key, config in DIRECT_MODELS.items()
+    )
+    print(f"Telegram bot started. Direct models: {models_summary}; default={DIRECT_MODEL_DEFAULT}", flush=True)
     initialize_shared_delivery_cursor()
 
     while RUNNING:
-        payload = {"timeout": 30, "allowed_updates": ["message"]}
+        payload = {"timeout": 30, "allowed_updates": ["message", "callback_query"]}
         if offset is not None:
             payload["offset"] = offset
 
@@ -549,6 +631,8 @@ def main():
                 offset = update["update_id"] + 1
                 if "message" in update:
                     handle_message(update["message"])
+                if "callback_query" in update:
+                    handle_callback_query(update["callback_query"])
             deliver_shared_chat_updates()
         except Exception as exc:
             print(f"Polling error: {exc}", file=sys.stderr, flush=True)
