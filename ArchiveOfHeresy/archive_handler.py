@@ -53,6 +53,11 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "sqlite_path": str(SQLITE_PATH),
                     "reports_root": str(REPORTS_ROOT),
                     "chat_context_messages": CHAT_CONTEXT_MESSAGES,
+                    "chat_queue": {
+                        **CHAT_QUEUE_LOCK.snapshot(),
+                        "wait_timeout_sec": CHAT_QUEUE_WAIT_TIMEOUT_SEC,
+                        **archive_state.CHAT_SESSION_LOCKS.snapshot(),
+                    },
                     "magos_context_layers": sorted(MAGOS_CONTEXT_LAYERS),
                     "direct_injection": {
                         "vector": VECTOR_INJECTION_ENABLED,
@@ -1636,16 +1641,18 @@ class ArchiveHandler(BaseHTTPRequestHandler):
 
     def mobile_chat_completion(self):
         maintenance_record = None
-        with CHAT_QUEUE_LOCK:
+        try:
+            payload = read_json(self)
+        except json.JSONDecodeError as exc:
+            write_json(self, 400, {"error": f"Invalid JSON: {exc}"})
+            return
+
+        session_id = shared_chat_session_id(payload.get("session_id") or payload.get("user") or SHARED_CHAT_SESSION_ID)
+        # Preserve turn order inside one conversation, but do not let queued
+        # turns from that conversation occupy all four global pipeline slots.
+        with archive_state.CHAT_SESSION_LOCKS.hold(session_id), CHAT_QUEUE_LOCK:
             created_at = now_iso()
             turn_id = str(uuid.uuid4())
-            try:
-                payload = read_json(self)
-            except json.JSONDecodeError as exc:
-                write_json(self, 400, {"error": f"Invalid JSON: {exc}"})
-                return
-
-            session_id = shared_chat_session_id(payload.get("session_id") or payload.get("user") or SHARED_CHAT_SESSION_ID)
             text = trim_chat_text(payload.get("text") or payload.get("message") or "")
             image_data_url = str(payload.get("image_data_url") or "").strip()
             if not text and not image_data_url:

@@ -17,7 +17,7 @@ TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8090").rstrip("/")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "").strip()
 LLM_MODEL = os.environ.get("LLM_MODEL", os.environ.get("ARCHIVE_DEFAULT_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"))
-DIRECT_MODEL_DEFAULT = os.environ.get("DIRECT_MODEL_DEFAULT", "qwen").strip().lower() or "qwen"
+DIRECT_MODEL_DEFAULT = os.environ.get("DIRECT_MODEL_DEFAULT", "gemma").strip().lower() or "gemma"
 MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "2048"))
 MAX_CONTINUATIONS = int(os.environ.get("MAX_CONTINUATIONS", "3"))
 CONTINUATION_TAIL_CHARS = int(os.environ.get("CONTINUATION_TAIL_CHARS", "2500"))
@@ -32,23 +32,27 @@ TELEGRAM_SHARED_CHAT_ENABLED = os.environ.get("TELEGRAM_SHARED_CHAT_ENABLED", "1
 TELEGRAM_SHARED_DELIVERY_ENABLED = os.environ.get("TELEGRAM_SHARED_DELIVERY_ENABLED", "0").strip().lower() not in ("0", "false", "no", "off")
 TELEGRAM_SHARED_DELIVERY_CHAT_ID = os.environ.get("TELEGRAM_SHARED_DELIVERY_CHAT_ID", "7791909246").strip()
 TELEGRAM_SHARED_DELIVERY_INTERVAL_SEC = max(1.0, float(os.environ.get("TELEGRAM_SHARED_DELIVERY_INTERVAL_SEC", "10")))
+TELEGRAM_ARCHIVE_JOB_TIMEOUT_SEC = max(1.0, float(os.environ.get("TELEGRAM_ARCHIVE_JOB_TIMEOUT_SEC", "900")))
+TELEGRAM_ARCHIVE_JOB_POLL_INTERVAL_SEC = max(
+    0.1,
+    float(os.environ.get("TELEGRAM_ARCHIVE_JOB_POLL_INTERVAL_SEC", "1.2")),
+)
 ARCHIVE_ALLOWLIST = {
     item.strip().lower()
     for item in os.environ.get("TELEGRAM_ARCHIVE_ALLOWLIST", "7791909246,@Ebuchaya_psina").split(",")
     if item.strip()
 }
 DIRECT_MODELS = {
-    "qwen": {
-        "label": "Qwen 80B Coder",
-        "base_url": os.environ.get("QWEN_LLM_BASE_URL", "http://127.0.0.1:8081").rstrip("/"),
-        "model": os.environ.get("QWEN_LLM_MODEL", "Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf"),
-    },
     "gemma": {
-        "label": "Gemma 12B",
-        "base_url": os.environ.get("GEMMA_LLM_BASE_URL", "http://127.0.0.1:8080").rstrip("/"),
+        "label": "Gemma 12B vLLM",
+        # Interactive traffic always enters through the four-slot dispatcher.
+        # Qwen is intentionally absent: it is reserved for background Warbands.
+        "base_url": os.environ.get("LLM_DISPATCH_BASE_URL", "http://127.0.0.1:8079").rstrip("/"),
         "model": os.environ.get("GEMMA_LLM_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"),
     },
 }
+if DIRECT_MODEL_DEFAULT not in DIRECT_MODELS:
+    DIRECT_MODEL_DEFAULT = "gemma"
 CHAT_MODEL_SELECTIONS = {}
 
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
@@ -67,7 +71,7 @@ def stop(_signum, _frame):
 def selected_model_key(chat_id):
     key = CHAT_MODEL_SELECTIONS.get(str(chat_id), DIRECT_MODEL_DEFAULT)
     if key not in DIRECT_MODELS:
-        key = "qwen"
+        key = "gemma"
     return key
 
 
@@ -256,9 +260,24 @@ def shared_chat_answer(chat_id, text, username=None):
     job_id = str(started.get("job_id") or "").strip()
     if not job_id:
         raise RuntimeError(f"Archive did not return job_id: {started}")
+
+    timeout_sec = max(0.0, float(TELEGRAM_ARCHIVE_JOB_TIMEOUT_SEC))
+    deadline = time.monotonic() + timeout_sec
+    last_status = "queued"
     while RUNNING:
-        snapshot = archive_get(f"/archive/client/job?job_id={job_id}", timeout=30)
-        status = snapshot.get("status")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(
+                f"Archive job {job_id} did not finish within {timeout_sec:g}s "
+                f"(last status: {last_status}); it may be orphaned"
+            )
+        snapshot = archive_get(
+            f"/archive/client/job?job_id={job_id}",
+            timeout=max(0.1, min(30.0, remaining)),
+        )
+        if not isinstance(snapshot, dict):
+            raise RuntimeError(f"Archive returned an invalid job snapshot for {job_id}")
+        status = str(snapshot.get("status") or "").strip().lower()
         if status == "done":
             response = snapshot.get("response") or {}
             message = str(response.get("message") or "").strip()
@@ -269,9 +288,16 @@ def shared_chat_answer(chat_id, text, username=None):
             if choices:
                 return str(((choices[0].get("message") or {}).get("content")) or "").strip()
             return "Archive завершил задачу без текста ответа."
-        if status == "failed":
+        if status in {"failed", "cancelled", "abandoned"}:
             raise RuntimeError(snapshot.get("error") or "Archive chat job failed")
-        time.sleep(1.2)
+        if snapshot.get("ok") is False or status not in {"queued", "running"}:
+            error = str(snapshot.get("error") or "").strip()
+            raise RuntimeError(error or f"Archive job {job_id} returned unexpected status: {status or 'missing'}")
+        last_status = status
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            continue
+        time.sleep(min(TELEGRAM_ARCHIVE_JOB_POLL_INTERVAL_SEC, remaining))
     return "Telegram bot stopped before Archive finished."
 
 

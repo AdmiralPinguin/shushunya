@@ -15,8 +15,9 @@ from archive_config import *  # noqa: F401,F403
 from archive_httpio import *  # noqa: F401,F403
 from archive_util import *  # noqa: F401,F403
 from semantic_memory import SEMANTIC_MIN_SCORE, semantic_scores
-from archive_state import (ARCHIVE_LOCK, CHAT_QUEUE_LOCK, CHAT_QUEUE_WAIT_TIMEOUT_SEC, ChatQueueBusy,
-    MAINTENANCE_LOCK, MOBILE_JOB_LOCK, TimedChatQueueLock)
+from archive_state import (ARCHIVE_LOCK, CHAT_QUEUE_LOCK, CHAT_QUEUE_WAIT_TIMEOUT_SEC,
+    CHAT_SESSION_LOCKS, ChatQueueBusy, MAINTENANCE_LOCK, MOBILE_JOB_LOCK,
+    TimedChatQueueLock)
 from archivist_agent import Librarian
 from archivist_agent.agent import FocusBookshelf, WikiBookshelf
 from archivist_agent.graph_memory import GRAPH_TOP_K, GraphMemory
@@ -232,15 +233,17 @@ def memory_search(memory_namespace, query, limit=5, include_content=False, layer
 def run_mobile_chat_payload(payload, on_token=None):
     LLM_PRIORITY.set("chat")  # the owner's live answer jumps ahead of brigade work
     maintenance_record = None
-    with CHAT_QUEUE_LOCK:
+    payload = dict(payload)
+    session_id = shared_chat_session_id(payload.get("session_id") or payload.get("user") or "default")
+    # Same-session waiters stay outside the four global pipeline slots, so one
+    # noisy conversation cannot head-of-line block unrelated sessions.
+    with CHAT_SESSION_LOCKS.hold(session_id), CHAT_QUEUE_LOCK:
         created_at = now_iso()
         turn_id = str(uuid.uuid4())
-        payload = dict(payload)
         # Carry only a named, allow-listed route. Direct llama.cpp deployments
         # safely ignore the internal header emitted by archive_httpio.
         model_route = set_llm_route(payload.get("model_route"))
         payload["stream"] = False
-        session_id = shared_chat_session_id(payload.get("session_id") or payload.get("user") or "default")
         client_source = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
         text = trim_chat_text(payload.get("text") or payload.get("message") or "")
         image_data_url = str(payload.get("image_data_url") or "").strip()
