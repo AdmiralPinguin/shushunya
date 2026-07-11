@@ -37,8 +37,8 @@ VLLM_USE_FLASHINFER_SAMPLER=0 VLLM_ATTENTION_BACKEND=FLASH_ATTN \
 setsid nohup CoreOfMadness/vllm-host/venv/bin/vllm serve "$MODEL" \
   --served-model-name gemma-4-12b-it-UD-Q5_K_XL.gguf google/gemma-4-12B-it-qat-w4a16-ct \
   --host 127.0.0.1 --port 8080 \
-  --max-model-len "${MAX_MODEL_LEN:-65536}" \
-  --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.92}" \
+  --max-model-len "${MAX_MODEL_LEN:-32768}" \
+  --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.66}" \
   --dtype auto --trust-remote-code \
   >> "$LOG" 2>&1 </dev/null &
 echo "$!" > "$PID_FILE"
