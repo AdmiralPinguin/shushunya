@@ -51,6 +51,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
 import android.util.Base64;
@@ -160,8 +161,8 @@ public class MainActivity extends Activity {
         LinearLayout cardsHost;
         LinearLayout finalHost;
         String cardKey = "";
+        String finalKey = "";
         final java.util.ArrayList<String> cardKeys = new java.util.ArrayList<>();
-        boolean finalShown;
     }
     private boolean chatDeltaLoopRunning;
     private final java.util.ArrayDeque<String> pendingLocalEchoes = new java.util.ArrayDeque<>();
@@ -171,6 +172,7 @@ public class MainActivity extends Activity {
     private ScrollView scrollView;
     private EditText input;
     private ImageView selectedImagePreview;
+    private FrameLayout selectedImagePreviewHost;
     private ImageButton attachImage;
     private ImageButton send;
     private ProgressBar progress;
@@ -191,6 +193,9 @@ public class MainActivity extends Activity {
     private LinearLayout commandPalette;
     private LinearLayout bottomNavigation;
     private final java.util.LinkedHashMap<String, TextView> navItems = new java.util.LinkedHashMap<>();
+    private final java.util.LinkedHashMap<String, Button> agentFilterButtons = new java.util.LinkedHashMap<>();
+    private FrameLayout appRoot;
+    private LinearLayout appMainColumn;
     private TextView warpOrb;
     private ValueAnimator warpAnimator;
     private LinearLayout agentMessageList;
@@ -250,7 +255,7 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         preferHighRefreshRate();
-        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
         createNotificationChannel();
         requestNotificationPermissionIfNeeded();
         try {
@@ -412,33 +417,23 @@ public class MainActivity extends Activity {
         int turquoise = WARP;
 
         FrameLayout root = new FrameLayout(this);
+        appRoot = root;
         root.setBackground(makeBackground());
 
         LinearLayout mainColumn = new LinearLayout(this);
+        appMainColumn = mainColumn;
         mainColumn.setOrientation(LinearLayout.VERTICAL);
-        mainColumn.setPadding(dp(16), dp(10), dp(16), dp(12));
+        mainColumn.setPadding(dp(16), 0, dp(16), 0);
         root.addView(mainColumn, new FrameLayout.LayoutParams(-1, -1));
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
-        header.setPadding(0, dp(5), 0, dp(12));
+        header.setPadding(0, dp(3), 0, dp(7));
         mainColumn.addView(header, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
         header.addView(titleRow, new LinearLayout.LayoutParams(-1, -2));
-
-        Button menu = new Button(this);
-        menu.setText("☰");
-        menu.setTextColor(TEXT);
-        menu.setTextSize(21);
-        menu.setTypeface(Typeface.DEFAULT_BOLD);
-        menu.setMinWidth(0);
-        menu.setMinimumWidth(0);
-        menu.setPadding(0, 0, 0, dp(2));
-        menu.setBackground(pill(SURFACE_RAISED, LINE, dp(20)));
-        titleRow.addView(menu, new LinearLayout.LayoutParams(dp(42), dp(42)));
-        menu.setOnClickListener(v -> setDrawerOpen(true));
 
         warpOrb = new TextView(this);
         warpOrb.setText("✦");
@@ -447,8 +442,8 @@ public class MainActivity extends Activity {
         warpOrb.setTextSize(18);
         warpOrb.setTypeface(Typeface.DEFAULT_BOLD);
         warpOrb.setBackground(gradientPill(WARP, WARP_DEEP, WARP, dp(20)));
-        LinearLayout.LayoutParams orbLp = new LinearLayout.LayoutParams(dp(40), dp(40));
-        orbLp.leftMargin = dp(9);
+        warpOrb.setContentDescription("Состояние Шушуни");
+        LinearLayout.LayoutParams orbLp = new LinearLayout.LayoutParams(dp(42), dp(42));
         titleRow.addView(warpOrb, orbLp);
         startWarpPulse();
 
@@ -459,6 +454,8 @@ public class MainActivity extends Activity {
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setLetterSpacing(-0.02f);
         title.setGravity(Gravity.CENTER_VERTICAL);
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, dp(42), 1);
         titleLp.leftMargin = dp(9);
         titleRow.addView(title, titleLp);
@@ -484,12 +481,12 @@ public class MainActivity extends Activity {
         endpoint.setTypeface(Typeface.DEFAULT_BOLD);
         endpoint.setLetterSpacing(0.08f);
         endpoint.setSingleLine(true);
-        endpoint.setPadding(dp(100), dp(1), 0, 0);
+        endpoint.setPadding(dp(51), 0, 0, 0);
         header.addView(endpoint, new LinearLayout.LayoutParams(-1, dp(24)));
 
         bottomNavigation = buildBottomNavigation();
-        LinearLayout.LayoutParams navLp = new LinearLayout.LayoutParams(-1, dp(46));
-        navLp.bottomMargin = dp(5);
+        LinearLayout.LayoutParams navLp = new LinearLayout.LayoutParams(-1, dp(54));
+        navLp.bottomMargin = dp(4);
         mainColumn.addView(bottomNavigation, navLp);
 
         contentHost = new FrameLayout(this);
@@ -536,16 +533,34 @@ public class MainActivity extends Activity {
         inputPanel.setPadding(0, dp(8), 0, 0);
         chatView.addView(inputPanel, new LinearLayout.LayoutParams(-1, -2));
 
+        selectedImagePreviewHost = new FrameLayout(this);
+        selectedImagePreviewHost.setVisibility(View.GONE);
+        selectedImagePreviewHost.setBackground(pill(SURFACE_RAISED, LINE, dp(18)));
+
         selectedImagePreview = new ImageView(this);
         selectedImagePreview.setScaleType(ImageView.ScaleType.CENTER_CROP);
         selectedImagePreview.setBackground(pill(SURFACE_RAISED, WARP, dp(18)));
         selectedImagePreview.setPadding(dp(2), dp(2), dp(2), dp(2));
-        selectedImagePreview.setVisibility(View.GONE);
-        selectedImagePreview.setOnClickListener(v -> clearPendingImage());
+        selectedImagePreviewHost.addView(selectedImagePreview, new FrameLayout.LayoutParams(-1, -1));
+
+        TextView removePreview = new TextView(this);
+        removePreview.setText("×");
+        removePreview.setTextColor(TEXT);
+        removePreview.setTextSize(22);
+        removePreview.setTypeface(Typeface.DEFAULT_BOLD);
+        removePreview.setGravity(Gravity.CENTER);
+        removePreview.setContentDescription("Удалить вложение");
+        removePreview.setBackground(pill(Color.argb(220, 14, 15, 25), LINE, dp(18)));
+        FrameLayout.LayoutParams removePreviewLp = new FrameLayout.LayoutParams(dp(38), dp(38), Gravity.TOP | Gravity.RIGHT);
+        removePreviewLp.topMargin = dp(5);
+        removePreviewLp.rightMargin = dp(5);
+        selectedImagePreviewHost.addView(removePreview, removePreviewLp);
+        removePreview.setOnClickListener(v -> clearPendingImage());
+
         LinearLayout.LayoutParams previewLp = new LinearLayout.LayoutParams(dp(132), dp(92));
         previewLp.leftMargin = dp(2);
         previewLp.bottomMargin = dp(6);
-        inputPanel.addView(selectedImagePreview, previewLp);
+        inputPanel.addView(selectedImagePreviewHost, previewLp);
 
         commandPalette = buildCommandPalette();
         commandPalette.setVisibility(View.GONE);
@@ -595,13 +610,16 @@ public class MainActivity extends Activity {
         composer.addView(input, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
         chatVoiceButton = new Button(this);
-        chatVoiceButton.setText("●");
+        chatVoiceButton.setText("");
+        chatVoiceButton.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_mic, 0, 0, 0);
+        chatVoiceButton.setCompoundDrawableTintList(android.content.res.ColorStateList.valueOf(CYAN));
         chatVoiceButton.setTextColor(CYAN);
         chatVoiceButton.setTextSize(15);
         chatVoiceButton.setTypeface(Typeface.DEFAULT_BOLD);
         chatVoiceButton.setMinWidth(0);
         chatVoiceButton.setMinimumWidth(0);
         chatVoiceButton.setPadding(0, 0, 0, 0);
+        chatVoiceButton.setContentDescription("Голосовой ввод");
         chatVoiceButton.setBackground(pill(Color.TRANSPARENT, Color.TRANSPARENT, dp(21)));
         LinearLayout.LayoutParams voiceLp = new LinearLayout.LayoutParams(dp(42), dp(42));
         voiceLp.leftMargin = dp(6);
@@ -609,22 +627,24 @@ public class MainActivity extends Activity {
         chatVoiceButton.setOnClickListener(v -> toggleWhisperRecording("ru", input, "Голосовой ввод", chatVoiceButton));
 
         attachImage = new ImageButton(this);
-        attachImage.setImageResource(android.R.drawable.ic_menu_gallery);
+        attachImage.setImageResource(R.drawable.ic_attach);
         attachImage.setColorFilter(TEXT_MUTED);
         attachImage.setScaleType(ImageView.ScaleType.CENTER);
         attachImage.setPadding(dp(9), dp(9), dp(9), dp(9));
         attachImage.setBackground(pill(Color.TRANSPARENT, Color.TRANSPARENT, dp(21)));
+        attachImage.setContentDescription("Прикрепить изображение");
         LinearLayout.LayoutParams attachLp = new LinearLayout.LayoutParams(dp(42), dp(42));
         attachLp.leftMargin = dp(6);
         composer.addView(attachImage, attachLp);
         attachImage.setOnClickListener(v -> pickImage());
 
         send = new ImageButton(this);
-        send.setImageResource(android.R.drawable.ic_menu_send);
-        send.setColorFilter(INK);
+        send.setImageResource(R.drawable.ic_send);
+        send.setColorFilter(TEXT);
         send.setScaleType(ImageView.ScaleType.CENTER);
         send.setPadding(dp(9), dp(9), dp(9), dp(9));
         send.setBackground(gradientPill(WARP, WARP_DEEP, WARP, dp(22)));
+        send.setContentDescription("Отправить сообщение");
         LinearLayout.LayoutParams sendLp = new LinearLayout.LayoutParams(dp(42), dp(42));
         sendLp.leftMargin = dp(6);
         composer.addView(send, sendLp);
@@ -633,14 +653,14 @@ public class MainActivity extends Activity {
         // Modern composer order: attachment, one borderless text surface,
         // then a contextual voice/send action. No nested control frames.
         composer.removeAllViews();
-        LinearLayout.LayoutParams modernAttachLp = new LinearLayout.LayoutParams(dp(42), dp(42));
+        LinearLayout.LayoutParams modernAttachLp = new LinearLayout.LayoutParams(dp(48), dp(48));
         composer.addView(attachImage, modernAttachLp);
         LinearLayout.LayoutParams modernInputLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
         composer.addView(input, modernInputLp);
-        LinearLayout.LayoutParams modernVoiceLp = new LinearLayout.LayoutParams(dp(42), dp(42));
+        LinearLayout.LayoutParams modernVoiceLp = new LinearLayout.LayoutParams(dp(48), dp(48));
         modernVoiceLp.leftMargin = dp(2);
         composer.addView(chatVoiceButton, modernVoiceLp);
-        LinearLayout.LayoutParams modernSendLp = new LinearLayout.LayoutParams(dp(44), dp(44));
+        LinearLayout.LayoutParams modernSendLp = new LinearLayout.LayoutParams(dp(48), dp(48));
         modernSendLp.leftMargin = dp(2);
         composer.addView(send, modernSendLp);
         updateComposerActions();
@@ -660,14 +680,13 @@ public class MainActivity extends Activity {
         progress = new ProgressBar(this);
         progress.setIndeterminate(true);
         progress.setVisibility(View.GONE);
-        FrameLayout.LayoutParams p = new FrameLayout.LayoutParams(dp(42), dp(42), Gravity.TOP | Gravity.RIGHT);
-        p.topMargin = dp(18);
-        p.rightMargin = dp(72);
-        root.addView(progress, p);
+        LinearLayout.LayoutParams progressLp = new LinearLayout.LayoutParams(dp(32), dp(32));
+        progressLp.leftMargin = dp(6);
+        titleRow.addView(progress, progressLp);
 
         buildDrawer(root);
         setContentView(root);
-        installKeyboardLift(root);
+        installSystemInsets(root, mainColumn);
     }
 
     private LinearLayout buildCommandPalette() {
@@ -689,7 +708,8 @@ public class MainActivity extends Activity {
         chip.setTypeface(Typeface.DEFAULT_BOLD);
         chip.setGravity(Gravity.CENTER);
         chip.setBackground(pill(SURFACE_RAISED, LINE, dp(15)));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(38), 1);
+        chip.setContentDescription(label);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(48), 1);
         if (panel.getChildCount() > 0) lp.leftMargin = dp(7);
         panel.addView(chip, lp);
         chip.setOnClickListener(v -> {
@@ -709,7 +729,8 @@ public class MainActivity extends Activity {
     private void updateCommandPalette(String value) {
         if (commandPalette == null) return;
         String clean = value == null ? "" : value.trim();
-        commandPalette.setVisibility(clean.isEmpty() || "/".equals(clean) ? View.VISIBLE : View.GONE);
+        commandPalette.setVisibility("/".equals(clean) ? View.VISIBLE : View.GONE);
+        if (appRoot != null) appRoot.requestApplyInsets();
     }
 
     private void updateComposerActions() {
@@ -725,7 +746,7 @@ public class MainActivity extends Activity {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER);
-        bar.setPadding(0, dp(2), 0, dp(4));
+        bar.setPadding(0, dp(3), 0, dp(3));
         bar.setBackgroundColor(Color.TRANSPARENT);
         addNavItem(bar, TAB_CHAT, "ЧАТ");
         addNavItem(bar, TAB_AGENT, "WARBANDS");
@@ -742,7 +763,8 @@ public class MainActivity extends Activity {
         item.setTypeface(Typeface.DEFAULT_BOLD);
         item.setGravity(Gravity.CENTER);
         item.setLetterSpacing(0.06f);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(38), 1);
+        item.setContentDescription("Открыть раздел " + label);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(48), 1);
         if (bar.getChildCount() > 0) lp.leftMargin = dp(4);
         bar.addView(item, lp);
         navItems.put(tab, item);
@@ -779,66 +801,44 @@ public class MainActivity extends Activity {
     }
 
     private void setWarpState(String label, int color) {
-        if (endpoint != null) endpoint.setText(label);
+        if (endpoint != null) {
+            endpoint.setText(label);
+            endpoint.setTextColor(color);
+        }
         if (warpOrb != null) warpOrb.setBackground(gradientPill(color, WARP_DEEP, color, dp(20)));
     }
 
-    private void installKeyboardLift(View root) {
-        root.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
-            Rect visible = new Rect();
-            root.getWindowVisibleDisplayFrame(visible);
-            int screenHeight = root.getRootView().getHeight();
-            int hiddenHeight = screenHeight - visible.bottom;
-            int threshold = dp(120);
-            int keyboardHeight = hiddenHeight > threshold ? hiddenHeight : 0;
-            if (keyboardHeight == lastKeyboardHeight) {
-                return;
+    private void restoreHeaderState() {
+        if (TAB_AGENT.equals(currentTab)) {
+            setWarpState(agentRunning ? "●  WARMASTER / В РАБОТЕ" : "●  WARMASTER / МОНИТОР", agentRunning ? WARP : CYAN);
+        } else if (TAB_TRANSLATOR.equals(currentTab)) {
+            setWarpState("●  ПЕРЕВОДЧИК / ГОТОВ", CYAN);
+        } else if (TAB_MEMORY.equals(currentTab)) {
+            setWarpState("●  АРХИВ / SHUSHUNYA", CYAN);
+        } else {
+            setWarpState(waiting ? "●  ШУШУНЯ ПЛЕТЁТ ОТВЕТ" : "●  ВАРП-КАНАЛ / В СЕТИ", waiting ? WARP : CYAN);
+        }
+    }
+
+    private void installSystemInsets(View root, LinearLayout mainColumn) {
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
+            android.graphics.Insets ime = insets.getInsets(WindowInsets.Type.ime());
+            int imeBottom = insets.isVisible(WindowInsets.Type.ime()) ? ime.bottom : 0;
+            int bottom = Math.max(bars.bottom, imeBottom);
+            lastKeyboardHeight = imeBottom;
+            mainColumn.setPadding(dp(16), bars.top + dp(8), dp(16), bottom + dp(10));
+            if (imeBottom > 0 && TAB_CHAT.equals(currentTab)) {
+                root.postDelayed(() -> maybeScrollToBottom(false), 80);
             }
-            lastKeyboardHeight = keyboardHeight;
-            if (TAB_TRANSLATOR.equals(currentTab)) {
-                inputPanel.animate().translationY(0f).setDuration(120).start();
-                scrollView.setPadding(0, 0, 0, 0);
-                updateToolKeyboardPadding();
-                return;
-            }
-            if (TAB_AGENT.equals(currentTab)) {
-                inputPanel.animate().translationY(0f).setDuration(120).start();
-                scrollView.setPadding(0, 0, 0, 0);
-                updateAgentKeyboardLift();
-                return;
-            }
-            if (TAB_MEMORY.equals(currentTab)) {
-                inputPanel.animate().translationY(0f).setDuration(120).start();
-                scrollView.setPadding(0, 0, 0, 0);
-                return;
-            }
-            float lift = keyboardHeight > 0 ? -keyboardHeight + dp(10) : 0f;
-            int bottomPadding = keyboardHeight > 0 ? keyboardHeight + inputPanel.getHeight() + dp(14) : 0;
-            scrollView.setPadding(0, 0, 0, bottomPadding);
-            inputPanel.animate()
-                    .translationY(lift)
-                    .setDuration(180)
-                    .setInterpolator(new DecelerateInterpolator())
-                    .start();
-            root.postDelayed(() -> maybeScrollToBottom(false), 80);
+            return insets;
         });
+        root.requestApplyInsets();
     }
 
     private void updateChatKeyboardLift() {
-        if (!TAB_CHAT.equals(currentTab) || inputPanel == null || scrollView == null) {
-            return;
-        }
-        inputPanel.post(() -> {
-            float lift = lastKeyboardHeight > 0 ? -lastKeyboardHeight + dp(10) : 0f;
-            int bottomPadding = lastKeyboardHeight > 0 ? lastKeyboardHeight + inputPanel.getHeight() + dp(14) : 0;
-            scrollView.setPadding(0, 0, 0, bottomPadding);
-            inputPanel.animate()
-                    .translationY(lift)
-                    .setDuration(120)
-                    .setInterpolator(new DecelerateInterpolator())
-                    .start();
-            maybeScrollToBottom(false);
-        });
+        if (appRoot != null) appRoot.requestApplyInsets();
+        if (TAB_CHAT.equals(currentTab)) maybeScrollToBottom(false);
     }
 
     private LinearLayout buildAgentView() {
@@ -863,6 +863,19 @@ public class MainActivity extends Activity {
         agentActiveMetric = addAgentMetric(metrics, "0", "АКТИВНО", WARP);
         agentDoneMetric = addAgentMetric(metrics, "0", "ГОТОВО", ACID);
         agentModeMetric = addAgentMetric(metrics, "LIVE", "КАНАЛ", CYAN);
+
+        agentRunButton = new ImageButton(this);
+        agentRunButton.setImageResource(R.drawable.ic_close);
+        agentRunButton.setColorFilter(TEXT);
+        agentRunButton.setScaleType(ImageView.ScaleType.CENTER);
+        agentRunButton.setPadding(dp(14), dp(14), dp(14), dp(14));
+        agentRunButton.setBackground(pill(Color.rgb(87, 23, 33), Color.rgb(231, 95, 69), dp(18)));
+        agentRunButton.setContentDescription("Отменить текущую задачу Warbands");
+        agentRunButton.setVisibility(View.GONE);
+        LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(dp(56), dp(60));
+        cancelLp.leftMargin = dp(7);
+        metrics.addView(agentRunButton, cancelLp);
+        agentRunButton.setOnClickListener(v -> cancelAgentTask());
         view.addView(metrics, new LinearLayout.LayoutParams(-1, dp(66)));
 
         agentScrollView = new ScrollView(this);
@@ -894,39 +907,45 @@ public class MainActivity extends Activity {
 
         LinearLayout quickRow = new LinearLayout(this);
         quickRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams quickLp = new LinearLayout.LayoutParams(-1, dp(44));
+        LinearLayout.LayoutParams quickLp = new LinearLayout.LayoutParams(-1, dp(50));
         quickLp.bottomMargin = dp(6);
         view.addView(quickRow, quickLp);
 
         Button statusButton = new Button(this);
         statusButton.setText("ИСКАНДАР");
         styleAgentQuickButton(statusButton);
-        quickRow.addView(statusButton, new LinearLayout.LayoutParams(0, dp(42), 1));
+        quickRow.addView(statusButton, new LinearLayout.LayoutParams(0, dp(48), 1));
+        agentFilterButtons.put("IskandarKhayon", statusButton);
         statusButton.setOnClickListener(v -> setAgentBrigadeFilter("IskandarKhayon"));
 
         Button workButton = new Button(this);
         workButton.setText("ЦЕРАКСИЯ");
         styleAgentQuickButton(workButton);
-        LinearLayout.LayoutParams workLp = new LinearLayout.LayoutParams(0, dp(42), 1);
+        LinearLayout.LayoutParams workLp = new LinearLayout.LayoutParams(0, dp(48), 1);
         workLp.leftMargin = dp(8);
         quickRow.addView(workButton, workLp);
+        agentFilterButtons.put("Ceraxia", workButton);
         workButton.setOnClickListener(v -> setAgentBrigadeFilter("Ceraxia"));
 
         Button focusButton = new Button(this);
         focusButton.setText("МОРИАНА");
         styleAgentQuickButton(focusButton);
-        LinearLayout.LayoutParams focusLp = new LinearLayout.LayoutParams(0, dp(42), 1);
+        LinearLayout.LayoutParams focusLp = new LinearLayout.LayoutParams(0, dp(48), 1);
         focusLp.leftMargin = dp(8);
         quickRow.addView(focusButton, focusLp);
+        agentFilterButtons.put("Moriana", focusButton);
         focusButton.setOnClickListener(v -> setAgentBrigadeFilter("Moriana"));
 
         Button stateButton = new Button(this);
         stateButton.setText("ВСЕ");
         styleAgentQuickButton(stateButton);
-        LinearLayout.LayoutParams stateLp = new LinearLayout.LayoutParams(0, dp(42), 1);
+        LinearLayout.LayoutParams stateLp = new LinearLayout.LayoutParams(0, dp(48), 1);
         stateLp.leftMargin = dp(8);
         quickRow.addView(stateButton, stateLp);
+        agentFilterButtons.put("", stateButton);
         stateButton.setOnClickListener(v -> setAgentBrigadeFilter(""));
+
+        updateAgentFilterStyles();
 
         return view;
     }
@@ -965,6 +984,17 @@ public class MainActivity extends Activity {
         button.setMinimumWidth(0);
         button.setPadding(dp(4), 0, dp(4), 0);
         button.setBackground(pill(SURFACE_RAISED, LINE, dp(15)));
+    }
+
+    private void updateAgentFilterStyles() {
+        for (java.util.Map.Entry<String, Button> entry : agentFilterButtons.entrySet()) {
+            boolean selected = entry.getKey().equals(agentBrigadeFilter);
+            Button button = entry.getValue();
+            button.setTextColor(selected ? ACID : TEXT_MUTED);
+            button.setBackground(selected
+                    ? pill(SURFACE_RAISED, ACID, dp(15))
+                    : pill(SURFACE_RAISED, LINE, dp(15)));
+        }
     }
 
     private LinearLayout buildTranslatorView() {
@@ -1204,9 +1234,26 @@ public class MainActivity extends Activity {
                 JSONObject payload = memoryGet("/archive/memory/catalog?namespace=" + SERVER_MEMORY_NAMESPACE + "&requester=shushunya-mobile");
                 main.post(() -> renderMemoryCatalog(payload));
             } catch (Exception exc) {
-                main.post(() -> memoryStatus.setText("АРХИВ НЕДОСТУПЕН • " + exc.getMessage()));
+                main.post(() -> renderMemoryOffline(exc.getMessage()));
             }
         }).start();
+    }
+
+    private void renderMemoryOffline(String reason) {
+        memoryList.removeAllViews();
+        memoryStatus.setText("АРХИВ ВНЕ КАНАЛА");
+        addMemoryHero("ПАМЯТЬ СПИТ", "Связь с архивом временно потеряна. Твои данные не пропали.");
+        TextView retry = memoryActionButton("↻  ПОВТОРИТЬ ПОДКЛЮЧЕНИЕ");
+        retry.setContentDescription("Повторить подключение к памяти");
+        LinearLayout.LayoutParams retryLp = new LinearLayout.LayoutParams(-1, dp(48));
+        retryLp.topMargin = dp(10);
+        memoryList.addView(retry, retryLp);
+        retry.setOnClickListener(v -> loadMemoryDashboard());
+        if (reason != null && !reason.trim().isEmpty()) {
+            TextView detail = memoryCardText(reason, 11, TEXT_MUTED, false);
+            detail.setPadding(dp(4), dp(10), dp(4), 0);
+            memoryList.addView(detail, new LinearLayout.LayoutParams(-1, -2));
+        }
     }
 
     private void renderMemoryCatalog(JSONObject payload) {
@@ -1682,12 +1729,11 @@ public class MainActivity extends Activity {
         if (agentRunButton == null) {
             return;
         }
+        agentRunButton.setVisibility(running ? View.VISIBLE : View.GONE);
         agentRunButton.setEnabled(true);
-        agentRunButton.setImageResource(running ? android.R.drawable.ic_menu_close_clear_cancel : android.R.drawable.ic_menu_upload);
-        agentRunButton.setColorFilter(running ? TEXT : INK);
-        agentRunButton.setBackground(running
-                ? pill(Color.rgb(87, 23, 33), Color.rgb(231, 95, 69), dp(16))
-                : pill(ACID, ACID, dp(18)));
+        agentRunButton.setImageResource(R.drawable.ic_close);
+        agentRunButton.setColorFilter(TEXT);
+        agentRunButton.setBackground(pill(Color.rgb(87, 23, 33), Color.rgb(231, 95, 69), dp(18)));
         agentRunButton.animate().alpha(agentCancelRequested ? 0.55f : 1f).setDuration(160).start();
     }
 
@@ -1724,6 +1770,7 @@ public class MainActivity extends Activity {
 
     private void setAgentBrigadeFilter(String filter) {
         agentBrigadeFilter = filter == null ? "" : filter.trim();
+        updateAgentFilterStyles();
         String label = agentBrigadeLabel(agentBrigadeFilter);
         if (agentStatus != null) {
             agentStatus.setText(label.isEmpty() ? "Показываю все варбанды..." : "Показываю: " + label);
@@ -2038,6 +2085,7 @@ public class MainActivity extends Activity {
         }
         int visible = 0;
         int length = tasks == null ? 0 : tasks.length();
+        java.util.HashSet<String> visibleTaskIds = new java.util.HashSet<>();
         int activeCount = 0;
         int doneCount = 0;
         for (int i = 0; i < length; i++) {
@@ -2060,6 +2108,7 @@ public class MainActivity extends Activity {
             if (taskId.isEmpty()) {
                 continue;
             }
+            visibleTaskIds.add(taskId);
             visible++;
             AgentSection section = agentSections.get(taskId);
             if (section == null) {
@@ -2122,14 +2171,25 @@ public class MainActivity extends Activity {
                 section.cardKeys.add(agentActivityCardKey(entry));
             }
             String finalText = task.optString("final", "").trim();
-            if (!finalText.isEmpty() && !section.finalShown) {
-                section.finalShown = true;
+            if (!finalText.equals(section.finalKey)) {
+                section.finalKey = finalText;
+                section.finalHost.removeAllViews();
+            }
+            if (!finalText.isEmpty() && section.finalHost.getChildCount() == 0) {
                 agentAppendTarget = section.finalHost;
                 addAgentFinalMessage(finalText, true);
                 agentAppendTarget = null;
             }
         }
-        if (firstFill && visible == 0) {
+        java.util.Iterator<java.util.Map.Entry<String, AgentSection>> sectionIterator = agentSections.entrySet().iterator();
+        while (sectionIterator.hasNext()) {
+            java.util.Map.Entry<String, AgentSection> entry = sectionIterator.next();
+            if (!visibleTaskIds.contains(entry.getKey())) {
+                agentMessageList.removeView(entry.getValue().container);
+                sectionIterator.remove();
+            }
+        }
+        if (visible == 0 && agentMessageList.getChildCount() == 0) {
             String label = agentBrigadeLabel(agentBrigadeFilter);
             addAgentMessage(false, label.isEmpty() ? "Задач по варбандам нет." : "У варбанды " + label + " пока нет задач.", false);
         }
@@ -2546,7 +2606,14 @@ public class MainActivity extends Activity {
         activeSpeechOutput = output;
         activeSpeechButton = button;
         recording = true;
-        button.setText("STOP");
+        if (button == chatVoiceButton) {
+            button.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0);
+            button.setText("■");
+            button.setTextColor(Color.rgb(255, 115, 115));
+            button.setContentDescription("Остановить запись");
+        } else {
+            button.setText("STOP");
+        }
         speechStatus.setText(titleText + ": слушаю и сразу отправляю...");
         setWarpState("●  СЛУШАЮ / ГОВОРИ", CYAN);
         button.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
@@ -2569,13 +2636,15 @@ public class MainActivity extends Activity {
                 } else {
                     speechStatus.setText("Готово.");
                 }
-                setWarpState("●  ВАРП-КАНАЛ / В СЕТИ", CYAN);
+                restoreHeaderState();
             });
         } catch (Exception exc) {
             main.post(() -> {
                 resetSpeechButton();
                 speechStatus.setText("STT ошибка: " + exc.getMessage());
-                setWarpState("●  ОШИБКА ГОЛОСА", Color.rgb(220, 91, 91));
+                if (TAB_CHAT.equals(currentTab) || TAB_TRANSLATOR.equals(currentTab)) {
+                    setWarpState("●  ОШИБКА ГОЛОСА", Color.rgb(220, 91, 91));
+                }
             });
         }
     }
@@ -2680,9 +2749,16 @@ public class MainActivity extends Activity {
 
     private void resetSpeechButton() {
         if (activeSpeechButton != null) {
-            activeSpeechButton.setText(activeSpeechButton == speechButton
-                    ? "REC " + TRANSLATOR_SHORT[translatorSourceIndex]
-                    : activeSpeechButton == chatVoiceButton ? "●" : "REC");
+            if (activeSpeechButton == chatVoiceButton) {
+                activeSpeechButton.setText("");
+                activeSpeechButton.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_mic, 0, 0, 0);
+                activeSpeechButton.setCompoundDrawableTintList(android.content.res.ColorStateList.valueOf(CYAN));
+                activeSpeechButton.setTextColor(CYAN);
+                activeSpeechButton.setContentDescription("Голосовой ввод");
+            } else {
+                activeSpeechButton.setText(activeSpeechButton == speechButton
+                        ? "REC " + TRANSLATOR_SHORT[translatorSourceIndex] : "REC");
+            }
         }
         activeSpeechButton = null;
     }
@@ -2795,7 +2871,6 @@ public class MainActivity extends Activity {
         boolean agent = TAB_AGENT.equals(tab);
         boolean memory = TAB_MEMORY.equals(tab);
         title.setText(chat ? "Шушуня" : agent ? "Warbands" : memory ? "Память" : "Переводчик");
-        endpoint.setText(chat ? "●  ВАРП-КАНАЛ / В СЕТИ" : agent ? "●  WARMASTER / МОНИТОР" : memory ? "●  АРХИВ / SHUSHUNYA" : "●  ПЕРЕВОДЧИК / ГОТОВ");
         endpoint.setVisibility(View.VISIBLE);
         chatView.setVisibility(chat ? View.VISIBLE : View.GONE);
         translatorView.setVisibility(translator ? View.VISIBLE : View.GONE);
@@ -2809,32 +2884,32 @@ public class MainActivity extends Activity {
             }
             translatorView.setPadding(0, dp(10), 0, 0);
             agentView.setPadding(0, dp(6), 0, 0);
-            scrollView.setPadding(0, 0, 0, lastKeyboardHeight > 0 ? lastKeyboardHeight + inputPanel.getHeight() + dp(14) : 0);
-            float lift = lastKeyboardHeight > 0 ? -lastKeyboardHeight + dp(10) : 0f;
-            inputPanel.animate().translationY(lift).setDuration(120).start();
+            scrollView.setPadding(0, 0, 0, 0);
+            inputPanel.setTranslationY(0f);
         } else if (agent) {
-            inputPanel.animate().translationY(0f).setDuration(120).start();
+            inputPanel.setTranslationY(0f);
             scrollView.setPadding(0, 0, 0, 0);
             updateAgentKeyboardLift();
             refreshBrigadeMonitor();
             startBrigadeDeltaLoop();
         } else if (translator) {
-            inputPanel.animate().translationY(0f).setDuration(120).start();
+            inputPanel.setTranslationY(0f);
             scrollView.setPadding(0, 0, 0, 0);
             updateToolKeyboardPadding();
         } else {
-            inputPanel.animate().translationY(0f).setDuration(120).start();
+            inputPanel.setTranslationY(0f);
             scrollView.setPadding(0, 0, 0, 0);
             loadMemoryDashboard();
         }
         updateDrawerSelection();
         updateBottomNavigation();
+        restoreHeaderState();
+        if (appRoot != null) appRoot.requestApplyInsets();
     }
 
     private void updateToolKeyboardPadding() {
-        int bottom = lastKeyboardHeight > 0 ? lastKeyboardHeight + dp(10) : 0;
         if (translatorView != null) {
-            translatorView.setPadding(0, dp(10), 0, bottom);
+            translatorView.setPadding(0, dp(10), 0, 0);
         }
     }
 
@@ -2987,7 +3062,7 @@ public class MainActivity extends Activity {
                 pendingImageLabel = finalLabel;
                 pendingImagePreview = finalPreview;
                 selectedImagePreview.setImageBitmap(finalPreview);
-                selectedImagePreview.setVisibility(View.VISIBLE);
+                selectedImagePreviewHost.setVisibility(View.VISIBLE);
                 updateComposerActions();
                 updateChatKeyboardLift();
                 attachImage.animate().alpha(1f).setDuration(120).start();
@@ -2998,7 +3073,7 @@ public class MainActivity extends Activity {
                 pendingImageDataUrl = null;
                 pendingImageLabel = null;
                 pendingImagePreview = null;
-                selectedImagePreview.setVisibility(View.GONE);
+                selectedImagePreviewHost.setVisibility(View.GONE);
                 updateChatKeyboardLift();
                 resetAttachImageButton();
                 addMessage(false, "Картинку не удалось подготовить: " + exc.getMessage());
@@ -3011,7 +3086,7 @@ public class MainActivity extends Activity {
         pendingImageLabel = null;
         pendingImagePreview = null;
         selectedImagePreview.setImageDrawable(null);
-        selectedImagePreview.setVisibility(View.GONE);
+        selectedImagePreviewHost.setVisibility(View.GONE);
         updateComposerActions();
         updateChatKeyboardLift();
         resetAttachImageButton();
@@ -3101,7 +3176,7 @@ public class MainActivity extends Activity {
         pendingImageLabel = null;
         pendingImagePreview = null;
         selectedImagePreview.setImageDrawable(null);
-        selectedImagePreview.setVisibility(View.GONE);
+        selectedImagePreviewHost.setVisibility(View.GONE);
         resetAttachImageButton();
         if (hasImage) {
             addImageMessage(text, imagePreview, imageLabel, -1);
@@ -3643,7 +3718,7 @@ public class MainActivity extends Activity {
         bubble.setTextColor(TEXT);
         bubble.setPadding(dp(16), dp(12), dp(16), dp(12));
         bubble.setBackground(fromUser
-                ? gradientPill(WARP, WARP_DEEP, WARP, dp(21))
+                ? gradientPill(WARP_DEEP, Color.rgb(48, 30, 92), WARP, dp(21))
                 : pill(SURFACE_RAISED, LINE, dp(21)));
         bubble.setAlpha(animate ? 0f : 1f);
         bubble.setTranslationY(animate ? dp(10) : 0f);
@@ -3690,7 +3765,7 @@ public class MainActivity extends Activity {
         LinearLayout bubble = new LinearLayout(this);
         bubble.setOrientation(LinearLayout.VERTICAL);
         bubble.setPadding(dp(8), dp(8), dp(8), dp(8));
-        bubble.setBackground(gradientPill(WARP, WARP_DEEP, WARP, dp(21)));
+        bubble.setBackground(gradientPill(WARP_DEEP, Color.rgb(48, 30, 92), WARP, dp(21)));
         if (!prepend) {
             bubble.setAlpha(0f);
             bubble.setTranslationY(dp(10));
@@ -3755,7 +3830,7 @@ public class MainActivity extends Activity {
         bubble.setTextColor(TEXT);
         bubble.setPadding(dp(16), dp(12), dp(16), dp(12));
         bubble.setBackground(fromUser
-                ? gradientPill(WARP, WARP_DEEP, WARP, dp(21))
+                ? gradientPill(WARP_DEEP, Color.rgb(48, 30, 92), WARP, dp(21))
                 : pill(SURFACE_RAISED, LINE, dp(21)));
         if (!prepend) {
             bubble.setAlpha(0f);
@@ -3780,7 +3855,7 @@ public class MainActivity extends Activity {
                 .setDuration(210)
                 .setInterpolator(new DecelerateInterpolator())
                 .start();
-        maybeScrollToBottom(true);
+        maybeScrollToBottom(fromUser);
         if (save) {
             saveChatMessage(fromUser, text);
         }
@@ -4379,7 +4454,7 @@ public class MainActivity extends Activity {
                         bubble.setText("Пусто. Даже варп иногда молчит.");
                     } else if (finished && shown >= available) {
                         applyRichText(bubble, visible.trim());
-                        setWarpState("●  ВАРП-КАНАЛ / В СЕТИ", CYAN);
+                        restoreHeaderState();
                         bubble.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
                     } else {
                         bubble.setText(visible + "▌");
