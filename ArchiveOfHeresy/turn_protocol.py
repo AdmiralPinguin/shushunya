@@ -68,18 +68,19 @@ def turn_capability_manifest(*, image_attached: bool = False, pending_reports: d
                 "action": "request_warmaster_mission",
                 "available": True,
                 "description": (
-                    "Ask EyeOfTerror Warmaster to command a real multi-step task. Shushunya decides only that the work "
-                    "needs Warmaster-level execution and describes the requested outcome. Warmaster chooses the department, "
-                    "brigadier, workers, plan, and acceptance process."
+                    "Ask EyeOfTerror Abaddon to command a real multi-step task. Shushunya decides only that the work "
+                    "needs Abaddon-level execution and describes the requested outcome. Abaddon chooses the strategic route "
+                    "and brigadier, arbitrates across warbands, and owns final escalation. The assigned brigadier makes "
+                    "warband-level decisions; subordinates own the detailed plan, execution, and checks."
                 ),
-                "server_effect": "ArchiveOfHeresy creates a real Warmaster task_id and starts the background pipeline.",
+                "server_effect": "ArchiveOfHeresy creates a real Abaddon task_id and starts the background pipeline.",
                 "warmaster_capability_areas": WARMASTER_CAPABILITY_AREAS,
                 "required_fields": ["warmaster_request"],
                 "limits": [
                     "Use only when the user is actually asking for work to be performed, not when they are merely discussing architecture or asking a question.",
-                    "Do not choose a concrete brigadier, governor, internal worker, or department here; that is Warmaster's job.",
+                    "Do not choose a concrete brigadier, governor, or department here; Abaddon owns that strategic route. Never choose internal workers or a detailed implementation plan here; the assigned brigadier and subordinates own those layers.",
                     "For vague follow-up commands, recover the intended task from recent chat history and include that full recovered task in warmaster_request.user_request.",
-                    "If the task lacks essential domain input, use ask_clarification instead of requesting Warmaster. Examples: image generation without a subject/description, code work without a target repository or greenfield scope, research without a topic.",
+                    "If the task lacks essential domain input, use ask_clarification instead of requesting Abaddon. Examples: image generation without a subject/description, code work without a target repository or greenfield scope, research without a topic.",
                 ],
             },
             {
@@ -163,17 +164,17 @@ def build_turn_decision_request(
                     "Return one valid JSON object only. No markdown, no prose. "
                     "Do not use keyword rules; infer the user's intent from the whole recent dialogue and the manifest. "
                     "If a real workflow would need missing essential input, choose ask_clarification instead of request_warmaster_mission. "
-                    "Do not hide missing inputs as risks inside a warmaster_request when Warmaster cannot start responsibly. "
+                    "Do not hide missing inputs as risks inside a warmaster_request when Abaddon cannot start responsibly. "
                     "The JSON schema is: "
                     "{\"action\":\"answer_in_chat|ask_clarification|request_warmaster_mission|create_administratum_task|deliver_pending_reports\","
                     "\"task\":\"full task text if an external action is selected, otherwise empty\","
                     "\"warmaster_request\":{\"user_request\":\"full recovered user request\","
                     "\"capability_area\":\"research|code|image|mixed|administration|unknown\","
-                    "\"why_warmaster_needed\":\"concrete reason this needs Warmaster instead of direct chat\","
+                    "\"why_warmaster_needed\":\"concrete reason this needs Abaddon instead of direct chat\","
                     "\"expected_outcome\":\"concrete outcome\","
                     "\"success_conditions\":[\"testable acceptance criteria\"],"
                     "\"constraints\":[\"hard user constraints\"],"
-                    "\"known_missing_inputs\":[\"non-blocking unknowns Warmaster should investigate\"]},"
+                    "\"known_missing_inputs\":[\"non-blocking unknowns Abaddon should investigate\"]},"
                     "\"reply\":\"short user-facing text only for answer_in_chat or ask_clarification\","
                     "\"confidence\":0.0,\"reason\":\"brief reason\"}."
                 ),
@@ -215,7 +216,7 @@ def normalize_turn_decision(raw: dict[str, Any] | None) -> dict[str, Any]:
         warmaster_request = normalize_warmaster_request(warmaster_request, fallback_task=task)
         if not warmaster_request.get("user_request") or not warmaster_request.get("expected_outcome"):
             action = "ask_clarification"
-            reason = reason or "Warmaster request selected without required request/outcome fields"
+            reason = reason or "Abaddon request selected without required request/outcome fields"
     if action == "create_administratum_task" and not task:
         action = "ask_clarification"
         reason = reason or "external action selected without required task field"
@@ -254,10 +255,11 @@ def normalize_warmaster_request(raw: dict[str, Any], *, fallback_task: str = "")
 def warmaster_request_to_message(request: dict[str, Any]) -> str:
     normalized = normalize_warmaster_request(request)
     sections = [
-        "Запрос Шушуни к EyeOfTerror Warmaster.",
-        "Шушуня не выбирает бригадира или отдел. Warmaster сам назначает бригадира, работников, план и приемку.",
+        "Запрос Шушуни к EyeOfTerror Abaddon.",
+        "Шушуня не выбирает бригадира или отдел. Абаддон выбирает стратегический маршрут и назначает бригадира; он не выбирает работников и не составляет подробный план.",
+        "Бригадир принимает решения своей варбанды, а подчинённые составляют детальный план, выполняют работу и проводят проверки. Абаддон держит межбригадную координацию и финальную эскалацию.",
         f"Область задачи: {normalized.get('capability_area')}",
-        f"Почему нужен Warmaster: {normalized.get('why_warmaster_needed')}",
+        f"Почему нужен Абаддон: {normalized.get('why_warmaster_needed')}",
         f"Исходный запрос пользователя: {normalized.get('user_request')}",
         f"Ожидаемый результат: {normalized.get('expected_outcome')}",
     ]
@@ -266,6 +268,6 @@ def warmaster_request_to_message(request: dict[str, Any]) -> str:
     if normalized.get("constraints"):
         sections.append("Ограничения:\n" + "\n".join(f"- {item}" for item in normalized["constraints"]))
     if normalized.get("known_missing_inputs"):
-        sections.append("Что Warmaster должен выяснить по ходу работы:\n" + "\n".join(f"- {item}" for item in normalized["known_missing_inputs"]))
-    sections.append("Warmaster должен оформить это как commander_order и не подменять смысл задачи пустой маршрутизацией.")
+        sections.append("Что Абаддон должен выяснить по ходу работы:\n" + "\n".join(f"- {item}" for item in normalized["known_missing_inputs"]))
+    sections.append("Абаддон должен оформить это как commander_order и не подменять смысл задачи пустой маршрутизацией.")
     return "\n\n".join(item for item in sections if str(item).strip())

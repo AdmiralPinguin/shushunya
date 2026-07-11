@@ -98,6 +98,11 @@ def main() -> int:
     activity = governor_activity_report(summary, ledger)
     tabs = activity.get("brigade_tabs") if isinstance(activity.get("brigade_tabs"), list) else []
     by_key = {str(tab.get("key") or ""): tab for tab in tabs if isinstance(tab, dict)}
+    if "warmaster" not in by_key:
+        raise AssertionError(f"Abaddon commander tab missing: {activity}")
+    commander = by_key["warmaster"]
+    if commander.get("label") != "Абаддон" or commander.get("governor") != "Warmaster":
+        raise AssertionError(f"public commander label or compatibility governor id drifted: {commander}")
     if "iskandar" not in by_key:
         raise AssertionError(f"Iskandar tab missing: {activity}")
     iskandar = by_key["iskandar"]
@@ -124,7 +129,7 @@ def main() -> int:
         raise AssertionError(f"running worker event should mark brigade tab active: {iskandar}")
     if activity.get("log_text"):
         raise AssertionError(f"brigade activity should stay structured, not log_text: {activity}")
-    print("[ok] Warmaster brigade tabs")
+    print("[ok] Abaddon brigade tabs and Warmaster actor compatibility")
     return 0
 
 

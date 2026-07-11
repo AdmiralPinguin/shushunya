@@ -641,7 +641,7 @@ def main() -> int:
             ):
                 raise AssertionError(f"/task did not enter command protocol: {compatibility_task}")
             health = request_json(base + "/health")
-            if not health.get("ok"):
+            if not health.get("ok") or health.get("gateway") != "WarmasterGateway" or health.get("display_name") != "Abaddon":
                 raise AssertionError(f"bad health: {health}")
             capabilities = request_json(base + "/capabilities")
             required_capabilities = {
@@ -688,7 +688,7 @@ def main() -> int:
                 or "POST /recovery/start_resume_local" not in capabilities.get("actions", {}).get("maintenance", [])
                 or capabilities.get("summary", {}).get("governors", {}).get("active", 0) < 1
                 or capabilities.get("summary", {}).get("workers", {}).get("active", 0) < 1
-                or capabilities.get("display", {}).get("headline") != "Warmaster Gateway capabilities"
+                or capabilities.get("display", {}).get("headline") != "Abaddon capabilities"
                 or capabilities.get("client_action", {}).get("path") != "/state"
                 or capabilities.get("model_brain", {}).get("kind") != "eye_of_terror_model_brain"
             ):
@@ -711,6 +711,8 @@ def main() -> int:
             ):
                 raise AssertionError(f"bad brigade health response: {brigade_health}")
             state = request_json(base + "/state")
+            if state.get("gateway") != "WarmasterGateway" or state.get("display_name") != "Abaddon":
+                raise AssertionError(f"state did not preserve machine identity with Abaddon display name: {state}")
             if state.get("brigade_plan", {}).get("mode") != "service-separated":
                 raise AssertionError(f"state did not include brigade plan: {state}")
             if not state.get("actions", {}).get("can_create_task"):

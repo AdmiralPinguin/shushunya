@@ -460,7 +460,7 @@ WORKER_ACTIVITY_LABELS = {
 
 
 GOVERNOR_ACTIVITY_LABELS = {
-    "Warmaster": "Вармастер",
+    "Warmaster": "Абаддон",
     "IskandarKhayon": "Искандар",
     "Iskandar": "Искандар",
     "Scriptorium": "Искандар",

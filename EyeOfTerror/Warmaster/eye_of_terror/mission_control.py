@@ -106,7 +106,7 @@ OWNER_REQUEST_LINE_RE = re.compile(r"Исходный запрос пользо�
 
 def owner_request_from_message(message: str) -> str:
     """The owner's literal words. Chat requests arrive wrapped in the
-    'Запрос Шушуни к EyeOfTerror Warmaster...' boilerplate; protocol fields
+    'Запрос Шушуни к EyeOfTerror Abaddon...' boilerplate; protocol fields
     that are quoted back to the owner must carry his words, not the wrapper."""
     match = OWNER_REQUEST_LINE_RE.search(message or "")
     text = match.group(1) if match else (message or "")
@@ -122,7 +122,7 @@ def commander_order_prompt_payload(message: str, route: dict[str, Any], mission_
         "required_json_schema": {
             "commander_intent": "short command intent, not a detailed brigade plan",
             "primary_goal": "one concrete goal",
-            "success_conditions": ["conditions Warmaster will use for acceptance"],
+            "success_conditions": ["conditions Abaddon will use for acceptance"],
             "constraints": ["hard limits or user preferences"],
             "escalate_to_user_if": ["only true user-decision blockers"],
         },
@@ -168,8 +168,9 @@ def build_commander_order(message: str, mission_id: str) -> dict[str, Any]:
         layer="command",
         instructions=(
             "Return one strict JSON object and nothing else. Do not create a detailed brigade work plan. "
-            "Warmaster's job is to define command intent, success conditions, constraints, and true escalation "
-            "conditions. The assigned governor will plan the domain work. Revisions are internal and must not be "
+            "Abaddon's job is to define command intent, success conditions, constraints, and true escalation "
+            "conditions. The assigned governor makes warband-level decisions and delegates detailed planning, execution, "
+            "and checks to subordinates. Revisions are internal and must not be "
             "reported to the user as final answers. "
             "Write commander_intent, primary_goal, success_conditions, constraints and escalate_to_user_if in Russian: "
             "these fields are quoted back to the Russian-speaking owner in reports."
@@ -178,7 +179,7 @@ def build_commander_order(message: str, mission_id: str) -> dict[str, Any]:
     if not model_decision.get("ok"):
         return {
             "ok": False,
-            "error": "WarmasterCommander model brain unavailable",
+            "error": "Abaddon commander model brain unavailable",
             "error_code": "commander_model_unavailable",
             "mission_id": mission_id,
             "route": route_payload,
@@ -203,7 +204,7 @@ def build_commander_order(message: str, mission_id: str) -> dict[str, Any]:
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         return {
             "ok": False,
-            "error": f"WarmasterCommander returned invalid commander_order: {exc}",
+            "error": f"Abaddon commander returned invalid commander_order: {exc}",
             "error_code": "invalid_commander_order",
             "mission_id": mission_id,
             "route": route_payload,
@@ -526,7 +527,7 @@ def revision_plan_from_acceptance(run_dir: Path, result: dict[str, Any], review:
             {
                 "step_id": step_id,
                 "worker": worker,
-                "reason": str(review.get("reason") or required_revision.get("order") or "Warmaster acceptance rejected the result."),
+                "reason": str(review.get("reason") or required_revision.get("order") or "Abaddon acceptance rejected the result."),
                 "source": "warmaster_acceptance",
                 "priority": "blocker",
             }
@@ -698,7 +699,7 @@ def build_acceptance_review(command: dict[str, Any], report: dict[str, Any], led
             reason="Бригадир вернул внутренний needs_revision; пользовательский финал запрещен до доработки.",
             required_revision={
                 "to": str(report.get("governor") or ""),
-                "order": "Выполнить внутреннюю ревизию по governor_report.revision_plan и повторно передать отчет Вармастеру.",
+                "order": "Выполнить внутреннюю ревизию по governor_report.revision_plan и повторно передать отчет Абаддону.",
                 "required_steps": [],
             },
             escalate_to_user=False,
@@ -736,7 +737,7 @@ def build_acceptance_review(command: dict[str, Any], report: dict[str, Any], led
         review = acceptance_review(
             str(report.get("mission_id") or ""),
             accepted=False,
-            reason="WarmasterAcceptance model brain unavailable.",
+            reason="Abaddon acceptance model brain unavailable.",
             required_revision={"to": str(report.get("governor") or ""), "order": "Повторить приемку после восстановления модели."},
             escalate_to_user=True,
         )
@@ -747,7 +748,7 @@ def build_acceptance_review(command: dict[str, Any], report: dict[str, Any], led
         review = acceptance_review(
             str(report.get("mission_id") or ""),
             accepted=False,
-            reason=f"WarmasterAcceptance returned invalid JSON: {exc}",
+            reason=f"Abaddon acceptance returned invalid JSON: {exc}",
             required_revision={"to": str(report.get("governor") or ""), "order": "Повторить приемку с валидным JSON-решением."},
             escalate_to_user=True,
         )
@@ -756,7 +757,7 @@ def build_acceptance_review(command: dict[str, Any], report: dict[str, Any], led
     review = acceptance_review(
         str(report.get("mission_id") or ""),
         accepted=bool(parsed.get("accepted")),
-        reason=str(parsed.get("reason") or "").strip() or "Warmaster acceptance decision recorded.",
+        reason=str(parsed.get("reason") or "").strip() or "Abaddon acceptance decision recorded.",
         required_revision={
             "to": str(report.get("governor") or ""),
             "order": str(required_revision.get("order") or parsed.get("reason") or "Доработать результат по условиям приемки."),
@@ -819,7 +820,7 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
         return {"ok": True, "accepted": True, "governor_report": report, "acceptance_review": review, "decision": decision}
     if review.get("escalate_to_user"):
         record_mission_state(mission_dir, "blocked")
-        ledger.force_status("blocked", reason=str(review.get("reason") or "Warmaster acceptance requires user escalation."))
+        ledger.force_status("blocked", reason=str(review.get("reason") or "Abaddon acceptance requires user escalation."))
         append_progress_event(
             mission_dir / "progress_events.jsonl",
             progress_event(mission_id, "Warmaster", "commander", "blocked", "blocked", "Нужна эскалация", str(review.get("reason") or "")),
@@ -828,7 +829,7 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
     rev_order_payload = revision_order(
         mission_id,
         to=str(report.get("governor") or ""),
-        reason=str(review.get("reason") or "Warmaster rejected the result."),
+        reason=str(review.get("reason") or "Abaddon rejected the result."),
         order=str((review.get("required_revision") or {}).get("order") if isinstance(review.get("required_revision"), dict) else "Доработать результат."),
         required_steps=(review.get("required_revision") or {}).get("required_steps") if isinstance(review.get("required_revision"), dict) and isinstance((review.get("required_revision") or {}).get("required_steps"), list) else [],
     )
@@ -841,13 +842,13 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
         {
             "ok": False,
             "status": "needs_revision",
-            "summary": str(review.get("reason") or "Warmaster rejected the result and ordered revision."),
+            "summary": str(review.get("reason") or "Abaddon rejected the result and ordered revision."),
             "revision_plan": revision_plan,
             "warmaster_acceptance": review,
         }
     )
     ledger.set_result(updated_result)
-    ledger.force_status("needs_revision", reason="Warmaster rejected completed run and ordered internal revision.")
+    ledger.force_status("needs_revision", reason="Abaddon rejected completed run and ordered internal revision.")
     record_mission_state(mission_dir, "revision", active=True)
     append_progress_event(
         mission_dir / "progress_events.jsonl",

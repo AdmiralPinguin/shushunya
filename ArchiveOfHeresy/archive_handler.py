@@ -713,7 +713,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
     def warmaster_event_as_agent_event(self, event, index, total):
         display = event.get("display") if isinstance(event, dict) else {}
         payload = event.get("payload") if isinstance(event, dict) else {}
-        headline = str(display.get("headline") or event.get("type") or "Warmaster event").strip()
+        headline = str(display.get("headline") or event.get("type") or "Abaddon event").strip()
         detail = str(display.get("detail") or payload.get("summary") or "").strip()
         message = headline if not detail else f"{headline}: {detail}"
         return {
@@ -726,7 +726,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         }
 
     def warmaster_activity_entry_as_agent_event(self, entry, index, total):
-        headline = str(entry.get("headline") or entry.get("kind") or "Warmaster activity").strip()
+        headline = str(entry.get("headline") or entry.get("kind") or "Abaddon activity").strip()
         detail = str(entry.get("detail") or "").strip()
         message = headline if not detail else f"{headline}: {detail}"
         return {
@@ -835,7 +835,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         except HTTPError as exc:
             self.write_proxy_error(exc)
         except Exception as exc:
-            write_json(self, 502, {"ok": False, "error": f"warmaster unavailable: {exc}"})
+            write_json(self, 502, {"ok": False, "error": f"Abaddon unavailable: {exc}"})
 
     def collect_agent_tasks(self, limit):
         status, response = proxy_json_url("GET", f"{WARMASTER_BASE_URL}/runs?limit={limit}", timeout=30)
@@ -922,7 +922,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         except HTTPError as exc:
             self.write_proxy_error(exc)
         except Exception as exc:
-            write_json(self, 502, {"ok": False, "error": f"warmaster unavailable: {exc}"})
+            write_json(self, 502, {"ok": False, "error": f"Abaddon unavailable: {exc}"})
 
     def mobile_agent_task(self):
         params = parse_qs(urlsplit(self.path).query)
@@ -1011,21 +1011,21 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         except HTTPError as exc:
             self.write_proxy_error(exc)
         except Exception as exc:
-            write_json(self, 502, {"ok": False, "error": f"warmaster unavailable: {exc}"})
+            write_json(self, 502, {"ok": False, "error": f"Abaddon unavailable: {exc}"})
 
     def mobile_agent_last_task(self):
         try:
             status, response = proxy_json_url("GET", f"{WARMASTER_BASE_URL}/runs?limit=1", timeout=30)
             runs = response.get("runs") if isinstance(response.get("runs"), list) else []
             if not runs:
-                write_json(self, 404, {"ok": False, "error": "no warmaster runs found"})
+                write_json(self, 404, {"ok": False, "error": "no Abaddon runs found"})
                 return
             task_id = str(runs[0].get("task_id") or "")
             write_json(self, status, {"ok": True, "backend": "warmaster", "task_id": task_id, "task": self.warmaster_run_as_agent_task(runs[0])})
         except HTTPError as exc:
             self.write_proxy_error(exc)
         except Exception as exc:
-            write_json(self, 502, {"ok": False, "error": f"warmaster unavailable: {exc}"})
+            write_json(self, 502, {"ok": False, "error": f"Abaddon unavailable: {exc}"})
 
     def warmaster_start_research_loop(self, task_id, payload):
         loop_payload = {
@@ -1051,7 +1051,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             return exc.code, parsed
 
     def warmaster_acceptance_message(self, task_id):
-        return f"Вармастер принял задачу и ведет исполнение: task_id={task_id}. Ход работы доступен во вкладке Бригады."
+        return f"Абаддон принял задачу и ведет исполнение: task_id={task_id}. Ход работы доступен во вкладке Бригады."
 
     def append_warmaster_acceptance_message(self, session_id, task_id, task_text=""):
         clean_task_id = str(task_id or "").strip()
@@ -1111,7 +1111,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             self.append_warmaster_acceptance_message(SHARED_CHAT_SESSION_ID, resolved_task_id, task_text=task)
             response["backend"] = "warmaster"
             response["task_id"] = resolved_task_id
-            response["message"] = self.warmaster_acceptance_message(resolved_task_id) if resolved_task_id else "Вармастер принял задачу."
+            response["message"] = self.warmaster_acceptance_message(resolved_task_id) if resolved_task_id else "Абаддон принял задачу."
             response["research_loop"] = loop_response
             accepted_status = self.warmaster_loop_started_or_active(loop_status, loop_response) if loop_status else 200 <= status < 300
             response["ok"] = accepted_status
@@ -1119,7 +1119,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         except HTTPError as exc:
             self.write_proxy_error(exc)
         except Exception as exc:
-            write_json(self, 502, {"ok": False, "error": f"warmaster unavailable: {exc}"})
+            write_json(self, 502, {"ok": False, "error": f"Abaddon unavailable: {exc}"})
 
     def mobile_agent_run(self):
         self.mobile_agent_start()
@@ -1142,12 +1142,12 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 timeout=30,
             )
             response["backend"] = "warmaster"
-            response["message"] = "Отмена отправлена в Warmaster."
+            response["message"] = "Отмена отправлена Абаддону."
             write_json(self, status, response)
         except HTTPError as exc:
             self.write_proxy_error(exc)
         except Exception as exc:
-            write_json(self, 502, {"ok": False, "error": f"warmaster unavailable: {exc}"})
+            write_json(self, 502, {"ok": False, "error": f"Abaddon unavailable: {exc}"})
 
     def mobile_agent_stream_unsupported(self):
         write_json(
@@ -1165,11 +1165,11 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         if not clean:
             return ""
         lower = clean.lower()
-        prefixes = ("/task ", "/w ", "/warmaster ", "!task ", "!вармастер ")
+        prefixes = ("/task ", "/w ", "/abaddon ", "!task ", "!абаддон ", "/warmaster ", "!вармастер ")
         for prefix in prefixes:
             if lower.startswith(prefix):
                 return clean[len(prefix) :].strip()
-        colon_prefixes = ("вармастер:", "warmaster:")
+        colon_prefixes = ("абаддон:", "abaddon:", "вармастер:", "warmaster:")
         for prefix in colon_prefixes:
             if lower.startswith(prefix):
                 return clean[len(prefix) :].strip()
@@ -1283,7 +1283,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         original_text = trim_chat_text(payload.get("text") or payload.get("message") or "")
         task = trim_chat_text(payload.get("warmaster_task") or "")
         if not task:
-            raise ValueError("warmaster task is empty")
+            raise ValueError("Abaddon task is empty")
 
         task_id = str(payload.get("task_id") or f"client-{uuid.uuid4().hex[:12]}").strip()
         warmaster_payload = {
@@ -1693,7 +1693,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 job_id = create_mobile_job("warmaster", payload)
                 run_mobile_job(job_id, lambda payload=payload: self.run_mobile_warmaster_payload(payload))
                 message = (
-                    f"Вармастер-пайплайн поставлен в очередь: task_id={task_id}. "
+                    f"Пайплайн Абаддона поставлен в очередь: task_id={task_id}. "
                     "Ход работы будет во вкладке Бригады, а в основной чат вернется финальный результат или запрос решения."
                 )
                 extra = {"warmaster": {"ok": True, "task_id": task_id, "job_id": job_id, "status": "queued"}}

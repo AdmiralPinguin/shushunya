@@ -8,8 +8,9 @@ Work for this project must stay inside this directory unless the user explicitly
 
 ## Active Work Focus
 
-Current active architecture work routes through `EyeOfTerror/Warmaster`.
-User-facing chat/task entry must go through Warmaster and its governors/workers;
+Current active architecture work routes through Abaddon, implemented in the
+compatibility package `EyeOfTerror/Warmaster`. User-facing chat/task entry must
+go through Abaddon and its governors/workers;
 do not recreate or route work through the removed standalone mobile agent.
 
 ## File Permissions

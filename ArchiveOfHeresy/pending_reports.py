@@ -59,7 +59,7 @@ def pending_summary():
 
 def task_roster_note():
     """Live status of all brigade tasks, injected every chat turn so Shushunya
-    answers task status from truth (Vox pulls it fresh from Warmaster) instead
+    answers task status from truth (Vox pulls it fresh from Abaddon) instead
     of confabulating from a stale ack line or focus note."""
     try:
         roster = _get("/roster")
@@ -73,8 +73,8 @@ def task_roster_note():
     return {
         "role": "system",
         "content": (
-            "[Твои задачи сейчас — живой статус от Warmaster. АВТОРИТЕТНЕЕ всего остального в промпте]\n"
-            "Эти задачи ведёт бригада Warmaster, а НЕ ты лично. Не описывай процесс от первого лица "
+            "[Твои задачи сейчас — живой статус от Абаддона. АВТОРИТЕТНЕЕ всего остального в промпте]\n"
+            "Эти задачи ведут варбанды Абаддона, а НЕ ты лично. Не описывай процесс от первого лица "
             "('я выкапываю', 'я собираю осколки') — так делает бригада, не ты. "
             "Статус задачи бери ТОЛЬКО из этого списка. Твой focus-файл и твои прошлые реплики в истории "
             "могут быть устаревшими — НЕ верь им про статус, верь только этому списку. "

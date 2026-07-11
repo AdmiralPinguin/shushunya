@@ -1,4 +1,4 @@
-"""Warmaster campaign orchestration above ordinary single-governor runs."""
+"""Abaddon campaign orchestration above ordinary single-governor runs."""
 from __future__ import annotations
 
 import hashlib
@@ -97,9 +97,9 @@ def campaign_task_text(original_task: str, subrun_id: str, handoff_path: str = "
         )
     if subrun_id == "implementation":
         handoff_clause = (
-            f" Перед началом прочитай handoff Вармастера: {handoff_path}. "
+            f" Перед началом прочитай handoff Абаддона: {handoff_path}. "
             if handoff_path
-            else " Перед началом дождись handoff Вармастера от исследовательской подзадачи. "
+            else " Перед началом дождись handoff Абаддона от исследовательской подзадачи. "
         )
         return (
             "Реализуй кодовую/техническую часть большой смешанной задачи как senior engineer."
@@ -131,7 +131,7 @@ def decompose_task(message: str, campaign_id: str | None = None, route: dict[str
             "implementation subrun is created only after research handoff is available",
             "implementation task references the campaign handoff input",
             "all required subruns complete without unresolved blockers",
-            "Warmaster final review verifies original task coverage and handoff usage",
+            "Abaddon final review verifies original task coverage and handoff usage",
         ],
         "subruns": [
             {
@@ -388,7 +388,7 @@ def prepare_campaign(run_root: Path, message: str, campaign_id: str | None = Non
             "campaign_id": resolved_id,
             "mission": mission,
             "error_code": str(mission.get("error_code") or "commander_intake_failed"),
-            "error": str(mission.get("error") or "Warmaster commander intake failed"),
+            "error": str(mission.get("error") or "Abaddon commander intake failed"),
         }
     target_dir.mkdir(parents=True, exist_ok=True)
     plan = preflight["plan"]

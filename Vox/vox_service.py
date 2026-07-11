@@ -64,7 +64,7 @@ STATE_LABELS = {
     "plan_review": "план готов, ждёт запуска — работа ещё НЕ идёт",
     "executing": "в работе",
     "governor_review": "бригадир проверяет результат",
-    "warmaster_acceptance": "Warmaster принимает результат",
+    "warmaster_acceptance": "Абаддон принимает результат",
     "revision": "на доработке у бригады",
 }
 CLASSES = ("срочно", "важно", "к слову", "фон", "unclassified")

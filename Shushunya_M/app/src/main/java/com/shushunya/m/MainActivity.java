@@ -819,7 +819,7 @@ public class MainActivity extends Activity {
 
     private void restoreHeaderState() {
         if (TAB_AGENT.equals(currentTab)) {
-            setWarpState(agentRunning ? "●  WARMASTER / В РАБОТЕ" : "●  WARMASTER / МОНИТОР", agentRunning ? WARP : CYAN);
+            setWarpState(agentRunning ? "●  АБАДДОН / В РАБОТЕ" : "●  АБАДДОН / МОНИТОР", agentRunning ? WARP : CYAN);
         } else if (TAB_TRANSLATOR.equals(currentTab)) {
             setWarpState("●  ПЕРЕВОДЧИК / ГОТОВ", CYAN);
         } else if (TAB_MEMORY.equals(currentTab)) {
@@ -856,7 +856,7 @@ public class MainActivity extends Activity {
         view.setPadding(0, dp(6), 0, 0);
 
         agentStatus = new TextView(this);
-        agentStatus.setText("WARMASTER • WARBANDS");
+        agentStatus.setText("АБАДДОН • WARBANDS");
         agentStatus.setTextColor(CYAN);
         agentStatus.setTextSize(12);
         agentStatus.setTypeface(Typeface.DEFAULT_BOLD);
@@ -912,7 +912,7 @@ public class MainActivity extends Activity {
         agentScrollView.addView(agentMessageList, new ScrollView.LayoutParams(-1, -2));
         view.addView(agentScrollView, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        addAgentMessage(false, "Warbands готовы. Задачи отправляй из основного чата через /task, /w, /warmaster или вармастер:.", false);
+        addAgentMessage(false, "Warbands готовы. Задачи отправляй из основного чата через /task, /w, /abaddon или «абаддон:».", false);
 
         LinearLayout quickRow = new LinearLayout(this);
         quickRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -1693,7 +1693,7 @@ public class MainActivity extends Activity {
         agentCancelRequested = false;
         setAgentRunButtonRunning(true);
         if (agentStatus != null) {
-            agentStatus.setText("Восстанавливаю состояние Warmaster...");
+            agentStatus.setText("Восстанавливаю состояние Абаддона...");
         }
         if (agentLiveBubble == null) {
             agentLiveBubble = addAgentMessage(false, "", false);
@@ -1844,23 +1844,23 @@ public class MainActivity extends Activity {
 
     private void refreshAgentState() {
         if (agentStatus != null) {
-            agentStatus.setText("Проверяю состояние Warmaster...");
+            agentStatus.setText("Проверяю состояние Абаддона...");
         }
         new Thread(() -> {
             try {
                 String state = requestAgentState();
                 main.post(() -> {
                     if (agentStatus != null) {
-                        agentStatus.setText("Состояние Warmaster получено.");
+                        agentStatus.setText("Состояние Абаддона получено.");
                     }
                     addAgentMessage(false, state, true);
                 });
             } catch (Exception exc) {
                 main.post(() -> {
                     if (agentStatus != null) {
-                        agentStatus.setText("Состояние Warmaster сейчас не обновилось.");
+                        agentStatus.setText("Состояние Абаддона сейчас не обновилось.");
                     }
-                    addAgentMessage(false, "! Состояние Warmaster сейчас не обновилось. Задачи на ПК от этого не останавливаются.", true);
+                    addAgentMessage(false, "! Состояние Абаддона сейчас не обновилось. Задачи на ПК от этого не останавливаются.", true);
                 });
             }
         }).start();
@@ -1878,7 +1878,7 @@ public class MainActivity extends Activity {
     private void handleAgentEvent(JSONObject event) {
         String type = event.optString("type", "");
         if ("start".equals(type)) {
-            agentStatus.setText(event.optString("message", "Warmaster стартует..."));
+            agentStatus.setText(event.optString("message", "Абаддон стартует..."));
             appendAgentLog("• " + event.optString("message", "старт"));
             return;
         }
@@ -1888,7 +1888,7 @@ public class MainActivity extends Activity {
             if (!taskId.isEmpty()) {
                 currentAgentTaskId = taskId;
             }
-            agentStatus.setText(taskId.isEmpty() ? "Warmaster получил задачу." : "Задача " + taskId);
+            agentStatus.setText(taskId.isEmpty() ? "Абаддон получил задачу." : "Задача " + taskId);
             appendAgentLog("• Память: " + namespace + (taskId.isEmpty() ? "" : ", task_id=" + taskId));
             return;
         }
@@ -1924,7 +1924,7 @@ public class MainActivity extends Activity {
         if ("heartbeat".equals(type)) {
             double duration = event.optDouble("current_task_duration_sec", -1.0);
             if (duration >= 0.0) {
-                agentStatus.setText("Warmaster думает... " + duration + "s");
+                agentStatus.setText("Абаддон думает... " + duration + "s");
             }
             return;
         }
@@ -1936,7 +1936,7 @@ public class MainActivity extends Activity {
             appendAgentLog(cancelled
                     ? (duration >= 0.0 ? "Остановлено (" + duration + "s):" : "Остановлено:")
                     : (duration >= 0.0 ? "Результат (" + duration + "s):" : "Результат:"));
-            appendAgentLog(message.isEmpty() ? "Warmaster вернул пустой ответ." : message);
+            appendAgentLog(message.isEmpty() ? "Абаддон вернул пустой ответ." : message);
             if (cancelled) {
                 agentStatus.setText("Отменено.");
             }
@@ -1949,7 +1949,7 @@ public class MainActivity extends Activity {
         if ("done".equals(type)) {
             JSONObject result = event.optJSONObject("result");
             boolean cancelled = result != null && result.optBoolean("cancelled", false);
-            agentStatus.setText(cancelled ? "Отменено." : event.optBoolean("ok", false) ? "Готово." : "Warmaster завершился с ошибкой.");
+            agentStatus.setText(cancelled ? "Отменено." : event.optBoolean("ok", false) ? "Готово." : "Абаддон завершился с ошибкой.");
         }
     }
 
@@ -1979,7 +1979,7 @@ public class MainActivity extends Activity {
         String response = readAll(stream);
         if (code < 200 || code >= 300) {
             if (code == 409) {
-                throw new IllegalStateException("Warmaster занят, открой Warbands и повтори позже");
+                throw new IllegalStateException("Абаддон занят, открой Warbands и повтори позже");
             }
             throw new IllegalStateException("HTTP " + code + ": " + response);
         }
@@ -2106,7 +2106,7 @@ public class MainActivity extends Activity {
         if (agentDoneMetric != null) agentDoneMetric.setText(String.valueOf(doneCount));
         if (agentModeMetric != null) agentModeMetric.setText(activeCount > 0 ? "BUSY" : "LIVE");
         if (TAB_AGENT.equals(currentTab)) {
-            setWarpState(activeCount > 0 ? "●  WARMASTER / В РАБОТЕ" : "●  WARMASTER / МОНИТОР", activeCount > 0 ? WARP : CYAN);
+            setWarpState(activeCount > 0 ? "●  АБАДДОН / В РАБОТЕ" : "●  АБАДДОН / МОНИТОР", activeCount > 0 ? WARP : CYAN);
         }
         for (int i = length - 1; i >= 0; i--) {
             JSONObject task = tasks.optJSONObject(i);
@@ -2458,6 +2458,9 @@ public class MainActivity extends Activity {
 
     private String agentBrigadeLabel(String governor) {
         String clean = governor == null ? "" : governor.trim();
+        if (clean.equalsIgnoreCase("Warmaster") || clean.equalsIgnoreCase("Abaddon")) {
+            return "Абаддон";
+        }
         if (clean.equalsIgnoreCase("IskandarKhayon") || clean.equalsIgnoreCase("Iskandar") || clean.equalsIgnoreCase("Khayon")) {
             return "Искандар Хайон";
         }
@@ -2504,12 +2507,12 @@ public class MainActivity extends Activity {
                 finalMessage = finalEvent.optString("message", "").trim();
                 boolean cancelled = finalEvent.optBoolean("cancelled", false);
                 if (cancelled && finalMessage.isEmpty()) {
-                    return "Warmaster остановлен: задача отменена.";
+                    return "Абаддон остановлен: задача отменена.";
                 }
-                return finalMessage.isEmpty() ? "Warmaster вернул пустой ответ." : finalMessage;
+                return finalMessage.isEmpty() ? "Абаддон вернул пустой ответ." : finalMessage;
             }
             if (!snapshot.optBoolean("running", false)) {
-                return finalMessage.isEmpty() ? "Warmaster завершился без финального сообщения." : finalMessage;
+                return finalMessage.isEmpty() ? "Абаддон завершился без финального сообщения." : finalMessage;
             }
             Thread.sleep(2000);
         }
@@ -2569,7 +2572,7 @@ public class MainActivity extends Activity {
         out.append("State: ").append(state.optBoolean("busy", false) ? "busy" : "idle");
         String revision = state.optString("revision", "").trim();
         if (!revision.isEmpty()) {
-            out.append("\nRevision: ").append(revision);
+            out.append("\nRevision: ").append(agentBrigadeLabel(revision));
         }
         out.append("\nUptime: ").append(state.optDouble("uptime_sec", 0.0)).append("s");
         out.append("\nОчередь: ").append(state.optInt("queued", 0));
@@ -3234,13 +3237,13 @@ public class MainActivity extends Activity {
             return "";
         }
         String lower = clean.toLowerCase();
-        String[] prefixes = {"/task ", "/w ", "/warmaster ", "!task ", "!вармастер "};
+        String[] prefixes = {"/task ", "/w ", "/abaddon ", "!task ", "!абаддон ", "/warmaster ", "!вармастер "};
         for (String prefix : prefixes) {
             if (lower.startsWith(prefix)) {
                 return clean.substring(prefix.length()).trim();
             }
         }
-        String[] colonPrefixes = {"вармастер:", "warmaster:"};
+        String[] colonPrefixes = {"абаддон:", "abaddon:", "вармастер:", "warmaster:"};
         for (String prefix : colonPrefixes) {
             if (lower.startsWith(prefix)) {
                 return clean.substring(prefix.length()).trim();
@@ -3252,16 +3255,16 @@ public class MainActivity extends Activity {
     private void runWarmasterTaskFromChat(String originalText, String task) {
         String clean = task == null ? "" : task.trim();
         if (clean.isEmpty()) {
-            addMessage(false, "После команды Warmaster нужна сама задача.");
+            addMessage(false, "После команды Абаддона укажи саму задачу.");
             return;
         }
         if (agentRunning) {
-            addMessage(false, "Warmaster уже выполняет задачу. Открой вкладку Warbands и дождись завершения или отмени текущую.");
+            addMessage(false, "Абаддон уже выполняет задачу. Открой вкладку Warbands и дождись завершения или отмени текущую.");
             return;
         }
 
         addMessage(true, originalText == null || originalText.trim().isEmpty() ? clean : originalText.trim());
-        TextView answerBubble = addMessage(false, "Warmaster принимает задачу...", false);
+        TextView answerBubble = addMessage(false, "Абаддон принимает задачу...", false);
         setWaiting(true);
         String taskId = "client-" + System.currentTimeMillis();
         currentAgentTaskId = taskId;
@@ -3269,7 +3272,7 @@ public class MainActivity extends Activity {
         agentCancelRequested = false;
         agentRunning = true;
         if (agentStatus != null) {
-            agentStatus.setText("Warmaster выполняет задачу из основного чата...");
+            agentStatus.setText("Абаддон выполняет задачу из основного чата...");
         }
         setAgentRunButtonRunning(true);
 
@@ -3307,7 +3310,7 @@ public class MainActivity extends Activity {
                     setWaiting(false);
                     setAgentRunButtonRunning(false);
                     if (agentStatus != null) {
-                        agentStatus.setText("Warmaster ведёт задачу " + finishedTaskId + "; результат придёт докладом.");
+                        agentStatus.setText("Абаддон ведёт задачу " + finishedTaskId + "; результат придёт докладом.");
                     }
                 });
             } catch (Exception exc) {
@@ -3353,7 +3356,7 @@ public class MainActivity extends Activity {
     private String warmasterAcceptedChatMessage(String taskId) {
         String cleanTaskId = taskId == null ? "" : taskId.trim();
         StringBuilder out = new StringBuilder();
-        out.append("Warmaster принял задачу.");
+        out.append("Абаддон принял задачу.");
         if (!cleanTaskId.isEmpty()) {
             out.append("\n").append("task_id=").append(cleanTaskId);
         }

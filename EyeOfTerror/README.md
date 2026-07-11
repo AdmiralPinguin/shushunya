@@ -8,11 +8,15 @@ the task state, and return status/results to the user.
 
 See `EyeOfTerror/ARCHITECTURE.md` for the layer boundaries and registry rules.
 
+The public commander name is **Abaddon**. Existing `Warmaster` package paths,
+module names, endpoints, environment variables, and JSON identifiers remain as
+compatibility contracts during the migration.
+
 ## Ports
 
 | Port | Service | Role |
 | --- | --- | --- |
-| 7000 | Warmaster Gateway | User-facing chat/orchestration entrypoint |
+| 7000 | Abaddon | User-facing chat/orchestration entrypoint |
 | 7101 | Iskandar Khayon | Lore, research, reconstruction task governor |
 
 Mechanicum workers use ports `7001+`. Legacy backends may keep their existing
@@ -20,7 +24,7 @@ ports while relay workers adapt them to the common worker API.
 
 ## Routing Rule
 
-The Warmaster Gateway should only do top-level routing:
+Abaddon should only do top-level routing:
 
 1. Accept a user message.
 2. Decide whether it is chat, status, cancellation, or a task.
@@ -124,30 +128,30 @@ same progress model.
 `GET /runs/<task_id>/steps/<step_id>/artifacts` returns the expected and
 produced artifact status for that worker step only.
 
-On startup, Warmaster Gateway marks stale `running` or `cancelling` ledgers as
+On startup, Abaddon marks stale `running` or `cancelling` ledgers as
 `interrupted`, so clients can resume runs after a gateway restart without first
 calling a maintenance endpoint. Pass `--no-recover-stale-on-start` to disable
 that behavior for diagnostics.
 
 Normal user tasks must enter through `POST /orchestrate_run`, which creates a
-Warmaster `commander_order`, assigns a governor, prepares the run, and starts or
+Abaddon `commander_order`, assigns a governor, prepares the run, and starts or
 returns the next gated action. `POST /task` is retained only as a diagnostic
 legacy endpoint and rejects calls unless `allow_legacy_direct_task=true` is
 present.
-Passing `governor_transport: "http"` makes Warmaster call the selected active
+Passing `governor_transport: "http"` makes Abaddon call the selected active
 governor service on its registry port, keeping the planning boundary compatible
 with future Inner Circle services.
-Before preparing an HTTP-governor run, Warmaster checks reachable governor
+Before preparing an HTTP-governor run, Abaddon checks reachable governor
 `required_workers` against the Mechanicum registry.
-Warmaster also rejects any produced task contract whose `worker_plan` references
+Abaddon also rejects any produced task contract whose `worker_plan` references
 workers absent from the Mechanicum registry.
 
-Warmaster Gateway can also be started with `--governor-transport http` and
+Abaddon can also be started with `--governor-transport http` and
 `--governor-host 127.0.0.1` so ordinary `POST /orchestrate_run` submissions use
 governor services by default.
 
 `GET /brigade_plan` and `GET /state` expose the expected service-separated
-brigade topology, including Warmaster, Iskandar, and registered Mechanicum
+brigade topology, including Abaddon, Iskandar, and registered Mechanicum
 workers.
 `GET /brigade_health` combines that topology with best-effort service health
 checks and reports whether reachable governor `required_workers` are present in
@@ -162,14 +166,14 @@ PYTHONPATH=EyeOfTerror/Warmaster:Mechanicum python3 EyeOfTerror/Warmaster/start_
 ```
 
 Use `--dry-run` to print the Mechanicum worker supervisor, Iskandar service, and
-Warmaster Gateway commands without starting them.
+Abaddon gateway commands without starting them.
 Use `--json` to print the same startup plan in a machine-readable form for
 diagnostics or future admin clients. The JSON includes top-level services and
 the individual Mechanicum worker names, ports, modules, service dependencies,
 and readiness URLs.
 Use `--wait-ready` to wait for top-level health URLs after starting the stack;
 `--ready-timeout-sec` controls the readiness timeout. Readiness covers
-Warmaster, Iskandar, and registered Mechanicum worker health URLs.
+Abaddon, Iskandar, and registered Mechanicum worker health URLs.
 If one managed process exits, the launcher terminates the remaining managed
 processes and returns the first exit code.
 Before starting, the launcher checks managed ports and refuses to start over a
@@ -185,7 +189,7 @@ reruns pass focused `revision_context` into the selected worker request; writer,
 critic, and finalizer artifacts preserve that focus as `revision_focus`.
 
 Research loop endpoints (`research_loop_local`, `research_loop_http`, and their
-`start_` background variants) let Warmaster run start/resume/revision decisions
+`start_` background variants) let Abaddon run start/resume/revision decisions
 until a final package is ready or a bounded stop condition is hit. Use
 `max_revision_cycles` to cap automatic rework.
 
@@ -198,14 +202,14 @@ or `<file>.epub.json`/`<file>.txt.json`; useful fields include `title`,
 `language`, `type`, `source_class`, `reliability`, `direct_event_detail_level`,
 `tags`, `aliases`, and `expected_use`.
 
-`GET /runs/<task_id>/worker_tasks` maps a Warmaster run to the task ids sent to
+`GET /runs/<task_id>/worker_tasks` maps an Abaddon run to the task ids sent to
 Mechanicum workers. Add `?live=1` for a best-effort lookup against worker
 runtime task endpoints.
 
 `GET /doctor` checks registry, manifest, and service consistency and is safe to
 call from an admin client.
 
-`POST /runs/<task_id>/cancel` marks the Warmaster ledger as cancelling and
+`POST /runs/<task_id>/cancel` marks the Abaddon ledger as cancelling and
 best-effort forwards cancellation to HTTP worker task endpoints from the run
 dispatch package.
 

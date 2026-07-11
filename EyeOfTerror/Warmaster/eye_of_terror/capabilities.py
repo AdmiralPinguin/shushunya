@@ -32,7 +32,7 @@ def gateway_capabilities() -> dict[str, Any]:
         },
         "model_brain": model_contract("WarmasterGateway", "top-level orchestration gateway", layer="gateway_service"),
         "display": {
-            "headline": "Warmaster Gateway capabilities",
+            "headline": "Abaddon capabilities",
             "detail": f"{len(governors)} governors, {len(workers)} workers, {len(actions.get('preferred_task_flow', []))} preferred task-flow steps",
             "severity": "info",
         },

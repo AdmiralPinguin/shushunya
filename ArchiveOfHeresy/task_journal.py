@@ -132,7 +132,7 @@ def deliver_final_to_chat(task_id, run=None):
     if not final_message:
         return False
     goal = human_goal(run or {})[:120] or task_id
-    body = f"Задача бригады выполнена и принята Warmaster'ом.\ntask: {goal}\nfinal ответ:\n{final_message[:4000]}"
+    body = f"Задача бригады выполнена и принята Абаддоном.\ntask: {goal}\nfinal ответ:\n{final_message[:4000]}"
     report_id = enqueue_report("warmaster", "task_completed", f"готово: {goal}", body, dedupe_key=f"warmaster:{task_id}:final")
     return bool(report_id)
 
@@ -182,7 +182,7 @@ def deliver_escalation_to_chat(task_id, run, event_kind):
     lines.append(f"task: {facts.get('goal')}")
     lines.append(f"губернатор: {facts.get('governor')}; task_id: {task_id}")
     if facts.get("warmaster_reason"):
-        lines.append(f"вердикт Warmaster'а: {facts['warmaster_reason']}")
+        lines.append(f"вердикт Абаддона: {facts['warmaster_reason']}")
     if facts.get("required_order"):
         lines.append(f"что требуется: {facts['required_order']}")
     for blocker in facts.get("blockers") or []:

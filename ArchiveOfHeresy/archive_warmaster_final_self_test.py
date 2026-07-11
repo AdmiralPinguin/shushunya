@@ -61,6 +61,9 @@ class FakeArchiveHandler:
 
 
 def main() -> int:
+    acceptance = ArchiveHandler.warmaster_acceptance_message(None, "public-name-test")
+    if "Абаддон" not in acceptance or "Вармастер" in acceptance or "Warmaster" in acceptance:
+        raise AssertionError(f"acceptance message leaked the legacy public commander name: {acceptance!r}")
     accepted = final_message(
         {
             "status": "completed",
@@ -229,6 +232,8 @@ def main() -> int:
         raise AssertionError(f"final delivery queued wrong report header: {queued_reports}")
     if "Доставленный финал task-final-delivery." not in queued_reports[0]["args"][3]:
         raise AssertionError(f"final delivery queued wrong report body: {queued_reports}")
+    if "принята Абаддоном" not in queued_reports[0]["args"][3] or "Warmaster" in queued_reports[0]["args"][3]:
+        raise AssertionError(f"final delivery report leaked the legacy public commander name: {queued_reports}")
     if queued_reports[0]["kwargs"].get("dedupe_key") != "warmaster:task-final-delivery:final":
         raise AssertionError(f"final delivery did not use stable dedupe key: {queued_reports}")
     queued_reports.clear()
@@ -365,7 +370,7 @@ def main() -> int:
         raise AssertionError(f"mobile completed run without final_response looked like user final: {no_final_payload}")
     if delivered:
         raise AssertionError(f"mobile completed run without final_response was delivered to chat: {delivered}")
-    print("[ok] Archive Warmaster final-message gate")
+    print("[ok] Archive Abaddon final-message gate and Warmaster protocol compatibility")
     return 0
 
 

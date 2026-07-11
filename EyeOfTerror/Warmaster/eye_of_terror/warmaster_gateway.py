@@ -297,9 +297,9 @@ def _validate_gateway_bind_host(host: str) -> str:
     try:
         address = ipaddress.ip_address(str(host).split("%", 1)[0])
     except ValueError as exc:
-        raise ValueError("Warmaster gateway bind host must be a literal loopback address") from exc
+        raise ValueError("Abaddon gateway bind host must be a literal loopback address") from exc
     if not address.is_loopback:
-        raise ValueError("Warmaster gateway cannot bind an unauthenticated control plane off loopback")
+        raise ValueError("Abaddon gateway cannot bind an unauthenticated control plane off loopback")
     return str(host)
 
 
@@ -335,6 +335,7 @@ def gateway_state(run_root: Path, run_limit: int = 20, include_health: bool = Fa
     payload = {
         "ok": True,
         "gateway": "WarmasterGateway",
+        "display_name": "Abaddon",
         "capabilities": gateway_capabilities(),
         "actions": gateway_actions(),
         "governors": governor_registry_snapshot(),
@@ -462,7 +463,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                 return
             parsed = urlparse(self.path)
             if parsed.path == "/health":
-                response(self, 200, {"ok": True, "gateway": "WarmasterGateway"})
+                response(self, 200, {"ok": True, "gateway": "WarmasterGateway", "display_name": "Abaddon"})
                 return
             if parsed.path == "/capabilities":
                 response(self, 200, gateway_capabilities())
@@ -1053,7 +1054,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                             "phase": "commander_intake",
                             "task_id": task_id or "",
                             "mission_id": mission_id,
-                            "error": str(commander.get("error") or "Warmaster commander intake failed"),
+                            "error": str(commander.get("error") or "Abaddon commander intake failed"),
                             "error_code": str(commander.get("error_code") or "commander_intake_failed"),
                             "commander_preview": commander,
                         }
@@ -1806,7 +1807,7 @@ def serve(host: str, port: int, run_root: Path, recover_stale_on_start: bool = T
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Serve the EyeOfTerror Warmaster Gateway.")
+    parser = argparse.ArgumentParser(description="Serve the EyeOfTerror Abaddon orchestration gateway.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7000)
     parser.add_argument("--run-root", default="runtime/warmaster-runs")

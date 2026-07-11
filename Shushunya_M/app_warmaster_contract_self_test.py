@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static contract checks for the Android Warmaster/brigade UI."""
+"""Static contract checks for the Android Abaddon UI and compatibility API."""
 from pathlib import Path
 
 
@@ -19,6 +19,12 @@ def main() -> None:
     require("/archive/client/warmaster/tasks" in source, "brigade monitor history must use the Warmaster client endpoint")
     require("/archive/client/warmaster/cancel" in source, "task cancellation must use the Warmaster client endpoint")
     require("/archive/client/warmaster/state" in source, "state checks must use the Warmaster client endpoint")
+    require("АБАДДОН • WARBANDS" in source, "brigade UI must expose Abaddon as the public commander name")
+    require("WARMASTER /" not in source, "legacy commander name must not remain in visible status banners")
+    require('clean.equalsIgnoreCase("Warmaster") || clean.equalsIgnoreCase("Abaddon")' in source, "machine commander ids must map to the Abaddon public label")
+    require('append(agentBrigadeLabel(revision))' in source, "state revision must not expose the legacy machine identity")
+    require("/abaddon " in source and "!абаддон " in source and "абаддон:" in source and "abaddon:" in source, "Abaddon chat command aliases are incomplete")
+    require("/warmaster " in source and "!вармастер " in source and "вармастер:" in source and "warmaster:" in source, "legacy command aliases must remain compatible")
     require("/archive/client/chat/completions" in source, "chat completions must use the client server facade")
     require("/archive/client/chat/messages" in source, "chat history must use the client server facade")
     require("/archive/client/agent/" not in source, "Android app must not call legacy client agent endpoints")
@@ -29,7 +35,7 @@ def main() -> None:
     require("runAgentTask(" not in source, "brigade monitor must not run a standalone task path")
     require("payload.put(\"message\", task)" in source, "Warmaster task payload must carry the user text as message")
     require("payload.put(\"task\", task)" not in source, "Warmaster launch payload must not use legacy raw task")
-    print("[ok] Android Warmaster client contract")
+    print("[ok] Android Abaddon UI and Warmaster API compatibility")
 
 
 if __name__ == "__main__":
