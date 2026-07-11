@@ -18,7 +18,8 @@ find "$ROOT" -type f \( \
   -path '*/android-tools/android-sdk/build-tools/*/*' -o \
   -path '*/android-tools/whisper.cpp/build/bin/*' -o \
   -path '*/.gradle-home/caches/*/transformed/aapt2-*-linux/aapt2' -o \
-  -path '*/llama.cpp/*' \
+  -path '*/llama.cpp/*' -o \
+  -path '*/WarpWails/tools/ffmpeg-*-static/*' \
 \) -exec chmod 755 {} +
 
 if [ -d "$ROOT/.secrets" ]; then

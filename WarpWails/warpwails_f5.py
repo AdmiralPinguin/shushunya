@@ -71,9 +71,12 @@ def ruaccent_f5(text: str) -> str:
         timeout=60,
     )
     if proc.returncode != 0:
-        return text
-    lines = [line for line in proc.stdout.splitlines() if line.strip()]
-    return lines[-1] if lines else text
+        result = text
+    else:
+        lines = [line for line in proc.stdout.splitlines() if line.strip()]
+        result = lines[-1] if lines else text
+    # тире-пауза в начале: F5 жрёт первый слог фразы без разгона
+    return result if result.startswith("—") else f"— {result}"
 
 
 def prepare_text(lines: list[tuple[str, str]], profile: dict, no_ruaccent: bool) -> str:
@@ -145,25 +148,56 @@ def float_to_pcm(samples) -> bytes:
 
 
 def stream_pcm(pcm: bytes, sr: int) -> None:
+    stream_pcm_iter([pcm], sr)
+
+
+def stream_pcm_iter(chunks, sr: int) -> None:
+    """Льёт куски PCM в плеер по мере готовности (конвейер: играем — пока считается следующее)."""
     name, command, problem = detect_player(sr)
     if not command:
         raise SystemExit(problem or "Аудиовывод недоступен.")
+    pad_head = b"\x00\x00" * (sr * 45 // 100)  # синк просыпается — глотает начало
+    pad_tail = b"\x00\x00" * (sr * 70 // 100)
     with subprocess.Popen(command, stdin=subprocess.PIPE) as player:
         assert player.stdin is not None
-        player.stdin.write(pcm)
+        player.stdin.write(pad_head)
+        for chunk in chunks:
+            if chunk:
+                player.stdin.write(chunk)
+                player.stdin.flush()
+        player.stdin.write(pad_tail)
         player.stdin.close()
         rc = player.wait()
     if rc != 0:
         raise SystemExit(f"{name} завершился с ошибкой {rc}.")
 
 
+def pick_ref(profile: dict, emotion: str) -> tuple[str, str, float | None]:
+    """Референс под эмоцию: свой клип на каждую, default как запасной. Третье — спид-оверрайд эмоции."""
+    refs = profile.get("f5", {}).get("refs", {})
+    entry = refs.get(emotion) or refs.get("default")
+    if entry:
+        audio = ROOT / entry["audio"]
+        if audio.exists():
+            speed = entry.get("speed")
+            return str(audio), entry["text"], float(speed) if speed else None
+    return (
+        str(files("f5_tts").joinpath("infer/examples/basic/basic_ref_en.wav")),
+        "Some call me nature, others call me mother nature.",
+        None,
+    )
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="F5-TTS Russian + RUAccent + streaming.")
+    parser = argparse.ArgumentParser(description="F5-TTS Russian + RUAccent + варп-пиздюк + streaming.")
     parser.add_argument("input", nargs="?")
     parser.add_argument("--text")
     parser.add_argument("--preview", action="store_true")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--no-ruaccent", action="store_true")
+    parser.add_argument("--no-sfx", action="store_true", help="Без смешков/скрипов.")
+    parser.add_argument("--dry", action="store_true", help="Чистый голос без варп-эффекта.")
+    parser.add_argument("--seed", type=int, help="Сид генератора вставок.")
     parser.add_argument("--ref-audio")
     parser.add_argument("--ref-text")
     args = parser.parse_args()
@@ -172,42 +206,108 @@ def main() -> None:
     if args.check:
         import torch
         player, _, _ = detect_player(24000)
+        refs = profile.get("f5", {}).get("refs", {})
         print("WarpWails F5 setup")
         print("- provider: F5-TTS_RUSSIAN accent_tune")
         print("- device: CPU")
         print(f"- torch: {torch.__version__}")
         print(f"- cuda available: {torch.cuda.is_available()}")
         print(f"- player: {player or 'not found'}")
+        print(f"- refs: {', '.join(sorted(refs)) or 'нет (fallback на демо-клип)'}")
         return
 
     lines = parse_lines(read_text(args), profile)
-    gen_text = prepare_text(lines, profile, args.no_ruaccent)
     if args.preview:
-        print(gen_text)
+        for emotion, phrase in lines:
+            phrase = apply_pronunciation_overrides(phrase, profile)
+            print(f"[{emotion}] {phrase if args.no_ruaccent else ruaccent_f5(phrase)}")
         return
 
     import torch
     from f5_tts.api import F5TTS
     from huggingface_hub import hf_hub_download
 
+    from warp_effect import WarpImpEffect
+    from warp_sfx import WarpSfxInserter
+
     ckpt = hf_hub_download("Misha24-10/F5-TTS_RUSSIAN", "F5TTS_v1_Base_accent_tune/model_last_inference.safetensors")
     vocab = hf_hub_download("Misha24-10/F5-TTS_RUSSIAN", "F5TTS_v1_Base/vocab.txt")
-    ref_audio = args.ref_audio or str(files("f5_tts").joinpath("infer/examples/basic/basic_ref_en.wav"))
-    ref_text = args.ref_text or "Some call me nature, others call me mother nature."
+    f5_cfg = profile.get("f5", {})
 
-    torch.set_num_threads(max(1, min(4, torch.get_num_threads())))
+    torch.set_num_threads(max(1, min(16, torch.get_num_threads())))
     f5 = F5TTS(model="F5TTS_v1_Base", ckpt_file=ckpt, vocab_file=vocab, device="cpu")
-    wav, sr, _ = f5.infer(
-        ref_file=ref_audio,
-        ref_text=ref_text,
-        gen_text=gen_text,
-        show_info=lambda *_args, **_kwargs: None,
-        progress=None,
-        nfe_step=16,
-        cfg_strength=2.0,
-        speed=0.95,
-    )
-    stream_pcm(float_to_pcm(wav), sr)
+
+    sr = 24000
+    effect = None if args.dry else WarpImpEffect(profile, sr)
+    sfx = None
+    if not args.no_sfx and not args.dry:
+        sfx = WarpSfxInserter(profile, sr, seed=args.seed)
+
+    import queue
+    import threading
+
+    pcm_queue: queue.Queue = queue.Queue(maxsize=4)
+    fail: list[BaseException] = []
+
+    def synth_worker() -> None:
+        try:
+            for index, (emotion, phrase) in enumerate(lines):
+                prepared = apply_pronunciation_overrides(phrase, profile)
+                gen_text = prepared if args.no_ruaccent else ruaccent_f5(prepared)
+                if args.ref_audio:
+                    ref_audio, ref_text, speed_override = args.ref_audio, args.ref_text or "", None
+                else:
+                    ref_audio, ref_text, speed_override = pick_ref(profile, emotion)
+                wav, _, _ = f5.infer(
+                    ref_file=ref_audio,
+                    ref_text=ref_text,
+                    gen_text=gen_text,
+                    show_info=lambda *_args, **_kwargs: None,
+                    progress=None,
+                    nfe_step=int(f5_cfg.get("nfe_step", 32)),
+                    cfg_strength=float(f5_cfg.get("cfg_strength", 2.0)),
+                    speed=speed_override or float(f5_cfg.get("speed", 0.95)),
+                    seed=f5_cfg.get("seed"),
+                )
+                samples = [int(max(-1.0, min(1.0, float(v))) * MAX_I16) for v in wav]
+                pitch = float(f5_cfg.get("pitch_semitones", 0.0))
+                if pitch:
+                    from warp_effect import pitch_shift_ffmpeg
+
+                    samples = pitch_shift_ffmpeg(samples, sr, pitch)
+                if effect is not None:
+                    samples = effect.process(samples)
+                if sfx is not None:
+                    if index > 0:
+                        gap = sfx.between_phrases(emotion)
+                        if gap:
+                            pcm_queue.put(struct.pack(f"<{len(gap)}h", *gap))
+                    pre = sfx.pre_phrase(emotion)
+                    if pre:
+                        pcm_queue.put(struct.pack(f"<{len(pre)}h", *pre))
+                    samples = sfx.process_phrase(samples, emotion)
+                pcm_queue.put(struct.pack(f"<{len(samples)}h", *[max(MIN_I16, min(MAX_I16, s)) for s in samples]))
+            if sfx is not None and lines:
+                tail = sfx.tail(lines[-1][0])
+                if tail:
+                    pcm_queue.put(struct.pack(f"<{len(tail)}h", *tail))
+        except BaseException as exc:  # пробрасываем в основной поток
+            fail.append(exc)
+        finally:
+            pcm_queue.put(None)
+
+    threading.Thread(target=synth_worker, daemon=True).start()
+
+    def queue_chunks():
+        while True:
+            chunk = pcm_queue.get()
+            if chunk is None:
+                break
+            yield chunk
+
+    stream_pcm_iter(queue_chunks(), sr)
+    if fail:
+        raise SystemExit(f"Синтез упал: {fail[0]}")
 
 
 if __name__ == "__main__":
