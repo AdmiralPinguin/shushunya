@@ -1,9 +1,15 @@
 <resources>
     <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
-        <item name="android:fontFamily">sans</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorAccent">#C4FF5B</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">#05060C</item>
+        <item name="android:windowSplashScreenBackground">#120D1F</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_shushunya</item>
+        <item name="android:windowSplashScreenAnimationDuration">420</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:navigationBarColor">#08112B</item>
-        <item name="android:statusBarColor">#08112B</item>
+        <item name="android:navigationBarColor">#05060C</item>
+        <item name="android:statusBarColor">#120D1F</item>
         <item name="android:windowLightNavigationBar">false</item>
     </style>
 </resources>

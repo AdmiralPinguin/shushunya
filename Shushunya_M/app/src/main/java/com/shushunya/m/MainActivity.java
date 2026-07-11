@@ -31,10 +31,22 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.MediaStore;
 import android.text.InputType;
+import android.text.Html;
+import android.text.Editable;
+import android.text.Spannable;
+import android.text.SpannableString;
 import android.text.TextUtils;
+import android.text.TextWatcher;
+import android.text.style.BackgroundColorSpan;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
+import android.text.style.TypefaceSpan;
+import android.text.util.Linkify;
+import android.text.method.LinkMovementMethod;
 import android.util.Size;
 import android.view.Display;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -54,6 +66,7 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.Scroller;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -69,6 +82,21 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 
 public class MainActivity extends Activity {
+    // Visual system: dark obsidian surfaces, warp-violet energy and a sharp
+    // acid accent. Keeping the palette centralized makes every screen feel
+    // like one product instead of a collection of test controls.
+    private static final int INK = Color.rgb(5, 6, 12);
+    private static final int SURFACE = Color.rgb(14, 15, 25);
+    private static final int SURFACE_RAISED = Color.rgb(22, 23, 37);
+    private static final int SURFACE_SOFT = Color.rgb(29, 30, 47);
+    private static final int LINE = Color.rgb(48, 49, 70);
+    private static final int TEXT = Color.rgb(246, 244, 249);
+    private static final int TEXT_MUTED = Color.rgb(151, 150, 169);
+    private static final int WARP = Color.rgb(151, 91, 255);
+    private static final int WARP_DEEP = Color.rgb(83, 48, 151);
+    private static final int ACID = Color.rgb(196, 255, 91);
+    private static final int CYAN = Color.rgb(76, 224, 215);
+
     private static final String PREFS = "shushunya_m";
     private static final String NOTIFICATION_CHANNEL_ID = "shushunya_answers";
     private static final int CHAT_HISTORY_LIMIT = 30;
@@ -87,6 +115,7 @@ public class MainActivity extends Activity {
     private static final String TAB_CHAT = "chat";
     private static final String TAB_TRANSLATOR = "translator";
     private static final String TAB_AGENT = "agent";
+    private static final String TAB_MEMORY = "memory";
     private static final String[] TRANSLATOR_NAMES = {"Русский", "Корейский", "Алж. арабский", "Турецкий"};
     private static final String[] TRANSLATOR_CODES = {"ru", "ko", "ar_dz", "tr"};
     private static final String[] TRANSLATOR_STT_CODES = {"ru", "ko", "ar", "tr"};
@@ -150,10 +179,20 @@ public class MainActivity extends Activity {
     private TextView drawerChat;
     private TextView drawerTranslator;
     private TextView drawerAgent;
+    private TextView drawerMemory;
     private FrameLayout contentHost;
     private LinearLayout chatView;
     private LinearLayout translatorView;
     private LinearLayout agentView;
+    private LinearLayout memoryView;
+    private LinearLayout memoryList;
+    private EditText memorySearch;
+    private TextView memoryStatus;
+    private LinearLayout commandPalette;
+    private LinearLayout bottomNavigation;
+    private final java.util.LinkedHashMap<String, TextView> navItems = new java.util.LinkedHashMap<>();
+    private TextView warpOrb;
+    private ValueAnimator warpAnimator;
     private LinearLayout agentMessageList;
     private ScrollView agentScrollView;
     private TextView agentLiveBubble;
@@ -166,8 +205,12 @@ public class MainActivity extends Activity {
     private TextView targetLangLabel;
     private Button swapDirectionButton;
     private Button speechButton;
+    private Button chatVoiceButton;
     private Button translateButton;
     private TextView agentStatus;
+    private TextView agentActiveMetric;
+    private TextView agentDoneMetric;
+    private TextView agentModeMetric;
     private ImageButton agentRunButton;
     private String agentBrigadeFilter = "";
     private volatile boolean recording;
@@ -364,21 +407,21 @@ public class MainActivity extends Activity {
     }
 
     private void buildUi() {
-        int panel = Color.rgb(8, 17, 43);
-        int gold = Color.rgb(201, 156, 58);
-        int turquoise = Color.rgb(29, 191, 183);
+        int panel = SURFACE_RAISED;
+        int gold = ACID;
+        int turquoise = WARP;
 
         FrameLayout root = new FrameLayout(this);
         root.setBackground(makeBackground());
 
         LinearLayout mainColumn = new LinearLayout(this);
         mainColumn.setOrientation(LinearLayout.VERTICAL);
-        mainColumn.setPadding(dp(14), dp(12), dp(14), dp(12));
+        mainColumn.setPadding(dp(16), dp(10), dp(16), dp(12));
         root.addView(mainColumn, new FrameLayout.LayoutParams(-1, -1));
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
-        header.setPadding(dp(4), dp(4), dp(4), dp(10));
+        header.setPadding(0, dp(5), 0, dp(12));
         mainColumn.addView(header, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout titleRow = new LinearLayout(this);
@@ -387,29 +430,47 @@ public class MainActivity extends Activity {
 
         Button menu = new Button(this);
         menu.setText("☰");
-        menu.setTextColor(Color.rgb(244, 217, 137));
-        menu.setTextSize(23);
+        menu.setTextColor(TEXT);
+        menu.setTextSize(21);
         menu.setTypeface(Typeface.DEFAULT_BOLD);
-        menu.setBackground(pill(Color.rgb(10, 25, 55), Color.rgb(48, 190, 180), dp(15)));
-        titleRow.addView(menu, new LinearLayout.LayoutParams(dp(48), dp(42)));
+        menu.setMinWidth(0);
+        menu.setMinimumWidth(0);
+        menu.setPadding(0, 0, 0, dp(2));
+        menu.setBackground(pill(SURFACE_RAISED, LINE, dp(20)));
+        titleRow.addView(menu, new LinearLayout.LayoutParams(dp(42), dp(42)));
         menu.setOnClickListener(v -> setDrawerOpen(true));
+
+        warpOrb = new TextView(this);
+        warpOrb.setText("✦");
+        warpOrb.setGravity(Gravity.CENTER);
+        warpOrb.setTextColor(TEXT);
+        warpOrb.setTextSize(18);
+        warpOrb.setTypeface(Typeface.DEFAULT_BOLD);
+        warpOrb.setBackground(gradientPill(WARP, WARP_DEEP, WARP, dp(20)));
+        LinearLayout.LayoutParams orbLp = new LinearLayout.LayoutParams(dp(40), dp(40));
+        orbLp.leftMargin = dp(9);
+        titleRow.addView(warpOrb, orbLp);
+        startWarpPulse();
 
         title = new TextView(this);
         title.setText("Шушуня");
-        title.setTextColor(Color.rgb(244, 217, 137));
-        title.setTextSize(24);
+        title.setTextColor(TEXT);
+        title.setTextSize(25);
         title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setLetterSpacing(-0.02f);
         title.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, dp(42), 1);
-        titleLp.leftMargin = dp(10);
+        titleLp.leftMargin = dp(9);
         titleRow.addView(title, titleLp);
 
         reportsButton = new Button(this);
         reportsButton.setText("✉");
-        reportsButton.setTextColor(Color.rgb(10, 25, 55));
+        reportsButton.setTextColor(INK);
         reportsButton.setTextSize(15);
         reportsButton.setTypeface(Typeface.DEFAULT_BOLD);
-        reportsButton.setBackground(pill(Color.rgb(244, 217, 137), Color.rgb(48, 190, 180), dp(15)));
+        reportsButton.setMinWidth(0);
+        reportsButton.setMinimumWidth(0);
+        reportsButton.setBackground(pill(ACID, ACID, dp(20)));
         reportsButton.setVisibility(View.GONE);
         LinearLayout.LayoutParams reportsLp = new LinearLayout.LayoutParams(dp(84), dp(42));
         reportsLp.leftMargin = dp(8);
@@ -417,11 +478,19 @@ public class MainActivity extends Activity {
         reportsButton.setOnClickListener(v -> deliverPendingReports());
 
         endpoint = new TextView(this);
-        endpoint.setText(baseUrl);
-        endpoint.setTextColor(Color.rgb(132, 219, 212));
-        endpoint.setTextSize(12);
+        endpoint.setText("●  ВАРП-КАНАЛ / В СЕТИ");
+        endpoint.setTextColor(CYAN);
+        endpoint.setTextSize(11);
+        endpoint.setTypeface(Typeface.DEFAULT_BOLD);
+        endpoint.setLetterSpacing(0.08f);
         endpoint.setSingleLine(true);
-        header.addView(endpoint, new LinearLayout.LayoutParams(-1, -2));
+        endpoint.setPadding(dp(100), dp(1), 0, 0);
+        header.addView(endpoint, new LinearLayout.LayoutParams(-1, dp(24)));
+
+        bottomNavigation = buildBottomNavigation();
+        LinearLayout.LayoutParams navLp = new LinearLayout.LayoutParams(-1, dp(46));
+        navLp.bottomMargin = dp(5);
+        mainColumn.addView(bottomNavigation, navLp);
 
         contentHost = new FrameLayout(this);
         mainColumn.addView(contentHost, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -458,18 +527,18 @@ public class MainActivity extends Activity {
         });
         messageList = new LinearLayout(this);
         messageList.setOrientation(LinearLayout.VERTICAL);
-        messageList.setPadding(0, dp(8), 0, dp(8));
+        messageList.setPadding(0, dp(14), 0, dp(14));
         scrollView.addView(messageList, new ScrollView.LayoutParams(-1, -2));
         chatView.addView(scrollView, new LinearLayout.LayoutParams(-1, 0, 1));
 
         inputPanel = new LinearLayout(this);
         inputPanel.setOrientation(LinearLayout.VERTICAL);
-        inputPanel.setPadding(0, dp(6), 0, 0);
+        inputPanel.setPadding(0, dp(8), 0, 0);
         chatView.addView(inputPanel, new LinearLayout.LayoutParams(-1, -2));
 
         selectedImagePreview = new ImageView(this);
         selectedImagePreview.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        selectedImagePreview.setBackground(pill(Color.rgb(6, 14, 36), Color.rgb(201, 156, 58), dp(14)));
+        selectedImagePreview.setBackground(pill(SURFACE_RAISED, WARP, dp(18)));
         selectedImagePreview.setPadding(dp(2), dp(2), dp(2), dp(2));
         selectedImagePreview.setVisibility(View.GONE);
         selectedImagePreview.setOnClickListener(v -> clearPendingImage());
@@ -478,29 +547,34 @@ public class MainActivity extends Activity {
         previewLp.bottomMargin = dp(6);
         inputPanel.addView(selectedImagePreview, previewLp);
 
+        commandPalette = buildCommandPalette();
+        commandPalette.setVisibility(View.GONE);
+        inputPanel.addView(commandPalette, new LinearLayout.LayoutParams(-1, -2));
+
         composer = new LinearLayout(this);
         composer.setOrientation(LinearLayout.HORIZONTAL);
-        composer.setGravity(Gravity.BOTTOM);
-        composer.setPadding(0, 0, 0, 0);
+        composer.setGravity(Gravity.CENTER_VERTICAL);
+        composer.setPadding(dp(4), dp(4), dp(4), dp(4));
+        composer.setBackground(pill(SURFACE_RAISED, LINE, dp(27)));
         inputPanel.addView(composer, new LinearLayout.LayoutParams(-1, -2));
 
         input = new EditText(this);
         input.setMinLines(1);
         input.setMaxLines(7);
-        input.setMinHeight(dp(54));
+        input.setMinHeight(dp(50));
         input.setMaxHeight(dp(178));
-        input.setTextColor(Color.rgb(240, 246, 255));
-        input.setHintTextColor(Color.rgb(116, 143, 164));
-        input.setHint("Сообщение");
+        input.setTextColor(TEXT);
+        input.setHintTextColor(TEXT_MUTED);
+        input.setHint("Сообщение Шушуне…");
         input.setTextSize(16);
-        input.setGravity(Gravity.TOP | Gravity.START);
+        input.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         input.setSingleLine(false);
         input.setVerticalScrollBarEnabled(true);
         input.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
         input.setScroller(new Scroller(this));
-        input.setBackground(pill(panel, Color.rgb(40, 171, 165), dp(16)));
-        input.setPadding(dp(14), dp(10), dp(14), dp(10));
+        input.setBackgroundColor(Color.TRANSPARENT);
+        input.setPadding(dp(6), dp(9), dp(8), dp(9));
         input.setOnTouchListener((v, event) -> {
             if (input.canScrollVertically(1) || input.canScrollVertically(-1)) {
                 v.getParent().requestDisallowInterceptTouchEvent(true);
@@ -510,29 +584,66 @@ public class MainActivity extends Activity {
             }
             return false;
         });
+        input.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                updateCommandPalette(s == null ? "" : s.toString());
+                updateComposerActions();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
         composer.addView(input, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+        chatVoiceButton = new Button(this);
+        chatVoiceButton.setText("●");
+        chatVoiceButton.setTextColor(CYAN);
+        chatVoiceButton.setTextSize(15);
+        chatVoiceButton.setTypeface(Typeface.DEFAULT_BOLD);
+        chatVoiceButton.setMinWidth(0);
+        chatVoiceButton.setMinimumWidth(0);
+        chatVoiceButton.setPadding(0, 0, 0, 0);
+        chatVoiceButton.setBackground(pill(Color.TRANSPARENT, Color.TRANSPARENT, dp(21)));
+        LinearLayout.LayoutParams voiceLp = new LinearLayout.LayoutParams(dp(42), dp(42));
+        voiceLp.leftMargin = dp(6);
+        composer.addView(chatVoiceButton, voiceLp);
+        chatVoiceButton.setOnClickListener(v -> toggleWhisperRecording("ru", input, "Голосовой ввод", chatVoiceButton));
 
         attachImage = new ImageButton(this);
         attachImage.setImageResource(android.R.drawable.ic_menu_gallery);
-        attachImage.setColorFilter(Color.rgb(244, 217, 137));
+        attachImage.setColorFilter(TEXT_MUTED);
         attachImage.setScaleType(ImageView.ScaleType.CENTER);
         attachImage.setPadding(dp(9), dp(9), dp(9), dp(9));
-        attachImage.setBackground(pill(Color.rgb(10, 25, 55), Color.rgb(48, 190, 180), dp(15)));
-        LinearLayout.LayoutParams attachLp = new LinearLayout.LayoutParams(dp(44), dp(50));
+        attachImage.setBackground(pill(Color.TRANSPARENT, Color.TRANSPARENT, dp(21)));
+        LinearLayout.LayoutParams attachLp = new LinearLayout.LayoutParams(dp(42), dp(42));
         attachLp.leftMargin = dp(6);
         composer.addView(attachImage, attachLp);
         attachImage.setOnClickListener(v -> pickImage());
 
         send = new ImageButton(this);
-        send.setImageResource(android.R.drawable.ic_menu_upload);
-        send.setColorFilter(Color.rgb(5, 13, 31));
+        send.setImageResource(android.R.drawable.ic_menu_send);
+        send.setColorFilter(INK);
         send.setScaleType(ImageView.ScaleType.CENTER);
         send.setPadding(dp(9), dp(9), dp(9), dp(9));
-        send.setBackground(pill(turquoise, gold, dp(16)));
-        LinearLayout.LayoutParams sendLp = new LinearLayout.LayoutParams(dp(48), dp(50));
+        send.setBackground(gradientPill(WARP, WARP_DEEP, WARP, dp(22)));
+        LinearLayout.LayoutParams sendLp = new LinearLayout.LayoutParams(dp(42), dp(42));
         sendLp.leftMargin = dp(6);
         composer.addView(send, sendLp);
         send.setOnClickListener(v -> submit());
+
+        // Modern composer order: attachment, one borderless text surface,
+        // then a contextual voice/send action. No nested control frames.
+        composer.removeAllViews();
+        LinearLayout.LayoutParams modernAttachLp = new LinearLayout.LayoutParams(dp(42), dp(42));
+        composer.addView(attachImage, modernAttachLp);
+        LinearLayout.LayoutParams modernInputLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+        composer.addView(input, modernInputLp);
+        LinearLayout.LayoutParams modernVoiceLp = new LinearLayout.LayoutParams(dp(42), dp(42));
+        modernVoiceLp.leftMargin = dp(2);
+        composer.addView(chatVoiceButton, modernVoiceLp);
+        LinearLayout.LayoutParams modernSendLp = new LinearLayout.LayoutParams(dp(44), dp(44));
+        modernSendLp.leftMargin = dp(2);
+        composer.addView(send, modernSendLp);
+        updateComposerActions();
 
         translatorView = buildTranslatorView();
         translatorView.setVisibility(View.GONE);
@@ -542,17 +653,134 @@ public class MainActivity extends Activity {
         agentView.setVisibility(View.GONE);
         contentHost.addView(agentView, new FrameLayout.LayoutParams(-1, -1));
 
+        memoryView = buildMemoryView();
+        memoryView.setVisibility(View.GONE);
+        contentHost.addView(memoryView, new FrameLayout.LayoutParams(-1, -1));
+
         progress = new ProgressBar(this);
         progress.setIndeterminate(true);
         progress.setVisibility(View.GONE);
         FrameLayout.LayoutParams p = new FrameLayout.LayoutParams(dp(42), dp(42), Gravity.TOP | Gravity.RIGHT);
         p.topMargin = dp(18);
-        p.rightMargin = dp(88);
+        p.rightMargin = dp(72);
         root.addView(progress, p);
 
         buildDrawer(root);
         setContentView(root);
         installKeyboardLift(root);
+    }
+
+    private LinearLayout buildCommandPalette() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.HORIZONTAL);
+        panel.setGravity(Gravity.CENTER_VERTICAL);
+        panel.setPadding(dp(2), dp(2), dp(2), dp(8));
+        addCommandChip(panel, "⚔ Задача", "/task ");
+        addCommandChip(panel, "⌁ Память", null);
+        addCommandChip(panel, "◈ Анализ", "Проанализируй приложенное изображение: ");
+        return panel;
+    }
+
+    private void addCommandChip(LinearLayout panel, String label, String command) {
+        TextView chip = new TextView(this);
+        chip.setText(label);
+        chip.setTextColor(TEXT);
+        chip.setTextSize(12);
+        chip.setTypeface(Typeface.DEFAULT_BOLD);
+        chip.setGravity(Gravity.CENTER);
+        chip.setBackground(pill(SURFACE_RAISED, LINE, dp(15)));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(38), 1);
+        if (panel.getChildCount() > 0) lp.leftMargin = dp(7);
+        panel.addView(chip, lp);
+        chip.setOnClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+            if (command == null) {
+                input.setText("");
+                showTab(TAB_MEMORY);
+                return;
+            }
+            input.setText(command);
+            input.setSelection(command.length());
+            commandPalette.setVisibility(View.GONE);
+            input.requestFocus();
+        });
+    }
+
+    private void updateCommandPalette(String value) {
+        if (commandPalette == null) return;
+        String clean = value == null ? "" : value.trim();
+        commandPalette.setVisibility(clean.isEmpty() || "/".equals(clean) ? View.VISIBLE : View.GONE);
+    }
+
+    private void updateComposerActions() {
+        if (send == null || chatVoiceButton == null || input == null) return;
+        boolean hasText = !input.getText().toString().trim().isEmpty();
+        boolean hasAttachment = pendingImageDataUrl != null && !pendingImageDataUrl.isEmpty();
+        boolean canSend = hasText || hasAttachment;
+        send.setVisibility(canSend ? View.VISIBLE : View.GONE);
+        chatVoiceButton.setVisibility(canSend ? View.GONE : View.VISIBLE);
+    }
+
+    private LinearLayout buildBottomNavigation() {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER);
+        bar.setPadding(0, dp(2), 0, dp(4));
+        bar.setBackgroundColor(Color.TRANSPARENT);
+        addNavItem(bar, TAB_CHAT, "ЧАТ");
+        addNavItem(bar, TAB_AGENT, "WARBANDS");
+        addNavItem(bar, TAB_TRANSLATOR, "ПЕРЕВОД");
+        addNavItem(bar, TAB_MEMORY, "ПАМЯТЬ");
+        updateBottomNavigation();
+        return bar;
+    }
+
+    private void addNavItem(LinearLayout bar, String tab, String label) {
+        TextView item = new TextView(this);
+        item.setText(label);
+        item.setTextSize(10);
+        item.setTypeface(Typeface.DEFAULT_BOLD);
+        item.setGravity(Gravity.CENTER);
+        item.setLetterSpacing(0.06f);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(38), 1);
+        if (bar.getChildCount() > 0) lp.leftMargin = dp(4);
+        bar.addView(item, lp);
+        navItems.put(tab, item);
+        item.setOnClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+            showTab(tab);
+        });
+    }
+
+    private void updateBottomNavigation() {
+        for (java.util.Map.Entry<String, TextView> entry : navItems.entrySet()) {
+            boolean selected = entry.getKey().equals(currentTab);
+            TextView item = entry.getValue();
+            item.setTextColor(selected ? ACID : TEXT_MUTED);
+            item.setBackground(selected
+                    ? pill(SURFACE_RAISED, ACID, dp(14))
+                    : pill(Color.TRANSPARENT, Color.TRANSPARENT, dp(14)));
+        }
+    }
+
+    private void startWarpPulse() {
+        if (warpOrb == null) return;
+        warpAnimator = ValueAnimator.ofFloat(0f, 1f);
+        warpAnimator.setDuration(1700);
+        warpAnimator.setRepeatCount(ValueAnimator.INFINITE);
+        warpAnimator.setRepeatMode(ValueAnimator.REVERSE);
+        warpAnimator.addUpdateListener(animation -> {
+            float value = (float) animation.getAnimatedValue();
+            warpOrb.setAlpha(0.72f + value * 0.28f);
+            warpOrb.setScaleX(0.94f + value * 0.08f);
+            warpOrb.setScaleY(0.94f + value * 0.08f);
+        });
+        warpAnimator.start();
+    }
+
+    private void setWarpState(String label, int color) {
+        if (endpoint != null) endpoint.setText(label);
+        if (warpOrb != null) warpOrb.setBackground(gradientPill(color, WARP_DEEP, color, dp(20)));
     }
 
     private void installKeyboardLift(View root) {
@@ -577,6 +805,11 @@ public class MainActivity extends Activity {
                 inputPanel.animate().translationY(0f).setDuration(120).start();
                 scrollView.setPadding(0, 0, 0, 0);
                 updateAgentKeyboardLift();
+                return;
+            }
+            if (TAB_MEMORY.equals(currentTab)) {
+                inputPanel.animate().translationY(0f).setDuration(120).start();
+                scrollView.setPadding(0, 0, 0, 0);
                 return;
             }
             float lift = keyboardHeight > 0 ? -keyboardHeight + dp(10) : 0f;
@@ -614,13 +847,23 @@ public class MainActivity extends Activity {
         view.setPadding(0, dp(6), 0, 0);
 
         agentStatus = new TextView(this);
-        agentStatus.setText("Монитор бригад Warmaster.");
-        agentStatus.setTextColor(Color.rgb(132, 219, 212));
-        agentStatus.setTextSize(13);
+        agentStatus.setText("WARMASTER • WARBANDS");
+        agentStatus.setTextColor(CYAN);
+        agentStatus.setTextSize(12);
+        agentStatus.setTypeface(Typeface.DEFAULT_BOLD);
+        agentStatus.setLetterSpacing(0.05f);
         agentStatus.setSingleLine(true);
         agentStatus.setEllipsize(TextUtils.TruncateAt.END);
-        agentStatus.setPadding(dp(4), 0, dp(4), dp(6));
+        agentStatus.setPadding(dp(4), dp(2), dp(4), dp(8));
         view.addView(agentStatus, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout metrics = new LinearLayout(this);
+        metrics.setOrientation(LinearLayout.HORIZONTAL);
+        metrics.setPadding(0, 0, 0, dp(5));
+        agentActiveMetric = addAgentMetric(metrics, "0", "АКТИВНО", WARP);
+        agentDoneMetric = addAgentMetric(metrics, "0", "ГОТОВО", ACID);
+        agentModeMetric = addAgentMetric(metrics, "LIVE", "КАНАЛ", CYAN);
+        view.addView(metrics, new LinearLayout.LayoutParams(-1, dp(66)));
 
         agentScrollView = new ScrollView(this);
         agentScrollView.setFillViewport(false);
@@ -643,11 +886,11 @@ public class MainActivity extends Activity {
         });
         agentMessageList = new LinearLayout(this);
         agentMessageList.setOrientation(LinearLayout.VERTICAL);
-        agentMessageList.setPadding(0, dp(8), 0, dp(8));
+        agentMessageList.setPadding(0, dp(12), 0, dp(12));
         agentScrollView.addView(agentMessageList, new ScrollView.LayoutParams(-1, -2));
         view.addView(agentScrollView, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        addAgentMessage(false, "Монитор бригад готов. Задачи отправляй из основного чата через /task, /w, /warmaster или вармастер:.", false);
+        addAgentMessage(false, "Warbands готовы. Задачи отправляй из основного чата через /task, /w, /warmaster или вармастер:.", false);
 
         LinearLayout quickRow = new LinearLayout(this);
         quickRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -688,11 +931,40 @@ public class MainActivity extends Activity {
         return view;
     }
 
+    private TextView addAgentMetric(LinearLayout row, String value, String label, int accent) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setGravity(Gravity.CENTER);
+        cell.setBackground(pill(SURFACE_RAISED, Color.argb(150, Color.red(accent), Color.green(accent), Color.blue(accent)), dp(16)));
+        TextView number = new TextView(this);
+        number.setText(value);
+        number.setTextColor(accent);
+        number.setTextSize(18);
+        number.setTypeface(Typeface.DEFAULT_BOLD);
+        number.setGravity(Gravity.CENTER);
+        TextView caption = new TextView(this);
+        caption.setText(label);
+        caption.setTextColor(TEXT_MUTED);
+        caption.setTextSize(9);
+        caption.setTypeface(Typeface.DEFAULT_BOLD);
+        caption.setLetterSpacing(0.08f);
+        caption.setGravity(Gravity.CENTER);
+        cell.addView(number, new LinearLayout.LayoutParams(-1, dp(30)));
+        cell.addView(caption, new LinearLayout.LayoutParams(-1, dp(20)));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(60), 1);
+        if (row.getChildCount() > 0) lp.leftMargin = dp(7);
+        row.addView(cell, lp);
+        return number;
+    }
+
     private void styleAgentQuickButton(Button button) {
-        button.setTextColor(Color.rgb(244, 217, 137));
-        button.setTextSize(12);
+        button.setTextColor(TEXT_MUTED);
+        button.setTextSize(11);
         button.setTypeface(Typeface.DEFAULT_BOLD);
-        button.setBackground(pill(Color.rgb(10, 25, 55), Color.rgb(48, 84, 116), dp(14)));
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setPadding(dp(4), 0, dp(4), 0);
+        button.setBackground(pill(SURFACE_RAISED, LINE, dp(15)));
     }
 
     private LinearLayout buildTranslatorView() {
@@ -702,8 +974,10 @@ public class MainActivity extends Activity {
 
         speechStatus = new TextView(this);
         speechStatus.setText("Выбери направление. Микрофон пишет в исходный текст.");
-        speechStatus.setTextColor(Color.rgb(132, 219, 212));
-        speechStatus.setTextSize(14);
+        speechStatus.setTextColor(CYAN);
+        speechStatus.setTextSize(12);
+        speechStatus.setTypeface(Typeface.DEFAULT_BOLD);
+        speechStatus.setLetterSpacing(0.04f);
         speechStatus.setPadding(dp(4), 0, dp(4), dp(8));
         view.addView(speechStatus, new LinearLayout.LayoutParams(-1, -2));
 
@@ -727,10 +1001,10 @@ public class MainActivity extends Activity {
         targetLangLabel = languageLabel();
         swapDirectionButton = new Button(this);
         swapDirectionButton.setText("⇄");
-        swapDirectionButton.setTextColor(Color.rgb(5, 13, 31));
+        swapDirectionButton.setTextColor(INK);
         swapDirectionButton.setTextSize(22);
         swapDirectionButton.setTypeface(Typeface.DEFAULT_BOLD);
-        swapDirectionButton.setBackground(pill(Color.rgb(201, 156, 58), Color.rgb(29, 191, 183), dp(18)));
+        swapDirectionButton.setBackground(pill(ACID, ACID, dp(22)));
         directionRow.addView(sourceLangLabel, new LinearLayout.LayoutParams(0, dp(44), 1));
         LinearLayout.LayoutParams swapLp = new LinearLayout.LayoutParams(dp(58), dp(44));
         swapLp.leftMargin = dp(10);
@@ -749,19 +1023,19 @@ public class MainActivity extends Activity {
 
         speechButton = new Button(this);
         speechButton.setText("REC");
-        speechButton.setTextColor(Color.rgb(5, 13, 31));
+        speechButton.setTextColor(TEXT);
         speechButton.setTextSize(14);
         speechButton.setTypeface(Typeface.DEFAULT_BOLD);
-        speechButton.setBackground(pill(Color.rgb(29, 191, 183), Color.rgb(244, 217, 137), dp(16)));
+        speechButton.setBackground(pill(SURFACE_SOFT, WARP, dp(18)));
         actionRow.addView(speechButton, new LinearLayout.LayoutParams(dp(94), dp(52)));
         speechButton.setOnClickListener(v -> toggleSelectedLanguageRecording());
 
         translateButton = new Button(this);
         translateButton.setText("ПЕРЕВЕСТИ");
-        translateButton.setTextColor(Color.rgb(5, 13, 31));
+        translateButton.setTextColor(INK);
         translateButton.setTextSize(13);
         translateButton.setTypeface(Typeface.DEFAULT_BOLD);
-        translateButton.setBackground(pill(Color.rgb(201, 156, 58), Color.rgb(29, 191, 183), dp(16)));
+        translateButton.setBackground(pill(ACID, ACID, dp(18)));
         LinearLayout.LayoutParams translateLp = new LinearLayout.LayoutParams(0, dp(52), 1);
         translateLp.leftMargin = dp(10);
         actionRow.addView(translateButton, translateLp);
@@ -777,7 +1051,8 @@ public class MainActivity extends Activity {
         label.setTypeface(Typeface.DEFAULT_BOLD);
         label.setGravity(Gravity.CENTER);
         label.setSingleLine(true);
-        label.setBackground(pill(Color.rgb(12, 30, 60), Color.rgb(48, 84, 116), dp(16)));
+        label.setTextColor(TEXT);
+        label.setBackground(pill(SURFACE_RAISED, LINE, dp(18)));
         return label;
     }
 
@@ -805,11 +1080,13 @@ public class MainActivity extends Activity {
     private Button fieldToolButton(String text) {
         Button button = new Button(this);
         button.setText(text);
-        button.setTextColor(Color.rgb(244, 217, 137));
+        button.setTextColor(TEXT_MUTED);
         button.setTextSize(20);
         button.setTypeface(Typeface.DEFAULT_BOLD);
         button.setPadding(0, 0, 0, dp(2));
-        button.setBackground(pill(Color.rgb(9, 23, 49), Color.rgb(45, 82, 116), dp(12)));
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setBackground(pill(SURFACE_SOFT, LINE, dp(13)));
         return button;
     }
 
@@ -827,10 +1104,10 @@ public class MainActivity extends Activity {
 
     private EditText translatorEdit(String hint) {
         EditText edit = new EditText(this);
-        edit.setTextColor(Color.rgb(230, 245, 250));
+        edit.setTextColor(TEXT);
         edit.setHint(hint);
-        edit.setHintTextColor(Color.rgb(104, 135, 155));
-        edit.setTextSize(18);
+        edit.setHintTextColor(TEXT_MUTED);
+        edit.setTextSize(17);
         edit.setGravity(Gravity.TOP | Gravity.START);
         edit.setMinLines(3);
         edit.setSingleLine(false);
@@ -839,7 +1116,7 @@ public class MainActivity extends Activity {
         edit.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
         edit.setScroller(new Scroller(this));
         edit.setPadding(dp(12), dp(42), dp(12), dp(10));
-        edit.setBackground(pill(Color.rgb(6, 14, 36), Color.rgb(45, 82, 116), dp(14)));
+        edit.setBackground(pill(SURFACE, LINE, dp(18)));
         edit.setOnTouchListener((v, event) -> {
             if (edit.canScrollVertically(1) || edit.canScrollVertically(-1)) {
                 v.getParent().requestDisallowInterceptTouchEvent(true);
@@ -850,6 +1127,275 @@ public class MainActivity extends Activity {
             return false;
         });
         return edit;
+    }
+
+    private LinearLayout buildMemoryView() {
+        LinearLayout view = new LinearLayout(this);
+        view.setOrientation(LinearLayout.VERTICAL);
+        view.setPadding(0, dp(8), 0, 0);
+
+        memoryStatus = new TextView(this);
+        memoryStatus.setText("АРХИВ ШУШУНИ • СИНХРОНИЗАЦИЯ");
+        memoryStatus.setTextColor(CYAN);
+        memoryStatus.setTextSize(11);
+        memoryStatus.setTypeface(Typeface.DEFAULT_BOLD);
+        memoryStatus.setLetterSpacing(0.07f);
+        memoryStatus.setPadding(dp(4), 0, dp(4), dp(9));
+        view.addView(memoryStatus, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout searchRow = new LinearLayout(this);
+        searchRow.setGravity(Gravity.CENTER_VERTICAL);
+        memorySearch = new EditText(this);
+        memorySearch.setSingleLine(true);
+        memorySearch.setHint("Что Шушуня помнит?");
+        memorySearch.setTextColor(TEXT);
+        memorySearch.setHintTextColor(TEXT_MUTED);
+        memorySearch.setTextSize(15);
+        memorySearch.setPadding(dp(14), 0, dp(14), 0);
+        memorySearch.setBackground(pill(SURFACE_RAISED, LINE, dp(18)));
+        searchRow.addView(memorySearch, new LinearLayout.LayoutParams(0, dp(48), 1));
+
+        TextView search = memoryActionButton("НАЙТИ");
+        LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(dp(82), dp(48));
+        searchLp.leftMargin = dp(8);
+        searchRow.addView(search, searchLp);
+        search.setOnClickListener(v -> searchMemory());
+        memorySearch.setOnEditorActionListener((v, actionId, event) -> {
+            searchMemory();
+            return true;
+        });
+        view.addView(searchRow, new LinearLayout.LayoutParams(-1, dp(48)));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setClipToPadding(false);
+        memoryList = new LinearLayout(this);
+        memoryList.setOrientation(LinearLayout.VERTICAL);
+        memoryList.setPadding(0, dp(12), 0, dp(12));
+        scroll.addView(memoryList, new ScrollView.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(-1, 0, 1);
+        scrollLp.topMargin = dp(6);
+        view.addView(scroll, scrollLp);
+
+        TextView propose = memoryActionButton("＋ ПРЕДЛОЖИТЬ ИЗМЕНЕНИЕ ПАМЯТИ");
+        propose.setTextColor(INK);
+        propose.setBackground(pill(ACID, ACID, dp(18)));
+        LinearLayout.LayoutParams proposeLp = new LinearLayout.LayoutParams(-1, dp(48));
+        proposeLp.topMargin = dp(5);
+        view.addView(propose, proposeLp);
+        propose.setOnClickListener(v -> showMemoryProposalDialog());
+        return view;
+    }
+
+    private TextView memoryActionButton(String label) {
+        TextView button = new TextView(this);
+        button.setText(label);
+        button.setTextColor(TEXT);
+        button.setTextSize(11);
+        button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setGravity(Gravity.CENTER);
+        button.setBackground(pill(SURFACE_SOFT, WARP, dp(18)));
+        return button;
+    }
+
+    private void loadMemoryDashboard() {
+        memoryStatus.setText("АРХИВ ШУШУНИ • ЧИТАЮ СЛОИ ПАМЯТИ");
+        new Thread(() -> {
+            try {
+                JSONObject payload = memoryGet("/archive/memory/catalog?namespace=" + SERVER_MEMORY_NAMESPACE + "&requester=shushunya-mobile");
+                main.post(() -> renderMemoryCatalog(payload));
+            } catch (Exception exc) {
+                main.post(() -> memoryStatus.setText("АРХИВ НЕДОСТУПЕН • " + exc.getMessage()));
+            }
+        }).start();
+    }
+
+    private void renderMemoryCatalog(JSONObject payload) {
+        memoryList.removeAllViews();
+        JSONObject focus = payload.optJSONObject("focus");
+        JSONObject wiki = payload.optJSONObject("wiki");
+        JSONArray books = focus == null ? null : focus.optJSONArray("books");
+        JSONArray pages = wiki == null ? null : wiki.optJSONArray("pages");
+        int bookCount = books == null ? 0 : books.length();
+        int pageCount = pages == null ? 0 : pages.length();
+        addMemoryHero("ПАМЯТЬ В СЕТИ", bookCount + " активных фокусов  •  " + pageCount + " страниц знания");
+        addMemoryArray("АКТИВНЫЙ КОНТЕКСТ", books, 4);
+        addMemoryArray("ЛИЧНАЯ ВИКИ", pages, 8);
+        if (bookCount == 0 && pageCount == 0) addMemoryCard("Пока пусто", "Архив ответил, но карточек памяти ещё нет.", CYAN);
+        memoryStatus.setText("АРХИВ ШУШУНИ • ОБНОВЛЕНО");
+    }
+
+    private void addMemoryArray(String section, JSONArray values, int limit) {
+        if (values == null || values.length() == 0) return;
+        TextView heading = new TextView(this);
+        heading.setText(section);
+        heading.setTextColor(TEXT_MUTED);
+        heading.setTextSize(10);
+        heading.setTypeface(Typeface.DEFAULT_BOLD);
+        heading.setLetterSpacing(0.10f);
+        heading.setPadding(dp(4), dp(12), dp(4), dp(5));
+        memoryList.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+        for (int i = 0; i < Math.min(limit, values.length()); i++) {
+            Object raw = values.opt(i);
+            JSONObject item = raw instanceof JSONObject ? (JSONObject) raw : null;
+            String titleText = item == null ? String.valueOf(raw) : item.optString("title", item.optString("id", "Запись"));
+            String detail = item == null ? "" : item.optString("summary", item.optString("updated_at", item.optString("id", "")));
+            addMemoryCard(titleText, detail, WARP);
+        }
+    }
+
+    private void addMemoryHero(String titleText, String detail) {
+        LinearLayout card = memoryCardBase(ACID);
+        TextView titleView = memoryCardText(titleText, 19, ACID, true);
+        TextView body = memoryCardText(detail, 13, TEXT, false);
+        card.addView(titleView);
+        card.addView(body);
+        memoryList.addView(card, memoryCardLayout());
+    }
+
+    private void addMemoryCard(String titleText, String detail, int accent) {
+        LinearLayout card = memoryCardBase(accent);
+        card.addView(memoryCardText(titleText, 16, TEXT, true));
+        if (detail != null && !detail.trim().isEmpty()) card.addView(memoryCardText(detail, 12, TEXT_MUTED, false));
+        memoryList.addView(card, memoryCardLayout());
+    }
+
+    private LinearLayout memoryCardBase(int accent) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(16), dp(14), dp(16), dp(14));
+        card.setBackground(pill(SURFACE_RAISED, Color.argb(170, Color.red(accent), Color.green(accent), Color.blue(accent)), dp(17)));
+        return card;
+    }
+
+    private LinearLayout.LayoutParams memoryCardLayout() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = dp(7);
+        return lp;
+    }
+
+    private TextView memoryCardText(String value, int size, int color, boolean bold) {
+        TextView text = new TextView(this);
+        text.setText(value == null ? "" : value);
+        text.setTextColor(color);
+        text.setTextSize(size);
+        text.setLineSpacing(dp(2), 1f);
+        if (bold) text.setTypeface(Typeface.DEFAULT_BOLD);
+        return text;
+    }
+
+    private void searchMemory() {
+        String query = memorySearch.getText().toString().trim();
+        if (query.isEmpty()) {
+            loadMemoryDashboard();
+            return;
+        }
+        memoryStatus.setText("ИЩУ В ПАМЯТИ • " + query.toUpperCase());
+        new Thread(() -> {
+            try {
+                JSONObject payload = memoryGet("/archive/memory/search?namespace=" + SERVER_MEMORY_NAMESPACE
+                        + "&requester=shushunya-mobile&include_content=true&limit=8&q=" + Uri.encode(query));
+                main.post(() -> renderMemorySearch(payload, query));
+            } catch (Exception exc) {
+                main.post(() -> memoryStatus.setText("ПОИСК НЕ УДАЛСЯ • " + exc.getMessage()));
+            }
+        }).start();
+    }
+
+    private void renderMemorySearch(JSONObject payload, String query) {
+        memoryList.removeAllViews();
+        addMemoryHero("РЕЗУЛЬТАТЫ", "Поиск по всем слоям: «" + query + "»");
+        int count = 0;
+        for (String layer : new String[]{"focus", "wiki", "vector"}) {
+            JSONArray values = payload.optJSONArray(layer);
+            if (values == null) continue;
+            for (int i = 0; i < Math.min(6, values.length()); i++) {
+                JSONObject item = values.optJSONObject(i);
+                if (item == null) continue;
+                String titleText = item.optString("title", item.optString("id", layer.toUpperCase()));
+                String detail = item.optString("content", item.optString("text", item.optString("summary", "")));
+                if (detail.length() > 360) detail = detail.substring(0, 360) + "…";
+                addMemoryCard(titleText, detail, "vector".equals(layer) ? CYAN : WARP);
+                count++;
+            }
+        }
+        if (count == 0) addMemoryCard("Ничего не найдено", "Попробуй другую формулировку.", CYAN);
+        memoryStatus.setText("ПАМЯТЬ • НАЙДЕНО: " + count);
+    }
+
+    private JSONObject memoryGet(String path) throws Exception {
+        URL url = new URL(trimSlash(baseUrl) + path);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(12000);
+        conn.setReadTimeout(30000);
+        conn.setRequestProperty("Accept", "application/json");
+        applyMobileAuth(conn);
+        int code = conn.getResponseCode();
+        InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
+        String response = readAll(stream);
+        if (code < 200 || code >= 300) throw new IllegalStateException("HTTP " + code);
+        return new JSONObject(response);
+    }
+
+    private void showMemoryProposalDialog() {
+        EditText proposal = new EditText(this);
+        proposal.setHint("Например: забудь старый адрес или запомни новое предпочтение");
+        proposal.setTextColor(TEXT);
+        proposal.setHintTextColor(TEXT_MUTED);
+        proposal.setMinLines(4);
+        proposal.setPadding(dp(16), dp(14), dp(16), dp(14));
+        proposal.setBackground(pill(SURFACE_RAISED, LINE, dp(16)));
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Изменение памяти")
+                .setView(proposal)
+                .setPositiveButton("Отправить архивариусу", null)
+                .setNegativeButton("Отмена", null)
+                .create();
+        dialog.setOnShowListener(d -> {
+            Window window = dialog.getWindow();
+            if (window != null) window.setBackgroundDrawable(pill(SURFACE, WARP, dp(18)));
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(ACID);
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                String value = proposal.getText().toString().trim();
+                if (value.isEmpty()) return;
+                dialog.dismiss();
+                proposeMemoryChange(value);
+            });
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(TEXT_MUTED);
+        });
+        dialog.show();
+    }
+
+    private void proposeMemoryChange(String proposal) {
+        memoryStatus.setText("АРХИВАРИУС ПРОВЕРЯЕТ ИЗМЕНЕНИЕ");
+        new Thread(() -> {
+            try {
+                URL url = new URL(trimSlash(baseUrl) + "/archive/memory/propose-change");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setConnectTimeout(12000);
+                conn.setReadTimeout(60000);
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                applyMobileAuth(conn);
+                JSONObject body = new JSONObject();
+                body.put("namespace", SERVER_MEMORY_NAMESPACE);
+                body.put("requester", "shushunya-mobile");
+                body.put("proposal", proposal);
+                body.put("target", "auto");
+                try (OutputStream out = conn.getOutputStream()) {
+                    out.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                }
+                int code = conn.getResponseCode();
+                if (code < 200 || code >= 300) throw new IllegalStateException("HTTP " + code);
+                main.post(() -> {
+                    memoryStatus.setText("ИЗМЕНЕНИЕ ПРИНЯТО НА ПРОВЕРКУ");
+                    Toast.makeText(this, "Архивариус получил предложение", Toast.LENGTH_SHORT).show();
+                });
+            } catch (Exception exc) {
+                main.post(() -> memoryStatus.setText("НЕ УДАЛОСЬ ИЗМЕНИТЬ • " + exc.getMessage()));
+            }
+        }).start();
     }
 
     private void showLanguageDialog(boolean sourceSide) {
@@ -866,7 +1412,7 @@ public class MainActivity extends Activity {
         dialog.setOnShowListener(d -> {
             Window window = dialog.getWindow();
             if (window != null) {
-                window.setBackgroundDrawable(pill(Color.rgb(8, 17, 43), Color.rgb(201, 156, 58), dp(14)));
+                window.setBackgroundDrawable(pill(SURFACE, WARP, dp(18)));
             }
         });
         dialog.show();
@@ -878,8 +1424,8 @@ public class MainActivity extends Activity {
         if (sourceLangLabel != null && targetLangLabel != null) {
             sourceLangLabel.setText(TRANSLATOR_NAMES[sourceIndex]);
             targetLangLabel.setText(TRANSLATOR_NAMES[targetIndex]);
-            sourceLangLabel.setTextColor(Color.rgb(230, 240, 245));
-            targetLangLabel.setTextColor(Color.rgb(230, 240, 245));
+            sourceLangLabel.setTextColor(TEXT);
+            targetLangLabel.setTextColor(TEXT);
         }
         if (speechButton != null) {
             speechButton.setText("REC " + TRANSLATOR_SHORT[sourceIndex]);
@@ -1075,7 +1621,7 @@ public class MainActivity extends Activity {
                 if (!fallbackTaskId.isEmpty()) {
                     main.post(() -> restoreAgentTask(fallbackTaskId));
                 } else {
-                    main.post(() -> agentStatus.setText("Историю бригад сейчас не удалось обновить. Задачи на ПК от этого не останавливаются."));
+                    main.post(() -> agentStatus.setText("Историю Warbands сейчас не удалось обновить. Задачи на ПК от этого не останавливаются."));
                 }
             }
         }).start();
@@ -1116,7 +1662,7 @@ public class MainActivity extends Activity {
             } catch (Exception exc) {
                 String taskIdText = currentAgentTaskId == null ? "" : currentAgentTaskId.trim();
                 String message = taskIdText.isEmpty()
-                        ? "Мониторинг бригады временно недоступен."
+                        ? "Мониторинг варбанды временно недоступен."
                         : warmasterMonitorDetachedMessage(taskIdText);
                 main.post(() -> {
                     agentRunning = false;
@@ -1138,10 +1684,10 @@ public class MainActivity extends Activity {
         }
         agentRunButton.setEnabled(true);
         agentRunButton.setImageResource(running ? android.R.drawable.ic_menu_close_clear_cancel : android.R.drawable.ic_menu_upload);
-        agentRunButton.setColorFilter(running ? Color.rgb(255, 232, 204) : Color.rgb(5, 13, 31));
+        agentRunButton.setColorFilter(running ? TEXT : INK);
         agentRunButton.setBackground(running
                 ? pill(Color.rgb(87, 23, 33), Color.rgb(231, 95, 69), dp(16))
-                : pill(Color.rgb(201, 156, 58), Color.rgb(29, 191, 183), dp(16)));
+                : pill(ACID, ACID, dp(18)));
         agentRunButton.animate().alpha(agentCancelRequested ? 0.55f : 1f).setDuration(160).start();
     }
 
@@ -1180,7 +1726,7 @@ public class MainActivity extends Activity {
         agentBrigadeFilter = filter == null ? "" : filter.trim();
         String label = agentBrigadeLabel(agentBrigadeFilter);
         if (agentStatus != null) {
-            agentStatus.setText(label.isEmpty() ? "Показываю все бригады..." : "Показываю: " + label);
+            agentStatus.setText(label.isEmpty() ? "Показываю все варбанды..." : "Показываю: " + label);
         }
         agentSections.clear();
         lastAgentTasksJson = "";
@@ -1201,7 +1747,7 @@ public class MainActivity extends Activity {
                 // the feed with warning bubbles is worse than a stale view.
                 main.post(() -> {
                     if (agentStatus != null) {
-                        agentStatus.setText("Монитор бригад сейчас не обновился.");
+                        agentStatus.setText("Монитор варбанд сейчас не обновился.");
                     }
                 });
             }
@@ -1377,7 +1923,7 @@ public class MainActivity extends Activity {
         String response = readAll(stream);
         if (code < 200 || code >= 300) {
             if (code == 409) {
-                throw new IllegalStateException("Warmaster занят, открой Бригады и повтори позже");
+                throw new IllegalStateException("Warmaster занят, открой Warbands и повтори позже");
             }
             throw new IllegalStateException("HTTP " + code + ": " + response);
         }
@@ -1492,6 +2038,19 @@ public class MainActivity extends Activity {
         }
         int visible = 0;
         int length = tasks == null ? 0 : tasks.length();
+        int activeCount = 0;
+        int doneCount = 0;
+        for (int i = 0; i < length; i++) {
+            JSONObject metricTask = tasks.optJSONObject(i);
+            if (metricTask == null || !agentTaskMatchesBrigade(metricTask)) continue;
+            if (metricTask.optBoolean("running", false)) activeCount++; else doneCount++;
+        }
+        if (agentActiveMetric != null) agentActiveMetric.setText(String.valueOf(activeCount));
+        if (agentDoneMetric != null) agentDoneMetric.setText(String.valueOf(doneCount));
+        if (agentModeMetric != null) agentModeMetric.setText(activeCount > 0 ? "BUSY" : "LIVE");
+        if (TAB_AGENT.equals(currentTab)) {
+            setWarpState(activeCount > 0 ? "●  WARMASTER / В РАБОТЕ" : "●  WARMASTER / МОНИТОР", activeCount > 0 ? WARP : CYAN);
+        }
         for (int i = length - 1; i >= 0; i--) {
             JSONObject task = tasks.optJSONObject(i);
             if (task == null || !agentTaskMatchesBrigade(task)) {
@@ -1572,7 +2131,7 @@ public class MainActivity extends Activity {
         }
         if (firstFill && visible == 0) {
             String label = agentBrigadeLabel(agentBrigadeFilter);
-            addAgentMessage(false, label.isEmpty() ? "Задач по бригадам нет." : "У бригады " + label + " пока нет задач.", false);
+            addAgentMessage(false, label.isEmpty() ? "Задач по варбандам нет." : "У варбанды " + label + " пока нет задач.", false);
         }
         maybeScrollAgentToBottom(false);
     }
@@ -1636,7 +2195,7 @@ public class MainActivity extends Activity {
         if ("completed".equals(cleanStatus) || "passed_with_warnings".equals(cleanStatus)) {
             return Color.rgb(73, 203, 145);
         }
-        return Color.rgb(33, 190, 181);
+        return CYAN;
     }
 
     private TextView agentSmallLabel(String text, int textColor) {
@@ -1647,7 +2206,7 @@ public class MainActivity extends Activity {
         label.setSingleLine(true);
         label.setEllipsize(TextUtils.TruncateAt.END);
         label.setPadding(dp(8), dp(3), dp(8), dp(3));
-        label.setBackground(pill(Color.rgb(8, 24, 43), Color.argb(150, Color.red(textColor), Color.green(textColor), Color.blue(textColor)), dp(12)));
+        label.setBackground(pill(SURFACE_SOFT, Color.argb(150, Color.red(textColor), Color.green(textColor), Color.blue(textColor)), dp(13)));
         return label;
     }
 
@@ -1655,7 +2214,7 @@ public class MainActivity extends Activity {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(12), dp(10), dp(12), dp(10));
-        card.setBackground(pill(Color.rgb(7, 26, 44), Color.rgb(47, 103, 121), dp(12)));
+        card.setBackground(pill(SURFACE_RAISED, LINE, dp(16)));
         card.setAlpha(animate ? 0f : 1f);
         card.setTranslationY(animate ? dp(10) : 0f);
 
@@ -1672,8 +2231,8 @@ public class MainActivity extends Activity {
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.setOrientation(LinearLayout.HORIZONTAL);
         TextView title = new TextView(this);
-        title.setText(brigade.isEmpty() ? "Бригада" : brigade);
-        title.setTextColor(Color.rgb(235, 251, 248));
+        title.setText(brigade.isEmpty() ? "Warband" : brigade);
+        title.setTextColor(TEXT);
         title.setTextSize(16);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setSingleLine(true);
@@ -1685,7 +2244,7 @@ public class MainActivity extends Activity {
         if (!taskId.isEmpty()) {
             TextView id = new TextView(this);
             id.setText(taskId);
-            id.setTextColor(Color.rgb(120, 168, 181));
+            id.setTextColor(TEXT_MUTED);
             id.setTextSize(12);
             id.setSingleLine(true);
             id.setEllipsize(TextUtils.TruncateAt.MIDDLE);
@@ -1696,7 +2255,7 @@ public class MainActivity extends Activity {
         if (!currentStep.isEmpty()) {
             TextView step = new TextView(this);
             step.setText("Сейчас: " + currentStep);
-            step.setTextColor(Color.rgb(205, 232, 229));
+            step.setTextColor(Color.rgb(218, 215, 228));
             step.setTextSize(14);
             step.setLineSpacing(dp(2), 1.0f);
             step.setPadding(0, dp(8), 0, 0);
@@ -1731,14 +2290,14 @@ public class MainActivity extends Activity {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(10), dp(8), dp(10), dp(8));
-        card.setBackground(pill(Color.rgb(7, 22, 39), Color.rgb(34, 71, 91), dp(10)));
+        card.setBackground(pill(SURFACE, LINE, dp(14)));
 
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.setOrientation(LinearLayout.HORIZONTAL);
         TextView title = new TextView(this);
         title.setText(headline.isEmpty() ? "Шаг " + (index + 1) : headline);
-        title.setTextColor(Color.rgb(230, 250, 247));
+        title.setTextColor(TEXT);
         title.setTextSize(14);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setSingleLine(false);
@@ -1749,7 +2308,7 @@ public class MainActivity extends Activity {
         if (!detail.isEmpty()) {
             TextView body = new TextView(this);
             body.setText(detail);
-            body.setTextColor(Color.rgb(196, 226, 224));
+            body.setTextColor(Color.rgb(218, 215, 228));
             body.setTextSize(13);
             body.setLineSpacing(dp(2), 1.0f);
             body.setPadding(0, dp(6), 0, 0);
@@ -1768,7 +2327,7 @@ public class MainActivity extends Activity {
         if (!metaText.isEmpty()) {
             TextView meta = new TextView(this);
             meta.setText(metaText);
-            meta.setTextColor(Color.rgb(118, 159, 170));
+            meta.setTextColor(TEXT_MUTED);
             meta.setTextSize(11);
             meta.setSingleLine(true);
             meta.setEllipsize(TextUtils.TruncateAt.END);
@@ -1784,26 +2343,27 @@ public class MainActivity extends Activity {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(12), dp(10), dp(12), dp(10));
-        card.setBackground(pill(Color.rgb(24, 30, 47), Color.rgb(229, 183, 82), dp(12)));
+        card.setBackground(pill(SURFACE_RAISED, ACID, dp(16)));
         card.setAlpha(animate ? 0f : 1f);
         card.setTranslationY(animate ? dp(10) : 0f);
 
         TextView title = new TextView(this);
         title.setText("Финальный ответ");
-        title.setTextColor(Color.rgb(247, 225, 160));
+        title.setTextColor(ACID);
         title.setTextSize(14);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         card.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         TextView body = new TextView(this);
-        body.setText(finalText);
-        body.setTextColor(Color.rgb(232, 238, 229));
+        applyRichText(body, finalText);
+        body.setTextColor(TEXT);
         body.setTextSize(14);
         body.setLineSpacing(dp(2), 1.0f);
         body.setPadding(0, dp(6), 0, 0);
         card.addView(body, new LinearLayout.LayoutParams(-1, -2));
 
         addAgentCardView(card, animate);
+        if (animate) card.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
     }
 
     private void addAgentCardView(View card, boolean animate) {
@@ -1988,6 +2548,8 @@ public class MainActivity extends Activity {
         recording = true;
         button.setText("STOP");
         speechStatus.setText(titleText + ": слушаю и сразу отправляю...");
+        setWarpState("●  СЛУШАЮ / ГОВОРИ", CYAN);
+        button.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
 
         new Thread(() -> runStreamingRemoteStt(language, titleText)).start();
     }
@@ -2007,11 +2569,13 @@ public class MainActivity extends Activity {
                 } else {
                     speechStatus.setText("Готово.");
                 }
+                setWarpState("●  ВАРП-КАНАЛ / В СЕТИ", CYAN);
             });
         } catch (Exception exc) {
             main.post(() -> {
                 resetSpeechButton();
                 speechStatus.setText("STT ошибка: " + exc.getMessage());
+                setWarpState("●  ОШИБКА ГОЛОСА", Color.rgb(220, 91, 91));
             });
         }
     }
@@ -2116,7 +2680,9 @@ public class MainActivity extends Activity {
 
     private void resetSpeechButton() {
         if (activeSpeechButton != null) {
-            activeSpeechButton.setText(activeSpeechButton == speechButton ? "REC " + TRANSLATOR_SHORT[translatorSourceIndex] : "REC");
+            activeSpeechButton.setText(activeSpeechButton == speechButton
+                    ? "REC " + TRANSLATOR_SHORT[translatorSourceIndex]
+                    : activeSpeechButton == chatVoiceButton ? "●" : "REC");
         }
         activeSpeechButton = null;
     }
@@ -2148,7 +2714,7 @@ public class MainActivity extends Activity {
 
     private void buildDrawer(FrameLayout root) {
         scrim = new View(this);
-        scrim.setBackgroundColor(Color.argb(150, 0, 0, 0));
+        scrim.setBackgroundColor(Color.argb(205, 0, 0, 0));
         scrim.setAlpha(0f);
         scrim.setVisibility(View.GONE);
         root.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
@@ -2157,7 +2723,7 @@ public class MainActivity extends Activity {
         int drawerWidth = Math.min(dp(316), getResources().getDisplayMetrics().widthPixels - dp(52));
         drawer = new LinearLayout(this);
         drawer.setOrientation(LinearLayout.VERTICAL);
-        drawer.setPadding(dp(18), dp(26), dp(18), dp(18));
+        drawer.setPadding(dp(20), dp(34), dp(20), dp(20));
         drawer.setBackground(drawerBackground());
         drawer.setTranslationX(-drawerWidth);
         FrameLayout.LayoutParams drawerLp = new FrameLayout.LayoutParams(drawerWidth, -1, Gravity.LEFT);
@@ -2165,17 +2731,30 @@ public class MainActivity extends Activity {
 
         TextView name = new TextView(this);
         name.setText("Шушуня");
-        name.setTextColor(Color.rgb(244, 217, 137));
-        name.setTextSize(25);
+        name.setTextColor(TEXT);
+        name.setTextSize(28);
         name.setTypeface(Typeface.DEFAULT_BOLD);
-        drawer.addView(name, new LinearLayout.LayoutParams(-1, dp(50)));
+        name.setLetterSpacing(-0.02f);
+        drawer.addView(name, new LinearLayout.LayoutParams(-1, dp(44)));
+
+        TextView signature = new TextView(this);
+        signature.setText("ПЕРСОНАЛЬНЫЙ ДЕМОН • ONLINE");
+        signature.setTextColor(CYAN);
+        signature.setTextSize(10);
+        signature.setTypeface(Typeface.DEFAULT_BOLD);
+        signature.setLetterSpacing(0.10f);
+        LinearLayout.LayoutParams signatureLp = new LinearLayout.LayoutParams(-1, dp(34));
+        signatureLp.bottomMargin = dp(14);
+        drawer.addView(signature, signatureLp);
 
         drawerChat = drawerItem("Шушуня");
         drawerTranslator = drawerItem("Переводчик");
-        drawerAgent = drawerItem("Бригады");
+        drawerAgent = drawerItem("Warbands");
+        drawerMemory = drawerItem("Память");
         drawer.addView(drawerChat);
         drawer.addView(drawerTranslator);
         drawer.addView(drawerAgent);
+        drawer.addView(drawerMemory);
 
         drawerChat.setOnClickListener(v -> {
             showTab(TAB_CHAT);
@@ -2189,18 +2768,22 @@ public class MainActivity extends Activity {
             showTab(TAB_AGENT);
             setDrawerOpen(false);
         });
+        drawerMemory.setOnClickListener(v -> {
+            showTab(TAB_MEMORY);
+            setDrawerOpen(false);
+        });
         updateDrawerSelection();
     }
 
     private TextView drawerItem(String text) {
         TextView item = new TextView(this);
         item.setText(text);
-        item.setTextSize(18);
+        item.setTextSize(16);
         item.setTypeface(Typeface.DEFAULT_BOLD);
         item.setGravity(Gravity.CENTER_VERTICAL);
-        item.setPadding(dp(16), 0, dp(16), 0);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(54));
-        lp.topMargin = dp(10);
+        item.setPadding(dp(18), 0, dp(18), 0);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(52));
+        lp.topMargin = dp(8);
         item.setLayoutParams(lp);
         return item;
     }
@@ -2210,12 +2793,14 @@ public class MainActivity extends Activity {
         boolean chat = TAB_CHAT.equals(tab);
         boolean translator = TAB_TRANSLATOR.equals(tab);
         boolean agent = TAB_AGENT.equals(tab);
-        title.setText(chat ? "Шушуня" : agent ? "Бригады" : "Переводчик");
-        endpoint.setText(baseUrl);
-        endpoint.setVisibility((chat || agent) ? View.VISIBLE : View.INVISIBLE);
+        boolean memory = TAB_MEMORY.equals(tab);
+        title.setText(chat ? "Шушуня" : agent ? "Warbands" : memory ? "Память" : "Переводчик");
+        endpoint.setText(chat ? "●  ВАРП-КАНАЛ / В СЕТИ" : agent ? "●  WARMASTER / МОНИТОР" : memory ? "●  АРХИВ / SHUSHUNYA" : "●  ПЕРЕВОДЧИК / ГОТОВ");
+        endpoint.setVisibility(View.VISIBLE);
         chatView.setVisibility(chat ? View.VISIBLE : View.GONE);
         translatorView.setVisibility(translator ? View.VISIBLE : View.GONE);
         agentView.setVisibility(agent ? View.VISIBLE : View.GONE);
+        memoryView.setVisibility(memory ? View.VISIBLE : View.GONE);
         if (chat) {
             if (messageList == null || messageList.getChildCount() == 0) {
                 loadServerChatHistory();
@@ -2233,12 +2818,17 @@ public class MainActivity extends Activity {
             updateAgentKeyboardLift();
             refreshBrigadeMonitor();
             startBrigadeDeltaLoop();
-        } else {
+        } else if (translator) {
             inputPanel.animate().translationY(0f).setDuration(120).start();
             scrollView.setPadding(0, 0, 0, 0);
             updateToolKeyboardPadding();
+        } else {
+            inputPanel.animate().translationY(0f).setDuration(120).start();
+            scrollView.setPadding(0, 0, 0, 0);
+            loadMemoryDashboard();
         }
         updateDrawerSelection();
+        updateBottomNavigation();
     }
 
     private void updateToolKeyboardPadding() {
@@ -2262,13 +2852,14 @@ public class MainActivity extends Activity {
         styleDrawerItem(drawerChat, TAB_CHAT.equals(currentTab));
         styleDrawerItem(drawerTranslator, TAB_TRANSLATOR.equals(currentTab));
         styleDrawerItem(drawerAgent, TAB_AGENT.equals(currentTab));
+        styleDrawerItem(drawerMemory, TAB_MEMORY.equals(currentTab));
     }
 
     private void styleDrawerItem(TextView item, boolean selected) {
-        item.setTextColor(selected ? Color.rgb(5, 13, 31) : Color.rgb(230, 240, 245));
+        item.setTextColor(selected ? INK : TEXT_MUTED);
         item.setBackground(selected
-                ? pill(Color.rgb(201, 156, 58), Color.rgb(29, 191, 183), dp(16))
-                : pill(Color.rgb(12, 30, 60), Color.rgb(48, 84, 116), dp(16)));
+                ? pill(ACID, ACID, dp(17))
+                : pill(SURFACE_RAISED, LINE, dp(17)));
     }
 
     private void setDrawerOpen(boolean open) {
@@ -2311,7 +2902,7 @@ public class MainActivity extends Activity {
         grid.setHorizontalSpacing(dp(8));
         grid.setPadding(dp(10), dp(10), dp(10), dp(10));
         grid.setClipToPadding(false);
-        grid.setBackgroundColor(Color.rgb(5, 12, 31));
+        grid.setBackgroundColor(INK);
         ImageGridAdapter adapter = new ImageGridAdapter(images);
         grid.setAdapter(adapter);
 
@@ -2328,9 +2919,9 @@ public class MainActivity extends Activity {
         dialog.setOnShowListener(d -> {
             Window window = dialog.getWindow();
             if (window != null) {
-                window.setBackgroundDrawable(pill(Color.rgb(8, 17, 43), Color.rgb(201, 156, 58), dp(14)));
+                window.setBackgroundDrawable(pill(SURFACE, WARP, dp(18)));
             }
-            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(Color.rgb(201, 156, 58));
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(ACID);
         });
         dialog.show();
     }
@@ -2397,9 +2988,10 @@ public class MainActivity extends Activity {
                 pendingImagePreview = finalPreview;
                 selectedImagePreview.setImageBitmap(finalPreview);
                 selectedImagePreview.setVisibility(View.VISIBLE);
+                updateComposerActions();
                 updateChatKeyboardLift();
                 attachImage.animate().alpha(1f).setDuration(120).start();
-                attachImage.setColorFilter(Color.rgb(201, 156, 58));
+                attachImage.setColorFilter(ACID);
             });
         } catch (Exception exc) {
             main.post(() -> {
@@ -2420,6 +3012,7 @@ public class MainActivity extends Activity {
         pendingImagePreview = null;
         selectedImagePreview.setImageDrawable(null);
         selectedImagePreview.setVisibility(View.GONE);
+        updateComposerActions();
         updateChatKeyboardLift();
         resetAttachImageButton();
     }
@@ -2452,9 +3045,9 @@ public class MainActivity extends Activity {
         return new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{
-                        Color.rgb(7, 17, 48),
-                        Color.rgb(4, 9, 29),
-                        Color.rgb(9, 25, 51)
+                        Color.rgb(18, 13, 31),
+                        INK,
+                        Color.rgb(8, 9, 18)
                 });
     }
 
@@ -2462,10 +3055,19 @@ public class MainActivity extends Activity {
         GradientDrawable drawable = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{
-                        Color.rgb(7, 18, 46),
-                        Color.rgb(10, 23, 50)
+                        Color.rgb(25, 20, 39),
+                        SURFACE
                 });
-        drawable.setStroke(dp(1), Color.rgb(201, 156, 58));
+        drawable.setStroke(dp(1), LINE);
+        return drawable;
+    }
+
+    private GradientDrawable gradientPill(int start, int end, int stroke, int radius) {
+        GradientDrawable drawable = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{start, end});
+        drawable.setCornerRadius(radius);
+        drawable.setStroke(dp(1), stroke);
         return drawable;
     }
 
@@ -2486,6 +3088,7 @@ public class MainActivity extends Activity {
         if ((text.isEmpty() && !hasImage) || waiting) {
             return;
         }
+        send.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
         String warmasterTask = hasImage ? "" : warmasterTaskFromChatCommand(text);
         if (!warmasterTask.isEmpty()) {
             input.setText("");
@@ -2569,7 +3172,7 @@ public class MainActivity extends Activity {
             return;
         }
         if (agentRunning) {
-            addMessage(false, "Warmaster уже выполняет задачу. Открой вкладку Бригады и дождись завершения или отмени текущую.");
+            addMessage(false, "Warmaster уже выполняет задачу. Открой вкладку Warbands и дождись завершения или отмени текущую.");
             return;
         }
 
@@ -2600,7 +3203,7 @@ public class MainActivity extends Activity {
                         .apply();
                 String acceptedMessage = warmasterAcceptedChatMessage(acceptedTaskId);
                 main.post(() -> {
-                    answerBubble.setText(acceptedMessage);
+                    applyRichText(answerBubble, acceptedMessage);
                     saveChatMessage(false, acceptedMessage);
                     maybeScrollToBottom(false);
                     refreshBrigadeMonitor();
@@ -2647,7 +3250,7 @@ public class MainActivity extends Activity {
                     }
                     setWaiting(false);
                     setAgentRunButtonRunning(false);
-                    answerBubble.setText(message);
+                    applyRichText(answerBubble, message);
                     saveChatMessage(false, message);
                     showAnswerNotification(message);
                     if (agentStatus != null) {
@@ -2670,13 +3273,13 @@ public class MainActivity extends Activity {
         if (!cleanTaskId.isEmpty()) {
             out.append("\n").append("task_id=").append(cleanTaskId);
         }
-        out.append("\n\nХод работы открыт во вкладке Бригады; основной чат получит только финал или запрос твоего решения.");
+        out.append("\n\nХод работы открыт во вкладке Warbands; основной чат получит только финал или запрос твоего решения.");
         return out.toString();
     }
 
     private void resetAttachImageButton() {
         attachImage.animate().alpha(1f).setDuration(120).start();
-        attachImage.setColorFilter(Color.rgb(244, 217, 137));
+        attachImage.setColorFilter(TEXT_MUTED);
     }
 
     private void streamAnswer(String text, String imageDataUrl, StreamingBubble liveBubble) throws Exception {
@@ -2789,7 +3392,7 @@ public class MainActivity extends Activity {
                     // The turn controller sent this to the brigade; the mission is
                     // already running server-side. Surface an ack; progress shows
                     // in the Brigades tab and the delta stream.
-                    String ack = "Взял в работу — веду через бригаду. Прогресс во вкладке «Бригады».";
+                    String ack = "Взял в работу — веду через варбанду. Прогресс во вкладке Warbands.";
                     full.setLength(0);
                     full.append(ack);
                     liveBubble.append(ack);
@@ -3009,25 +3612,48 @@ public class MainActivity extends Activity {
         return addMessage(fromUser, text, true);
     }
 
+    private void applyRichText(TextView view, String raw) {
+        String source = raw == null ? "" : raw;
+        String html = TextUtils.htmlEncode(source);
+        html = html.replaceAll("(?s)```(?:[a-zA-Z0-9_+-]+)?\\n?(.*?)```", "<tt><font color='#C4FF5B'>$1</font></tt>");
+        html = html.replaceAll("`([^`\\n]+)`", "<tt><font color='#C4FF5B'>$1</font></tt>");
+        html = html.replaceAll("\\*\\*([^*]+)\\*\\*", "<b>$1</b>");
+        html = html.replaceAll("(?m)^#{1,3}\\s+(.+)$", "<big><b>$1</b></big>");
+        html = html.replace("\n", "<br>");
+        view.setText(Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY));
+        view.setAutoLinkMask(Linkify.WEB_URLS);
+        view.setMovementMethod(LinkMovementMethod.getInstance());
+        view.setTextIsSelectable(true);
+        view.setOnLongClickListener(v -> {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard != null) {
+                clipboard.setPrimaryClip(ClipData.newPlainText("shushunya-message", source));
+                Toast.makeText(this, "Сообщение скопировано", Toast.LENGTH_SHORT).show();
+                v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            }
+            return true;
+        });
+    }
+
     private TextView addAgentMessage(boolean fromUser, String text, boolean animate) {
         TextView bubble = new TextView(this);
-        bubble.setText(text);
+        applyRichText(bubble, text);
         bubble.setTextSize(16);
         bubble.setLineSpacing(dp(2), 1.0f);
-        bubble.setTextColor(fromUser ? Color.rgb(247, 240, 221) : Color.rgb(224, 250, 247));
-        bubble.setPadding(dp(14), dp(10), dp(14), dp(10));
+        bubble.setTextColor(TEXT);
+        bubble.setPadding(dp(16), dp(12), dp(16), dp(12));
         bubble.setBackground(fromUser
-                ? pill(Color.rgb(78, 43, 105), Color.rgb(205, 160, 61), dp(18))
-                : pill(Color.rgb(9, 35, 57), Color.rgb(33, 190, 181), dp(18)));
+                ? gradientPill(WARP, WARP_DEEP, WARP, dp(21))
+                : pill(SURFACE_RAISED, LINE, dp(21)));
         bubble.setAlpha(animate ? 0f : 1f);
         bubble.setTranslationY(animate ? dp(10) : 0f);
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                Math.min(getResources().getDisplayMetrics().widthPixels - dp(74), dp(560)),
+                Math.min(getResources().getDisplayMetrics().widthPixels - dp(58), dp(560)),
                 ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.gravity = fromUser ? Gravity.RIGHT : Gravity.LEFT;
-        lp.topMargin = dp(6);
-        lp.bottomMargin = dp(6);
+        lp.topMargin = dp(5);
+        lp.bottomMargin = dp(5);
         (agentAppendTarget != null ? agentAppendTarget : agentMessageList).addView(bubble, lp);
 
         if (animate) {
@@ -3064,7 +3690,7 @@ public class MainActivity extends Activity {
         LinearLayout bubble = new LinearLayout(this);
         bubble.setOrientation(LinearLayout.VERTICAL);
         bubble.setPadding(dp(8), dp(8), dp(8), dp(8));
-        bubble.setBackground(pill(Color.rgb(78, 43, 105), Color.rgb(205, 160, 61), dp(18)));
+        bubble.setBackground(gradientPill(WARP, WARP_DEEP, WARP, dp(21)));
         if (!prepend) {
             bubble.setAlpha(0f);
             bubble.setTranslationY(dp(10));
@@ -3072,7 +3698,7 @@ public class MainActivity extends Activity {
 
         ImageView imageView = new ImageView(this);
         imageView.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        imageView.setBackground(pill(Color.rgb(6, 14, 36), Color.rgb(201, 156, 58), dp(14)));
+        imageView.setBackground(pill(SURFACE, Color.argb(120, 255, 255, 255), dp(16)));
         imageView.setPadding(dp(2), dp(2), dp(2), dp(2));
         if (image != null) {
             imageView.setImageBitmap(image);
@@ -3082,10 +3708,10 @@ public class MainActivity extends Activity {
 
         if (text != null && !text.trim().isEmpty()) {
             TextView caption = new TextView(this);
-            caption.setText(text.trim());
+            applyRichText(caption, text.trim());
             caption.setTextSize(16);
             caption.setLineSpacing(dp(2), 1.0f);
-            caption.setTextColor(Color.rgb(247, 240, 221));
+            caption.setTextColor(TEXT);
             caption.setPadding(dp(6), dp(8), dp(6), dp(2));
             bubble.addView(caption, new LinearLayout.LayoutParams(-1, -2));
             if (!prepend) {
@@ -3096,7 +3722,7 @@ public class MainActivity extends Activity {
         }
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                Math.min(getResources().getDisplayMetrics().widthPixels - dp(74), dp(560)),
+                Math.min(getResources().getDisplayMetrics().widthPixels - dp(58), dp(560)),
                 ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.gravity = Gravity.RIGHT;
         lp.topMargin = dp(6);
@@ -3123,25 +3749,25 @@ public class MainActivity extends Activity {
     private TextView addMessage(boolean fromUser, String text, boolean save, int insertIndex) {
         boolean prepend = insertIndex >= 0;
         TextView bubble = new TextView(this);
-        bubble.setText(text);
+        applyRichText(bubble, text);
         bubble.setTextSize(16);
         bubble.setLineSpacing(dp(2), 1.0f);
-        bubble.setTextColor(fromUser ? Color.rgb(247, 240, 221) : Color.rgb(224, 250, 247));
-        bubble.setPadding(dp(14), dp(10), dp(14), dp(10));
+        bubble.setTextColor(TEXT);
+        bubble.setPadding(dp(16), dp(12), dp(16), dp(12));
         bubble.setBackground(fromUser
-                ? pill(Color.rgb(78, 43, 105), Color.rgb(205, 160, 61), dp(18))
-                : pill(Color.rgb(9, 35, 57), Color.rgb(33, 190, 181), dp(18)));
+                ? gradientPill(WARP, WARP_DEEP, WARP, dp(21))
+                : pill(SURFACE_RAISED, LINE, dp(21)));
         if (!prepend) {
             bubble.setAlpha(0f);
             bubble.setTranslationY(dp(10));
         }
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                Math.min(getResources().getDisplayMetrics().widthPixels - dp(74), dp(560)),
+                Math.min(getResources().getDisplayMetrics().widthPixels - dp(58), dp(560)),
                 ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.gravity = fromUser ? Gravity.RIGHT : Gravity.LEFT;
-        lp.topMargin = dp(6);
-        lp.bottomMargin = dp(6);
+        lp.topMargin = dp(5);
+        lp.bottomMargin = dp(5);
         if (prepend) {
             messageList.addView(bubble, Math.min(insertIndex, messageList.getChildCount()), lp);
             return bubble;
@@ -3447,7 +4073,7 @@ public class MainActivity extends Activity {
             if (!fromUser && pendingAnswerBubble != null) {
                 // The awaited answer arrives through the delta stream (e.g. after
                 // a dropped poll): fill the waiting bubble instead of appending.
-                pendingAnswerBubble.setText(text);
+                applyRichText(pendingAnswerBubble, text);
                 pendingAnswerBubble = null;
                 setWaiting(false);
                 showAnswerNotification(text);
@@ -3640,11 +4266,18 @@ public class MainActivity extends Activity {
         send.setEnabled(!value);
         send.animate().alpha(value ? 0.55f : 1f).setDuration(180).start();
         progress.setVisibility(value ? View.VISIBLE : View.GONE);
+        if (TAB_CHAT.equals(currentTab)) {
+            setWarpState(value ? "●  ШУШУНЯ ПЛЕТЁТ ОТВЕТ" : "●  ВАРП-КАНАЛ / В СЕТИ", value ? WARP : CYAN);
+        }
     }
 
     @Override
     protected void onDestroy() {
         recording = false;
+        if (warpAnimator != null) {
+            warpAnimator.cancel();
+            warpAnimator = null;
+        }
         super.onDestroy();
     }
 
@@ -3679,14 +4312,14 @@ public class MainActivity extends Activity {
             ImageView image = convertView instanceof ImageView ? (ImageView) convertView : new ImageView(MainActivity.this);
             image.setLayoutParams(new GridView.LayoutParams(-1, dp(112)));
             image.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            image.setBackground(pill(Color.rgb(6, 14, 36), Color.rgb(45, 82, 116), dp(10)));
+            image.setBackground(pill(SURFACE_RAISED, LINE, dp(12)));
             image.setPadding(dp(2), dp(2), dp(2), dp(2));
             try {
                 Bitmap thumb = getContentResolver().loadThumbnail(images.get(position), new Size(dp(160), dp(160)), null);
                 image.setImageBitmap(thumb);
             } catch (Exception ignored) {
                 image.setImageResource(android.R.drawable.ic_menu_gallery);
-                image.setColorFilter(Color.rgb(244, 217, 137));
+                image.setColorFilter(TEXT_MUTED);
             }
             return image;
         }
@@ -3744,8 +4377,12 @@ public class MainActivity extends Activity {
                     String visible = target.substring(0, shown);
                     if (visible.trim().isEmpty() && finished) {
                         bubble.setText("Пусто. Даже варп иногда молчит.");
+                    } else if (finished && shown >= available) {
+                        applyRichText(bubble, visible.trim());
+                        setWarpState("●  ВАРП-КАНАЛ / В СЕТИ", CYAN);
+                        bubble.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
                     } else {
-                        bubble.setText(finished && shown >= available ? visible.trim() : visible + "▌");
+                        bubble.setText(visible + "▌");
                     }
                 }
                 maybeScrollToBottom(false);

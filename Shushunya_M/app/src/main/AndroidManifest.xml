@@ -8,6 +8,8 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@drawable/ic_shushunya"
+        android:roundIcon="@drawable/ic_shushunya"
         android:label="Шушуня"
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/AppTheme"
