@@ -36,8 +36,8 @@ android {
         applicationId = "com.shushunya.m"
         minSdk = 34
         targetSdk = 35
-        versionCode = 40
-        versionName = "7.0"
+        versionCode = 41
+        versionName = "7.1"
         buildConfigField("String", "CLIENT_API_KEY", "\"$clientApiKey\"")
     }
 }

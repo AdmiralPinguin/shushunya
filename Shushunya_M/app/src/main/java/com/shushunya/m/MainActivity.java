@@ -238,6 +238,9 @@ public class MainActivity extends Activity {
     private boolean drawerOpen;
     private boolean userPinnedScroll;
     private boolean chatTouchActive;
+    // Explicit follow mode. A finger touching the history disables it
+    // immediately, so already queued streaming callbacks cannot steal scroll.
+    private boolean chatAutoFollow = true;
     private boolean agentPinnedScroll;
     private boolean agentTouchActive;
     private ValueAnimator agentScrollAnimator;
@@ -503,6 +506,10 @@ public class MainActivity extends Activity {
         // Near the top: pull in the previous page of history (Telegram-style),
         // so only a small window is ever mounted no matter how long the chat is.
         scrollView.setOnScrollChangeListener((v, x, y, oldX, oldY) -> {
+            if (y < oldY) {
+                chatAutoFollow = false;
+                userPinnedScroll = true;
+            }
             if (y <= dp(80) && y < oldY) {
                 loadOlderChatPage();
             }
@@ -511,6 +518,7 @@ public class MainActivity extends Activity {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
                 chatTouchActive = true;
                 userPinnedScroll = true;
+                chatAutoFollow = false;
                 if (scrollAnimator != null) {
                     scrollAnimator.cancel();
                     scrollAnimator = null;
@@ -518,7 +526,8 @@ public class MainActivity extends Activity {
             }
             if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
                 chatTouchActive = false;
-                userPinnedScroll = !isAtChatBottom();
+                chatAutoFollow = isAtChatBottom();
+                userPinnedScroll = !chatAutoFollow;
             }
             return false;
         });
@@ -4284,13 +4293,19 @@ public class MainActivity extends Activity {
     }
 
     private void maybeScrollToBottom(boolean force) {
-        if (!force && (chatTouchActive || userPinnedScroll)) {
+        if (!force && (chatTouchActive || userPinnedScroll || !chatAutoFollow)) {
             return;
         }
         if (force) {
             userPinnedScroll = false;
+            chatAutoFollow = true;
         }
         main.postDelayed(() -> {
+            // The user may have touched or moved the history after this callback
+            // was queued by a previous token. Re-check here, not only above.
+            if (chatTouchActive || userPinnedScroll || !chatAutoFollow) {
+                return;
+            }
             int target = Math.max(0, messageList.getBottom() + scrollView.getPaddingBottom() - scrollView.getHeight());
             if (scrollAnimator != null) {
                 scrollAnimator.cancel();
