@@ -35,10 +35,15 @@ if [ ! -x "$ENV_DIR/bin/python" ]; then
   exit 1
 fi
 
-if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+# NB: kill -0 alone is not enough — after a reboot the pid can belong to a completely
+# unrelated process (pid reuse), and the stale file silently blocks startup.
+# Trust the pid only if it actually runs OUR main.py.
+if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null \
+   && grep -q "main\.py" "/proc/$(cat "$PID_FILE")/cmdline" 2>/dev/null; then
   echo "ArchiveOfHeresy main is already running with PID $(cat "$PID_FILE")"
   exit 0
 fi
+rm -f "$PID_FILE"
 
 mkdir -p "$RUNTIME_DIR"
 
