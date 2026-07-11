@@ -1,10 +1,24 @@
 # Ceraxia
 
-Ceraxia is the Inner Circle governor for code tasks.
+> **Legacy evaluation archive (frozen).** The active coding architecture is the
+> Skitarii Warband in `../Skitarii`, reached through Warmaster's Ceraxia
+> compatibility facade and `skitarii_bridge.py`. The retired CodeBrigade worker
+> directories and PlanningBrigade are not live services. The material below is
+> retained as historical evidence and must not be used to describe current
+> execution capabilities.
 
-Current project focus: Ceraxia and her code brigade are the active development
+Ceraxia is the Inner Circle compatibility governor for code tasks.
+
+Current project focus: the new Skitarii coding warband is the active development
 track. User-facing work enters through Warmaster, not through a standalone
 mobile agent.
+
+The active result contract is `skitarii_bridge_result`. Warmaster exposes it at
+`GET /runs/{task_id}/final`; `work/skitarii.patch` is available through the
+artifact endpoints. A `ready_to_apply` result carries a fingerprint-bound
+`POST /runs/{task_id}/apply_patch` action. Completion requires live apply plus a
+successful post-apply rerun; the historical final-manifest workflow documented
+below is not binding on the active backend.
 
 Current evaluation status: Ceraxia has stronger planning, readiness, patch,
 verification, repair, and review artifacts than the original prototype, but a
@@ -316,6 +330,15 @@ machine-readable specialized-brigade contract: normalized task text, worker
 briefs, patch contract, execution flow, and final package schema. The main
 orchestrator should treat that response as the function signature for invoking
 Ceraxia and then use `/prepare_run` plus Warmaster execution endpoints.
+
+The active HTTP facade is a loopback-only control plane. It rejects non-loopback
+binds, peers, and Host headers, applies a bounded JSON request size, and does not
+grant wildcard CORS. Browser POSTs must be same-origin or listed in
+`CERAXIA_TRUSTED_ORIGINS`. If `CERAXIA_BEARER_TOKEN` is set, Warmaster sends that
+credential only to Ceraxia and every Ceraxia POST requires it. A supplied
+`run_dir` must be the exact, previously nonexistent `<configured-run-root>/<task_id>`
+or `<WARMMASTER_RUN_ROOT>/<task_id>` path; root-level, cross-task, symlinked, and
+duplicate destinations are rejected.
 
 Ceraxia also exposes a machine-readable `task_profile` and
 `worker_specialization_briefs` through `/capabilities`, `/plan`, oversight, and

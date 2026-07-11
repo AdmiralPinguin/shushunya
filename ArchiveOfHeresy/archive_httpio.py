@@ -12,11 +12,25 @@ from archive_config import *  # noqa: F401,F403
 # consolidation — and inherited by every upstream call on that thread; defaults
 # to "other" for all ancillary/background work.
 LLM_PRIORITY = contextvars.ContextVar("llm_priority", default="other")
+LLM_ROUTE = contextvars.ContextVar("llm_route", default="")
+ALLOWED_LLM_ROUTES = frozenset({"gemma", "qwen"})
+
+
+def set_llm_route(value):
+    """Select a configured dispatcher route without accepting arbitrary URLs."""
+    route = str(value or "").strip().lower()
+    if route not in ALLOWED_LLM_ROUTES:
+        route = ""
+    LLM_ROUTE.set(route)
+    return route
 
 
 def _with_priority(headers):
     headers = dict(headers or {})
     headers.setdefault("X-LLM-Priority", LLM_PRIORITY.get())
+    route = LLM_ROUTE.get()
+    if route:
+        headers.setdefault("X-LLM-Route", route)
     return headers
 
 

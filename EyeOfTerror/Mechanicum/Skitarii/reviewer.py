@@ -38,6 +38,17 @@ def _extract_json(text: str) -> dict[str, Any]:
         return {}
 
 
+def _diff_sample(unified_diff: str, limit: int = 12_000) -> tuple[str, bool]:
+    """Sample beginning/middle/end hunks instead of silently reviewing only the prefix."""
+    if len(unified_diff) <= limit:
+        return unified_diff, False
+    window = limit // 4
+    last_start = max(0, len(unified_diff) - window)
+    starts = (0, len(unified_diff) // 3, (2 * len(unified_diff)) // 3, last_start)
+    chunks = [unified_diff[start:start + window] for start in starts]
+    return "\n\n--- OMITTED DIFF REGION ---\n\n".join(chunks), True
+
+
 def review(goal: str, unified_diff: str, acceptance: dict[str, Any],
            invariants: list[str] | None = None) -> dict[str, Any]:
     """Return {approved: bool, issues: [str]}. Approves only if the diff plausibly does
@@ -47,6 +58,7 @@ def review(goal: str, unified_diff: str, acceptance: dict[str, Any],
     results = acceptance.get("results", []) if isinstance(acceptance, dict) else []
     fails = [r for r in results if not r.get("ok")]
     inv = "\n".join(f"- {i}" for i in (invariants or [])) or "(не заданы)"
+    sampled_diff, truncated = _diff_sample(unified_diff)
     prompt = (
         "You are an independent code reviewer. You do NOT trust the author. Given the TASK, the unified "
         "diff, the invariants that must hold, and the acceptance results, decide if the change is correct "
@@ -57,7 +69,9 @@ def review(goal: str, unified_diff: str, acceptance: dict[str, Any],
         "approved must be false.\n\n"
         f"TASK:\n{goal}\n\nINVARIANTS:\n{inv}\n\n"
         f"ACCEPTANCE FAILURES: {json.dumps(fails, ensure_ascii=False)[:1500]}\n\n"
-        f"UNIFIED DIFF:\n{unified_diff[:12000]}"
+        f"DIFF COVERAGE: {'sampled across the full patch' if truncated else 'complete'}; "
+        f"total_chars={len(unified_diff)}\n"
+        f"UNIFIED DIFF:\n{sampled_diff}"
     )
     try:
         parsed = _extract_json(_chat(prompt))
@@ -67,4 +81,11 @@ def review(goal: str, unified_diff: str, acceptance: dict[str, Any],
     approved = bool(parsed.get("approved")) and not fails
     if not approved and not issues:
         issues = ["Ревьюер не одобрил (проверки не прошли или изменение сомнительно)."]
-    return {"approved": approved, "issues": issues}
+    return {
+        "approved": approved,
+        "issues": issues,
+        "coverage": "sampled" if truncated else "complete",
+        "reviewed_chars": len(sampled_diff),
+        "total_diff_chars": len(unified_diff),
+        "advisory": True,
+    }

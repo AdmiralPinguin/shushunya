@@ -167,8 +167,14 @@ def main() -> int:
         raise AssertionError(f"Ceraxia plan should expose worker role contracts: {local_plan}")
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
-        if resolve_run_dir(root / "runs", "child", "task").resolve() != (root / "runs" / "child").resolve():
-            raise AssertionError("relative run_dir did not resolve under default root")
+        if resolve_run_dir(root / "runs", "task", "task").resolve() != (root / "runs" / "task").resolve():
+            raise AssertionError("task-scoped relative run_dir did not resolve under default root")
+        try:
+            resolve_run_dir(root / "runs", "other-task", "task")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("run_dir for another task should be rejected")
         server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(root / "runs"))
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -240,22 +246,29 @@ def main() -> int:
                     "task": "почини python приложение",
                     "task_id": "ceraxia-callable-test",
                     "commander_order": ceraxia_command("почини python приложение", "ceraxia-callable-test"),
-                    "repo_path": str(root / "sample-repo"),
+                    "repo_path": str(PROJECT_ROOT),
                     "constraints": {"allowed_commands": ["python -m unittest discover"]},
                 },
             )
-            required_final_fields = callable_contract.get("final_package_schema", {}).get("required_fields", [])
+            final_package_schema = callable_contract.get("final_package_schema", {})
+            required_final_fields = final_package_schema.get("required_fields", [])
+            callable_next_action = callable_contract.get("next_action", {})
+            callable_commander_order = callable_next_action.get("body", {}).get("commander_order")
             if (
                 not callable_contract.get("ok")
                 or callable_contract.get("callable_kind") != "specialized_code_brigade"
-                or "CERAXIA_TARGET_REPO:" not in callable_contract.get("normalized_task", "")
-                or "patch_package" not in required_final_fields
-                or "pr_summary" not in required_final_fields
-                or callable_contract.get("next_action", {}).get("endpoint") != "POST /prepare_run"
+                or "CERAXIA_REPOSITORY_SCOPE:" not in callable_contract.get("normalized_task", "")
+                or "CERAXIA_TARGET_REPO:" in callable_contract.get("normalized_task", "")
+                or final_package_schema.get("kind") != "skitarii_bridge_result"
+                or "patch_stage" not in required_final_fields
+                or "ready_to_apply" not in required_final_fields
+                or callable_next_action.get("endpoint") != "POST /prepare_run"
+                or not isinstance(callable_commander_order, dict)
+                or "<commander_order>" in json.dumps(callable_contract, ensure_ascii=False)
                 or callable_contract.get("model_brain", {}).get("status") != "answered"
             ):
                 raise AssertionError(f"bad callable contract: {callable_contract}")
-            run_dir = root / "runs" / "custom-run"
+            run_dir = root / "runs" / "ceraxia-http-test"
             prepared = request_json(
                 base + "/prepare_run",
                 {
@@ -268,6 +281,7 @@ def main() -> int:
             if (
                 not prepared.get("ok")
                 or prepared.get("governor") != "Ceraxia"
+                or prepared.get("status", {}).get("run_dir") != str(run_dir)
                 or not (run_dir / "dispatch" / "repository_survey.json").exists()
                 or not (run_dir / "oversight.json").exists()
                 or prepared.get("model_brain", {}).get("status") != "answered"
@@ -281,7 +295,7 @@ def main() -> int:
                 or not expectations.get("worker_brief", {}).get("must_produce")
             ):
                 raise AssertionError(f"Ceraxia dispatch should carry task profile and worker brief: {implementation_dispatch}")
-            protocol_run_dir = root / "runs" / "protocol-run"
+            protocol_run_dir = root / "runs" / "ceraxia-protocol-test"
             protocol_task = "почини python приложение"
             protocol_prepared = request_json(
                 base + "/prepare_run",

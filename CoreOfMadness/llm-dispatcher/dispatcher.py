@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Priority dispatcher in front of the single llama.cpp server.
+"""Priority dispatcher in front of the configured llama.cpp servers.
 
 Everything that needs the model — the main chat, the librarian, Vox, the
 turn controller, and every EyeOfTerror governor/worker — points at this proxy
-instead of llama.cpp directly, so nothing bypasses the queue. One GPU, one
-model: requests are admitted by priority, not first-come.
+instead of llama.cpp directly, so nothing bypasses the queue. Requests are
+admitted by priority, not first-come, then sent to an allow-listed model host.
 
 Priority (lower number wins), set by the caller via the X-LLM-Priority header:
   librarian  -> 0   (memory consolidation outranks a fresh answer: the next
@@ -19,6 +19,7 @@ waiter goes next — so chat and librarian "jump to the front of the queue".
 from __future__ import annotations
 
 import heapq
+import json
 import os
 import sys
 import threading
@@ -27,6 +28,19 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 UPSTREAM = os.environ.get("LLM_DISPATCH_UPSTREAM", "http://127.0.0.1:8080").rstrip("/")
+GEMMA_UPSTREAM = os.environ.get("GEMMA_LLM_BASE_URL", UPSTREAM).rstrip("/")
+QWEN_UPSTREAM = os.environ.get("QWEN_LLM_BASE_URL", "http://127.0.0.1:8081").rstrip("/")
+GEMMA_MODEL = os.environ.get("GEMMA_LLM_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf").strip()
+QWEN_MODEL = os.environ.get("QWEN_LLM_MODEL", "Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf").strip()
+ROUTE_UPSTREAMS = {
+    "gemma": GEMMA_UPSTREAM,
+    "qwen": QWEN_UPSTREAM,
+}
+MODEL_ROUTES = {
+    model: route
+    for model, route in ((GEMMA_MODEL, "gemma"), (QWEN_MODEL, "qwen"))
+    if model
+}
 HOST = os.environ.get("LLM_DISPATCH_HOST", "127.0.0.1")
 PORT = int(os.environ.get("LLM_DISPATCH_PORT", "8079"))
 CONCURRENCY = int(os.environ.get("LLM_DISPATCH_CONCURRENCY", "1"))
@@ -69,6 +83,22 @@ class PriorityGate:
 GATE = PriorityGate(CONCURRENCY)
 
 
+def select_upstream(headers, body: bytes) -> tuple[str, str]:
+    """Resolve only configured routes; unknown input keeps legacy behaviour."""
+    route = str(headers.get("X-LLM-Route") or "").strip().lower()
+    if route not in ROUTE_UPSTREAMS and body:
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            payload = {}
+        if isinstance(payload, dict):
+            model = str(payload.get("model") or "").strip()
+            route = MODEL_ROUTES.get(model, "")
+    if route in ROUTE_UPSTREAMS:
+        return ROUTE_UPSTREAMS[route], route
+    return UPSTREAM, "legacy"
+
+
 class DispatchHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -85,6 +115,7 @@ class DispatchHandler(BaseHTTPRequestHandler):
 
     def _forward(self, method: str) -> None:
         body = self._read_body()
+        target_upstream, _route = select_upstream(self.headers, body)
         ungated = any(self.path.startswith(prefix) for prefix in UNGATED_PREFIXES)
         if not ungated:
             GATE.acquire(self._priority())
@@ -93,7 +124,12 @@ class DispatchHandler(BaseHTTPRequestHandler):
             for key in ("Content-Type", "Authorization", "Accept"):
                 if self.headers.get(key):
                     headers[key] = self.headers.get(key)
-            request = urllib.request.Request(f"{UPSTREAM}{self.path}", data=body if body else None, headers=headers, method=method)
+            request = urllib.request.Request(
+                f"{target_upstream}{self.path}",
+                data=body if body else None,
+                headers=headers,
+                method=method,
+            )
             with urllib.request.urlopen(request, timeout=1800) as upstream:
                 self.send_response(upstream.status)
                 passthrough = {}
@@ -154,7 +190,12 @@ class DispatchHandler(BaseHTTPRequestHandler):
 
 def main() -> int:
     server = ThreadingHTTPServer((HOST, PORT), DispatchHandler)
-    print(f"LLM dispatcher on {HOST}:{PORT} -> {UPSTREAM} (concurrency={CONCURRENCY})", flush=True)
+    routes = ", ".join(f"{name}={url}" for name, url in ROUTE_UPSTREAMS.items())
+    print(
+        f"LLM dispatcher on {HOST}:{PORT} -> {UPSTREAM} "
+        f"(routes: {routes}; concurrency={CONCURRENCY})",
+        flush=True,
+    )
     server.serve_forever()
     return 0
 

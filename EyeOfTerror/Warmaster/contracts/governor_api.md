@@ -13,6 +13,13 @@ POST /plan
 POST /prepare_run
 ```
 
+Ceraxia serves these routes only on a literal loopback bind and accepts only
+loopback peers with a literal loopback Host header. POST bodies must be bounded
+`application/json`; browser origins must be same-origin or explicitly listed in
+`CERAXIA_TRUSTED_ORIGINS`. Setting `CERAXIA_BEARER_TOKEN` requires a matching
+Bearer credential on every Ceraxia POST; Warmaster scopes that credential to
+Ceraxia and does not forward it to other governors.
+
 ## GET /health Response
 
 ```json
@@ -258,8 +265,11 @@ Warmaster handoff logic.
 }
 ```
 
-If a governor accepts `run_dir`, it must keep that path inside its configured
-default run root. Relative paths are resolved below the default root.
+Ceraxia accepts `run_dir` only when it is the exact, previously nonexistent
+`<configured-run-root>/<task_id>` or `<WARMMASTER_RUN_ROOT>/<task_id>` path.
+Root-level, cross-task, relative-alias, symlinked, and duplicate destinations are
+rejected. Other governors may define a narrower rule but must never accept a path
+outside their configured run root.
 `POST /prepare_run` responses include `phase`, `decision`, and `display`
 fields. A successful direct governor preparation reports
 `decision.can_handoff_to_warmaster=true`; the governor does not advertise

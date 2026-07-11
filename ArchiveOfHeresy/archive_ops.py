@@ -236,6 +236,9 @@ def run_mobile_chat_payload(payload, on_token=None):
         created_at = now_iso()
         turn_id = str(uuid.uuid4())
         payload = dict(payload)
+        # Carry only a named, allow-listed route. Direct llama.cpp deployments
+        # safely ignore the internal header emitted by archive_httpio.
+        model_route = set_llm_route(payload.get("model_route"))
         payload["stream"] = False
         session_id = shared_chat_session_id(payload.get("session_id") or payload.get("user") or "default")
         client_source = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
@@ -456,6 +459,7 @@ def run_mobile_chat_payload(payload, on_token=None):
             "request": {
                 "session_id": session_id,
                 "client_source": client_source,
+                "model_route": model_route or None,
                 "text": text,
                 "has_image": bool(image_data_url),
                 "stream": False,

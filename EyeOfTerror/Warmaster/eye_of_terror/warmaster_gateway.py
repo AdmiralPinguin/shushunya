@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
+import os
 import re
 import shutil
 import sys
@@ -120,6 +122,11 @@ from .artifacts import (
     final_package,
     resolve_artifact,
 )
+from .skitarii_bridge import (
+    answer_skitarii_mission,
+    apply_staged_patch,
+    cancel_skitarii_mission_for_run,
+)
 from .brigade import (
     brigade_health_snapshot,
     brigade_plan_snapshot,
@@ -154,6 +161,7 @@ from .gateway_util import (
     parse_nonnegative_int,
     post_json,
     read_payload,
+    redact_host_paths,
     requested_step_ids_from_payload,
     resolve_run_child_path,
     response,
@@ -189,6 +197,110 @@ from .runtime_state import (
     REPO_ROOT,
     TASK_ID_RE,
 )
+
+
+APPLY_TRUSTED_ORIGINS_ENV = "WARMMASTER_APPLY_TRUSTED_ORIGINS"
+TRUSTED_HOSTS_ENV = "WARMMASTER_TRUSTED_HOSTS"
+
+
+def _canonical_http_origin(value: str) -> str:
+    """Return a comparable serialized HTTP(S) origin, or an empty string."""
+    raw = value.strip()
+    if not raw or raw == "null" or "," in raw or "\\" in raw or any(char.isspace() for char in raw):
+        return ""
+    try:
+        parsed = urlparse(raw)
+        port = parsed.port
+    except ValueError:
+        return ""
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").lower()
+    if (
+        scheme not in {"http", "https"}
+        or not host
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        return ""
+    rendered_host = f"[{host}]" if ":" in host else host
+    default_port = 80 if scheme == "http" else 443
+    port_suffix = "" if port is None or port == default_port else f":{port}"
+    return f"{scheme}://{rendered_host}{port_suffix}"
+
+
+def _trusted_apply_origins() -> set[str]:
+    origins: set[str] = set()
+    for item in os.environ.get(APPLY_TRUSTED_ORIGINS_ENV, "").split(","):
+        canonical = _canonical_http_origin(item)
+        if canonical:
+            origins.add(canonical)
+    return origins
+
+
+def _is_loopback_origin(origin: str) -> bool:
+    """Accept only literal loopback/localhost origins without performing DNS."""
+    host = (urlparse(origin).hostname or "").lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _resolved_run_dir(run_root: Path, task_id: str) -> Path:
+    """Resolve one non-symlink run directory strictly beneath run_root."""
+    if not valid_task_id(task_id):
+        raise ValueError("invalid task_id")
+    root = run_root.resolve()
+    candidate = root / task_id
+    if candidate.is_symlink():
+        raise ValueError("run directory must not be a symlink")
+    resolved = candidate.resolve()
+    if resolved == root or root not in resolved.parents:
+        raise ValueError("run directory escapes run_root")
+    return resolved
+
+
+def _gateway_host_allowed(raw_host: str) -> bool:
+    host = raw_host.strip().lower()
+    if not host or any(char.isspace() for char in host) or "," in host or "\\" in host:
+        return False
+    canonical = _canonical_http_origin(f"http://{host}")
+    if canonical and _is_loopback_origin(canonical):
+        return True
+    trusted = {
+        item.strip().lower()
+        for item in os.environ.get(TRUSTED_HOSTS_ENV, "").split(",")
+        if item.strip()
+    }
+    return host in trusted
+
+
+def _gateway_peer_allowed(raw_peer: str) -> bool:
+    """The gateway is an unauthenticated local control plane, so peers are loopback only."""
+    try:
+        address = ipaddress.ip_address(str(raw_peer).split("%", 1)[0])
+    except ValueError:
+        return False
+    if address.is_loopback:
+        return True
+    mapped = getattr(address, "ipv4_mapped", None)
+    return bool(mapped and mapped.is_loopback)
+
+
+def _validate_gateway_bind_host(host: str) -> str:
+    try:
+        address = ipaddress.ip_address(str(host).split("%", 1)[0])
+    except ValueError as exc:
+        raise ValueError("Warmaster gateway bind host must be a literal loopback address") from exc
+    if not address.is_loopback:
+        raise ValueError("Warmaster gateway cannot bind an unauthenticated control plane off loopback")
+    return str(host)
 
 
 def gateway_model_decision(operation: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -260,14 +372,94 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
         def log_message(self, fmt: str, *args: Any) -> None:
             return
 
+        def _apply_origin_policy(self) -> tuple[bool, str | None, str]:
+            """Protect the state-changing apply action from browser cross-origin calls."""
+            raw_origin = self.headers.get("Origin", "").strip()
+            fetch_site = self.headers.get("Sec-Fetch-Site", "").strip().lower()
+            if not raw_origin:
+                if fetch_site == "cross-site":
+                    return False, None, "cross-site apply requests are forbidden"
+                # Non-browser operator clients (curl, CLI, local automation) normally
+                # do not send Origin and remain supported.
+                return True, None, ""
+
+            origin = _canonical_http_origin(raw_origin)
+            if not origin:
+                return False, None, "invalid Origin header"
+            host = self.headers.get("Host", "").strip()
+            same_origin = _canonical_http_origin(f"http://{host}") if host else ""
+            if origin in _trusted_apply_origins():
+                return True, origin, ""
+            if origin == same_origin and _is_loopback_origin(origin):
+                return True, origin, ""
+            return False, None, "cross-origin apply requests are forbidden"
+
+        def _apply_response(
+            self,
+            status: int,
+            payload: dict[str, Any],
+            cors_origin: str | None = None,
+        ) -> None:
+            """Send an apply response without the gateway's wildcard CORS policy."""
+            data = json.dumps(redact_host_paths(payload), ensure_ascii=False, indent=2).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            if cors_origin:
+                self.send_header("Access-Control-Allow-Origin", cors_origin)
+                self.send_header("Vary", "Origin")
+            self.end_headers()
+            self.wfile.write(data)
+
         def do_OPTIONS(self) -> None:  # noqa: N802 - stdlib handler API
+            if (
+                not _gateway_peer_allowed(str(self.client_address[0]))
+                or not _gateway_host_allowed(self.headers.get("Host", ""))
+            ):
+                self._apply_response(421, {"ok": False, "error": "gateway requires a loopback peer and Host"})
+                return
+            parts = [part for part in urlparse(self.path).path.split("/") if part]
+            if len(parts) == 3 and parts[0] == "runs" and parts[2] == "apply_patch":
+                allowed, cors_origin, error = self._apply_origin_policy()
+                if not allowed:
+                    self._apply_response(403, {"ok": False, "error": error})
+                    return
+                task_id = parts[1]
+                if not valid_task_id(task_id):
+                    self._apply_response(
+                        400,
+                        {"ok": False, "error": "invalid task_id", "task_id": task_id},
+                        cors_origin,
+                    )
+                    return
+                self.send_response(204)
+                self.send_header("Content-Length", "0")
+                self.send_header("Cache-Control", "no-store")
+                if cors_origin:
+                    self.send_header("Access-Control-Allow-Origin", cors_origin)
+                    self.send_header("Vary", "Origin")
+                    self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+                    self.send_header("Access-Control-Allow-Headers", "Content-Type, Accept")
+                    self.send_header("Access-Control-Max-Age", "300")
+                self.end_headers()
+                return
             self.send_response(204)
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, Accept")
+            allowed, cors_origin, _error = self._apply_origin_policy()
+            if allowed and cors_origin:
+                self.send_header("Access-Control-Allow-Origin", cors_origin)
+                self.send_header("Vary", "Origin")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type, Accept")
             self.end_headers()
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+            if (
+                not _gateway_peer_allowed(str(self.client_address[0]))
+                or not _gateway_host_allowed(self.headers.get("Host", ""))
+            ):
+                self._apply_response(421, {"ok": False, "error": "gateway requires a loopback peer and Host"})
+                return
             parsed = urlparse(self.path)
             if parsed.path == "/health":
                 response(self, 200, {"ok": True, "gateway": "WarmasterGateway"})
@@ -408,7 +600,14 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                 return
             if len(parts) == 4 and parts[0] == "runs" and parts[2] == "steps":
                 task_id = parts[1]
-                run_dir = run_root / task_id
+                try:
+                    run_dir = _resolved_run_dir(run_root, task_id)
+                except ValueError as exc:
+                    response(self, 400, {"ok": False, "error": str(exc), "task_id": task_id})
+                    return
+                if not valid_task_id(parts[3]):
+                    response(self, 400, {"ok": False, "error": "invalid step_id", "task_id": task_id})
+                    return
                 if not run_dir.exists():
                     response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
                     return
@@ -418,7 +617,14 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                 return
             if len(parts) == 5 and parts[0] == "runs" and parts[2] == "steps" and parts[4] == "artifacts":
                 task_id = parts[1]
-                run_dir = run_root / task_id
+                try:
+                    run_dir = _resolved_run_dir(run_root, task_id)
+                except ValueError as exc:
+                    response(self, 400, {"ok": False, "error": str(exc), "task_id": task_id})
+                    return
+                if not valid_task_id(parts[3]):
+                    response(self, 400, {"ok": False, "error": "invalid step_id", "task_id": task_id})
+                    return
                 if not run_dir.exists():
                     response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
                     return
@@ -428,7 +634,11 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                 return
             if len(parts) in {2, 3} and parts[0] == "runs":
                 task_id = parts[1]
-                run_dir = run_root / task_id
+                try:
+                    run_dir = _resolved_run_dir(run_root, task_id)
+                except ValueError as exc:
+                    response(self, 400, {"ok": False, "error": str(exc), "task_id": task_id})
+                    return
                 status_path = run_dir / "status.json"
                 ledger_path = run_dir / "task_ledger.json"
                 if not run_dir.exists():
@@ -597,8 +807,21 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         payload = payload_with_run_view({"ok": False, "error": str(exc), "task_id": task_id}, run_dir, task_id)
                         response(self, 400, payload)
                         return
-                    payload = payload_with_run_view({"task_id": task_id, **payload}, run_dir, task_id)
-                    response(self, 200 if payload.get("ok") else 404, payload)
+                    final_payload = {"task_id": task_id, **payload}
+                    payload = payload_with_run_view(final_payload, run_dir, task_id)
+                    if final_payload.get("kind") == "skitarii_bridge_result":
+                        # Generic run-view lifecycle is durably "blocked" for a
+                        # ready-to-apply result; preserve the more precise native
+                        # Skitarii phase/next_action while still attaching run_summary.
+                        payload.update(final_payload)
+                        native_action = (
+                            final_payload.get("next_action")
+                            if isinstance(final_payload.get("next_action"), dict)
+                            else {}
+                        )
+                        payload["client_action"] = executable_client_action(task_id, native_action)
+                    retrieved = payload.get("kind") == "skitarii_bridge_result"
+                    response(self, 200 if payload.get("ok") or retrieved else 404, payload)
                     return
                 if len(parts) == 3 and parts[2] == "artifact_text":
                     if not ledger_path.exists():
@@ -650,7 +873,27 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
             response(self, 404, {"ok": False, "error": "not found"})
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+            if (
+                not _gateway_peer_allowed(str(self.client_address[0]))
+                or not _gateway_host_allowed(self.headers.get("Host", ""))
+            ):
+                self._apply_response(421, {"ok": False, "error": "gateway requires a loopback peer and Host"})
+                return
+            request_parts = [part for part in urlparse(self.path).path.split("/") if part]
+            apply_request = (
+                len(request_parts) == 3
+                and request_parts[0] == "runs"
+                and request_parts[2] == "apply_patch"
+            )
+            apply_cors_origin: str | None = None
             try:
+                allowed, apply_cors_origin, error = self._apply_origin_policy()
+                if not allowed:
+                    if apply_request:
+                        self._apply_response(403, {"ok": False, "error": error})
+                    else:
+                        response(self, 403, {"ok": False, "error": error})
+                    return
                 payload = read_payload(self)
                 if self.path == "/orchestrate":
                     model_decision = gateway_model_decision("orchestrate", payload)
@@ -972,15 +1215,145 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         return
                     response(self, 200 if resumed.get("ok") else 409, resumed)
                     return
+                if len(parts) == 3 and parts[0] == "runs" and parts[2] == "clarification":
+                    task_id = parts[1]
+                    try:
+                        run_dir = _resolved_run_dir(run_root, task_id)
+                    except ValueError as exc:
+                        response(self, 400, {"ok": False, "error": str(exc), "task_id": task_id})
+                        return
+                    if not run_dir.exists():
+                        response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
+                        return
+                    answer = str(payload.get("answer") or "").strip()
+                    if not answer:
+                        response(self, 400, {"ok": False, "error": "answer is required", "task_id": task_id})
+                        return
+                    try:
+                        answered = answer_skitarii_mission(run_dir, task_id, answer)
+                    except (OSError, RuntimeError, ValueError) as exc:
+                        response(
+                            self,
+                            502,
+                            {"ok": False, "error": f"clarification forwarding failed: {exc}", "task_id": task_id},
+                        )
+                        return
+                    next_action = {
+                        "kind": "poll",
+                        "method": "GET",
+                        "endpoint": "GET /runs/{task_id}/snapshot",
+                        "body": {"events_after": 0},
+                        "reason": "clarification accepted; the same Skitarii mission resumed",
+                    }
+                    answered["next_action"] = next_action if answered.get("ok") else {}
+                    answered["client_action"] = (
+                        executable_client_action(task_id, next_action) if answered.get("ok") else {}
+                    )
+                    response(self, 200 if answered.get("ok") else 409, answered)
+                    return
+                if len(parts) == 3 and parts[0] == "runs" and parts[2] == "apply_patch":
+                    task_id = parts[1]
+                    if not valid_task_id(task_id):
+                        self._apply_response(
+                            400,
+                            {"ok": False, "error": "invalid task_id", "task_id": task_id},
+                            apply_cors_origin,
+                        )
+                        return
+                    run_root_resolved = run_root.resolve()
+                    run_candidate = run_root_resolved / task_id
+                    if run_candidate.is_symlink():
+                        self._apply_response(
+                            400,
+                            {"ok": False, "error": "run directory must not be a symlink", "task_id": task_id},
+                            apply_cors_origin,
+                        )
+                        return
+                    run_dir = run_candidate.resolve()
+                    if run_dir == run_root_resolved or run_root_resolved not in run_dir.parents:
+                        self._apply_response(
+                            400,
+                            {"ok": False, "error": "run directory escapes run_root", "task_id": task_id},
+                            apply_cors_origin,
+                        )
+                        return
+                    if payload.get("confirm_apply") is not True:
+                        self._apply_response(
+                            400,
+                            {"ok": False, "error": "confirm_apply must be true", "task_id": task_id},
+                            apply_cors_origin,
+                        )
+                        return
+                    digests: dict[str, str] = {}
+                    for field in (
+                        "expected_repository_fingerprint",
+                        "expected_patch_sha256",
+                        "expected_checks_sha256",
+                    ):
+                        digest = str(payload.get(field) or "").strip().lower()
+                        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+                            self._apply_response(
+                                400,
+                                {
+                                    "ok": False,
+                                    "error": f"{field} must be a SHA-256 hex digest",
+                                    "task_id": task_id,
+                                },
+                                apply_cors_origin,
+                            )
+                            return
+                        digests[field] = digest
+                    ledger_candidate = run_dir / "task_ledger.json"
+                    if ledger_candidate.is_symlink():
+                        self._apply_response(
+                            400,
+                            {"ok": False, "error": "ledger must not be a symlink", "task_id": task_id},
+                            apply_cors_origin,
+                        )
+                        return
+                    ledger_path = ledger_candidate.resolve()
+                    if run_dir not in ledger_path.parents:
+                        self._apply_response(
+                            400,
+                            {"ok": False, "error": "ledger escapes run directory", "task_id": task_id},
+                            apply_cors_origin,
+                        )
+                        return
+                    if not ledger_path.exists():
+                        self._apply_response(
+                            404,
+                            {"ok": False, "error": "ledger not found", "task_id": task_id},
+                            apply_cors_origin,
+                        )
+                        return
+                    ledger = TaskLedger.load(ledger_path)
+                    applied = apply_staged_patch(
+                        run_dir,
+                        ledger,
+                        digests["expected_repository_fingerprint"],
+                        expected_patch_sha256=digests["expected_patch_sha256"],
+                        expected_checks_sha256=digests["expected_checks_sha256"],
+                    )
+                    self._apply_response(
+                        200 if applied.get("ok") else 409,
+                        applied,
+                        apply_cors_origin,
+                    )
+                    return
                 if len(parts) == 3 and parts[0] == "runs" and parts[2] == "cancel":
                     task_id = parts[1]
-                    ledger_path = run_root / task_id / "task_ledger.json"
+                    try:
+                        run_dir = _resolved_run_dir(run_root, task_id)
+                    except ValueError as exc:
+                        response(self, 400, {"ok": False, "error": str(exc), "task_id": task_id})
+                        return
+                    ledger_path = run_dir / "task_ledger.json"
                     if not ledger_path.exists():
                         response(self, 404, {"ok": False, "error": "ledger not found", "task_id": task_id})
                         return
                     reason = str(payload.get("reason") or "").strip()
                     ledger = TaskLedger.load(ledger_path)
-                    if ledger.to_dict().get("status") in {"completed", "failed", "cancelled", "corrupt"}:
+                    if ledger.to_dict().get("status") in {"completed", "failed", "blocked", "cancelled", "corrupt"}:
                         inspect_action = {"kind": "inspect", "method": "GET", "endpoint": "GET /runs/{task_id}/summary", "body": {}, "reason": "run is already terminal"}
                         response(
                             self,
@@ -995,9 +1368,71 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                             },
                         )
                         return
-                    ledger.request_cancel(reason)
+                    if not ledger.request_cancel(reason):
+                        refreshed = TaskLedger.load(ledger_path)
+                        inspect_action = {
+                            "kind": "inspect", "method": "GET",
+                            "endpoint": "GET /runs/{task_id}/summary", "body": {},
+                            "reason": "run became terminal before cancellation was recorded",
+                        }
+                        response(self, 409, {
+                            "ok": False, "task_id": task_id,
+                            "error": "run is already terminal",
+                            "ledger": refreshed.to_dict(),
+                            "next_action": inspect_action,
+                            "client_action": executable_client_action(task_id, inspect_action),
+                        })
+                        return
+                    try:
+                        skitarii_cancellation = cancel_skitarii_mission_for_run(
+                            run_dir, task_id,
+                        )
+                    except (OSError, RuntimeError, ValueError) as exc:
+                        skitarii_cancellation = {
+                            "ok": False,
+                            "status": "error",
+                            "error": f"Skitarii cancellation failed: {exc}",
+                        }
                     host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
-                    worker_cancellations = cancel_http_worker_tasks(run_root / task_id, host=host)
+                    worker_cancellations = cancel_http_worker_tasks(run_dir, host=host)
+                    skitarii_status = str(skitarii_cancellation.get("status") or "")
+                    if skitarii_status == "cancelled" and skitarii_cancellation.get("ok") is True:
+                        inspect_action = {
+                            "kind": "inspect", "method": "GET",
+                            "endpoint": "GET /runs/{task_id}/summary", "body": {},
+                            "reason": "Skitarii cancellation and sandbox cleanup are complete",
+                        }
+                        refreshed = TaskLedger.load(ledger_path)
+                        response(self, 200, {
+                            "ok": True, "task_id": task_id, "status": "cancelled",
+                            "ledger": refreshed.to_dict(),
+                            "skitarii_cancellation": skitarii_cancellation,
+                            "worker_cancellations": worker_cancellations,
+                            "next_action": inspect_action,
+                            "client_action": executable_client_action(task_id, inspect_action),
+                        })
+                        return
+                    if (
+                        skitarii_cancellation.get("ok") is not True
+                        and skitarii_status not in {"", "not_active"}
+                    ):
+                        inspect_action = {
+                            "kind": "inspect", "method": "GET",
+                            "endpoint": "GET /runs/{task_id}/summary", "body": {},
+                            "reason": "cancellation cleanup failed and the run is blocked",
+                        }
+                        refreshed = TaskLedger.load(ledger_path)
+                        response(self, 409, {
+                            "ok": False, "task_id": task_id,
+                            "status": str(refreshed.to_dict().get("status") or "blocked"),
+                            "error": str(skitarii_cancellation.get("error") or "Skitarii cancellation failed"),
+                            "ledger": refreshed.to_dict(),
+                            "skitarii_cancellation": skitarii_cancellation,
+                            "worker_cancellations": worker_cancellations,
+                            "next_action": inspect_action,
+                            "client_action": executable_client_action(task_id, inspect_action),
+                        })
+                        return
                     poll_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {"events_after": 0}, "reason": "cancellation is cooperative and should be polled"}
                     response(
                         self,
@@ -1007,6 +1442,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                             "task_id": task_id,
                             "status": "cancelling",
                             "ledger": ledger.to_dict(),
+                            "skitarii_cancellation": skitarii_cancellation,
                             "worker_cancellations": worker_cancellations,
                             "next_action": poll_action,
                             "client_action": executable_client_action(task_id, poll_action),
@@ -1021,7 +1457,11 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                 }
                 if len(parts) == 3 and parts[0] == "runs" and parts[2] in research_loop_modes:
                     task_id = parts[1]
-                    run_dir = run_root / task_id
+                    try:
+                        run_dir = _resolved_run_dir(run_root, task_id)
+                    except ValueError as exc:
+                        response(self, 400, {"ok": False, "error": str(exc), "task_id": task_id})
+                        return
                     if not run_dir.exists():
                         response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
                         return
@@ -1110,7 +1550,11 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                 }
                 if len(parts) == 3 and parts[0] == "runs" and parts[2] in execution_modes:
                     task_id = parts[1]
-                    run_dir = run_root / task_id
+                    try:
+                        run_dir = _resolved_run_dir(run_root, task_id)
+                    except ValueError as exc:
+                        response(self, 400, {"ok": False, "error": str(exc), "task_id": task_id})
+                        return
                     if not run_dir.exists():
                         response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
                         return
@@ -1282,9 +1726,17 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     return
                 response(self, 404, {"ok": False, "error": "not found"})
             except ValueError as exc:
-                response(self, 400, {"ok": False, "gateway": "WarmasterGateway", "error": str(exc)})
+                payload = {"ok": False, "gateway": "WarmasterGateway", "error": str(exc)}
+                if apply_request:
+                    self._apply_response(400, payload, apply_cors_origin)
+                else:
+                    response(self, 400, payload)
             except Exception as exc:  # noqa: BLE001 - gateway boundary records routing failures.
-                response(self, 500, {"ok": False, "gateway": "WarmasterGateway", "error": str(exc)})
+                payload = {"ok": False, "gateway": "WarmasterGateway", "error": str(exc)}
+                if apply_request:
+                    self._apply_response(500, payload, apply_cors_origin)
+                else:
+                    response(self, 500, payload)
 
     return WarmasterHandler
 
@@ -1346,6 +1798,7 @@ def orphan_run_watchdog(run_root: Path, interval_sec: float = 60.0, grace_sec: f
 
 
 def serve(host: str, port: int, run_root: Path, recover_stale_on_start: bool = True, governor_transport: str = "local", governor_host: str = "127.0.0.1") -> None:
+    host = _validate_gateway_bind_host(host)
     prepare_run_root(run_root, recover_stale_on_start=recover_stale_on_start)
     threading.Thread(target=orphan_run_watchdog, args=(run_root,), daemon=True, name="orphan-run-watchdog").start()
     server = ThreadingHTTPServer((host, port), make_handler(run_root, default_governor_transport=governor_transport, default_governor_host=governor_host))

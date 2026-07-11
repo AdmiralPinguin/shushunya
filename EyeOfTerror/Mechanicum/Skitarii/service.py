@@ -11,29 +11,120 @@ inside the sandbox VM and returns an honest verdict.
 """
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
+import hmac
+import ipaddress
 import json
 import os
+import posixpath
+import re
+import shlex
 import sys
+import threading
 import time
+import uuid
+import weakref
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from warband import run_mission  # noqa: E402
 from planner import plan_and_run  # noqa: E402
-from executor import VmExecutor  # noqa: E402
+from executor import (  # noqa: E402
+    BOUNDARY_HELPER_SHA256, BOUNDARY_HELPER_VERSION, ProcessBoundaryBusy,
+    ProcessBoundaryQuarantined, VmExecutor,
+)
 from explorer import explore, brief_for_fighter  # noqa: E402
 from reviewer import review  # noqa: E402
 from clarify import needs_clarification  # noqa: E402
+from spec import _private_oracle, build_held_out_plan  # noqa: E402
+from acceptor import accept  # noqa: E402
 import mission_store  # noqa: E402
+
+_PUBLIC_ACCEPT = accept
 
 VM_KEY = os.environ.get("SKITARII_VM_KEY",
                         "/media/shushunya/SHUSHUNYA/shushunya/CoreOfMadness/vm-sandbox/skitarii_key")
 VM_PORT = int(os.environ.get("SKITARII_VM_PORT", "2222"))
 
+_PATCH_FILE = ".git/skitarii-patch.diff"
+_CHANGED_FILES_FILE = ".git/skitarii-changed-files"
+MAX_REQUEST_BYTES = int(os.environ.get("SKITARII_MAX_REQUEST_BYTES", "75000000"))
+MAX_PATCH_BYTES = int(os.environ.get("SKITARII_MAX_PATCH_BYTES", "20000000"))
+MAX_CHANGED_MANIFEST_BYTES = int(os.environ.get("SKITARII_MAX_CHANGED_MANIFEST_BYTES", "1000000"))
+MAX_RETURNED_FILE_BYTES = int(os.environ.get("SKITARII_MAX_RETURNED_FILE_BYTES", "100000"))
+MAX_RETURNED_TOTAL_BYTES = int(os.environ.get("SKITARII_MAX_RETURNED_TOTAL_BYTES", "1200000"))
+BEARER_TOKEN = os.environ.get("SKITARII_BEARER_TOKEN", "")
+SERVICE_STARTED_AT = int(time.time())
+SERVICE_INSTANCE_ID = uuid.uuid4().hex
+_TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_ASYNC_CREATE_LOCK = threading.Lock()
+_MISSION_EXECUTOR_LOCK = threading.Lock()
+_EXECUTION_LOCAL = threading.local()
+SERVICE_SOURCE_FILES = (
+    "service.py", "spec.py", "acceptor.py", "warband.py", "planner.py",
+    "executor.py", "explorer.py", "reviewer.py", "clarify.py",
+    "mission_store.py", "tools.py", "harness.py",
+)
+
+
+def _service_source_sha256() -> str:
+    digest = hashlib.sha256()
+    root = Path(__file__).resolve().parent
+    for name in SERVICE_SOURCE_FILES:
+        digest.update(name.encode("utf-8") + b"\0")
+        digest.update((root / name).read_bytes())
+    return digest.hexdigest()
+
+
+SERVICE_SOURCE_SHA256 = _service_source_sha256()
+
+
+def service_identity() -> dict:
+    planner_model = os.environ.get("PLANNER_LLM_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf")
+    planner_base = os.environ.get("PLANNER_LLM_BASE_URL", "http://127.0.0.1:8079/v1")
+    spec_model = os.environ.get("SPEC_LLM_MODEL", "Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf")
+    spec_base = os.environ.get("SPEC_LLM_BASE_URL", "http://127.0.0.1:8081/v1")
+    return {
+        "source_sha256": SERVICE_SOURCE_SHA256,
+        "instance_id": SERVICE_INSTANCE_ID,
+        "started_at": SERVICE_STARTED_AT,
+        "held_out_required": os.environ.get("SKITARII_REQUIRE_HELD_OUT", "1") == "1",
+        "process_boundary_required": True,
+        "process_boundary_helper": BOUNDARY_HELPER_VERSION,
+        "process_boundary_helper_sha256": BOUNDARY_HELPER_SHA256,
+        "bearer_auth_required": bool(BEARER_TOKEN),
+        "models": {
+            "planner": {"model": planner_model, "base_url": planner_base},
+            "reviewer": {
+                "model": os.environ.get("REVIEWER_LLM_MODEL", planner_model),
+                "base_url": planner_base,
+            },
+            "spec": {
+                "model": spec_model,
+                "base_url": spec_base,
+            },
+            "fighter": {
+                "model": os.environ.get("SKITARII_LLM_MODEL", "Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf"),
+                "base_url": os.environ.get("SKITARII_LLM_BASE_URL", "http://127.0.0.1:8081/v1"),
+            },
+            "held_out": {
+                "model": os.environ.get("HELD_OUT_LLM_MODEL", spec_model),
+                "base_url": os.environ.get("HELD_OUT_LLM_BASE_URL", spec_base),
+            },
+        },
+    }
+
 
 def _memory(task_id: str, note: str) -> None:
     """Best-effort note to the task's wiki memory page (also feeds Shushunya)."""
+    # Mission ledgers already persist progress. Archive indexing mutates a tracked
+    # runtime index and would invalidate the repository baseline during a code run.
+    if os.environ.get("SKITARII_WRITE_ARCHIVE_MEMORY", "0") != "1":
+        return
     try:
         from harness import _memory_note
         _memory_note(task_id, note)
@@ -44,19 +135,379 @@ def _memory(task_id: str, note: str) -> None:
 def _mission_executor(task_id: str) -> VmExecutor:
     # Each RUN gets its own unique clean workdir — a random suffix so two concurrent
     # requests with the same task_id can't wipe each other's directory (race fix).
-    import uuid
-    safe = "".join(c for c in task_id if c.isalnum() or c in "-_") or "mission"
-    workdir = f"/home/skitarii/work/{safe}-{uuid.uuid4().hex[:8]}"
-    ex = VmExecutor(host="127.0.0.1", port=VM_PORT, user="skitarii", key=VM_KEY, workdir=workdir)
-    ex.bash(f"rm -rf {workdir}; mkdir -p {workdir}", timeout=30)
+    run_suffix = uuid.uuid4().hex[:16]
+    workdir = f"/home/skitarii/work/mission-{run_suffix}"
+    cache_root = f"/tmp/skitarii-cache-{run_suffix}"
+    command_env = {
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTEST_ADDOPTS": "-p no:cacheprovider",
+        "XDG_CACHE_HOME": f"{cache_root}/xdg",
+        "npm_config_cache": f"{cache_root}/npm",
+    }
+    ex = VmExecutor(
+        host="127.0.0.1", port=VM_PORT, user="skitarii", key=VM_KEY,
+        workdir=workdir, process_boundary=True, command_env=command_env,
+    )
+    ex.initialize_process_boundary(strict=True)
+    cleanup_executor = VmExecutor(
+        host=ex.host, port=ex.port, user=ex.user, key=ex.key, workdir=ex.workdir,
+        mission_marker=ex.mission_marker,
+        command_env=ex.command_env,
+        process_boundary=True, boundary_runtime_sec=ex.boundary_runtime_sec,
+        boundary_process_baseline=ex.boundary_process_baseline,
+        boundary_auth_state=ex.boundary_auth_state,
+        boundary_lease=ex.boundary_lease,
+        boundary_release_on_cleanup=True,
+    )
+    cleanup_state = {
+        "lock": threading.Lock(), "attempted": False, "error": None,
+    }
+    ex._cleanup_state = cleanup_state
+    cleanup_executor._cleanup_state = cleanup_state
+    ex._cleanup_finalizer = weakref.finalize(ex, _cleanup_workspace_processes, cleanup_executor)
     return ex
+
+
+def _stop_workspace_processes(ex: VmExecutor, *, strict: bool = False) -> bool:
+    """Reap mission descendants and prove none remain before freezing a candidate."""
+    if getattr(ex, "process_boundary", False):
+        stop_boundary = getattr(ex, "stop_process_boundary", None)
+        if not callable(stop_boundary):
+            if strict:
+                raise RuntimeError("mission process boundary is unavailable")
+            return False
+        try:
+            return bool(stop_boundary(strict=strict))
+        except Exception as exc:
+            if strict:
+                raise RuntimeError(f"could not stop mission cgroup processes: {exc}") from exc
+            return False
+    if not getattr(ex, "mission_marker", ""):
+        close = getattr(ex, "close", None)
+        if callable(close):
+            close()
+        return True
+    marker = shlex.quote(f"SKITARII_MISSION_MARKER={getattr(ex, 'mission_marker', '')}")
+    command = (
+        f"root=$(pwd -P); marker={marker}; me=$$; parent=$PPID; "
+        "is_tagged() { proc=/proc/$1; cwd=$(readlink \"$proc/cwd\" 2>/dev/null || true); "
+        "case \"$cwd\" in \"$root\"|\"$root\"/*|\"$root (deleted)\"|\"${root}_wt_\"*) return 0;; esac; "
+        "tr '\\0' '\\n' < \"$proc/environ\" 2>/dev/null | grep -Fqx -- \"$marker\"; }; "
+        "for proc in /proc/[0-9]*; do pid=${proc##*/}; "
+        "[ \"$pid\" = \"$me\" ] && continue; [ \"$pid\" = \"$parent\" ] && continue; "
+        "is_tagged \"$pid\" && kill -TERM \"$pid\" 2>/dev/null || true; done; "
+        "sleep 0.2; "
+        "for proc in /proc/[0-9]*; do pid=${proc##*/}; "
+        "[ \"$pid\" = \"$me\" ] && continue; [ \"$pid\" = \"$parent\" ] && continue; "
+        "is_tagged \"$pid\" && kill -KILL \"$pid\" 2>/dev/null || true; done; "
+        "sleep 0.1; remaining=0; for proc in /proc/[0-9]*; do pid=${proc##*/}; "
+        "[ \"$pid\" = \"$me\" ] && continue; [ \"$pid\" = \"$parent\" ] && continue; "
+        "is_tagged \"$pid\" && remaining=1 || true; done; [ \"$remaining\" = 0 ]"
+    )
+    try:
+        result = ex.bash(command, timeout=30)
+        ok = result.get("returncode") == 0
+    except Exception as exc:
+        if strict:
+            raise RuntimeError(f"could not stop mission processes: {exc}") from exc
+        return False
+    if strict and not ok:
+        detail = (result.get("stderr") or result.get("stdout") or "cleanup failed").strip()
+        raise RuntimeError(f"mission processes survived cleanup: {detail[-500:]}")
+    return ok
+
+
+def _remove_workspace(ex: VmExecutor) -> None:
+    trusted_remove = getattr(ex, "remove_boundary_storage", None)
+    if getattr(ex, "process_boundary", False) and callable(trusted_remove):
+        trusted_remove(strict=True)
+        return
+    cache_paths = sorted({
+        str(value) for key, value in getattr(ex, "command_env", {}).items()
+        if key in {"XDG_CACHE_HOME", "npm_config_cache"}
+        and str(value).startswith("/tmp/skitarii-cache-")
+    })
+    remove_caches = " ".join(shlex.quote(path) for path in cache_paths)
+    root_path = Path(str(ex.workdir))
+    owned_children: list[str] = []
+    for raw_child in getattr(ex, "_owned_child_workdirs", set()):
+        child_path = Path(raw_child)
+        if (
+            child_path.parent != root_path.parent
+            or not re.fullmatch(r"mission-[0-9a-f]{16}", child_path.name)
+        ):
+            raise RuntimeError(f"unsafe owned verifier workdir: {child_path}")
+        owned_children.append(shlex.quote(str(child_path)))
+    remove_children = " ".join(sorted(owned_children))
+    command = (
+        "root=$(pwd -P); base=${root%/*}; cd \"$base\" || exit 0; rm -rf -- \"$root\""
+        + (f" {remove_children}" if remove_children else "")
+        + "; "
+        + (f"rm -rf -- {remove_caches}" if remove_caches else ":")
+    )
+    result = ex.bash(command, timeout=30)
+    if result.get("returncode") != 0:
+        detail = (result.get("stderr") or result.get("stdout") or "workspace cleanup failed").strip()
+        raise RuntimeError(detail[-500:])
+
+
+def _cleanup_workspace_processes(ex: VmExecutor) -> None:
+    """Strictly prove cleanup before releasing the global sandbox lifecycle lock."""
+    state = getattr(ex, "_cleanup_state", None)
+    if not isinstance(state, dict):
+        state = {"lock": threading.Lock(), "attempted": False, "error": None}
+        ex._cleanup_state = state
+    with state["lock"]:
+        if state["attempted"]:
+            if state["error"] is not None:
+                raise RuntimeError(str(state["error"]))
+            return
+        state["attempted"] = True
+    cleaned = False
+    try:
+        try:
+            _stop_workspace_processes(ex, strict=True)
+            _remove_workspace(ex)
+            _stop_workspace_processes(ex, strict=True)
+            cleaned = True
+        finally:
+            if cleaned:
+                release = getattr(ex, "release_process_boundary", None)
+                if callable(release):
+                    release(strict=True)
+            else:
+                quarantine = getattr(ex, "quarantine_process_boundary", None)
+                if callable(quarantine):
+                    quarantine()
+    except BaseException as exc:
+        state["error"] = f"{type(exc).__name__}: {exc}"
+        raise
+    else:
+        state["error"] = None
+    finally:
+        finalizer = getattr(ex, "_cleanup_finalizer", None)
+        if finalizer is not None and finalizer.alive:
+            finalizer.detach()
+
+
+def _raw_index_population(*, write_objects: bool, info_only: bool = False) -> str:
+    """Populate the selected Git index from literal filesystem bytes, without attrs."""
+    hash_flags = "-w " if write_objects else ""
+    update_flags = "--info-only " if info_only else ""
+    return (
+        "all=\"$index.skitarii-all\"; paths=\"$index.skitarii-paths\"; links=\"$index.skitarii-links\"; "
+        "hashes=\"$index.skitarii-hashes\"; "
+        "rm -f -- \"$all\" \"$paths\" \"$links\" \"$hashes\"; "
+        "/usr/bin/find . -path ./.git -prune -o -mindepth 1 -print0 > \"$all\"; "
+        ": > \"$paths\"; : > \"$links\"; "
+        "while IFS= read -r -d '' entry; do "
+        "case \"$entry\" in *$'\\n'*) exit 65;; esac; "
+        "if [ -L \"$entry\" ]; then printf '%s\\n' \"$entry\" >> \"$links\"; "
+        "elif [ -f \"$entry\" ]; then printf '%s\\n' \"$entry\" >> \"$paths\"; "
+        "elif [ -d \"$entry\" ]; then continue; else exit 65; fi; "
+        "done < \"$all\"; "
+        f"/usr/bin/git hash-object --no-filters {hash_flags}--stdin-paths < \"$paths\" > \"$hashes\"; "
+        "{ exec 3< \"$hashes\"; "
+        "while IFS= read -r entry; do IFS= read -r oid <&3 || exit 65; "
+        "case ${#oid} in 40|64) :;; *) exit 65;; esac; "
+        "case \"$oid\" in *[!0-9a-f]*) exit 65;; esac; "
+        "if [ -x \"$entry\" ]; then mode=100755; else mode=100644; fi; "
+        "path=${entry#./}; printf '%s %s\\t%s\\0' \"$mode\" \"$oid\" \"$path\"; "
+        "done < \"$paths\"; if IFS= read -r extra <&3; then exit 65; fi; exec 3<&-; "
+        "while IFS= read -r entry; do path=${entry#./}; "
+        f"oid=$(/usr/bin/readlink -n -- \"$entry\" | /usr/bin/git hash-object --no-filters {hash_flags}--stdin); "
+        "case ${#oid} in 40|64) :;; *) exit 65;; esac; "
+        "case \"$oid\" in *[!0-9a-f]*) exit 65;; esac; "
+        "printf '120000 %s\\t%s\\0' \"$oid\" \"$path\"; done < \"$links\"; "
+        f"}} | /usr/bin/git update-index {update_flags}-z --index-info; "
+        "rm -f -- \"$all\" \"$paths\" \"$links\" \"$hashes\"; "
+    )
+
+
+def _workspace_fingerprint(ex: VmExecutor) -> str:
+    # Git's index format gives a canonical NUL-safe path/mode/blob manifest.  The
+    # blobs are hashed from literal bytes and are deliberately not written into the
+    # candidate-controlled object database.
+    _sanitize_git_control(ex, preserve_patch=True)
+    result = _checked_bash(
+        ex,
+        _TRUSTED_GIT_ENV
+        + "set -e -o pipefail; index=$(pwd -P)/.git/skitarii-fingerprint-index; "
+        "rm -f -- \"$index\" \"$index.lock\"; export GIT_INDEX_FILE=\"$index\"; "
+        "trap 'rm -f -- \"$index\" \"$index.lock\" \"$index.skitarii-all\" \"$index.skitarii-paths\" "
+        "\"$index.skitarii-links\" \"$index.skitarii-hashes\"' EXIT; "
+        "/usr/bin/git read-tree --empty; "
+        + _raw_index_population(write_objects=False, info_only=True)
+        + "/usr/bin/git ls-files --stage -z | /usr/bin/sha256sum",
+        timeout=120,
+    )
+    value = (result.get("stdout") or "").strip().split()
+    if not value:
+        raise RuntimeError("workspace fingerprint is empty")
+    return value[0]
+
+
+def _copy_candidate_for_verification(ex: VmExecutor, base_commit: str) -> VmExecutor:
+    child = ex.child("verifier")
+    destination = shlex.quote(str(child.workdir))
+    patch_path = shlex.quote(posixpath.join(ex.workdir, _PATCH_FILE))
+    base_q = shlex.quote(str(base_commit))
+    materialize = (
+        f"dest={destination}; base={base_q}; "
+        "tree_list=$(pwd -P)/.git/skitarii-baseline-tree; rm -f -- \"$tree_list\"; "
+        "/usr/bin/git ls-tree -rz --full-tree \"$base\" > \"$tree_list\"; "
+        "while IFS= read -r -d '' entry; do "
+        "meta=${entry%%$'\\t'*}; path=${entry#*$'\\t'}; "
+        "mode=${meta%% *}; rest=${meta#* }; kind=${rest%% *}; oid=${rest##* }; "
+        "case \"$path\" in /*|../*|*/../*|.git|.git/*|*/.git|*/.git/*) exit 65;; esac; "
+        "out=\"$dest/$path\"; /usr/bin/mkdir -p -- \"${out%/*}\"; "
+        "case \"$mode:$kind\" in "
+        "100644:blob) /usr/bin/git cat-file blob \"$oid\" > \"$out\"; /usr/bin/chmod 0644 \"$out\";; "
+        "100755:blob) /usr/bin/git cat-file blob \"$oid\" > \"$out\"; /usr/bin/chmod 0755 \"$out\";; "
+        "120000:blob) /usr/bin/git cat-file blob \"$oid\" | "
+        "/usr/bin/python3 -c 'import os,sys; os.symlink(os.fsdecode(sys.stdin.buffer.read()), sys.argv[1])' "
+        "\"$out\";; *) exit 65;; esac; "
+        "done < \"$tree_list\"; rm -f -- \"$tree_list\""
+    )
+    _checked_bash(
+        ex,
+        "set -e -o pipefail; " + _TRUSTED_GIT_ENV
+        + materialize + " && "
+        + f"/usr/bin/git -C {destination} init -q && "
+        + f"/usr/bin/git -C {destination} apply --binary --whitespace=nowarn {patch_path}",
+        timeout=180,
+    )
+    _sanitize_git_control(child)
+    return child
+
+
+def _scrub_interstage_temp(ex: VmExecutor) -> None:
+    scrub = getattr(ex, "scrub_boundary_temp", None)
+    if getattr(ex, "process_boundary", False):
+        if not callable(scrub):
+            raise RuntimeError("trusted inter-stage temp scrub is unavailable")
+        scrub(strict=True)
+
+
+def _held_out_failure_class(acceptance: dict) -> str:
+    for result in acceptance.get("results") or []:
+        if result.get("ok"):
+            continue
+        if result.get("exit") in {124, 127, 255}:
+            return "verifier_infra"
+        if str(result.get("why") or "").startswith("oracle failed"):
+            return "verifier_infra"
+    return "candidate_failure"
+
+
+def _held_out_evidence_violation(checks: list[dict]) -> str:
+    """Require private evidence that cannot be reduced to candidate-controlled exit 0."""
+    invalid: list[str] = []
+    for index, check in enumerate(checks):
+        if not isinstance(check, dict) or not str(check.get("cmd") or "").strip():
+            invalid.append(str(index + 1))
+            continue
+        literal = (
+            "expect_stdout" in check
+            and isinstance(check.get("expect_stdout"), (str, int, float))
+            and bool(str(check.get("expect_stdout")).strip())
+        )
+        oracle = isinstance(check.get("oracle"), str) and bool(check["oracle"].strip())
+        if not (literal or oracle):
+            invalid.append(str(index + 1))
+    if not checks:
+        return "private verifier produced no checks"
+    if invalid:
+        return "private checks without immutable output evidence: " + ", ".join(invalid[:20])
+    return ""
+
+
+def _isolate_private_oracles(checks: list[dict]) -> list[dict]:
+    """Canonicalize validated oracle code into isolated stdlib-only Python."""
+    isolated: list[dict] = []
+    for check in checks:
+        copied = dict(check) if isinstance(check, dict) else check
+        if isinstance(copied, dict) and "oracle" in copied:
+            raw = str(copied.get("oracle") or "").strip()
+            try:
+                tokens = shlex.split(raw, posix=True)
+            except ValueError as exc:
+                raise ValueError("private oracle is outside the trusted positive grammar") from exc
+            if (
+                len(tokens) == 5
+                and tokens[0] == "/usr/bin/python3"
+                and tokens[1:4] == ["-I", "-S", "-c"]
+            ):
+                validation_form = f"python3 -c {shlex.quote(tokens[4])}"
+                code = tokens[4]
+            else:
+                validation_form = raw
+                code = tokens[2] if len(tokens) == 3 else ""
+            if not _private_oracle(validation_form):
+                raise ValueError("private oracle is outside the trusted positive grammar")
+            copied["oracle"] = f"/usr/bin/python3 -I -S -c {shlex.quote(code)}"
+        isolated.append(copied)
+    return isolated
+
+
+def _held_out_runtime_evidence_violation(checks: list[dict], acceptance: dict) -> str:
+    """An oracle comparison must produce non-empty values on both independent sides."""
+    results = acceptance.get("results") if isinstance(acceptance, dict) else None
+    if not isinstance(results, list):
+        return "private verifier returned no structured evidence"
+    for index, check in enumerate(checks):
+        if not isinstance(check, dict) or "oracle" not in check:
+            continue
+        if index >= len(results) or not isinstance(results[index], dict):
+            return f"private oracle check {index + 1} returned no evidence"
+        result = results[index]
+        if not str(result.get("stdout") or "").strip() or not str(
+            result.get("expected") or ""
+        ).strip():
+            return f"private oracle check {index + 1} produced empty comparable evidence"
+    return ""
+
+
+def _public_replay_inputs(verdict: dict) -> tuple[list[str], list[dict]]:
+    """Recover the exact checks and deliverables that produced public acceptance."""
+    checks = [
+        dict(check)
+        for check in (verdict.get("checks") or [])
+        if isinstance(check, dict) and str(check.get("cmd") or "").strip()
+    ]
+    acceptance = None
+    for round_state in reversed(verdict.get("rounds") or []):
+        if isinstance(round_state, dict) and isinstance(round_state.get("acceptance"), dict):
+            acceptance = round_state["acceptance"]
+            break
+    if acceptance is None and isinstance(verdict.get("acceptance"), dict):
+        acceptance = verdict["acceptance"]
+    deliverables: list[str] = []
+    for result in (acceptance or {}).get("results") or []:
+        if not isinstance(result, dict) or result.get("kind") != "deliverable":
+            continue
+        path = _safe_workspace_path(result.get("target"))
+        if path not in deliverables:
+            deliverables.append(path)
+    return deliverables, checks
 
 
 def _collect_files(ex: VmExecutor, artifacts: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
+    total = 0
     for path in artifacts[:12]:
         try:
-            out[path] = ex.fetch_artifact(path).decode("utf-8", errors="replace")[:100_000]
+            safe = _safe_workspace_path(path)
+            sized = ex.bash(f"wc -c < {shlex.quote(safe)}", timeout=20)
+            size = int((sized.get("stdout") or "").strip())
+            if size > MAX_RETURNED_FILE_BYTES or total + size > MAX_RETURNED_TOTAL_BYTES:
+                continue
+            raw = ex.fetch_artifact(safe, max_bytes=MAX_RETURNED_FILE_BYTES)
+            if len(raw) > MAX_RETURNED_FILE_BYTES:
+                continue
+            content = raw.decode("utf-8", errors="strict")
+            out[safe] = content
+            total += size
         except Exception:
             pass
     if not out:
@@ -67,13 +518,396 @@ def _collect_files(ex: VmExecutor, artifacts: list[str]) -> dict[str, str]:
         for path in (listing.get("stdout") or "").split():
             path = path.lstrip("./")
             try:
-                out[path] = ex.fetch_artifact(path).decode("utf-8", errors="replace")[:100_000]
+                safe = _safe_workspace_path(path)
+                sized = ex.bash(f"wc -c < {shlex.quote(safe)}", timeout=20)
+                size = int((sized.get("stdout") or "").strip())
+                if size > MAX_RETURNED_FILE_BYTES or total + size > MAX_RETURNED_TOTAL_BYTES:
+                    continue
+                raw = ex.fetch_artifact(safe, max_bytes=MAX_RETURNED_FILE_BYTES)
+                if len(raw) > MAX_RETURNED_FILE_BYTES:
+                    continue
+                out[safe] = raw.decode("utf-8", errors="strict")
+                total += size
             except Exception:
                 pass
     return out
 
 
-def execute_mission(payload: dict, mission=None) -> dict:
+def _safe_workspace_path(raw: object) -> str:
+    """Return a safe, repository-relative POSIX path or fail closed."""
+    if not isinstance(raw, str):
+        raise ValueError("workspace path must be a string")
+    value = raw.replace("\\", "/")
+    if not value or "\x00" in value:
+        raise ValueError("workspace path is empty or contains NUL")
+    path = PurePosixPath(value)
+    parts = path.parts
+    if path.is_absolute() or not parts or any(part == ".." for part in parts):
+        raise ValueError(f"workspace path escapes the repository: {value!r}")
+    if parts[0].endswith(":") or ".git" in parts:
+        raise ValueError(f"workspace path is reserved: {value!r}")
+    normalized = path.as_posix()
+    if normalized in ("", "."):
+        raise ValueError("workspace path must name a file")
+    return normalized
+
+
+def _safe_symlink_target(link_path: str, raw_target: object) -> str:
+    target = str(raw_target).replace("\\", "/")
+    if not target or "\x00" in target or posixpath.isabs(target):
+        raise ValueError(f"unsafe symlink target for {link_path!r}: {target!r}")
+    resolved = posixpath.normpath(posixpath.join(posixpath.dirname(link_path), target))
+    if resolved == ".." or resolved.startswith("../") or posixpath.isabs(resolved):
+        raise ValueError(f"symlink target escapes the repository: {link_path!r} -> {target!r}")
+    if PurePosixPath(resolved).parts and ".git" in PurePosixPath(resolved).parts:
+        raise ValueError(f"symlink target reaches reserved git metadata: {link_path!r} -> {target!r}")
+    return target
+
+
+def _checked_bash(ex: VmExecutor, command: str, *, timeout: int = 30) -> dict:
+    result = ex.bash(command, timeout=timeout)
+    if result.get("returncode") != 0:
+        detail = (result.get("stderr") or result.get("stdout") or "command failed").strip()
+        raise RuntimeError(detail[-2000:])
+    return result
+
+
+_TRUSTED_GIT_ENV = (
+    "export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_ATTR_NOSYSTEM=1 "
+    "GIT_NO_REPLACE_OBJECTS=1 GIT_PAGER=cat PAGER=cat; "
+    "unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY "
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_CONFIG_COUNT "
+    "GIT_CONFIG_PARAMETERS GIT_EXTERNAL_DIFF; "
+)
+
+
+def _sanitize_git_control(ex: VmExecutor, *, preserve_patch: bool = False) -> None:
+    """Remove candidate-controlled Git execution/config channels before trusted Git."""
+    patch_cleanup = "" if preserve_patch else ".git/skitarii-patch.diff "
+    command = _TRUSTED_GIT_ENV + (
+        "set -eu; test -d .git && test ! -L .git; "
+        "test ! -e .git/commondir && test ! -L .git/commondir; "
+        "test -z \"$(/usr/bin/find . -mindepth 1 -path ./.git -prune -o "
+        "-name .git -print -quit)\"; "
+        "for d in .git/objects .git/objects/info .git/info .git/refs; do "
+        "[ ! -e \"$d\" ] && [ ! -L \"$d\" ] || { test -d \"$d\" && test ! -L \"$d\"; }; done; "
+        "for f in .git/config .git/config.worktree .git/info/attributes .git/info/exclude "
+        ".git/info/grafts .git/objects/info/alternates; do "
+        "[ ! -e \"$f\" ] && [ ! -L \"$f\" ] || { test -f \"$f\" && test ! -L \"$f\"; }; done; "
+        "test -z \"$(/usr/bin/find .git -mindepth 1 -type l -print -quit)\"; "
+        "test -z \"$(/usr/bin/find .git -mindepth 1 ! -type d ! -type f -print -quit)\"; "
+        "rm -rf -- .git/hooks .git/refs/replace; mkdir -p -- .git/hooks .git/info .git/objects/info; "
+        "rm -f -- .git/config .git/config.worktree .git/info/attributes .git/info/exclude .git/info/grafts "
+        ".git/objects/info/alternates .git/skitarii-index "
+        + patch_cleanup
+        +
+        ".git/skitarii-fingerprint-index .git/skitarii-fingerprint-index.lock "
+        ".git/skitarii-baseline-tree "
+        ".git/index.skitarii-all .git/skitarii-index.skitarii-all "
+        ".git/skitarii-fingerprint-index.skitarii-all "
+        ".git/index.skitarii-paths .git/index.skitarii-links .git/index.skitarii-hashes "
+        ".git/skitarii-index.skitarii-paths .git/skitarii-index.skitarii-links "
+        ".git/skitarii-index.skitarii-hashes .git/skitarii-fingerprint-index.skitarii-paths "
+        ".git/skitarii-fingerprint-index.skitarii-links .git/skitarii-fingerprint-index.skitarii-hashes "
+        ".git/skitarii-changed-files .git/skitarii-symlink-violations .git/skitarii-symlinks "
+        ".git/skitarii-symlink-scan; "
+        "printf '%s\\n' '[core]' 'repositoryformatversion = 0' 'filemode = true' "
+        "'bare = false' 'logallrefupdates = true' > .git/config; chmod 0600 .git/config; "
+        "test \"$(/usr/bin/git rev-parse --git-dir)\" = .git; "
+        "test \"$(/usr/bin/git rev-parse --git-common-dir)\" = .git"
+    )
+    _checked_bash(ex, command, timeout=30)
+
+
+def _scrub_runtime_debris(ex: VmExecutor) -> None:
+    command = (
+        "/usr/bin/find . -path ./.git -prune -o -type f "
+        "\\( -name '*.pyc' -o -name '*.pyo' \\) -exec /usr/bin/rm -f -- {} +; "
+        "/usr/bin/find . -path ./.git -prune -o -type d "
+        "\\( -name __pycache__ -o -name .pytest_cache \\) -prune "
+        "-exec /usr/bin/rm -rf -- {} +"
+    )
+    _checked_bash(ex, command, timeout=60)
+
+
+def _workspace_symlink_violation(ex: VmExecutor) -> str:
+    """Reject links that resolve outside the frozen repository or into .git."""
+    report = ".git/skitarii-symlink-violations"
+    inventory = ".git/skitarii-symlinks"
+    scan = ".git/skitarii-symlink-scan"
+    command = (
+        f"set -e; rm -f -- {report} {inventory} {scan}; : > {report}; : > {inventory}; "
+        "root=$(/usr/bin/realpath -e .); "
+        f"/usr/bin/find . -mindepth 1 -path ./.git -prune -o -type l -print0 > {scan}; "
+        "while IFS= read -r -d '' link; do "
+        "target=$(/usr/bin/readlink -- \"$link\" 2>/dev/null || true); "
+        f"printf '%s\\0%s\\0' \"$link\" \"$target\" >> {inventory}; "
+        "resolved=$(/usr/bin/realpath -m -- \"$link\" 2>/dev/null || true); "
+        "case \"$resolved\" in \"$root/.git\"|\"$root/.git/\"*|'') "
+        f"printf '%s\\0' \"$link\" >> {report};; "
+        f"\"$root\"/*) :;; *) printf '%s\\0' \"$link\" >> {report};; esac; "
+        f"done < {scan}"
+    )
+    _checked_bash(ex, command, timeout=30)
+    raw = ex.fetch_artifact(report, max_bytes=MAX_CHANGED_MANIFEST_BYTES)
+    if len(raw) > MAX_CHANGED_MANIFEST_BYTES:
+        raise ValueError("symlink policy report exceeds manifest limit")
+    paths = [
+        _safe_workspace_path(part.decode("utf-8"))
+        for part in raw.split(b"\0") if part
+    ]
+    inventory_raw = ex.fetch_artifact(inventory, max_bytes=MAX_CHANGED_MANIFEST_BYTES)
+    if len(inventory_raw) > MAX_CHANGED_MANIFEST_BYTES:
+        raise ValueError("symlink inventory exceeds manifest limit")
+    parts = inventory_raw.split(b"\0")
+    if parts and parts[-1] == b"":
+        parts.pop()
+    if len(parts) % 2:
+        raise ValueError("symlink inventory is malformed")
+    for index in range(0, len(parts), 2):
+        path = _safe_workspace_path(parts[index].decode("utf-8"))
+        target = parts[index + 1].decode("utf-8")
+        try:
+            _safe_symlink_target(path, target)
+        except ValueError:
+            paths.append(path)
+    return ", ".join(sorted(set(paths))[:20])
+
+
+def _prepare_workspace(ex: VmExecutor, files: dict, blobs: dict, deleted: list,
+                       modes: dict, symlinks: dict) -> int:
+    """Materialise the exact caller snapshot before creating the baseline commit."""
+    prepared = 0
+    for raw_path, content in files.items():
+        path = _safe_workspace_path(raw_path)
+        ex.write_file(path, str(content))
+        prepared += 1
+
+    for raw_path, encoded in blobs.items():
+        path = _safe_workspace_path(raw_path)
+        try:
+            content = base64.b64decode(str(encoded), validate=True)
+        except (binascii.Error, ValueError, TypeError) as exc:
+            raise ValueError(f"invalid base64 workspace blob: {path}") from exc
+        ex.write_bytes(path, content)
+        prepared += 1
+
+    for raw_path in deleted:
+        path = _safe_workspace_path(raw_path)
+        _checked_bash(ex, f"rm -rf -- {shlex.quote(path)}")
+
+    for raw_path, raw_target in symlinks.items():
+        path = _safe_workspace_path(raw_path)
+        target = _safe_symlink_target(path, raw_target)
+        parent = posixpath.dirname(path) or "."
+        _checked_bash(
+            ex,
+            f"mkdir -p -- {shlex.quote(parent)} && "
+            f"rm -rf -- {shlex.quote(path)} && "
+            f"ln -s -- {shlex.quote(target)} {shlex.quote(path)}",
+        )
+        prepared += 1
+
+    for raw_path, raw_mode in modes.items():
+        path = _safe_workspace_path(raw_path)
+        mode = str(raw_mode)
+        if mode == "100755":
+            _checked_bash(ex, f"test -e {shlex.quote(path)} && chmod a+x -- {shlex.quote(path)}")
+        elif mode == "100644":
+            _checked_bash(ex, f"test -e {shlex.quote(path)} && chmod a-x -- {shlex.quote(path)}")
+        elif mode == "120000":
+            _checked_bash(ex, f"test -L {shlex.quote(path)}")
+        else:
+            raise ValueError(f"unsupported git mode for {path!r}: {mode!r}")
+    return prepared
+
+
+def _create_baseline(ex: VmExecutor) -> str:
+    """Create a synthetic commit from exact caller bytes, ignoring Git attributes."""
+    _checked_bash(ex, _TRUSTED_GIT_ENV + "/usr/bin/git init -q .", timeout=30)
+    _sanitize_git_control(ex)
+    result = _checked_bash(
+        ex,
+        _TRUSTED_GIT_ENV
+        + "set -e -o pipefail; index=$(pwd -P)/.git/index; "
+        "rm -f -- \"$index\" \"$index.lock\"; export GIT_INDEX_FILE=\"$index\"; "
+        "/usr/bin/git read-tree --empty; "
+        + _raw_index_population(write_objects=True)
+        +
+        "/usr/bin/git -c user.email=b@x -c user.name=skitarii "
+        "commit --allow-empty -qm baseline && /usr/bin/git rev-parse HEAD",
+        timeout=120,
+    )
+    base = (result.get("stdout") or "").strip().splitlines()
+    if not base:
+        raise RuntimeError("baseline commit did not return a commit id")
+    return base[-1]
+
+
+def _build_patch_bundle(ex: VmExecutor, base_commit: str, *, accepted: bool) -> dict:
+    """Stage the final VM tree and diff it against the original caller snapshot.
+
+    Comparing the staged tree with ``base_commit`` is intentional: fighter branches
+    may already have been merged into HEAD, and a worktree-only ``git diff HEAD``
+    would silently discard those changes.  ``git add -A`` also captures new and
+    deleted paths, while ``--binary`` makes the returned patch applyable to binary
+    files.  Diff output is written under .git before fetching because executor
+    stdout is deliberately capped.
+    """
+    base = str(base_commit).strip()
+    if not base:
+        raise ValueError("base commit is missing")
+    commit_expr = shlex.quote(f"{base}^{{commit}}")
+    base_q = shlex.quote(base)
+    clean_pathspec = "."
+    _scrub_runtime_debris(ex)
+    _sanitize_git_control(ex)
+    command = _TRUSTED_GIT_ENV + (
+        "set -e -o pipefail; index=$(pwd -P)/.git/skitarii-index; "
+        "rm -f -- \"$index\" \"$index.lock\"; export GIT_INDEX_FILE=\"$index\"; "
+        f"/usr/bin/git rev-parse --verify {commit_expr} >/dev/null && "
+        "/usr/bin/git read-tree --empty && "
+        + _raw_index_population(write_objects=True)
+        +
+        f"/usr/bin/git diff --cached --no-ext-diff --no-textconv --binary --full-index "
+        f"{base_q} -- {clean_pathspec} > {_PATCH_FILE} && "
+        f"/usr/bin/git diff --cached --no-ext-diff --no-textconv --name-only -z "
+        f"{base_q} -- {clean_pathspec} > {_CHANGED_FILES_FILE}"
+    )
+    _checked_bash(ex, command, timeout=120)
+    patch_size = int((_checked_bash(ex, f"wc -c < {_PATCH_FILE}").get("stdout") or "0").strip())
+    manifest_size = int((_checked_bash(ex, f"wc -c < {_CHANGED_FILES_FILE}").get("stdout") or "0").strip())
+    if patch_size > MAX_PATCH_BYTES:
+        raise ValueError(f"complete patch exceeds {MAX_PATCH_BYTES} bytes")
+    if manifest_size > MAX_CHANGED_MANIFEST_BYTES:
+        raise ValueError(f"changed-file manifest exceeds {MAX_CHANGED_MANIFEST_BYTES} bytes")
+    diff_raw = ex.fetch_artifact(_PATCH_FILE, max_bytes=MAX_PATCH_BYTES)
+    names_raw = ex.fetch_artifact(_CHANGED_FILES_FILE, max_bytes=MAX_CHANGED_MANIFEST_BYTES)
+    if len(diff_raw) > MAX_PATCH_BYTES or len(names_raw) > MAX_CHANGED_MANIFEST_BYTES:
+        raise ValueError("patch output grew while it was being collected")
+    diff = diff_raw.decode("utf-8", errors="strict")
+    names = names_raw.decode("utf-8", errors="strict")
+    changed = [path for path in names.split("\x00") if path]
+    return {
+        "base_commit": base,
+        "changed_files": changed,
+        "unified_diff": diff,
+        "rollback": "git apply -R <patch>",
+        "apply_gate": "accepted" if accepted else "blocked",
+    }
+
+
+def _is_test_path(path: str) -> bool:
+    parts = path.lower().split("/")
+    name = parts[-1] if parts else ""
+    return (
+        name.startswith("test")
+        or name.endswith(("_test.py", ".spec.js", ".spec.ts", ".test.js", ".test.ts"))
+        or any(part in ("test", "tests", "spec", "specs") for part in parts[:-1])
+    )
+
+
+def _allows_test_changes(goal: str) -> bool:
+    lowered = goal.lower()
+    markers = (
+        "fix test", "update test", "change test", "add test", "write test",
+        "почини тест", "исправь тест", "обнови тест", "добавь тест", "напиши тест",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def _protected_path_violation(
+    goal: str, baseline_paths: Any, changed_files: list[str], explicit: list,
+) -> str:
+    protected = {_safe_workspace_path(path) for path in explicit}
+    if not _allows_test_changes(goal):
+        protected.update(
+            _safe_workspace_path(path) for path in baseline_paths if _is_test_path(str(path))
+        )
+    touched = {_safe_workspace_path(path) for path in changed_files}
+    violations = sorted(protected & touched)
+    return ", ".join(violations[:20])
+
+
+def _runner_control_violation(changed_files: list[str]) -> str:
+    """Forbid candidate-controlled Python/test runner hooks for every goal."""
+    forbidden_configs = {
+        "pytest.ini", ".pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini",
+    }
+    forbidden_modules = {
+        "sitecustomize", "usercustomize", "conftest", "pytest", "_pytest",
+        "unittest", "runpy",
+    }
+    violations: list[str] = []
+    for raw in changed_files:
+        path = _safe_workspace_path(str(raw))
+        parts = [part.lower() for part in path.split("/")]
+        name = parts[-1]
+        stem = name.rsplit(".", 1)[0]
+        if (
+            name in forbidden_configs
+            or name.endswith((".pyc", ".pyo"))
+            or "__pycache__" in parts
+            or stem in forbidden_modules
+            or any(part in forbidden_modules for part in parts[:-1])
+        ):
+            violations.append(path)
+    return ", ".join(sorted(set(violations))[:20])
+
+
+def _is_health_path(path: str) -> bool:
+    return path.split("?", 1)[0] == "/health"
+
+
+def _valid_task_id(value: object) -> bool:
+    return bool(_TASK_ID_RE.fullmatch(str(value or "")))
+
+
+def _literal_loopback_authority(value: str) -> tuple[str, int] | None:
+    """Parse a Host/authority without DNS and accept only 127.0.0.1 or ::1."""
+    value = str(value or "")
+    if not value or any(ch.isspace() for ch in value) or any(ch in value for ch in "/\\@"):
+        return None
+    host = value
+    port_text = ""
+    if value.startswith("["):
+        close = value.find("]")
+        if close < 0:
+            return None
+        host = value[1:close]
+        suffix = value[close + 1:]
+        if suffix:
+            if not suffix.startswith(":"):
+                return None
+            port_text = suffix[1:]
+    elif value.count(":") == 1:
+        host, port_text = value.rsplit(":", 1)
+    elif ":" in value:
+        return None
+    if host not in {"127.0.0.1", "::1"}:
+        return None
+    if not port_text:
+        return host, 80
+    if not port_text.isascii() or not port_text.isdigit():
+        return None
+    port = int(port_text)
+    return (host, port) if 1 <= port <= 65535 else None
+
+
+def _trusted_origin(value: str, host_authority: tuple[str, int]) -> bool:
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme != "http" or parsed.username is not None or parsed.password is not None:
+            return False
+        if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+            return False
+        authority = _literal_loopback_authority(parsed.netloc)
+    except (TypeError, ValueError):
+        return False
+    return authority == host_authority
+
+
+def _execute_mission_body(payload: dict, mission=None) -> dict:
     """Run one mission end to end and return the verdict. If `mission` is given it is an
     async mission_store.Mission: the fighter can ask it questions and be cancelled, and
     progress is journalled to it."""
@@ -81,6 +915,16 @@ def execute_mission(payload: dict, mission=None) -> dict:
     task_id = str(payload.get("task_id") or f"m{int(time.time())}")
     checks = payload.get("checks") if isinstance(payload.get("checks"), list) else None
     workspace_files = payload.get("workspace_files") if isinstance(payload.get("workspace_files"), dict) else {}
+    workspace_blobs = payload.get("workspace_blobs") if isinstance(payload.get("workspace_blobs"), dict) else {}
+    workspace_inventory = payload.get("workspace_inventory") if isinstance(payload.get("workspace_inventory"), list) else []
+    workspace_external_assets = (
+        payload.get("workspace_external_assets")
+        if isinstance(payload.get("workspace_external_assets"), dict) else {}
+    )
+    workspace_deleted = payload.get("workspace_deleted") if isinstance(payload.get("workspace_deleted"), list) else []
+    workspace_modes = payload.get("workspace_modes") if isinstance(payload.get("workspace_modes"), dict) else {}
+    workspace_symlinks = payload.get("workspace_symlinks") if isinstance(payload.get("workspace_symlinks"), dict) else {}
+    protected_paths = payload.get("protected_paths") if isinstance(payload.get("protected_paths"), list) else []
     mode = str(payload.get("mode") or "greenfield")
     ask_fn = (lambda q: mission.ask_user(q)) if mission is not None else None
     cancel_fn = (lambda: mission.cancelled.is_set()) if mission is not None else None
@@ -90,7 +934,9 @@ def execute_mission(payload: dict, mission=None) -> dict:
     # grinding blind (the eval showed 0/5 clarifications). Skip when explicit checks are
     # given (a checked task is grounded by construction). Fails open.
     if not checks:
-        clar = needs_clarification(goal, has_workspace=bool(workspace_files))
+        clar = needs_clarification(
+            goal, has_workspace=bool(workspace_files or workspace_blobs or workspace_external_assets),
+        )
         if clar:
             note("Задача размыта — спрашиваю уточнение вместо слепой работы.")
             answer = (ask_fn(clar) if ask_fn is not None else "") or ""
@@ -100,45 +946,325 @@ def execute_mission(payload: dict, mission=None) -> dict:
                         "summary": clar, "needs_user": True, "task_id": task_id, "files": {}}
             goal += f"\n\nУточнение пользователя: {answer}"
 
-    ex = _mission_executor(task_id)
+    try:
+        ex = _mission_executor(task_id)
+    except ProcessBoundaryBusy as exc:
+        return {
+            "status": "blocked", "accepted": False, "task_id": task_id,
+            "summary": "Sandbox is busy with another code mission; retry later.",
+            "error": str(exc)[:500], "files": {},
+        }
+    except ProcessBoundaryQuarantined as exc:
+        return {
+            "status": "blocked", "accepted": False, "task_id": task_id,
+            "summary": "Sandbox initialization became uncertain and was quarantined.",
+            "error": str(exc)[:500], "cleanup_complete": False,
+            "boundary_quarantined": True, "files": {},
+        }
+    except RuntimeError as exc:
+        return {
+            "status": "blocked", "accepted": False, "task_id": task_id,
+            "summary": "Sandbox process boundary could not be initialized.",
+            "error": str(exc)[:500], "files": {},
+        }
+    _EXECUTION_LOCAL.executor = ex
+    if mission is not None:
+        with _MISSION_EXECUTOR_LOCK:
+            mission.executor = ex
+            mission.executor_attempt = getattr(_EXECUTION_LOCAL, "attempt_token", "")
+            cancelled_before_attach = mission.cancelled.is_set()
+        if cancelled_before_attach:
+            ex.cancel_current_commands()
+            return {
+                "status": "cancelled", "accepted": False, "task_id": task_id,
+                "summary": "Mission was cancelled before sandbox execution began.",
+                "files": {},
+            }
     if not ex.alive():
         return {"status": "blocked", "accepted": False, "error": "sandbox VM is not reachable"}
 
-    preloaded = 0
-    for rel, content in (workspace_files or {}).items():
-        try:
-            ex.write_file(str(rel), str(content)); preloaded += 1
-        except Exception:
-            pass
-    base_commit = ""
-    if preloaded:
-        snap = ex.bash("git init -q . && git add -A && "
-                       "git -c user.email=b@x -c user.name=skitarii commit -qm baseline && "
-                       "git rev-parse HEAD", timeout=60)
-        base_commit = (snap.get("stdout") or "").strip().split("\n")[-1]
-        goal += (f"\n\n(ПРАВКА СУЩЕСТВУЮЩЕГО кода: {preloaded} файл(ов) проекта уже лежат в рабочем "
+    try:
+        preloaded = _prepare_workspace(
+            ex, workspace_files, workspace_blobs, workspace_deleted,
+            workspace_modes, workspace_symlinks,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {
+            "status": "blocked", "accepted": False,
+            "error": f"invalid workspace snapshot: {exc}", "task_id": task_id,
+        }
+    visible_count = len(workspace_inventory) or (preloaded + len(workspace_external_assets))
+    try:
+        # Every mission, including greenfield work, gets an immutable empty-or-loaded
+        # baseline so the real deliverable is always a reproducible patch.
+        base_commit = _create_baseline(ex)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {"status": "blocked", "accepted": False,
+                "error": f"could not create workspace baseline: {exc}", "task_id": task_id}
+    if preloaded or workspace_deleted or workspace_external_assets:
+        goal += (f"\n\n(ПРАВКА СУЩЕСТВУЮЩЕГО кода: {visible_count} файл(ов) проекта уже лежат в рабочем "
                  "каталоге с их путями — читай и правь их, НЕ переписывай с нуля.)")
-    _memory(task_id, f"Загружено {preloaded} файлов проекта." if preloaded else f"Старт: {goal[:200]}")
+        if workspace_external_assets:
+            external_paths = sorted(_safe_workspace_path(path) for path in workspace_external_assets)
+            goal += ("\nLarge clean tracked assets are inventory-only in the fighter VM and must remain "
+                     "unchanged: " + ", ".join(external_paths[:50]))
+    _memory(task_id, f"Загружено {visible_count} файлов проекта." if visible_count else f"Старт: {goal[:200]}")
 
-    exploration = explore(goal, workspace_files, ex) if workspace_files else {}
+    exploration = explore(
+        goal, workspace_files, ex, inventory=workspace_inventory,
+    ) if (workspace_files or workspace_inventory) else {}
     brief = brief_for_fighter(exploration) if exploration else ""
     if brief:
         goal += brief; note("Explorer наметил цели/инварианты.")
 
-    if checks:
-        verdict = run_mission(goal, ex, checks=checks, task_id=task_id, ask_fn=ask_fn, cancel_fn=cancel_fn,
-                              max_fighter_rounds=int(payload.get("max_rounds") or 3),
-                              max_steps=int(payload.get("max_steps") or 40),
-                              max_wall_sec=int(payload.get("max_wall_sec") or 3600))
-    else:
-        verdict = plan_and_run(goal, ex, task_id=task_id, ask_fn=ask_fn, cancel_fn=cancel_fn,
-                               max_wall_sec=int(payload.get("max_wall_sec") or 3600),
-                               memory=lambda m: (note(m), _memory(task_id, m)))
+    trusted_bypass = (
+        payload.get("_trusted_skip_held_out") is True
+        and os.environ.get("SKITARII_ALLOW_TRUSTED_HELD_OUT_BYPASS", "0") == "1"
+    )
+    held_out_required = (
+        os.environ.get("SKITARII_REQUIRE_HELD_OUT", "1") == "1" and not trusted_bypass
+    )
+    held_out_plan = build_held_out_plan(goal) if held_out_required else {
+        "status": "not_required", "checks": [], "error": "",
+    }
+    held_out_checks = list(held_out_plan.get("checks") or [])
+    if held_out_required:
+        note(f"Private verifier prepared {len(held_out_checks)} undisclosed behavioural check(s).")
+        try:
+            held_out_checks = _isolate_private_oracles(held_out_checks)
+            evidence_violation = _held_out_evidence_violation(held_out_checks)
+        except (TypeError, ValueError) as exc:
+            evidence_violation = str(exc)
+        if held_out_plan.get("status") != "ok" or evidence_violation:
+            return {
+                "status": "blocked", "accepted": False, "task_id": task_id,
+                "summary": "Blocked: private verifier infrastructure could not produce valid checks.",
+                "held_out_required": True,
+                "held_out_check_count": 0,
+                "held_out_status": (
+                    "invalid_evidence" if evidence_violation
+                    else held_out_plan.get("status") or "invalid_spec"
+                ),
+                "held_out_error": str(evidence_violation or held_out_plan.get("error") or "")[:500],
+                "files": {},
+            }
+
+    try:
+        if checks:
+            verdict = run_mission(goal, ex, checks=checks, task_id=task_id, ask_fn=ask_fn, cancel_fn=cancel_fn,
+                                  max_fighter_rounds=int(payload.get("max_rounds") or 3),
+                                  max_steps=int(payload.get("max_steps") or 40),
+                                  max_wall_sec=int(payload.get("max_wall_sec") or 3600))
+        else:
+            verdict = plan_and_run(goal, ex, task_id=task_id, ask_fn=ask_fn, cancel_fn=cancel_fn,
+                                   max_wall_sec=int(payload.get("max_wall_sec") or 3600),
+                                   memory=lambda m: (note(m), _memory(task_id, m)))
+    except BaseException:
+        raise
+    # Stop every fighter descendant before freezing any artifact. From this point on
+    # the primary worktree is read only; private checks run in a disposable copy.
+    try:
+        _stop_workspace_processes(ex, strict=True)
+    except RuntimeError as exc:
+        verdict.update({
+            "accepted": False,
+            "status": "blocked",
+            "summary": "Blocked: fighter processes could not be frozen safely.",
+            "freeze_error": str(exc)[:500],
+            "task_id": task_id,
+            "held_out_required": held_out_required,
+            "held_out_check_count": len(held_out_checks),
+            "held_out_status": "not_run_freeze_failed",
+            "files": {},
+        })
+        return verdict
     verdict["files"] = _collect_files(ex, verdict.get("artifacts") or [])
     verdict["task_id"] = task_id
+    verdict["held_out_required"] = held_out_required
+    verdict["held_out_check_count"] = len(held_out_checks)
     if base_commit:
-        diff = ex.bash("git diff HEAD", timeout=60).get("stdout") or ""
-        changed = [ln for ln in (ex.bash("git diff --name-only HEAD", timeout=30).get("stdout") or "").splitlines() if ln]
+        try:
+            # The patch is captured before any private command executes and remains
+            # blocked until every independent gate has passed.
+            patch_bundle = _build_patch_bundle(ex, base_commit, accepted=False)
+        except (OSError, RuntimeError, ValueError) as exc:
+            verdict["accepted"] = False
+            verdict["status"] = "failed"
+            verdict["patch_bundle"] = {
+                "base_commit": base_commit, "changed_files": [], "unified_diff": "",
+                "apply_gate": "blocked", "error": f"could not build complete patch: {exc}",
+            }
+            _memory(task_id, "Patch bundle failed closed: " + str(exc)[:300])
+            return verdict
+        runner_violation = _runner_control_violation(
+            list(patch_bundle.get("changed_files") or [])
+        )
+        symlink_violation = _workspace_symlink_violation(ex)
+        if symlink_violation:
+            verdict.update({
+                "accepted": False,
+                "status": "failed",
+                "summary": "Blocked: candidate symlink escaped the reproducible workspace.",
+                "workspace_symlink_violation": symlink_violation,
+                "held_out_status": "not_run_workspace_symlink_violation",
+            })
+            patch_bundle["apply_gate"] = "blocked"
+            verdict["patch_bundle"] = patch_bundle
+            return verdict
+        if runner_violation:
+            verdict.update({
+                "accepted": False,
+                "status": "failed",
+                "summary": "Blocked: candidate attempted to control the verification runner.",
+                "runner_control_violation": runner_violation,
+                "held_out_status": "not_run_runner_control_violation",
+            })
+            patch_bundle["apply_gate"] = "blocked"
+            verdict["patch_bundle"] = patch_bundle
+            _memory(task_id, "Runner-control files were blocked: " + runner_violation[:300])
+            return verdict
+        if verdict.get("accepted"):
+            public_child = None
+            held_out_child = None
+            primary_before = ""
+            primary_after = ""
+            public_before = ""
+            public_after = ""
+            held_out_before = ""
+            held_out_after = ""
+            held_out_acceptance: dict = {
+                "accepted": False, "results": [], "reason": "verifier did not run",
+            }
+            public_replay_acceptance: dict = {
+                "accepted": False, "results": [], "reason": "public replay did not run",
+            }
+            verifier_error = ""
+            try:
+                _scrub_interstage_temp(ex)
+                primary_before = _workspace_fingerprint(ex)
+                public_child = _copy_candidate_for_verification(ex, base_commit)
+                public_before = _workspace_fingerprint(public_child)
+                if primary_before != public_before:
+                    raise RuntimeError(
+                        "clean baseline plus captured patch does not reproduce candidate tree"
+                    )
+                public_deliverables, public_checks = _public_replay_inputs(verdict)
+                public_replay_acceptance = _PUBLIC_ACCEPT(
+                    public_child, public_deliverables, public_checks,
+                )
+                _stop_workspace_processes(public_child, strict=True)
+                _scrub_runtime_debris(public_child)
+                public_after = _workspace_fingerprint(public_child)
+                primary_after_public = _workspace_fingerprint(ex)
+                if public_before != public_after or primary_before != primary_after_public:
+                    raise RuntimeError("public replay mutated a frozen candidate snapshot")
+                completed_public_child = public_child
+                public_child = None
+                _cleanup_workspace_processes(completed_public_child)
+                if public_replay_acceptance.get("accepted") and held_out_required:
+                    # Public replay is candidate-visible. Discard it completely,
+                    # scrub shared temp, and give private checks a fresh reconstruction.
+                    _scrub_interstage_temp(ex)
+                    held_out_child = _copy_candidate_for_verification(ex, base_commit)
+                    held_out_before = _workspace_fingerprint(held_out_child)
+                    if primary_before != held_out_before:
+                        raise RuntimeError(
+                            "fresh private reconstruction does not match the frozen candidate tree"
+                        )
+                    held_out_acceptance = accept(held_out_child, [], held_out_checks)
+                    runtime_evidence_violation = _held_out_runtime_evidence_violation(
+                        held_out_checks, held_out_acceptance,
+                    )
+                    if runtime_evidence_violation:
+                        raise RuntimeError(runtime_evidence_violation)
+                    _stop_workspace_processes(held_out_child, strict=True)
+                    _scrub_runtime_debris(held_out_child)
+                    held_out_after = _workspace_fingerprint(held_out_child)
+                    primary_after = _workspace_fingerprint(ex)
+                elif public_replay_acceptance.get("accepted"):
+                    held_out_acceptance = {
+                        "accepted": True, "results": [], "reason": "not required",
+                    }
+                    primary_after = primary_after_public
+                else:
+                    primary_after = primary_after_public
+            except Exception as exc:
+                verifier_error = f"{type(exc).__name__}: {str(exc)[:500]}"
+            finally:
+                for cleanup_label, cleanup_child in (
+                    ("public replay", public_child),
+                    ("private verifier", held_out_child),
+                ):
+                    if cleanup_child is None:
+                        continue
+                    try:
+                        _cleanup_workspace_processes(cleanup_child)
+                    except Exception as cleanup_exc:
+                        detail = (
+                            f"{cleanup_label} cleanup failed: "
+                            f"{type(cleanup_exc).__name__}: {str(cleanup_exc)[:500]}"
+                        )
+                        verifier_error = (
+                            f"{verifier_error}; {detail}" if verifier_error else detail
+                        )[:1000]
+
+            mutated = bool(
+                primary_before and primary_after and primary_before != primary_after
+                or public_before and public_after and public_before != public_after
+                or held_out_before and held_out_after and held_out_before != held_out_after
+            )
+            verdict["held_out_acceptance"] = held_out_acceptance
+            verdict["public_replay_acceptance"] = public_replay_acceptance
+            if verifier_error or mutated:
+                verdict["accepted"] = False
+                verdict["status"] = "blocked"
+                verdict["held_out_status"] = "verifier_infra"
+                verdict["held_out_failure_class"] = "verifier_infra"
+                verdict["held_out_error"] = (
+                    verifier_error or "private verifier mutated the frozen candidate snapshot"
+                )
+                verdict["summary"] = "Blocked: private held-out verifier was not isolated and reproducible."
+            elif not public_replay_acceptance.get("accepted"):
+                verdict["accepted"] = False
+                verdict["status"] = "failed"
+                verdict["held_out_status"] = "reconstructed_public_failure"
+                verdict["held_out_failure_class"] = "candidate_failure"
+                verdict["summary"] = (
+                    "Blocked: the captured patch no longer passes the public acceptance that produced it."
+                )
+            elif not held_out_acceptance.get("accepted"):
+                failure_class = _held_out_failure_class(held_out_acceptance)
+                verdict["accepted"] = False
+                verdict["held_out_failure_class"] = failure_class
+                verdict["held_out_status"] = failure_class
+                if failure_class == "verifier_infra":
+                    verdict["status"] = "blocked"
+                    verdict["summary"] = "Blocked: private held-out verifier infrastructure failed."
+                else:
+                    verdict["status"] = "failed"
+                    verdict["summary"] = "Blocked: private held-out verification rejected the candidate."
+            else:
+                verdict["held_out_status"] = "passed" if held_out_required else "not_required"
+                verdict["held_out_failure_class"] = ""
+                public_checks = verdict.get("checks") if isinstance(verdict.get("checks"), list) else []
+                verdict["checks"] = public_checks + (held_out_checks if held_out_required else [])
+        elif held_out_required:
+            verdict["held_out_status"] = "not_run_candidate_rejected"
+        else:
+            verdict["held_out_status"] = "not_required"
+        diff = patch_bundle["unified_diff"]
+        violation = _protected_path_violation(
+            goal,
+            set(workspace_files) | set(workspace_blobs) | set(workspace_symlinks),
+            patch_bundle.get("changed_files") or [],
+            protected_paths,
+        )
+        if violation:
+            verdict["accepted"] = False
+            verdict["status"] = "failed"
+            verdict["protected_path_violation"] = violation
+            patch_bundle["apply_gate"] = "blocked"
+            _memory(task_id, "Protected files were changed: " + violation[:300])
         last_acc = {}
         for r in reversed(verdict.get("rounds") or []):
             if isinstance(r.get("acceptance"), dict):
@@ -156,14 +1282,113 @@ def execute_mission(payload: dict, mission=None) -> dict:
             verdict["review_warning"] = rev["issues"]
             note("Ревьюер отметил замечания (совещательно — проверки зелёные, приёмку не отменяю): "
                  + "; ".join(rev["issues"])[:300])
-        verdict["patch_bundle"] = {"base_commit": base_commit, "changed_files": changed,
-                                   "unified_diff": diff[:400_000], "rollback": "git apply -R <patch>",
-                                   "apply_gate": "accepted" if verdict.get("accepted") else "blocked"}
+        patch_bundle["apply_gate"] = "accepted" if verdict.get("accepted") else "blocked"
+        verdict["patch_bundle"] = patch_bundle
     _memory(task_id, f"Итог: {verdict.get('status')} (accepted={verdict.get('accepted')}).")
     return verdict
 
 
+def execute_mission(payload: dict, mission=None) -> dict:
+    """Own one executor attempt from creation through proven cleanup."""
+    token = uuid.uuid4().hex
+    previous_executor = getattr(_EXECUTION_LOCAL, "executor", None)
+    previous_token = getattr(_EXECUTION_LOCAL, "attempt_token", None)
+    _EXECUTION_LOCAL.executor = None
+    _EXECUTION_LOCAL.attempt_token = token
+    task_id = str(payload.get("task_id") or "") if isinstance(payload, dict) else ""
+    verdict: dict | None = None
+    pipeline_error: Exception | None = None
+    cleanup_error: Exception | None = None
+    try:
+        verdict = _execute_mission_body(payload, mission)
+    except Exception as exc:  # noqa: BLE001 - service boundary must fail closed
+        pipeline_error = exc
+    finally:
+        executor = getattr(_EXECUTION_LOCAL, "executor", None)
+        if executor is not None:
+            try:
+                _cleanup_workspace_processes(executor)
+            except Exception as exc:  # noqa: BLE001
+                cleanup_error = exc
+        if mission is not None:
+            with _MISSION_EXECUTOR_LOCK:
+                if getattr(mission, "executor_attempt", None) == token:
+                    mission.executor = None
+                    mission.executor_attempt = None
+        _EXECUTION_LOCAL.executor = previous_executor
+        _EXECUTION_LOCAL.attempt_token = previous_token
+
+    if cleanup_error is not None:
+        return {
+            "status": "blocked", "accepted": False, "task_id": task_id,
+            "summary": "Sandbox cleanup could not be proven; lifecycle quarantined.",
+            "error": f"{type(cleanup_error).__name__}: {cleanup_error}"[:500],
+            "cleanup_complete": False, "boundary_quarantined": True, "files": {},
+        }
+    if pipeline_error is not None:
+        return {
+            "status": "blocked", "accepted": False, "task_id": task_id,
+            "summary": "Mission pipeline failed before a trustworthy verdict was produced.",
+            "error": f"{type(pipeline_error).__name__}: {pipeline_error}"[:500],
+            "cleanup_complete": True, "files": {},
+        }
+    if verdict is not None:
+        verdict.setdefault("cleanup_complete", True)
+        return verdict
+    return {
+        "status": "blocked", "accepted": False, "task_id": task_id,
+        "summary": "Mission pipeline returned no verdict.",
+        "cleanup_complete": True, "files": {},
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
+    def _request_gate(self, *, require_json: bool = False) -> bool:
+        """Reject DNS-rebinding, browser CSRF and optional bearer-auth failures."""
+        try:
+            peer = ipaddress.ip_address(str(self.client_address[0]))
+        except (IndexError, TypeError, ValueError):
+            self._send(403, {"error": "loopback client required"})
+            return False
+        if not peer.is_loopback:
+            self._send(403, {"error": "loopback client required"})
+            return False
+
+        hosts = self.headers.get_all("Host") or []
+        authority = _literal_loopback_authority(hosts[0]) if len(hosts) == 1 else None
+        if authority is None:
+            self._send(421, {"error": "literal loopback Host required"})
+            return False
+
+        fetch_sites = self.headers.get_all("Sec-Fetch-Site") or []
+        if len(fetch_sites) > 1 or (
+            fetch_sites and fetch_sites[0].strip().lower() not in {"same-origin", "same-site", "none"}
+        ):
+            self._send(403, {"error": "cross-site request rejected"})
+            return False
+        origins = self.headers.get_all("Origin") or []
+        if len(origins) > 1 or (origins and not _trusted_origin(origins[0].strip(), authority)):
+            self._send(403, {"error": "untrusted Origin"})
+            return False
+
+        if BEARER_TOKEN:
+            auth = self.headers.get_all("Authorization") or []
+            expected = f"Bearer {BEARER_TOKEN}"
+            if len(auth) != 1 or not hmac.compare_digest(auth[0], expected):
+                self._send(401, {"error": "bearer authorization required"})
+                return False
+
+        if require_json:
+            content_types = self.headers.get_all("Content-Type") or []
+            media_type = content_types[0].split(";", 1)[0].strip().lower() if len(content_types) == 1 else ""
+            if media_type != "application/json":
+                self._send(415, {"error": "Content-Type application/json required"})
+                return False
+            if self.headers.get_all("Transfer-Encoding"):
+                self._send(400, {"error": "Transfer-Encoding is not supported"})
+                return False
+        return True
+
     def _send(self, code: int, obj: dict) -> None:
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         try:
@@ -186,14 +1411,20 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        if self.path == "/health":
+        if not self._request_gate():
+            return
+        if _is_health_path(self.path):
             # cheap health: does not block on the VM (that could take seconds over SSH
             # and make a client time out). Report VM reachability only if asked.
             probe = "vm" in (self.path.split("?", 1)[1] if "?" in self.path else "")
-            payload = {"status": "ok", "service": "Skitarii"}
+            payload = {"status": "ok", "service": "Skitarii", "identity": service_identity()}
             if probe:
-                payload["vm_alive"] = VmExecutor(host="127.0.0.1", port=VM_PORT,
-                                                 user="skitarii", key=VM_KEY).alive()
+                vm = VmExecutor(host="127.0.0.1", port=VM_PORT,
+                                user="skitarii", key=VM_KEY)
+                payload["vm_alive"] = vm.alive()
+                payload["process_boundary_ready"] = (
+                    payload["vm_alive"] and vm.boundary_ready()
+                )
             self._send(200, payload)
             return
         parts = [p for p in self.path.split("?", 1)[0].split("/") if p]
@@ -202,15 +1433,25 @@ class Handler(BaseHTTPRequestHandler):
             if not m:
                 self._send(404, {"error": "mission not found"}); return
             if len(parts) == 3 and parts[2] == "events":   # GET /missions/{id}/events
-                self._send(200, {"id": m.id, "events": m.snapshot()["events"]}); return
+                self._send(200, {"id": m.id, "events": m.events_snapshot()}); return
             self._send(200, m.snapshot(event_limit=50)); return   # GET /missions/{id}
         self._send(404, {"error": "not found"})
 
     def _body(self) -> dict:
-        length = int(self.headers.get("Content-Length") or 0)
-        return json.loads(self.rfile.read(length) or b"{}")
+        lengths = self.headers.get_all("Content-Length") or []
+        if len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdigit():
+            raise ValueError("exactly one decimal Content-Length is required")
+        length = int(lengths[0])
+        if length < 0 or length > MAX_REQUEST_BYTES:
+            raise ValueError(f"request body exceeds {MAX_REQUEST_BYTES} bytes")
+        payload = json.loads(self.rfile.read(length) or b"{}")
+        if not isinstance(payload, dict):
+            raise ValueError("JSON body must be an object")
+        return payload
 
     def do_POST(self):
+        if not self._request_gate(require_json=True):
+            return
         parts = [p for p in self.path.split("?", 1)[0].split("/") if p]
         try:
             payload = self._body()
@@ -221,6 +1462,8 @@ class Handler(BaseHTTPRequestHandler):
         if parts == ["mission"]:
             if not str(payload.get("goal") or "").strip():
                 self._send(400, {"error": "goal is required"}); return
+            if payload.get("task_id") is not None and not _valid_task_id(payload.get("task_id")):
+                self._send(400, {"error": "invalid task_id"}); return
             self._send(200, execute_mission(payload)); return
 
         # async lifecycle
@@ -229,11 +1472,48 @@ class Handler(BaseHTTPRequestHandler):
             if not goal:
                 self._send(400, {"error": "goal is required"}); return
             mid = str(payload.get("task_id") or f"m{int(time.time()*1000)}")
-            m = mission_store.create(mid, goal)
-            m.payload = payload   # remembered so the mission can be resumed later
-            m.record("created", {"goal": goal[:300]})
-            mission_store.run_async(m, lambda mm: execute_mission(payload, mm))
-            self._send(202, {"mission_id": mid, "status": m.status}); return
+            if not _valid_task_id(mid):
+                self._send(400, {"error": "invalid task_id"}); return
+            payload = {**payload, "task_id": mid}
+            with _ASYNC_CREATE_LOCK:
+                existing = mission_store.get(mid)
+                if existing is not None:
+                    self._send(409, {
+                        "error": "mission already exists", "mission_id": mid,
+                        "request_sha256": existing.request_sha256,
+                    }); return
+                try:
+                    # ID reservation, exact resumable payload and adoption hash
+                    # become visible atomically under the mission-store lock.
+                    m = mission_store.create_and_run(
+                        mid,
+                        goal,
+                        payload,
+                        lambda mm: execute_mission(payload, mm),
+                        on_created=lambda mission: mission.record(
+                            "created", {"goal": goal[:300]}
+                        ),
+                    )
+                except mission_store.MissionExistsError:
+                    existing = mission_store.get(mid)
+                    self._send(409, {
+                        "error": "mission already exists", "mission_id": mid,
+                        "request_sha256": (
+                            existing.request_sha256 if existing else None
+                        ),
+                    }); return
+                except mission_store.PayloadTooLargeError as exc:
+                    self._send(413, {"error": str(exc), "mission_id": mid}); return
+                except mission_store.MissionCapacityError as exc:
+                    self._send(429, {
+                        "error": str(exc), "mission_id": mid, "retryable": True,
+                    }); return
+                except mission_store.MissionPersistenceError as exc:
+                    self._send(507, {"error": str(exc), "mission_id": mid}); return
+            self._send(202, {
+                "mission_id": mid, "status": m.status,
+                "request_sha256": m.request_sha256,
+            }); return
         if len(parts) == 3 and parts[0] == "missions":
             m = mission_store.get(parts[1])
             if not m:
@@ -242,10 +1522,29 @@ class Handler(BaseHTTPRequestHandler):
                 ok = m.provide_answer(str(payload.get("answer") or ""))
                 self._send(200 if ok else 409, {"ok": ok, "status": m.status}); return
             if parts[2] == "cancel":           # POST /missions/{id}/cancel
-                self._send(200, {"ok": mission_store.cancel(parts[1]), "status": m.status}); return
+                cancel_error = None
+                with _MISSION_EXECUTOR_LOCK:
+                    try:
+                        ok = mission_store.cancel(parts[1], expected=m)
+                    except mission_store.MissionPersistenceError as exc:
+                        ok = False
+                        cancel_error = exc
+                    executor = getattr(m, "executor", None)
+                cancel_commands = getattr(executor, "cancel_current_commands", None)
+                if (ok or cancel_error is not None) and callable(cancel_commands):
+                    cancel_commands()
+                if cancel_error is not None:
+                    self._send(507, {
+                        "ok": False, "status": "blocked", "error": str(cancel_error),
+                    }); return
+                self._send(200, {"ok": ok, "status": m.status}); return
             if parts[2] == "resume":           # POST /missions/{id}/resume -> retry a stopped mission
                 ok = mission_store.resume(
-                    parts[1], lambda mm: execute_mission(getattr(mm, "payload", None) or {"goal": mm.goal}, mm))
+                    parts[1],
+                    lambda mm: execute_mission(mm.payload, mm),
+                    expected=m,
+                    require_payload=True,
+                )
                 self._send(200 if ok else 409, {"ok": ok, "status": m.status}); return
         self._send(404, {"error": "not found"})
 

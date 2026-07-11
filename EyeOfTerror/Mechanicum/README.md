@@ -1,52 +1,74 @@
 # EyeOfTerror Mechanicum
 
-This folder is the EyeOfTerror-side home for code-governance structure.
+This folder contains the active coding warband and its evaluation boundary.
 
-- `Ceraxia/` contains the code-brigade governor evaluation protocol, field
-  trials, ledger, dry-run lifecycle controller, run package audit, summary
-  schema, per-surface verification review, repository read-order evidence, and
-  review material.
-- `CodeBrigade/` contains code-worker grouping and implementation brigade
-  contracts. It can accept dry-run handoffs, run allowlisted verification, and
-  perform read-only execution preflight checks, but real source mutation is
-  still intentionally blocked.
-- `PlanningBrigade/` contains Ceraxia's advisory planning department: task
-  triage, problem framing, path-hint extraction, repository survey request,
-  dependency mapping, work breakdown, impact analysis, surface verification
-  mapping, acceptance contracts, self-review, risk register, role quality
-  gates, and field-trial coverage gates.
+## Current Architecture
 
-Runtime worker implementations can stay in the top-level `Mechanicum/` service
-tree until each brigade boundary is stable.
+- `Skitarii/` is the executable coding warband. Its service listens on port
+  `7200` and owns clarification, repository exploration, planning, isolated VM
+  execution, fighter/reviewer loops, behavioural acceptance, patch bundling,
+  and async mission lifecycle.
+- `Ceraxia/` retains historical governor evaluations and review material. It is
+  not the active worker implementation.
+- Warmaster's Ceraxia service on port `7104` preserves the established six-step
+  code contract for compatibility. The old CodeBrigade worker names are virtual
+  contract adapters only; `skitarii_bridge.py` hands actual execution to the
+  Skitarii Warband.
 
-`boundary_self_test.py` protects this split: brigade governance and contracts
-live here, while root-level `Mechanicum/` remains the legacy/shared worker
-runtime until a worker is intentionally migrated.
+The retired `CodeBrigade/Workers` and `PlanningBrigade` implementations must not
+be reported as live services or extended as a second coding architecture.
 
-`mechanicum_status.py` reports component maturity for orchestration. It should
-stay honest: contract-only components must not be reported as executable
-workers until a real adapter exists. Its JSON output also carries the current
-architecture roadmap, ordered by priority.
+## Safety and Acceptance
 
-`contracts_self_test.py` checks that generated packets and run artifacts still
-satisfy the required fields declared by the local JSON schema files, including
-execution policy, execution result, evidence matrix, and run summary contracts.
-It is intentionally small and stdlib-only; detailed schema validation can come
-later.
+Patch missions receive an exact bounded inline snapshot of Git-visible files.
+Clean tracked assets above the inline cap remain immutable and are represented
+by path, size, mode, and SHA-256; dirty or untracked oversized files block the
+mission. File modes, safe in-repository symlinks, binary content, and deleted
+paths are carried as baseline data. Returned patches are built against the
+original baseline, include new/deleted/binary changes, and must apply and pass
+their checks in an isolated self-contained clone before Warmaster can report
+success. If live auto-apply is disabled, Warmaster reports `ready_to_apply` and
+publishes `work/skitarii.patch`; it does not claim that the repository changed.
+The returned action is executable through
+`POST /runs/{task_id}/apply_patch` and requires the recorded repository
+fingerprint. The gateway rechecks the patch under a repository lock, reruns
+tests after live apply, and rolls back only when the post-apply state is proven
+unchanged. The native result and patch are readable through the standard
+`/final`, `/artifacts`, and `/artifact_text` endpoints.
 
-Current source mutation status: narrow explicit-patch and guarded inference
-only. `CodeBrigade` can apply `CERAXIA_PATCH` operations against surveyed
-repo-relative files after brief validation and preflight, and it can infer a
-small set of backtick-delimited single-file operations from task text. The next
-hard architecture step is expanding that adapter beyond guarded operations
-while preserving validation, preflight, execution result, verification,
-rollback, and audit contracts.
+Production missions use two acceptance layers: working checks may guide the
+fighter, while a separate verifier head creates private behavioural edge checks
+before implementation. The fighter and its background descendants are stopped
+before the candidate is frozen; private checks run against a disposable copy
+and any verifier mutation blocks acceptance. Both check sets are then rerun
+through bubblewrap with a clean environment, no network, a fresh tmpfs per
+command, bounded output, and cgroup CPU/memory/PID limits. A mission with no
+usable private behavioural check cannot be reported complete.
 
-For fast local iteration inside this folder, run:
+The capability smoke suite keeps its oracle checks private, independently
+applies the actual returned binary patch (including greenfield tasks), protects
+seed test fixtures, and executes candidate code only inside the sandbox VM.
+It records verifier infrastructure failures as unverified rather than blaming
+or accepting the candidate, and attests the loaded service source, instance,
+held-out policy, and model endpoints at both ends of the run. It is a 30-task
+smoke barrier, not a substitute for a real-repository benchmark.
+
+Run the local required barrier:
 
 ```bash
 EyeOfTerror/Mechanicum/check-mechanicum-local.sh
 ```
 
-The repository-level `EyeOfTerror/check-eye-mechanicum.sh` remains the full
-integration gate before committing.
+Run a clean complete capability smoke evaluation and atomically replace the raw
+result file only after all tasks finish:
+
+```bash
+cd EyeOfTerror/Mechanicum/Skitarii
+python3 eval_suite.py --n 0 --out eval_results.json
+```
+
+The repository-level integration gate remains:
+
+```bash
+EyeOfTerror/check-eye-mechanicum.sh
+```

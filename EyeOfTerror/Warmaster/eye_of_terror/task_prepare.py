@@ -3,6 +3,7 @@ the run package (contract, oversight, dispatch), and run task preflight."""
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import urllib.error
 import urllib.request
@@ -32,6 +33,22 @@ from .routing import route_message
 from .run_validation import plan_oversight_errors, verify_prepared_run_package
 from .views import payload_with_task_view
 from EyeOfTerror.common_protocol import governor_plan_from_contract, validate_protocol_payload
+
+
+def _post_governor_json(
+    url: str,
+    payload: dict[str, Any],
+    governor_name: str,
+) -> dict[str, Any]:
+    """Attach the Ceraxia credential only to Ceraxia's own POST endpoints."""
+    headers: dict[str, str] = {}
+    if str(governor_name) == "Ceraxia":
+        token = os.environ.get("CERAXIA_BEARER_TOKEN", "")
+        if any(char in token for char in "\r\n"):
+            raise ValueError("invalid Ceraxia bearer token")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+    return post_json(url, payload, headers=headers)
 
 
 def plan_image_task(task_text, task_id=None):
@@ -136,7 +153,7 @@ def prepare_task_via_governor_service(
     base = f"http://{host}:{service_port}"
     governor_payload = governor_payload_for(message, task_id, commander_order=commander_order)
     try:
-        plan = post_json(base + "/plan", governor_payload)
+        plan = _post_governor_json(base + "/plan", governor_payload, governor.name)
         plan = attach_governor_plan_payload(plan, mission_id_from_commander(task_id, commander_order), commander_order)
     except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
         return {
@@ -251,9 +268,10 @@ def prepare_task_via_governor_service(
             "actions": task_preflight_actions(False, "task_exists", service_task_id, governor_transport="http", governor_host=host, message=message),
         }
     try:
-        prepared = post_json(
+        prepared = _post_governor_json(
             base + "/prepare_run",
             {**governor_payload_for(message, service_task_id, commander_order=commander_order), "run_dir": str(run_dir)},
+            governor.name,
         )
     except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
         return {
@@ -654,7 +672,11 @@ def preflight_task(
                     ),
                 }
         try:
-            plan_payload = post_json(base + "/plan", governor_payload_for(message, task_id, commander_order=commander_order))
+            plan_payload = _post_governor_json(
+                base + "/plan",
+                governor_payload_for(message, task_id, commander_order=commander_order),
+                governor_ref.name,
+            )
             plan_payload = attach_governor_plan_payload(plan_payload, mission_id_from_commander(task_id, commander_order), commander_order)
         except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
             return {

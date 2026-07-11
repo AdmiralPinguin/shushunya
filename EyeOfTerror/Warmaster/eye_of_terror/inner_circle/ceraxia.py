@@ -470,9 +470,9 @@ def plan_actions(contract: dict[str, Any], ok: bool, errors: list[str], missing_
             "method": "POST",
             "endpoint": "POST /prepare_run",
             "body": {
-                "commander_order": "<same commander_order used for /plan>",
                 "task_id": str(contract.get("task_id") or ""),
             },
+            "requires": ["commander_order"],
             "reason": "governor plan is valid and required workers are available",
         }
     else:
@@ -542,11 +542,26 @@ class CeraxiaPlan:
                 continue
             worker_payload = worker.to_dict()
             metadata = worker_metadata(worker.path)
+            path_exists = (REPO_ROOT / worker.path).is_dir()
+            worker_payload["path_exists"] = path_exists
+            worker_payload["compatibility_only"] = not path_exists
             if metadata:
                 worker_payload["status"] = metadata.get("status", "")
                 worker_payload["capabilities"] = metadata.get("capabilities", [])
                 if isinstance(metadata.get("role_contract"), dict):
                     worker_payload["role_contract"] = metadata["role_contract"]
+            else:
+                # The retired CodeBrigade directories are intentionally gone. These
+                # registry entries survive only so existing Warmaster contracts can be
+                # prepared and intercepted by skitarii_bridge; never present them as
+                # live worker services.
+                worker_payload["status"] = "compatibility_adapter"
+                worker_payload["capabilities"] = ["contract_shape_only"]
+                worker_payload["execution_backend"] = "SkitariiWarband"
+                worker_payload["role_contract"] = {
+                    "owned_step": step.step_id,
+                    **step_role_policy(step.step_id),
+                }
             resolved_workers[step.worker] = worker_payload
             if metadata.get("status") == "planned" and step.worker not in {item.get("name") for item in unavailable_workers}:
                 unavailable_workers.append(

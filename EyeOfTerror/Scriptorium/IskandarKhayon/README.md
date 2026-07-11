@@ -2,6 +2,11 @@
 
 Port: `7101`
 
+Architecture status: the current pipeline is frozen as a legacy compatibility
+service while a clean Research Warband is designed. See
+[`REWRITE_DECISION.md`](REWRITE_DECISION.md) for the accepted replacement scope
+and cutover gates.
+
 Iskandar Khayon is the first Inner Circle governor. He owns research, source
 reconstruction, translation, and long-form synthesis tasks. Lore reconstruction
 is a specialized training case inside that broader mandate.

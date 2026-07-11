@@ -1,0 +1,233 @@
+#!/bin/bash
+set -euo pipefail
+export LC_ALL=C
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+IFS=$' \t\n'
+unset CDPATH ENV BASH_ENV
+umask 077
+[ "$#" -ge 1 ] || exit 64
+if [ "$1" = --version ]; then echo skitarii-boundary-v3; exit 0; fi
+tool=$1
+shift
+safe_workdir() {
+  [[ "$1" =~ ^/home/skitarii/work/[A-Za-z0-9_-]+$ ]]
+}
+safe_tempdir() {
+  [[ "$1" =~ ^/home/skitarii/work/\.skitarii-tmp(/(tmp|var-tmp|dev-shm|run-user))?$ ]]
+}
+load_skitarii_uid() {
+  skitarii_uid=$(/usr/bin/id -u skitarii) || exit 70
+  [[ "$skitarii_uid" =~ ^[1-9][0-9]*$ ]] || exit 70
+  user_unit="user@${skitarii_uid}.service"
+}
+mission_unit_re='^skitarii-mission-[0-9a-f]{24}-(cmd|bg)-[0-9a-f]{12}\.service$'
+mission_name_re='^skitarii-mission-[0-9a-f]{24}-(cmd|bg)-[0-9a-f]{12}$'
+mission_slice_re='^skitarii-mission-[0-9a-f]{24}\.slice$'
+not_symlink() { [ ! -L "$1" ]; }
+validate_run_tail() {
+  [ "$#" -eq 24 ] || return 1
+  [[ "${1#--unit=}" =~ ^(skitarii-mission-[0-9a-f]{24})-(cmd|bg)-[0-9a-f]{12}$ ]] \
+    && unit_prefix=${BASH_REMATCH[1]} && [ "$1" != "${1#--unit=}" ] \
+    && [ "$2" = "--property=Slice=${unit_prefix}.slice" ] \
+    && [ "$3" = --property=KillMode=control-group ] \
+    && [ "$4" = --property=SendSIGKILL=yes ] \
+    && [ "$5" = --property=TimeoutStopSec=2s ] \
+    && [ "$6" = --property=NoNewPrivileges=yes ] \
+    && [ "$7" = --property=RestrictSUIDSGID=yes ] \
+    && [ "$8" = --property=ProtectSystem=strict ] \
+    && [ "$9" = --property=ProtectHome=read-only ] \
+    && [ "${10}" = --property=ReadWritePaths=/home/skitarii/work ] \
+    && [ "${11}" = '--property=InaccessiblePaths=/run/systemd/journal /dev/log' ] \
+    && [ "${12}" = --property=IPAddressDeny=10.0.2.2/32 ] \
+    && [ "${13}" = --property=MemoryMax=4294967296 ] \
+    && [ "${14}" = --property=TasksMax=512 ] \
+    && [ "${15}" = --property=CPUQuota=400% ] \
+    && [ "${16}" = --property=LimitFSIZE=1073741824 ] \
+    && [ "${17}" = --property=LimitCORE=0 ] \
+    && [ "${18}" = '--property=BindPaths=/home/skitarii/work/.skitarii-tmp/tmp:/tmp /home/skitarii/work/.skitarii-tmp/var-tmp:/var/tmp /home/skitarii/work/.skitarii-tmp/dev-shm:/dev/shm /home/skitarii/work/.skitarii-tmp/run-user:/run/user' ] \
+    && [[ "${19}" =~ ^--property=RuntimeMaxSec=([0-9]{1,4})s$ ]] \
+    && [ "${BASH_REMATCH[1]}" -ge 1 ] && [ "${BASH_REMATCH[1]}" -le 7200 ] \
+    && [ "${20}" = --uid=skitarii ] && [ "${21}" = --gid=skitarii ] \
+    && [ "${22}" = /bin/bash ] && [ "${23}" = -c ]
+}
+case "$tool" in
+  systemd-run)
+    original=("$@")
+    if [ "$#" -eq 29 ] && [ "$1" = --quiet ] && [ "$2" = --wait ] \
+      && [ "$3" = --collect ] && [ "$4" = --pipe ] && [ "$5" = --service-type=exec ]; then
+      validate_run_tail "${@:6}" || exit 65
+    elif [ "$#" -eq 27 ] && [ "$1" = --quiet ] && [ "$2" = --collect ] \
+      && [ "$3" = --service-type=exec ]; then
+      validate_run_tail "${@:4}" || exit 65
+    else
+      exit 65
+    fi
+    exec /usr/bin/systemd-run "${original[@]}"
+    ;;
+  systemctl)
+    [ "$#" -ge 1 ] || exit 64
+    original=("$@"); sub=$1; shift
+    case "$sub" in
+      mask)
+        [ "$#" -eq 2 ] && [ "$1" = --runtime ] \
+          && [[ "$2" =~ ^user@[1-9][0-9]*\.service$ ]] || exit 65
+        load_skitarii_uid; [ "$2" = "$user_unit" ] || exit 65;;
+      stop)
+        [ "$#" -eq 1 ] || exit 65
+        if [[ "$1" =~ $mission_unit_re ]]; then :
+        elif [[ "$1" =~ $mission_slice_re ]]; then :
+        elif [[ "$1" =~ ^user@[1-9][0-9]*\.service$ ]]; then
+          load_skitarii_uid; [ "$1" = "$user_unit" ] || exit 65
+        else exit 65; fi;;
+      kill) [ "$#" -eq 3 ] && [ "$1" = --kill-whom=all ] && [ "$2" = --signal=KILL ] \
+        && [[ "$3" =~ ^skitarii-mission-[0-9a-f]{24}-(cmd|bg)-[0-9a-f]{12}\.service$ ]] || exit 65;;
+      show) [ "$#" -eq 3 ] && [[ "$1" =~ ^--property=(ControlGroup|MainPID|InvocationID|ActiveState)$ ]] \
+        && [ "$2" = --value ] && [[ "$3" =~ ^skitarii-mission-[0-9a-f]{24}-(cmd|bg)-[0-9a-f]{12}\.service$ ]] || exit 65;;
+      list-units) [ "$#" -eq 5 ] && [ "$1" = --all ] && [ "$2" = --full ] && [ "$3" = --plain ] \
+        && [ "$4" = --no-legend ] && [[ "$5" =~ ^skitarii-mission-[0-9a-f]{24}-\*\.service$ ]] || exit 65;;
+      reset-failed) [ "$#" -eq 1 ] && [[ "$1" =~ ^skitarii-mission-[0-9a-f]{24}-(cmd|bg)-[0-9a-f]{12}\.service$ ]] || exit 65;;
+      set-property)
+        [ "$#" -eq 5 ] && [ "$1" = --runtime ] && [[ "$2" =~ $mission_slice_re ]] \
+          && [ "$3" = MemoryMax=4294967296 ] && [ "$4" = TasksMax=512 ] \
+          && [ "$5" = CPUQuota=400% ] || exit 65;;
+      revert)
+        [ "$#" -eq 1 ] && [[ "$1" =~ $mission_slice_re ]] || exit 65;;
+      is-enabled)
+        [ "$#" -eq 1 ] && [[ "$1" =~ ^user@[1-9][0-9]*\.service$ ]] || exit 65
+        load_skitarii_uid; [ "$1" = "$user_unit" ] || exit 65;;
+      is-active)
+        [ "$#" -eq 2 ] && [ "$1" = --quiet ] \
+          && { [[ "$2" =~ ^user@[1-9][0-9]*\.service$ ]] || [[ "$2" =~ $mission_slice_re ]]; } \
+          || exit 65
+        if [[ "$2" =~ ^user@ ]]; then
+          load_skitarii_uid; [ "$2" = "$user_unit" ] || exit 65
+        fi;;
+      *) exit 65;;
+    esac
+    exec /usr/bin/systemctl "${original[@]}"
+    ;;
+  mkdir)
+    if [ "$#" -eq 2 ] && [ "$1" = -p ] && [ "$2" = /home/skitarii/.ssh ]; then :
+    elif [ "$#" -eq 3 ] && [ "$1" = -p ] && [ "$2" = -- ] \
+      && { [ "$3" = /home/skitarii/work ] || safe_workdir "$3" || safe_tempdir "$3"; }; then :
+    else exit 65; fi
+    exec /usr/bin/mkdir "$@";;
+  chown)
+    if [ "$#" -eq 3 ] && [ "$1" = -hR ] && [ "$2" = root:root ] \
+      && [ "$3" = /home/skitarii ] && not_symlink "$3"; then :
+    elif [ "$#" -eq 2 ] && [ "$1" = root:root ] \
+      && { [ "$2" = /home/skitarii/.ssh/authorized_keys ] || [ "$2" = /home/skitarii/work ]; } \
+      && not_symlink "$2"; then :
+    elif [ "$#" -eq 3 ] && [ "$1" = root:root ] && [ "$2" = -- ] \
+      && [ "$3" = /home/skitarii/work ] && not_symlink "$3"; then :
+    elif [ "$#" -eq 4 ] && [ "$1" = -hR ] && [ "$2" = skitarii:skitarii ] \
+      && [ "$3" = -- ] && safe_workdir "$4" && not_symlink "$4"; then :
+    else exit 65; fi
+    exec /usr/bin/chown "$@";;
+  chmod)
+    if [ "$#" -eq 2 ] && [ "$1" = 0755 ] \
+      && { [ "$2" = /home/skitarii ] || [ "$2" = /home/skitarii/.ssh ]; } \
+      && not_symlink "$2"; then :
+    elif [ "$#" -eq 2 ] && [ "$1" = 0711 ] \
+      && [ "$2" = /home/skitarii/work ] && not_symlink "$2"; then :
+    elif [ "$#" -eq 2 ] && [ "$1" = 0644 ] \
+      && [ "$2" = /home/skitarii/.ssh/authorized_keys ] && not_symlink "$2"; then :
+    elif [ "$#" -eq 3 ] && [ "$1" = 0711 ] && [ "$2" = -- ] \
+      && [ "$3" = /home/skitarii/work ] && not_symlink "$3"; then :
+    elif [ "$#" -eq 3 ] && [ "$1" = 0700 ] && [ "$2" = -- ] \
+      && safe_workdir "$3" && not_symlink "$3"; then :
+    elif [ "$#" -eq 3 ] && [ "$1" = 0755 ] && [ "$2" = -- ] \
+      && [ "$3" = /home/skitarii/work/.skitarii-tmp ] && not_symlink "$3"; then :
+    elif [ "$#" -eq 3 ] && [ "$1" = 01777 ] && [ "$2" = -- ] \
+      && safe_tempdir "$3" && [ "$3" != /home/skitarii/work/.skitarii-tmp ] \
+      && not_symlink "$3"; then :
+    else exit 65; fi
+    exec /usr/bin/chmod "$@";;
+  mount)
+    [ "$#" -eq 6 ] && [ "$1" = -t ] && [ "$2" = tmpfs ] && [ "$3" = -o ] \
+      && [ "$4" = size=1073741824,nr_inodes=50000,nosuid,nodev,mode=0711,uid=0,gid=0 ] \
+      && [ "$5" = tmpfs ] && [ "$6" = /home/skitarii/work ] \
+      && not_symlink "$6" || exit 65
+    exec /usr/bin/mount "$@";;
+  umount)
+    [ "$#" -eq 2 ] && [ "$1" = -- ] && [ "$2" = /home/skitarii/work ] \
+      && not_symlink "$2" || exit 65
+    exec /usr/bin/umount "$@";;
+  mountpoint)
+    [ "$#" -eq 3 ] && [ "$1" = -q ] && [ "$2" = -- ] \
+      && [ "$3" = /home/skitarii/work ] && not_symlink "$3" || exit 65
+    exec /usr/bin/mountpoint "$@";;
+  rm)
+    [ "$#" -ge 3 ] && [ "$1" = -rf ] && [ "$2" = -- ] || exit 65
+    if [ "$#" -eq 3 ] && { [ "$3" = /home/skitarii/work ] || safe_workdir "$3"; }; then :
+    else
+      for arg in "${@:3}"; do
+        [[ "$arg" =~ ^/tmp/skitarii-cache-[A-Za-z0-9_-]+(/(xdg|npm))?$ ]] || exit 65
+      done
+    fi
+    exec /usr/bin/rm "$@";;
+  find)
+    if [ "$#" -eq 17 ] && [ "$1" = /home/skitarii ] \
+      && [ "$2" = -mindepth ] && [ "$3" = 1 ] && [ "$4" = -maxdepth ] \
+      && [ "$5" = 1 ] && [ "$6" = '!' ] && [ "$7" = -name ] \
+      && [ "$8" = .ssh ] && [ "$9" = '!' ] && [ "${10}" = -name ] \
+      && [ "${11}" = work ] && [ "${12}" = -exec ] \
+      && [ "${13}" = /usr/bin/rm ] && [ "${14}" = -rf ] && [ "${15}" = -- ] \
+      && [ "${16}" = '{}' ] && [ "${17}" = + ]; then
+      :
+    elif [ "$#" -eq 14 ] && [ "$1" = /home/skitarii/.ssh ] \
+      && [ "$2" = -mindepth ] && [ "$3" = 1 ] && [ "$4" = -maxdepth ] \
+      && [ "$5" = 1 ] && [ "$6" = '!' ] && [ "$7" = -name ] \
+      && [ "$8" = authorized_keys ] && [ "$9" = -exec ] \
+      && [ "${10}" = /usr/bin/rm ] && [ "${11}" = -rf ] && [ "${12}" = -- ] \
+      && [ "${13}" = '{}' ] && [ "${14}" = + ]; then
+      :
+    elif [ "$#" -eq 5 ] && [ "$1" = /home/skitarii/work ] \
+      && [ "$2" = -mindepth ] && [ "$3" = 1 ] \
+      && [ "$4" = -print ] && [ "$5" = -quit ]; then
+      :
+    elif [ "$#" -eq 13 ] \
+      && [ "$1" = /home/skitarii/work/.skitarii-tmp/tmp ] \
+      && [ "$2" = /home/skitarii/work/.skitarii-tmp/var-tmp ] \
+      && [ "$3" = /home/skitarii/work/.skitarii-tmp/dev-shm ] \
+      && [ "$4" = /home/skitarii/work/.skitarii-tmp/run-user ] \
+      && [ "$5" = -xdev ] && [ "$6" = -mindepth ] && [ "$7" = 1 ] \
+      && [ "$8" = -exec ] && [ "$9" = /usr/bin/rm ] && [ "${10}" = -rf ] \
+      && [ "${11}" = -- ] && [ "${12}" = '{}' ] && [ "${13}" = + ]; then
+      :
+    elif { [ "$#" -eq 14 ] || [ "$#" -eq 15 ]; } \
+      && [ "$1" = /tmp ] && [ "$2" = /var/tmp ] && [ "$3" = /dev/shm ]; then
+      pos=4
+      if [ "$#" -eq 15 ]; then
+        [[ "$4" =~ ^/run/user/[1-9][0-9]*$ ]] || exit 65
+        pos=5
+      fi
+      [ "${!pos}" = -xdev ] || exit 65; ((pos+=1))
+      [ "${!pos}" = -mindepth ] || exit 65; ((pos+=1))
+      [ "${!pos}" = 1 ] || exit 65; ((pos+=1))
+      [ "${!pos}" = -user ] || exit 65; ((pos+=1))
+      requested_uid=${!pos}; ((pos+=1))
+      [[ "$requested_uid" =~ ^[1-9][0-9]*$ ]] || exit 65
+      [ "${!pos}" = -exec ] || exit 65; ((pos+=1))
+      [ "${!pos}" = /usr/bin/rm ] || exit 65; ((pos+=1))
+      [ "${!pos}" = -rf ] || exit 65; ((pos+=1))
+      [ "${!pos}" = -- ] || exit 65; ((pos+=1))
+      [ "${!pos}" = '{}' ] || exit 65; ((pos+=1))
+      [ "${!pos}" = + ] || exit 65
+      load_skitarii_uid
+      [ "$requested_uid" = "$skitarii_uid" ] || exit 65
+      if [ "$#" -eq 15 ]; then [ "$4" = "/run/user/$skitarii_uid" ] || exit 65; fi
+    else
+      exit 65
+    fi
+    exec /usr/bin/find "$@";;
+  sha256sum)
+    [ "$#" -eq 1 ] && [ "$1" = /home/skitarii/.ssh/authorized_keys ] || exit 65
+    exec /usr/bin/sha256sum "$@";;
+  stat)
+    [ "$#" -eq 3 ] && [ "$1" = -c ] && [ "$2" = '%u:%g:%a' ] \
+      && [ "$3" = /home/skitarii/.ssh/authorized_keys ] || exit 65
+    exec /usr/bin/stat "$@";;
+  *) exit 64;;
+esac

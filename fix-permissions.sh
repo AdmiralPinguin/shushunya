@@ -3,10 +3,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-find "$ROOT" -type d -exec chmod 755 {} +
-find "$ROOT" -type f -exec chmod 644 {} +
+# Git owns its internal permission model; never recursively rewrite .git.
+find "$ROOT" -name .git -prune -o -type d -exec chmod 755 {} +
+find "$ROOT" -name .git -prune -o -type f -exec chmod 644 {} +
 
-find "$ROOT" -type f \( \
+find "$ROOT" -name .git -prune -o -type f \( \
   -name '*.sh' -o \
   -name '*.py' -o \
   -name 'cloudflared' -o \
@@ -19,12 +20,30 @@ find "$ROOT" -type f \( \
   -path '*/android-tools/whisper.cpp/build/bin/*' -o \
   -path '*/.gradle-home/caches/*/transformed/aapt2-*-linux/aapt2' -o \
   -path '*/llama.cpp/*' -o \
-  -path '*/WarpWails/tools/ffmpeg-*-static/*' \
+  -path '*/WarpWails/tools/ffmpeg-*-static/ffmpeg' -o \
+  -path '*/WarpWails/tools/ffmpeg-*-static/ffprobe' -o \
+  -path '*/WarpWails/tools/ffmpeg-*-static/qt-faststart' \
 \) -exec chmod 755 {} +
 
 if [ -d "$ROOT/.secrets" ]; then
   chmod 700 "$ROOT/.secrets"
   find "$ROOT/.secrets" -type f -exec chmod 600 {} +
+fi
+
+# Restore strict modes for local credentials after the broad source-tree pass.
+find "$ROOT" -name .git -prune -o -type f \( \
+  -name '.env' -o \
+  -name '.env.bak-*' -o \
+  -name '.roxdub-server-token' -o \
+  -name 'google-services.json' -o \
+  -iname '*service-account*.json' \
+\) -exec chmod 600 {} +
+
+if [ -f "$ROOT/.git/git-credentials" ]; then
+  chmod 600 "$ROOT/.git/git-credentials"
+fi
+if [ -f "$ROOT/CoreOfMadness/vm-sandbox/skitarii_key" ]; then
+  chmod 600 "$ROOT/CoreOfMadness/vm-sandbox/skitarii_key"
 fi
 
 echo "Permissions restored under $ROOT"

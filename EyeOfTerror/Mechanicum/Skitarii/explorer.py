@@ -42,16 +42,18 @@ def _extract_json(text: str) -> dict[str, Any]:
 _CODE_SUFFIX = ("py", "php", "js", "ts", "go", "java", "rb", "rs", "c", "h", "cpp", "sh", "json")
 
 
-def _full_working_copy(executor: Any, workspace: dict[str, str]) -> tuple[list[str], dict[str, str]]:
+def _full_working_copy(
+    executor: Any, workspace: dict[str, str], inventory: list[str] | None = None,
+) -> tuple[list[str], dict[str, str]]:
     """Enumerate the ACTUAL working copy in the sandbox (not just the caller's preloaded
     slice), so recon reasons over the whole tree. Returns (all_files, heads) where heads
     holds file contents for the preloaded files plus a bounded number of newly-found ones."""
-    all_files: list[str] = []
+    all_files: list[str] = [str(path) for path in (inventory or [])]
     heads = dict(workspace)
     if executor is None:
         return sorted(heads.keys()), heads
     try:
-        out = executor.bash("find . -type f -not -path './.git/*' -not -path './.bg/*' 2>/dev/null | head -400",
+        out = executor.bash("find . -type f -not -path './.git/*' -not -path './.bg/*' 2>/dev/null | sort",
                             timeout=30).get("stdout") or ""
     except Exception:  # noqa: BLE001
         return sorted(heads.keys()), heads
@@ -74,22 +76,34 @@ def _full_working_copy(executor: Any, workspace: dict[str, str]) -> tuple[list[s
     return (sorted(set(all_files) | set(heads.keys())), heads)
 
 
-def explore(goal: str, workspace: dict[str, str] | None, executor: Any = None) -> dict[str, Any]:
+def explore(
+    goal: str,
+    workspace: dict[str, str] | None,
+    executor: Any = None,
+    *,
+    inventory: list[str] | None = None,
+) -> dict[str, Any]:
     """Return {target_files, related_files, tests, invariants, risks}. Empty-ish for a
     greenfield task (no workspace) — the fighter just builds from scratch. When an
     executor is given, recon sees the FULL working copy in the sandbox, not just the
     caller's preloaded slice."""
-    if not workspace and executor is None:
+    if not workspace and not inventory and executor is None:
         return {"target_files": [], "related_files": [], "tests": [], "invariants": [], "risks": []}
-    all_files, heads = _full_working_copy(executor, workspace or {})
+    all_files, heads = _full_working_copy(executor, workspace or {}, inventory)
     if not heads and not all_files:
         return {"target_files": [], "related_files": [], "tests": [], "invariants": [], "risks": []}
-    # keep the prompt bounded: full file tree (names) + short heads of the important ones
+    # Give recon the complete inventory. Contents stay bounded, but silently hiding the
+    # 401st path made target selection depend on alphabetical luck in larger repos.
+    goal_terms = {t.lower() for t in re.findall(r"[\w.-]{3,}", goal)}
+    ranked_heads = sorted(
+        heads.items(),
+        key=lambda item: (-sum(term in item[0].lower() for term in goal_terms), item[0]),
+    )
     listing = []
-    for path, content in list(heads.items())[:40]:
+    for path, content in ranked_heads[:40]:
         head = "\n".join((content or "").splitlines()[:25])
         listing.append(f"### {path}\n{head}")
-    tree = "\n".join(all_files[:400])
+    tree = "\n".join(all_files)
     prompt = (
         "You are the recon head of a coding warband. Given the TASK, the full file tree of the "
         "working copy, and the heads of the key files, work out where the change goes. Return ONE "
@@ -108,9 +122,9 @@ def explore(goal: str, workspace: dict[str, str] | None, executor: Any = None) -
     def _keep(xs: Any) -> list[str]:
         return [str(x) for x in xs if isinstance(x, str)][:12] if isinstance(xs, list) else []
     return {
-        "target_files": [f for f in _keep(parsed.get("target_files")) if f in known] or _keep(parsed.get("target_files")),
-        "related_files": _keep(parsed.get("related_files")),
-        "tests": _keep(parsed.get("tests")),
+        "target_files": [f for f in _keep(parsed.get("target_files")) if f in known],
+        "related_files": [f for f in _keep(parsed.get("related_files")) if f in known],
+        "tests": [f for f in _keep(parsed.get("tests")) if f in known],
         "invariants": _keep(parsed.get("invariants")),
         "risks": _keep(parsed.get("risks")),
     }

@@ -104,6 +104,9 @@ android-tools/
 
 # Downloaded external kernel/driver tooling
 tools/
+!WarpWails/tools/
+WarpWails/tools/*
+!WarpWails/tools/*.py
 
 # Mechanicum local runtimes, virtualenvs, models, cloned apps, and generated media
 Mechanicum/RoxDub/RoxDub/
@@ -185,14 +188,13 @@ Corpus/*.txt
 Corpus/*.epub
 Corpus/*.pdf
 
-# Skitarii sandbox VM: private key, disk images, cloud-init
-
 # Skitarii sandbox VM: private key + disk images/logs (NOT the scripts/cloud-init)
 CoreOfMadness/vm-sandbox/skitarii_key
 CoreOfMadness/vm-sandbox/skitarii_key.pub
 CoreOfMadness/vm-sandbox/*.qcow2
 CoreOfMadness/vm-sandbox/*.iso
 CoreOfMadness/vm-sandbox/*.img
+CoreOfMadness/vm-sandbox/*.raw
 CoreOfMadness/vm-sandbox/*.log
 
 # Generated Android signing sidecars
@@ -206,6 +208,8 @@ ArchiveOfHeresy/archive/task_journal_state.json
 WarpWails/refs/
 WarpWails/preview/
 WarpWails/sfx/
+WarpWails/tools/ffmpeg-*-static/
+WarpWails/tools/ffmpeg-static.tar.xz
 
 # Local benchmark outputs
 CoreOfMadness/*-bench-*.json

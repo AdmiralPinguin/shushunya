@@ -236,10 +236,16 @@ def archive_get(path, timeout=30):
 
 
 def shared_chat_answer(chat_id, text, username=None):
+    model_key = selected_model_key(chat_id)
+    llm = selected_model(chat_id)
+    model = str(llm.get("model") or "").strip() or LLM_MODEL
     payload = {
         "session_id": SHARED_CHAT_SESSION_ID,
         "user": SHARED_CHAT_SESSION_ID,
-        "model": LLM_MODEL,
+        # Archive stays the shared-chat front door. The route is an allow-listed
+        # identifier that Archive carries to the local LLM dispatcher.
+        "model": model,
+        "model_route": model_key,
         **archive_flags(chat_id, username=username),
         "max_tokens": MAX_TOKENS,
         "temperature": TEMPERATURE,
@@ -527,7 +533,7 @@ def send_model_picker(chat_id):
     active = DIRECT_MODELS[active_key]
     send_message(
         chat_id,
-        f"Сейчас выбрана: {active['label']}\nСледующие сообщения пойдут напрямую в эту модель.",
+        f"Сейчас выбрана: {active['label']}\nСледующие сообщения будут обработаны этой моделью.",
         reply_markup=model_keyboard(active_key),
     )
 
@@ -552,7 +558,7 @@ def handle_callback_query(callback_query):
 
     CHAT_MODEL_SELECTIONS[str(chat_id)] = key
     config = DIRECT_MODELS[key]
-    send_message(chat_id, f"Переключил на {config['label']}. Следующий запрос пойдет напрямую в нее.")
+    send_message(chat_id, f"Переключил на {config['label']}. Следующий запрос будет обработан ею.")
 
 
 def handle_message(message):
@@ -578,7 +584,7 @@ def handle_message(message):
         active = selected_model(chat_id)
         send_message(
             chat_id,
-            f"Я подключён напрямую к локальной модели: {active['label']}. /model - выбрать модель.",
+            f"Я работаю с локальной моделью: {active['label']}. /model - выбрать модель.",
         )
         return
 
@@ -617,7 +623,7 @@ def main():
     models_summary = ", ".join(
         f"{key}={config['base_url']}:{config['model']}" for key, config in DIRECT_MODELS.items()
     )
-    print(f"Telegram bot started. Direct models: {models_summary}; default={DIRECT_MODEL_DEFAULT}", flush=True)
+    print(f"Telegram bot started. Model routes: {models_summary}; default={DIRECT_MODEL_DEFAULT}", flush=True)
     initialize_shared_delivery_cursor()
 
     while RUNNING:

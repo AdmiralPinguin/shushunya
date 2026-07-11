@@ -16,8 +16,16 @@ cd "$ROOT"
 fail=0
 
 echo "== REQUIRED: Skitarii Warband =="
-python3 EyeOfTerror/Mechanicum/Skitarii/test_skitarii.py || fail=1
-python3 -m py_compile EyeOfTerror/Mechanicum/Skitarii/*.py EyeOfTerror/Warmaster/eye_of_terror/skitarii_bridge.py || fail=1
+python3 -W error -m unittest \
+  EyeOfTerror.Mechanicum.Skitarii.test_skitarii \
+  EyeOfTerror.Mechanicum.Skitarii.test_eval_hardening \
+  EyeOfTerror.Mechanicum.Skitarii.test_service_patch_bundle \
+  EyeOfTerror.Mechanicum.Skitarii.test_ceraxia_facade || fail=1
+python3 -m py_compile \
+  EyeOfTerror/Mechanicum/Skitarii/*.py \
+  EyeOfTerror/Warmaster/eye_of_terror/skitarii_bridge.py \
+  EyeOfTerror/Warmaster/eye_of_terror/inner_circle/ceraxia.py \
+  EyeOfTerror/Warmaster/eye_of_terror/inner_circle/ceraxia_service.py || fail=1
 
 echo "== REQUIRED: Warmaster suites (must stay green) =="
 for s in research_modes_self_test.py research_revision_loop_self_test.py routing_self_test.py \
