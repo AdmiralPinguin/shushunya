@@ -20,7 +20,10 @@ fi
 
 mkdir -p "$RUNTIME_DIR"
 
-if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+# после ребута pid может достаться чужому процессу (pid reuse) — верим только
+# если это реально cloudflared
+if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null \
+   && grep -q "cloudflared" "/proc/$(cat "$PID_FILE")/cmdline" 2>/dev/null; then
   echo "Cloudflare tunnel already running with PID $(cat "$PID_FILE")"
   exit 0
 fi

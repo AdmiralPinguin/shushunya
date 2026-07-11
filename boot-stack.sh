@@ -44,6 +44,9 @@ elif ! curl -fsS --max-time 3 http://127.0.0.1:7500/health >/dev/null 2>&1; then
       >> runtime/warpwails.log 2>&1 & ) || true
 fi
 
+echo "[boot] cloudflare tunnel (chat.shushunya.com — вход для приложения)…"
+bash start-cloudflare-tunnel.sh >/dev/null 2>&1 || echo "  tunnel FAILED (см. runtime/cloudflare/)"
+
 echo "[boot] done. Status:"
 for pp in "8080 gemma" "8081 qwen" "8079 dispatcher" "8090 archive" "7000 gateway" "7101 iskandar" "7104 ceraxia" "7103 moriana" "7200 skitarii-warband" "7300 administratum" "7500 warpwails"; do
   set -- $pp
