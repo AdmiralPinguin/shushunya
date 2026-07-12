@@ -13,5 +13,7 @@ start iskandar 7101 -m eye_of_terror.inner_circle.iskandar_service
 start ceraxia  7104 -m eye_of_terror.inner_circle.ceraxia_service \
       --default-run-root runtime/warmaster-runs
 sleep 4
+export SKITARII_AUTOAPPLY="${SKITARII_AUTOAPPLY:-1}"
+export SKITARII_AUTOPUBLISH="${SKITARII_AUTOPUBLISH:-1}"
 start gateway  7000 -m eye_of_terror.warmaster_gateway --host 127.0.0.1 --port 7000 \
       --run-root runtime/warmaster-runs --governor-transport http --governor-host 127.0.0.1

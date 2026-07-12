@@ -208,6 +208,7 @@ def orchestration_display(
     revision_summary = summary.get("revision_plan_summary") if isinstance(summary.get("revision_plan_summary"), dict) else {}
     headlines = {
         "running": "Run is active",
+        "publishing": "Verified change is being published",
         "completed": "Run completed",
         "ready_to_start": "Run is ready to start",
         "resume_required": "Run can be resumed",
@@ -220,6 +221,8 @@ def orchestration_display(
     headline = headlines.get(phase, "Inspect run state")
     if phase == "running" and planned_steps:
         detail = f"{completed_steps}/{planned_steps} steps complete"
+    elif phase == "publishing":
+        detail = str(next_action.get("reason") or "Commit and origin/main confirmation are in progress")
     elif phase == "completed" and final_summary:
         detail = f"Final package status: {final_summary.get('status') or 'unknown'}"
     elif phase == "revision_required":
@@ -273,6 +276,18 @@ def orchestration_view_fields(
     if active or status in {"running", "queued", "cancelling"}:
         phase = "running"
         next_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/orchestration", "body": {"events_after": event_cursor_next}, "reason": "run is active"}
+    elif status in {
+        "apply_intent", "applied_unverified", "publishing",
+        "push_pending", "protocol_finalize_pending",
+    }:
+        phase = "publishing"
+        next_action = {
+            "kind": "poll",
+            "method": "GET",
+            "endpoint": "GET /runs/{task_id}/orchestration",
+            "body": {"events_after": event_cursor_next},
+            "reason": "autonomous repository publication is recovering or finalizing",
+        }
     elif next_action.get("kind") == "inspect_blockers":
         phase = "blocked"
     elif actions.get("can_start_revision"):
@@ -296,7 +311,7 @@ def orchestration_view_fields(
     elif status == "created":
         phase = "ready_to_preflight"
     decision = {
-        "can_poll": phase == "running",
+        "can_poll": phase in {"running", "publishing"},
         "can_start": phase == "ready_to_start",
         "can_resume": phase == "resume_required",
         "can_execute_revision": phase == "revision_required",

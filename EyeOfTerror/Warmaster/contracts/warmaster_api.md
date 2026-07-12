@@ -381,10 +381,15 @@ Aggregate `/events` responses include the same cursor shape plus `task_id`,
 - `/runs/{task_id}/artifact_text` and `/runs/{task_id}/worker_tasks` include the
   same run detail client-view fields so artifact and worker-task screens can
   render the current run state without a follow-up summary request.
-- `/runs/{task_id}/apply_patch` is the explicit live-repository mutation gate
-  for a completed Skitarii mission. It requires the recorded repository
-  fingerprint, reapplies and verifies the staged patch under the repository
-  lock, and never runs implicitly as part of ordinary orchestration.
+- `/runs/{task_id}/apply_patch` is the authenticated retry/manual entry point
+  for the Skitarii repository transaction. It requires the recorded repository,
+  patch, and verification-set fingerprints. Production ordinary orchestration
+  enters this transaction automatically: verify, live apply, post-check,
+  mission-path-only commit on `main`, non-force push to `origin/main`, remote
+  byte proof, then protocol completion. `apply_intent`, `applied_unverified`,
+  `publishing`, `push_pending`, and `protocol_finalize_pending` are durable
+  recoverable states; the gateway resumes them after restart without regenerating
+  code, reapplying a committed patch, or requiring an operator click.
 - `/runs/{task_id}/package` for run-package diagnostics across
   `contract.json`, `oversight.json`, `status.json`, and dispatch packets. The
   response also includes `run_summary`, `phase`, `decision`, `display`,

@@ -31,14 +31,23 @@ mission. File modes, safe in-repository symlinks, binary content, and deleted
 paths are carried as baseline data. Returned patches are built against the
 original baseline, include new/deleted/binary changes, and must apply and pass
 their checks in an isolated self-contained clone before Warmaster can report
-success. If live auto-apply is disabled, Warmaster reports `ready_to_apply` and
-publishes `work/skitarii.patch`; it does not claim that the repository changed.
-The returned action is executable through
-`POST /runs/{task_id}/apply_patch` and requires the recorded repository
-fingerprint. The gateway rechecks the patch under a repository lock, reruns
-tests after live apply, and rolls back only when the post-apply state is proven
-unchanged. The native result and patch are readable through the standard
-`/final`, `/artifacts`, and `/artifact_text` endpoints.
+success. Production enables both `SKITARII_AUTOAPPLY=1` and
+`SKITARII_AUTOPUBLISH=1`: the gateway serializes repository mutations, refuses
+dirty patch targets, applies the verified patch, reruns its frozen checks,
+commits only the mission paths on `main`, pushes the exact commit without
+force to `origin/main`, and verifies the remote target bytes before reporting
+`completed`. Unrelated staged, unstaged, and untracked owner work is preserved.
+Durable `apply_intent`, `applied_unverified`, `publishing`, `push_pending`, and
+`protocol_finalize_pending` checkpoints resume automatically after a gateway
+restart; they are working states, not user blockers. Cancellation is rejected
+once durable repository mutation has begun.
+
+If live auto-apply is disabled, Warmaster reports `ready_to_apply` and publishes
+`work/skitarii.patch`; it does not claim that the repository changed. The same
+transaction can be entered or retried through `POST /runs/{task_id}/apply_patch`
+with the recorded repository, patch, and check fingerprints. The native result
+and patch are readable through the standard `/final`, `/artifacts`, and
+`/artifact_text` endpoints.
 
 Production missions use two acceptance layers: working checks may guide the
 fighter, while a separate verifier head creates private behavioural edge checks

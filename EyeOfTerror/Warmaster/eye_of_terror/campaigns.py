@@ -592,6 +592,18 @@ def native_code_result_completion(run_root: Path, task_id: str) -> dict[str, Any
                     errors.append(f"Skitarii patch_stage {field} is not true")
             if patch_stage.get("rolled_back"):
                 errors.append("Skitarii patch was rolled back")
+            if patch_stage.get("publication_required") is True:
+                for field in (
+                    "committed_to_main", "pushed_to_origin", "remote_contains_commit",
+                ):
+                    if patch_stage.get(field) is not True:
+                        errors.append(f"Skitarii patch_stage {field} is not true")
+                if patch_stage.get("publication_status") != "pushed":
+                    errors.append("Skitarii patch_stage publication_status is not pushed")
+                if patch_stage.get("remote_target_fingerprint") != patch_stage.get(
+                    "patched_target_fingerprint"
+                ):
+                    errors.append("Skitarii remote main target bytes do not match the verified patch")
 
     return {
         "ok": not errors,

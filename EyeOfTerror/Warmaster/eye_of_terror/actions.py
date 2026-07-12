@@ -142,7 +142,9 @@ def run_actions(
     result_next_action: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     terminal_locked = status in {
-        "blocked", "completed", "running", "cancelling", "queued", "corrupt",
+        "blocked", "completed", "running", "apply_intent", "applied_unverified",
+        "publishing", "push_pending",
+        "protocol_finalize_pending", "cancelling", "queued", "corrupt",
     }
     preflightable = status != "corrupt"
     revision_required = bool(revision_plan.get("required"))
@@ -196,7 +198,10 @@ def run_actions(
         next_action = {"kind": "inspect_blockers", "method": "GET", "endpoint": "GET /runs/{task_id}/summary", "body": {}, "reason": "research loop stopped on a stable blocker"}
     elif revision_runnable:
         next_action = {"kind": "execute_revision", "method": "POST", "endpoint": "POST /runs/{task_id}/start_revision_http", "body": {}, "reason": "revision_plan requires selected steps to rerun"}
-    elif status == "blocked" and explicit_next_action:
+    elif status in {
+        "blocked", "apply_intent", "applied_unverified", "publishing",
+        "push_pending", "protocol_finalize_pending",
+    } and explicit_next_action:
         next_action = explicit_next_action
     elif resume_required:
         next_action = {"kind": "resume", "method": "POST", "endpoint": "POST /runs/{task_id}/start_resume_http", "body": {}, "reason": "run is interrupted and has pending steps"}

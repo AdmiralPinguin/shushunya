@@ -132,6 +132,7 @@ from .artifacts import (
 from .skitarii_bridge import (
     answer_skitarii_mission,
     apply_staged_patch,
+    begin_run_cancellation,
     cancel_skitarii_mission_for_run,
 )
 from .brigade import (
@@ -1310,8 +1311,17 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         expected_patch_sha256=digests["expected_patch_sha256"],
                         expected_checks_sha256=digests["expected_checks_sha256"],
                     )
+                    applied_status = str(applied.get("status") or applied.get("phase") or "")
+                    response_status = (
+                        200 if applied.get("ok")
+                        else 202 if applied_status in {
+                            "apply_intent", "applied_unverified", "publishing",
+                            "push_pending", "protocol_finalize_pending",
+                        }
+                        else 409
+                    )
                     self._apply_response(
-                        200 if applied.get("ok") else 409,
+                        response_status,
                         applied,
                         apply_cors_origin,
                     )
@@ -1328,36 +1338,32 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         response(self, 404, {"ok": False, "error": "ledger not found", "task_id": task_id})
                         return
                     reason = str(payload.get("reason") or "").strip()
-                    ledger = TaskLedger.load(ledger_path)
-                    if ledger.to_dict().get("status") in {"completed", "failed", "blocked", "cancelled", "corrupt"}:
+                    cancellation = begin_run_cancellation(run_dir, reason)
+                    if not cancellation.get("ok"):
+                        cancellation_status = str(cancellation.get("status") or "")
                         inspect_action = {"kind": "inspect", "method": "GET", "endpoint": "GET /runs/{task_id}/summary", "body": {}, "reason": "run is already terminal"}
+                        if cancellation_status in {
+                            "apply_intent", "applied_unverified", "publishing",
+                            "push_pending", "protocol_finalize_pending",
+                        }:
+                            inspect_action = {
+                                "kind": "poll", "method": "GET",
+                                "endpoint": "GET /runs/{task_id}/orchestration", "body": {},
+                                "reason": "repository mutation is already durable and must finish safely",
+                            }
                         response(
                             self,
                             409,
                             {
                                 "ok": False,
                                 "task_id": task_id,
-                                "error": "run is already terminal",
-                                "ledger": ledger.to_dict(),
+                                "status": cancellation_status,
+                                "error": str(cancellation.get("error") or "run is already terminal"),
+                                "ledger": cancellation.get("ledger") or {},
                                 "next_action": inspect_action,
                                 "client_action": executable_client_action(task_id, inspect_action),
                             },
                         )
-                        return
-                    if not ledger.request_cancel(reason):
-                        refreshed = TaskLedger.load(ledger_path)
-                        inspect_action = {
-                            "kind": "inspect", "method": "GET",
-                            "endpoint": "GET /runs/{task_id}/summary", "body": {},
-                            "reason": "run became terminal before cancellation was recorded",
-                        }
-                        response(self, 409, {
-                            "ok": False, "task_id": task_id,
-                            "error": "run is already terminal",
-                            "ledger": refreshed.to_dict(),
-                            "next_action": inspect_action,
-                            "client_action": executable_client_action(task_id, inspect_action),
-                        })
                         return
                     try:
                         skitarii_cancellation = cancel_skitarii_mission_for_run(
@@ -1417,7 +1423,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                             "ok": True,
                             "task_id": task_id,
                             "status": "cancelling",
-                            "ledger": ledger.to_dict(),
+                            "ledger": TaskLedger.load(ledger_path).to_dict(),
                             "skitarii_cancellation": skitarii_cancellation,
                             "worker_cancellations": worker_cancellations,
                             "next_action": poll_action,
@@ -1793,6 +1799,7 @@ def orphan_run_watchdog(run_root: Path, interval_sec: float = 60.0, grace_sec: f
     while True:
         _time.sleep(interval_sec)
         try:
+            _resume_pending_publications(run_root)
             for ledger_path in run_root.glob("*/task_ledger.json"):
                 try:
                     ledger_data = json.loads(ledger_path.read_text(encoding="utf-8"))
@@ -1835,8 +1842,68 @@ def orphan_run_watchdog(run_root: Path, interval_sec: float = 60.0, grace_sec: f
             print(f"orphan watchdog error: {exc}", flush=True)
 
 
+def _resume_pending_publications(run_root: Path) -> list[str]:
+    """Idempotently resume commit/push/protocol checkpoints after a restart."""
+    if os.environ.get("SKITARII_AUTOPUBLISH") != "1":
+        return []
+    started: list[str] = []
+    for ledger_path in run_root.glob("*/task_ledger.json"):
+        try:
+            ledger = TaskLedger.load(ledger_path)
+            payload = ledger.to_dict()
+            result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+            phase = str(result.get("phase") or result.get("status") or "")
+            if phase not in {
+                "apply_intent", "applied_unverified", "publishing",
+                "push_pending", "protocol_finalize_pending",
+            }:
+                continue
+            stage = result.get("patch_stage") if isinstance(result.get("patch_stage"), dict) else {}
+            fingerprint = str(stage.get("baseline_fingerprint") or "")
+            patch_sha = str(stage.get("patch_sha256") or "")
+            checks_sha = str(stage.get("checks_sha256") or "")
+            if any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in (
+                fingerprint, patch_sha, checks_sha,
+            )):
+                continue
+            task_id = str(payload.get("task_id") or ledger_path.parent.name)
+            run_dir = ledger_path.parent
+
+            def retry(
+                directory: Path = run_dir,
+                expected: str = fingerprint,
+                expected_patch: str = patch_sha,
+                expected_checks: str = checks_sha,
+            ) -> None:
+                try:
+                    apply_staged_patch(
+                        directory,
+                        TaskLedger.load(directory / "task_ledger.json"),
+                        expected,
+                        expected_patch_sha256=expected_patch,
+                        expected_checks_sha256=expected_checks,
+                    )
+                except Exception as exc:  # noqa: BLE001 - preserve recoverable checkpoint.
+                    try:
+                        current = TaskLedger.load(directory / "task_ledger.json")
+                        current.record_event(
+                            "skitarii_publication_retry_error",
+                            {"type": type(exc).__name__, "error": str(exc)[:240]},
+                        )
+                    except Exception:
+                        pass
+
+            if start_background(task_id, retry):
+                started.append(task_id)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+    return started
+
+
 def serve(host: str, port: int, run_root: Path, recover_stale_on_start: bool = True, governor_transport: str = "local", governor_host: str = "127.0.0.1") -> None:
     host = _validate_gateway_bind_host(host)
+    run_root.mkdir(parents=True, exist_ok=True)
+    _resume_pending_publications(run_root)
     prepare_run_root(run_root, recover_stale_on_start=recover_stale_on_start)
     threading.Thread(target=orphan_run_watchdog, args=(run_root,), daemon=True, name="orphan-run-watchdog").start()
     server = ThreadingHTTPServer((host, port), make_handler(run_root, default_governor_transport=governor_transport, default_governor_host=governor_host))

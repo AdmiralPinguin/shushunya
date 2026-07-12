@@ -287,11 +287,121 @@ def assert_native_shape(payload: dict, run_dir: Path) -> None:
         raise AssertionError(f"gateway persisted an invalid native package: {errors}")
 
 
+def publication_pending_ledger(run_root: Path, task_id: str, phase: str) -> Path:
+    run_dir = run_root / task_id
+    ledger = warmaster_gateway.TaskLedger.create(
+        run_dir / "task_ledger.json",
+        task_id,
+        "Publish the already verified Skitarii change.",
+        "Ceraxia",
+    )
+    digest_seed = {
+        "baseline_fingerprint": "1" * 64,
+        "patch_sha256": "2" * 64,
+        "checks_sha256": "3" * 64,
+    }
+    ledger.data["result"] = {
+        "kind": "skitarii_bridge_result",
+        "ok": False,
+        "accepted": True,
+        "status": phase,
+        "phase": phase,
+        "patch_stage": dict(digest_seed),
+        "next_action": {
+            "kind": "poll",
+            "method": "GET",
+            "endpoint": "GET /runs/{task_id}/orchestration",
+            "body": {},
+            "reason": "autonomous publication must finish safely",
+        },
+    }
+    ledger.force_status(phase, reason="gateway publication recovery self-test")
+    return run_dir
+
+
+def assert_publication_recovery_scanner() -> None:
+    with tempfile.TemporaryDirectory() as raw_root:
+        run_root = Path(raw_root) / "publication-recovery-runs"
+        expected_phases = {
+            "publication-recover-apply-intent": "apply_intent",
+            "publication-recover-push-pending": "push_pending",
+        }
+        for task_id, phase in expected_phases.items():
+            publication_pending_ledger(run_root, task_id, phase)
+        publication_pending_ledger(run_root, "publication-recover-ignore", "running")
+
+        callbacks: dict[str, object] = {}
+
+        def capture_background(task_id: str, executor: object) -> bool:
+            callbacks[task_id] = executor
+            return True
+
+        with (
+            mock.patch.dict(os.environ, {"SKITARII_AUTOPUBLISH": "1"}, clear=False),
+            mock.patch.object(
+                warmaster_gateway,
+                "start_background",
+                side_effect=capture_background,
+            ) as start_mock,
+            mock.patch.object(
+                warmaster_gateway,
+                "apply_staged_patch",
+                return_value={"ok": True, "status": "completed"},
+            ) as apply_mock,
+        ):
+            started = warmaster_gateway._resume_pending_publications(run_root)
+            if set(started) != set(expected_phases) or set(callbacks) != set(expected_phases):
+                raise AssertionError(
+                    "startup publication scanner did not adopt both durable checkpoints: "
+                    f"started={started}, callbacks={sorted(callbacks)}"
+                )
+            if start_mock.call_count != len(expected_phases):
+                raise AssertionError(f"startup scanner scheduled an unexpected run: {start_mock.call_args_list}")
+            for task_id in sorted(callbacks):
+                callback = callbacks[task_id]
+                if not callable(callback):
+                    raise AssertionError(f"startup scanner produced a non-callable retry for {task_id}")
+                callback()
+            if apply_mock.call_count != len(expected_phases):
+                raise AssertionError(
+                    "startup publication retries did not reach the idempotent apply/publish entrypoint: "
+                    f"calls={apply_mock.call_args_list}"
+                )
+            applied_task_ids = {
+                str(call.args[0].name)
+                for call in apply_mock.call_args_list
+            }
+            if applied_task_ids != set(expected_phases):
+                raise AssertionError(
+                    "startup publication scanner retried the wrong ledgers: "
+                    f"task_ids={sorted(applied_task_ids)}"
+                )
+            for call in apply_mock.call_args_list:
+                if (
+                    call.args[2] != "1" * 64
+                    or call.kwargs.get("expected_patch_sha256") != "2" * 64
+                    or call.kwargs.get("expected_checks_sha256") != "3" * 64
+                ):
+                    raise AssertionError(
+                        "startup publication scanner lost caller-bound patch identity: "
+                        f"call={call}"
+                    )
+
+        with (
+            mock.patch.dict(os.environ, {"SKITARII_AUTOPUBLISH": "0"}, clear=False),
+            mock.patch.object(warmaster_gateway, "start_background") as disabled_start,
+        ):
+            if warmaster_gateway._resume_pending_publications(run_root) != []:
+                raise AssertionError("startup scanner ran while autonomous publication was disabled")
+            disabled_start.assert_not_called()
+
+
 def main() -> int:
     warmaster_gateway.request_model_decision = fake_model_decision
     local_executor.request_model_decision = fake_model_decision
     mission_control.request_model_decision = fake_model_decision
     routing.request_model_decision = fake_model_decision
+    assert_publication_recovery_scanner()
 
     # The production path resolves this correctly from EyeOfTerror/Warmaster.
     # This assignment also supports the flattened local review snapshot.
@@ -385,6 +495,77 @@ def main() -> int:
                 health = request_json(gateway_base + "/health")
                 if health.get("gateway") != "WarmasterGateway" or health.get("display_name") != "Abaddon":
                     raise AssertionError(f"bad gateway identity: {health}")
+
+                pending_task_id = "native-publication-push-pending"
+                pending_run = publication_pending_ledger(
+                    run_root,
+                    pending_task_id,
+                    "push_pending",
+                )
+                pending_summary = request_json(
+                    gateway_base + f"/runs/{pending_task_id}/summary"
+                )
+                pending_orchestration = request_json(
+                    gateway_base + f"/runs/{pending_task_id}/orchestration"
+                )
+                pending_runs = request_json(gateway_base + "/runs")
+                summary_payload = (
+                    pending_summary.get("summary")
+                    if isinstance(pending_summary.get("summary"), dict)
+                    else {}
+                )
+                summary_mission = (
+                    summary_payload.get("mission_state")
+                    if isinstance(summary_payload.get("mission_state"), dict)
+                    else {}
+                )
+                orchestration_mission = (
+                    pending_orchestration.get("mission_state")
+                    if isinstance(pending_orchestration.get("mission_state"), dict)
+                    else {}
+                )
+                if (
+                    summary_payload.get("status") != "push_pending"
+                    or summary_payload.get("lifecycle_status") != "executing"
+                    or summary_mission.get("status") != "executing"
+                    or summary_mission.get("user_visible_state") != "working"
+                    or pending_summary.get("phase") != "publishing"
+                    or pending_summary.get("decision", {}).get("can_poll") is not True
+                    or pending_summary.get("phase") == "blocked"
+                    or pending_orchestration.get("status") != "push_pending"
+                    or pending_orchestration.get("phase") != "publishing"
+                    or pending_orchestration.get("decision", {}).get("can_poll") is not True
+                    or orchestration_mission.get("status") != "executing"
+                    or orchestration_mission.get("user_visible_state") != "working"
+                    or pending_runs.get("run_summary", {}).get("by_status", {}).get("push_pending") != 1
+                ):
+                    raise AssertionError(
+                        "durable push_pending was exposed as blocked or terminal: "
+                        f"summary={pending_summary}, orchestration={pending_orchestration}, "
+                        f"runs={pending_runs.get('run_summary')}"
+                    )
+
+                rejected_cancel = request_json(
+                    gateway_base + f"/runs/{pending_task_id}/cancel",
+                    {"reason": "must not interrupt an in-flight repository publication"},
+                    expected_status=409,
+                )
+                pending_ledger = json.loads(
+                    (pending_run / "task_ledger.json").read_text(encoding="utf-8")
+                )
+                if (
+                    rejected_cancel.get("ok") is not False
+                    or rejected_cancel.get("status") != "push_pending"
+                    or rejected_cancel.get("next_action", {}).get("kind") != "poll"
+                    or pending_ledger.get("status") != "push_pending"
+                    or pending_ledger.get("cancel_requested")
+                    or pending_ledger.get("cancel_reason")
+                    or pending_ledger.get("result", {}).get("phase") != "push_pending"
+                ):
+                    raise AssertionError(
+                        "cancel crossed the durable publication boundary: "
+                        f"response={rejected_cancel}, ledger={pending_ledger}"
+                    )
 
                 plan = request_json(gateway_base + "/brigade_plan")
                 warbands = plan.get("warbands") if isinstance(plan.get("warbands"), list) else []

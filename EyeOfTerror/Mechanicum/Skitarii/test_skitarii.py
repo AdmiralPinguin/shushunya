@@ -1336,6 +1336,19 @@ class TestExecutorTools(unittest.TestCase):
 class TestBridge(unittest.TestCase):
     """Real tests of the Warmaster→Skitarii bridge (not stubs)."""
 
+    class PublicationLedger:
+        def __init__(self):
+            self.data: dict[str, object] = {}
+            self.events: list[tuple[str, object]] = []
+            self.status = "running"
+
+        def record_event(self, kind, payload):
+            self.events.append((kind, payload))
+
+        def force_status(self, status, reason=""):
+            self.status = status
+            self.data["status_reason"] = reason
+
     @classmethod
     def setUpClass(cls):
         root = Path(__file__).resolve().parents[3]  # repo root
@@ -1343,6 +1356,98 @@ class TestBridge(unittest.TestCase):
         sys.path.insert(0, str(root / "EyeOfTerror" / "Warmaster"))
         from eye_of_terror import skitarii_bridge
         cls.b = skitarii_bridge
+
+    def _publication_repo(self, files: dict[str, str]) -> tuple[Path, Path, str]:
+        base = Path(tempfile.mkdtemp(prefix="skitarii-publish-test-"))
+        root = base / "repo"
+        origin = base / "origin.git"
+        subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.email", "owner@example.invalid"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.name", "Repository Owner"],
+            check=True,
+        )
+        for relative, content in files.items():
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "remote", "add", "origin", str(origin)],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "push", "-q", "origin", "main:refs/heads/main"],
+            check=True,
+        )
+        base_head = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        return root, origin, base_head
+
+    def _run_autopublished_patch(
+        self,
+        root: Path,
+        snapshot,
+        unified_diff: str,
+        checks: list[dict[str, object]],
+    ) -> tuple[dict[str, object], object, Path]:
+        run_dir = Path(tempfile.mkdtemp(prefix="skitarii-publish-run-"))
+        runtime_dir = run_dir / "runtime"
+        runtime_dir.mkdir()
+        ledger = self.PublicationLedger()
+        original = self.b.REPO_ROOT
+        self.b.REPO_ROOT = root
+        try:
+            with patch.dict(
+                os.environ,
+                {
+                    "SKITARII_AUTOAPPLY": "1",
+                    "SKITARII_AUTOPUBLISH": "1",
+                    "XDG_RUNTIME_DIR": str(runtime_dir),
+                },
+            ):
+                result = self.b._verify_and_stage_patch(
+                    {
+                        "patch_bundle": {"unified_diff": unified_diff},
+                        "checks": checks,
+                    },
+                    run_dir,
+                    ledger,
+                    snapshot,
+                )
+        finally:
+            self.b.REPO_ROOT = original
+        return result, ledger, run_dir
+
+    def _publication_snapshot(self, root: Path):
+        original = self.b.REPO_ROOT
+        self.b.REPO_ROOT = root
+        try:
+            return self.b._full_repo_snapshot()
+        finally:
+            self.b.REPO_ROOT = original
+
+    @staticmethod
+    def _commit_paths(root: Path, base_head: str, commit_sha: str) -> list[str]:
+        changed = subprocess.run(
+            [
+                "git", "-C", str(root), "diff-tree", "--no-commit-id",
+                "--name-only", "--no-renames", "-r", "-z",
+                base_head, commit_sha, "--",
+            ],
+            check=True, capture_output=True,
+        ).stdout
+        return sorted(
+            item.decode("utf-8", errors="strict")
+            for item in changed.split(b"\0") if item
+        )
 
     def test_traversal_refused(self):
         self.assertIsNone(self.b._safe_repo_file("../../etc/passwd"))
@@ -2237,6 +2342,468 @@ class TestBridge(unittest.TestCase):
         self.assertTrue(result["post_apply_tests_passed"])
         self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(2)\n")
         self.assertEqual((root / "notes.txt").read_text(encoding="utf-8"), "owner wip\n")
+
+    def test_autopublish_pushes_exact_patch_and_preserves_unrelated_owner_state(self):
+        root, origin, base_head = self._publication_repo({
+            "a.py": "print(1)\n",
+            "owner.txt": "owner base\n",
+            "staged.txt": "staged base\n",
+        })
+        (root / "owner.txt").write_text("owner unstaged\n", encoding="utf-8")
+        (root / "staged.txt").write_text("owner staged\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "staged.txt"], check=True)
+        (root / "untracked.txt").write_text("owner untracked\n", encoding="utf-8")
+        snapshot = self._publication_snapshot(root)
+
+        result, _ledger, _run_dir = self._run_autopublished_patch(
+            root,
+            snapshot,
+            """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1 +1 @@
+-print(1)
++print(2)
+""",
+            [{"cmd": "python3 a.py", "expect_stdout": "2"}],
+        )
+
+        commit_sha = str(result.get("commit_sha") or "")
+        remote_sha = subprocess.run(
+            ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        self.assertTrue(self.b._patch_stage_passed(
+            result, require_applied=True, require_published=True,
+        ))
+        self.assertEqual(result["publication_status"], "pushed")
+        self.assertTrue(result["committed_to_main"])
+        self.assertTrue(result["pushed_to_origin"])
+        self.assertEqual(commit_sha, remote_sha)
+        self.assertEqual(self._commit_paths(root, base_head, commit_sha), ["a.py"])
+        self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(2)\n")
+        self.assertEqual((root / "owner.txt").read_text(encoding="utf-8"), "owner unstaged\n")
+        self.assertEqual((root / "untracked.txt").read_text(encoding="utf-8"), "owner untracked\n")
+        self.assertEqual(
+            subprocess.run(
+                ["git", "-C", str(root), "show", ":staged.txt"],
+                check=True, capture_output=True, text=True,
+            ).stdout,
+            "owner staged\n",
+        )
+        self.assertEqual(
+            subprocess.run(
+                ["git", "-C", str(root), "diff", "--cached", "--name-only"],
+                check=True, capture_output=True, text=True,
+            ).stdout.splitlines(),
+            ["staged.txt"],
+        )
+        status = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain=v1"],
+            check=True, capture_output=True, text=True,
+        ).stdout.splitlines()
+        self.assertIn(" M owner.txt", status)
+        self.assertIn("M  staged.txt", status)
+        self.assertIn("?? untracked.txt", status)
+
+    def test_autopublish_commits_new_and_deleted_targets_only(self):
+        root, origin, base_head = self._publication_repo({
+            "gone.txt": "old\n",
+            "keep.txt": "keep\n",
+        })
+        snapshot = self._publication_snapshot(root)
+
+        result, _ledger, _run_dir = self._run_autopublished_patch(
+            root,
+            snapshot,
+            """diff --git a/gone.txt b/gone.txt
+deleted file mode 100644
+--- a/gone.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-old
+diff --git a/new.txt b/new.txt
+new file mode 100644
+--- /dev/null
++++ b/new.txt
+@@ -0,0 +1 @@
++new
+""",
+            [{"cmd": "test ! -e gone.txt && grep -qx new new.txt"}],
+        )
+
+        commit_sha = str(result.get("commit_sha") or "")
+        remote_sha = subprocess.run(
+            ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        self.assertIn("publication_status", result, result)
+        self.assertEqual(result["publication_status"], "pushed")
+        self.assertEqual(commit_sha, remote_sha)
+        self.assertEqual(
+            self._commit_paths(root, base_head, commit_sha),
+            ["gone.txt", "new.txt"],
+        )
+        self.assertFalse((root / "gone.txt").exists())
+        self.assertEqual((root / "new.txt").read_text(encoding="utf-8"), "new\n")
+        self.assertEqual((root / "keep.txt").read_text(encoding="utf-8"), "keep\n")
+        self.assertEqual(
+            subprocess.run(
+                ["git", "-C", str(root), "show", f"{commit_sha}:new.txt"],
+                check=True, capture_output=True, text=True,
+            ).stdout,
+            "new\n",
+        )
+        deleted = subprocess.run(
+            ["git", "-C", str(root), "cat-file", "-e", f"{commit_sha}:gone.txt"],
+            capture_output=True,
+        )
+        self.assertNotEqual(deleted.returncode, 0)
+
+    def test_autopublish_dirty_target_preflight_blocks_before_live_mutation(self):
+        root, origin, base_head = self._publication_repo({"a.py": "print(1)\n"})
+        (root / "a.py").write_text("print(9)\n", encoding="utf-8")
+        snapshot = self._publication_snapshot(root)
+
+        result, _ledger, _run_dir = self._run_autopublished_patch(
+            root,
+            snapshot,
+            """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1 +1 @@
+-print(9)
++print(2)
+""",
+            [{"cmd": "python3 a.py", "expect_stdout": "2"}],
+        )
+
+        local_head = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        remote_head = subprocess.run(
+            ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        self.assertFalse(result["applies_to_live"])
+        self.assertFalse(result["applied_to_live"])
+        self.assertEqual(result["publication_status"], "blocked")
+        self.assertIn("dirty patch target", result["reason"])
+        self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(9)\n")
+        self.assertEqual(local_head, base_head)
+        self.assertEqual(remote_head, base_head)
+
+    def test_autopublish_disables_malicious_hooks_and_commit_signing(self):
+        root, origin, base_head = self._publication_repo({"a.py": "print(1)\n"})
+        hook_sentinel = root.parent / "hook-was-run"
+        gpg_sentinel = root.parent / "gpg-was-run"
+        hook_script = (
+            "#!/bin/sh\n"
+            f"printf invoked > '{hook_sentinel}'\n"
+            "exit 91\n"
+        )
+        for hook_name in (
+            "pre-commit", "pre-push", "post-index-change", "reference-transaction",
+        ):
+            hook = root / ".git" / "hooks" / hook_name
+            hook.write_text(hook_script, encoding="utf-8")
+            hook.chmod(0o755)
+        malicious_gpg = root.parent / "malicious-gpg"
+        malicious_gpg.write_text(
+            "#!/bin/sh\n"
+            f"printf invoked > '{gpg_sentinel}'\n"
+            "exit 92\n",
+            encoding="utf-8",
+        )
+        malicious_gpg.chmod(0o755)
+        subprocess.run(
+            ["git", "-C", str(root), "config", "commit.gpgSign", "true"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "config", "gpg.program", str(malicious_gpg)],
+            check=True,
+        )
+        snapshot = self._publication_snapshot(root)
+
+        result, _ledger, _run_dir = self._run_autopublished_patch(
+            root,
+            snapshot,
+            """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1 +1 @@
+-print(1)
++print(2)
+""",
+            [{"cmd": "python3 a.py", "expect_stdout": "2"}],
+        )
+
+        commit_sha = str(result.get("commit_sha") or "")
+        remote_sha = subprocess.run(
+            ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        self.assertEqual(result["publication_status"], "pushed")
+        self.assertEqual(commit_sha, remote_sha)
+        self.assertEqual(self._commit_paths(root, base_head, commit_sha), ["a.py"])
+        self.assertFalse(hook_sentinel.exists())
+        self.assertFalse(gpg_sentinel.exists())
+
+    def test_autopublish_recovers_crash_after_applied_unverified_checkpoint(self):
+        root, origin, base_head = self._publication_repo({"a.py": "print(1)\n"})
+        snapshot = self._publication_snapshot(root)
+        run_dir = Path(tempfile.mkdtemp(prefix="skitarii-publish-crash-run-"))
+        runtime_dir = run_dir / "runtime"
+        runtime_dir.mkdir()
+        ledger = self.PublicationLedger()
+        original_root = self.b.REPO_ROOT
+        original_checkpoint = self.b._persist_publication_checkpoint
+
+        def crash_after_applied_checkpoint(
+            checkpoint_run_dir,
+            checkpoint_ledger,
+            checkpoint_stage,
+            *,
+            phase,
+            reason,
+        ):
+            original_checkpoint(
+                checkpoint_run_dir,
+                checkpoint_ledger,
+                checkpoint_stage,
+                phase=phase,
+                reason=reason,
+            )
+            if phase == "applied_unverified":
+                raise SystemExit("fault injection after durable applied checkpoint")
+
+        self.b.REPO_ROOT = root
+        try:
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "SKITARII_AUTOAPPLY": "1",
+                        "SKITARII_AUTOPUBLISH": "1",
+                        "XDG_RUNTIME_DIR": str(runtime_dir),
+                    },
+                ),
+                patch.object(
+                    self.b,
+                    "_persist_publication_checkpoint",
+                    side_effect=crash_after_applied_checkpoint,
+                ),
+            ):
+                with self.assertRaisesRegex(SystemExit, "fault injection"):
+                    self.b._verify_and_stage_patch(
+                        {
+                            "patch_bundle": {"unified_diff": """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1 +1 @@
+-print(1)
++print(2)
+"""},
+                            "checks": [
+                                {"cmd": "python3 a.py", "expect_stdout": "2"},
+                            ],
+                        },
+                        run_dir,
+                        ledger,
+                        snapshot,
+                    )
+            durable_result = ledger.data.get("result")
+            self.assertIsInstance(durable_result, dict)
+            self.assertEqual(durable_result["phase"], "applied_unverified")
+            interrupted_stage = durable_result["patch_stage"]
+            self.assertEqual(interrupted_stage["publication_status"], "applied_unverified")
+            self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(2)\n")
+            self.assertEqual(
+                subprocess.run(
+                    ["git", "-C", str(root), "rev-parse", "HEAD"],
+                    check=True, capture_output=True, text=True,
+                ).stdout.strip(),
+                base_head,
+            )
+
+            with patch.dict(
+                os.environ,
+                {
+                    "SKITARII_AUTOAPPLY": "1",
+                    "SKITARII_AUTOPUBLISH": "1",
+                    "XDG_RUNTIME_DIR": str(runtime_dir),
+                },
+            ):
+                recovered = self.b._resume_interrupted_publication_apply(
+                    run_dir,
+                    ledger,
+                    interrupted_stage,
+                )
+        finally:
+            self.b.REPO_ROOT = original_root
+
+        commit_sha = str(recovered.get("commit_sha") or "")
+        remote_sha = subprocess.run(
+            ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        commit_count = subprocess.run(
+            ["git", "-C", str(root), "rev-list", "--count", f"{base_head}..{commit_sha}"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        self.assertEqual(recovered["publication_status"], "pushed")
+        self.assertTrue(self.b._published_stage_proof_valid(
+            recovered, verify_remote=True, root=root,
+        ))
+        self.assertEqual(remote_sha, commit_sha)
+        self.assertEqual(commit_count, "1")
+        self.assertEqual(self._commit_paths(root, base_head, commit_sha), ["a.py"])
+        self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(2)\n")
+
+    def test_autopublish_retries_remote_outage_without_duplicate_commit(self):
+        root, origin, base_head = self._publication_repo({"a.py": "print(1)\n"})
+        snapshot = self._publication_snapshot(root)
+        original_remote_main = self.b._remote_main_sha
+        remote_reads = 0
+
+        def remote_outage_after_commit(repo_root):
+            nonlocal remote_reads
+            remote_reads += 1
+            if remote_reads >= 3:
+                raise self.b.SnapshotError("fault-injected origin outage")
+            return original_remote_main(repo_root)
+
+        with patch.object(
+            self.b,
+            "_remote_main_sha",
+            side_effect=remote_outage_after_commit,
+        ):
+            pending, ledger, run_dir = self._run_autopublished_patch(
+                root,
+                snapshot,
+                """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1 +1 @@
+-print(1)
++print(2)
+""",
+                [{"cmd": "python3 a.py", "expect_stdout": "2"}],
+            )
+
+        first_commit = str(pending.get("commit_sha") or "")
+        self.assertEqual(remote_reads, 3)
+        self.assertEqual(pending["publication_status"], "push_pending")
+        self.assertTrue(pending["committed_to_main"])
+        self.assertFalse(pending["pushed_to_origin"])
+        self.assertEqual(
+            subprocess.run(
+                ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip(),
+            base_head,
+        )
+
+        with patch.dict(
+            os.environ,
+            {"XDG_RUNTIME_DIR": str(run_dir / "runtime")},
+        ):
+            retried = self.b._publish_verified_patch(root, pending, run_dir, ledger)
+
+        remote_sha = subprocess.run(
+            ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        commit_count = subprocess.run(
+            ["git", "-C", str(root), "rev-list", "--count", f"{base_head}..HEAD"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        self.assertEqual(retried["publication_status"], "pushed")
+        self.assertEqual(retried["commit_sha"], first_commit)
+        self.assertEqual(remote_sha, first_commit)
+        self.assertEqual(commit_count, "1")
+        self.assertEqual(self._commit_paths(root, base_head, first_commit), ["a.py"])
+
+    def test_published_proof_accepts_only_descendants_preserving_mission_targets(self):
+        root, origin, _base_head = self._publication_repo({
+            "a.py": "print(1)\n",
+            "base.txt": "base\n",
+        })
+        snapshot = self._publication_snapshot(root)
+        stage, _ledger, _run_dir = self._run_autopublished_patch(
+            root,
+            snapshot,
+            """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1 +1 @@
+-print(1)
++print(2)
+""",
+            [{"cmd": "python3 a.py", "expect_stdout": "2"}],
+        )
+        mission_commit = str(stage.get("commit_sha") or "")
+        self.assertTrue(self.b._published_stage_proof_valid(
+            stage, verify_remote=True, root=root,
+        ))
+
+        bad_clone = root.parent / "bad-descendant"
+        subprocess.run(
+            ["git", "clone", "-q", "--branch", "main", str(origin), str(bad_clone)],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(bad_clone), "config", "user.email", "peer@example.invalid"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(bad_clone), "config", "user.name", "Peer"],
+            check=True,
+        )
+        (bad_clone / "a.py").write_text("print(3)\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(bad_clone), "commit", "-qam", "change target"], check=True)
+        subprocess.run(["git", "-C", str(bad_clone), "push", "-q", "origin", "main"], check=True)
+        bad_commit = subprocess.run(
+            ["git", "-C", str(bad_clone), "rev-parse", "HEAD"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        self.assertFalse(self.b._published_stage_proof_valid(
+            stage, verify_remote=True, root=root,
+        ))
+
+        subprocess.run(
+            [
+                "git", "--git-dir", str(origin), "update-ref", "refs/heads/main",
+                mission_commit, bad_commit,
+            ],
+            check=True,
+        )
+        good_clone = root.parent / "good-descendant"
+        subprocess.run(
+            ["git", "clone", "-q", "--branch", "main", str(origin), str(good_clone)],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(good_clone), "config", "user.email", "peer@example.invalid"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(good_clone), "config", "user.name", "Peer"],
+            check=True,
+        )
+        (good_clone / "unrelated.txt").write_text("later\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(good_clone), "add", "unrelated.txt"], check=True)
+        subprocess.run(
+            ["git", "-C", str(good_clone), "commit", "-qm", "unrelated descendant"],
+            check=True,
+        )
+        subprocess.run(["git", "-C", str(good_clone), "push", "-q", "origin", "main"], check=True)
+
+        self.assertTrue(self.b._published_stage_proof_valid(
+            stage, verify_remote=True, root=root,
+        ))
 
     def test_unrelated_mutation_during_postcheck_does_not_fail_or_get_rolled_back(self):
         root = Path(tempfile.mkdtemp())
@@ -4143,8 +4710,14 @@ new file mode 100644
         self.assertTrue(reconciled["ok"])
         self.assertEqual(reconciled["status"], "completed")
         self.assertEqual(finalizer_calls, 2)
-        self.assertEqual(pre_finalize_states[0], ("blocked", "protocol_finalize_pending"))
-        self.assertEqual(pre_finalize_states[1], ("blocked", "protocol_finalize_pending"))
+        self.assertEqual(
+            pre_finalize_states[0],
+            ("protocol_finalize_pending", "protocol_finalize_pending"),
+        )
+        self.assertEqual(
+            pre_finalize_states[1],
+            ("protocol_finalize_pending", "protocol_finalize_pending"),
+        )
         self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(2)\n")
         audit = mission_control.mission_protocol_audit(mission_dir)
         self.assertTrue(audit["ok"], audit["errors"])

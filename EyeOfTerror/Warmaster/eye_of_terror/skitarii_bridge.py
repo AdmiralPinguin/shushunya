@@ -68,6 +68,8 @@ SKITARII_POLL_INTERVAL_SEC = 0.5
 _MISSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 _OWNED_GIT_LOCKS: dict[str, tuple[int, int, int]] = {}
 _OWNED_GIT_GUARDS: dict[str, tuple[int, tuple[str, ...]]] = {}
+_OWNED_PUBLICATION_GUARDS: dict[str, tuple[int, int]] = {}
+_OWNED_RUN_APPLY_GUARDS: dict[str, tuple[int, int]] = {}
 
 
 @dataclass
@@ -632,6 +634,11 @@ def _git_visible_content_fingerprint(
                 continue
             if scoped:
                 digest.update(f"missing\0{rel}\0\0\0".encode("utf-8", errors="strict"))
+                continue
+            if rel in modes:
+                # A tracked path remains in the index after a worktree deletion.
+                # Its absence is a legitimate post-patch state; the authoritative
+                # changed-path fingerprint below records it explicitly as missing.
                 continue
             raise SnapshotError(f"patched repository path disappeared: {rel}")
         except OSError as exc:
@@ -1750,16 +1757,37 @@ def _run_sandboxed_check(command: str, worktree: Path, timeout: int = 180) -> Sa
     )
 
 
-def _patch_stage_passed(stage: dict[str, Any] | None, *, require_applied: bool = False) -> bool:
+def _patch_stage_passed(
+    stage: dict[str, Any] | None,
+    *,
+    require_applied: bool = False,
+    require_published: bool = False,
+) -> bool:
     passed = bool(stage and stage.get("applies_to_live") is True and
                   stage.get("tests_pass_in_worktree") is True)
     if require_applied:
-        return bool(
+        passed = bool(
             passed and stage.get("applied_to_live") is True
             and stage.get("post_apply_tests_passed") is True
             and not stage.get("rolled_back")
         )
-    return passed
+    if require_published:
+        return bool(
+            passed
+            and stage.get("publication_status") == "pushed"
+            and stage.get("publication_required") is True
+            and stage.get("committed_to_main") is True
+            and stage.get("pushed_to_origin") is True
+            and re.fullmatch(r"[0-9a-f]{40,64}", str(stage.get("commit_sha") or ""))
+            and re.fullmatch(r"[0-9a-f]{40,64}", str(stage.get("commit_tree_sha") or ""))
+            and stage.get("commit_parent_sha") == stage.get("publication_base_head")
+            and stage.get("published_target_fingerprint")
+            == stage.get("patched_target_fingerprint")
+            and stage.get("remote_contains_commit") is True
+            and stage.get("remote_target_fingerprint")
+            == stage.get("patched_target_fingerprint")
+        )
+    return bool(passed)
 
 
 def _stage_conflict_manifest(stage: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1861,6 +1889,9 @@ def _repo_lock(root: Path, timeout: int = 30):
     started = time.monotonic()
     acquired: list[tuple[Path, int, tuple[int, int]]] = []
     owner = threading.get_ident()
+    publication_key = str(root.resolve())
+    publication_guard = _OWNED_PUBLICATION_GUARDS.get(publication_key)
+    cooperative_owned = bool(publication_guard and publication_guard[0] == owner)
 
     def release_git_locks() -> str:
         errors: list[str] = []
@@ -1884,14 +1915,15 @@ def _repo_lock(root: Path, timeout: int = 30):
         return "; ".join(errors)
 
     try:
-        while True:
-            try:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() - started >= timeout:
-                    raise TimeoutError("timed out waiting for the repository apply lock")
-                time.sleep(0.1)
+        if not cooperative_owned:
+            while True:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() - started >= timeout:
+                        raise TimeoutError("timed out waiting for the repository apply lock")
+                    time.sleep(0.1)
         guard_paths = _git_mutation_lock_paths(root.resolve())
         token = (uuid.uuid4().hex + "\n").encode("ascii")
         while True:
@@ -1973,7 +2005,8 @@ def _repo_lock(root: Path, timeout: int = 30):
         cleanup_error = release_git_locks()
         flock_error = ""
         try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            if not cooperative_owned:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         except OSError as exc:
             flock_error = f"flock unlock: {type(exc).__name__}: {str(exc)[:120]}"
         finally:
@@ -2045,6 +2078,885 @@ def _write_private_artifact(run_dir: Path, path: Path, payload: bytes) -> str:
             pass
         os.close(directory_fd)
     return hashlib.sha256(payload).hexdigest()
+
+
+def _publication_git_env() -> dict[str, str]:
+    """Non-interactive Git environment with literal pathspec semantics."""
+    env = os.environ.copy()
+    env.update({
+        "GIT_LITERAL_PATHSPECS": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GCM_INTERACTIVE": "Never",
+        "GIT_AUTHOR_NAME": "Ceraxia",
+        "GIT_AUTHOR_EMAIL": "ceraxia@localhost",
+        "GIT_COMMITTER_NAME": "Ceraxia",
+        "GIT_COMMITTER_EMAIL": "ceraxia@localhost",
+    })
+    return env
+
+
+def _git_object_id(value: object) -> str:
+    oid = str(value or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{40,64}", oid):
+        raise SnapshotError("Git returned an invalid object id")
+    return oid
+
+
+def _publication_branch_and_head(root: Path) -> tuple[str, str]:
+    env = _publication_git_env()
+    branch = subprocess.run(
+        ["git", "symbolic-ref", "-q", "HEAD"], cwd=root, env=env,
+        capture_output=True, text=True, timeout=30,
+    )
+    if branch.returncode != 0 or branch.stdout.strip() != "refs/heads/main":
+        raise SnapshotError("autonomous publication requires the checked-out main branch")
+    head = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"], cwd=root, env=env,
+        capture_output=True, text=True, timeout=30, check=True,
+    ).stdout.strip()
+    return "main", _git_object_id(head)
+
+
+def _remote_main_sha(root: Path) -> str:
+    result = subprocess.run(
+        ["git", "ls-remote", "--exit-code", "--refs", "origin", "refs/heads/main"],
+        cwd=root, env=_publication_git_env(), capture_output=True, timeout=60,
+    )
+    if result.returncode != 0 or len(result.stdout) > 4096:
+        raise SnapshotError("origin/main could not be read non-interactively")
+    rows = [row for row in result.stdout.splitlines() if row]
+    if len(rows) != 1 or b"\t" not in rows[0]:
+        raise SnapshotError("origin/main returned an invalid ref record")
+    raw_oid, raw_ref = rows[0].split(b"\t", 1)
+    if raw_ref != b"refs/heads/main":
+        raise SnapshotError("origin/main returned an unexpected ref")
+    return _git_object_id(raw_oid.decode("ascii", errors="strict"))
+
+
+def _remote_main_contains(root: Path, commit_sha: str, remote_sha: str) -> bool:
+    commit = _git_object_id(commit_sha)
+    remote = _git_object_id(remote_sha)
+    if commit == remote:
+        return True
+    env = _publication_git_env()
+    present = subprocess.run(
+        ["git", "cat-file", "-e", f"{remote}^{{commit}}"], cwd=root, env=env,
+        capture_output=True, timeout=30,
+    )
+    if present.returncode != 0:
+        fetched = subprocess.run(
+            ["git", "-c", "core.hooksPath=/dev/null", "fetch", "--quiet", "--no-tags",
+             "origin", "refs/heads/main"],
+            cwd=root, env=env, capture_output=True, timeout=120,
+        )
+        if fetched.returncode != 0:
+            return False
+    return subprocess.run(
+        ["git", "merge-base", "--is-ancestor", commit, remote],
+        cwd=root, env=env, capture_output=True, timeout=30,
+    ).returncode == 0
+
+
+def _remote_publication_matches(
+    root: Path,
+    commit_sha: str,
+    remote_sha: str,
+    paths: Iterable[str],
+    expected_targets: str,
+) -> tuple[bool, str]:
+    if not _remote_main_contains(root, commit_sha, remote_sha):
+        return False, ""
+    remote_targets = _git_tree_target_fingerprint(root, remote_sha, paths)
+    return remote_targets == expected_targets, remote_targets
+
+
+@contextmanager
+def _publication_lock(root: Path, timeout: int = 30):
+    """Serialize publication while leaving native Git locks to Git itself."""
+    import fcntl
+
+    key = str(root.resolve())
+    owner = threading.get_ident()
+    existing = _OWNED_PUBLICATION_GUARDS.get(key)
+    if existing is not None and existing[0] == owner:
+        _OWNED_PUBLICATION_GUARDS[key] = (owner, existing[1] + 1)
+        try:
+            yield 0.0
+        finally:
+            current = _OWNED_PUBLICATION_GUARDS.get(key)
+            if current is not None and current[0] == owner:
+                if current[1] <= 1:
+                    _OWNED_PUBLICATION_GUARDS.pop(key, None)
+                else:
+                    _OWNED_PUBLICATION_GUARDS[key] = (owner, current[1] - 1)
+        return
+
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+    runtime.mkdir(parents=True, exist_ok=True)
+    name = hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()[:20]
+    lock_path = runtime / f"skitarii-repo-{name}.lock"
+    handle = lock_path.open("a+b")
+    started = time.monotonic()
+    try:
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() - started >= timeout:
+                    raise TimeoutError("timed out waiting for the repository publication lock")
+                time.sleep(0.1)
+        _OWNED_PUBLICATION_GUARDS[key] = (owner, 1)
+        yield round(time.monotonic() - started, 3)
+    finally:
+        current = _OWNED_PUBLICATION_GUARDS.get(key)
+        if current is not None and current[0] == owner:
+            _OWNED_PUBLICATION_GUARDS.pop(key, None)
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+
+@contextmanager
+def _run_apply_lock(run_dir: Path, timeout: int = 30):
+    """Serialize cancellation and durable repository-mutation transitions per run."""
+    import fcntl
+
+    resolved = run_dir.resolve()
+    key = str(resolved)
+    owner = threading.get_ident()
+    existing = _OWNED_RUN_APPLY_GUARDS.get(key)
+    if existing is not None and existing[0] == owner:
+        _OWNED_RUN_APPLY_GUARDS[key] = (owner, existing[1] + 1)
+        try:
+            yield
+        finally:
+            current = _OWNED_RUN_APPLY_GUARDS.get(key)
+            if current is not None and current[0] == owner:
+                if current[1] <= 1:
+                    _OWNED_RUN_APPLY_GUARDS.pop(key, None)
+                else:
+                    _OWNED_RUN_APPLY_GUARDS[key] = (owner, current[1] - 1)
+        return
+    lock_root = Path(os.environ.get("WARMMASTER_RUNTIME_ROOT", "/tmp")) / "skitarii-apply-locks"
+    lock_root.mkdir(parents=True, exist_ok=True)
+    lock_name = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    lock_path = lock_root / f"{lock_name}.lock"
+    handle = lock_path.open("a+b")
+    started = time.monotonic()
+    try:
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() - started >= timeout:
+                    raise TimeoutError("timed out waiting for the run mutation lock")
+                time.sleep(0.05)
+        _OWNED_RUN_APPLY_GUARDS[key] = (owner, 1)
+        yield
+    finally:
+        current = _OWNED_RUN_APPLY_GUARDS.get(key)
+        if current is not None and current[0] == owner:
+            _OWNED_RUN_APPLY_GUARDS.pop(key, None)
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+
+def _git_blob_sha256(root: Path, oid: str, cache: dict[str, str]) -> str:
+    object_id = _git_object_id(oid)
+    if object_id not in cache:
+        payload = _bounded_command_stdout(
+            ["git", "cat-file", "blob", object_id], root,
+            timeout=60, max_bytes=MAX_PATCH_FILE_BYTES,
+        )
+        cache[object_id] = hashlib.sha256(payload).hexdigest()
+    return cache[object_id]
+
+
+def _target_entry_fingerprint(
+    root: Path,
+    paths: Iterable[str],
+    entries: dict[str, tuple[str, str]],
+) -> str:
+    digest = hashlib.sha256(b"skitarii-content-v1\0")
+    cache: dict[str, str] = {}
+    for rel in sorted({_safe_relative_path(path) for path in paths}):
+        entry = entries.get(rel)
+        if entry is None:
+            digest.update(f"missing\0{rel}\0\0\0".encode("utf-8", errors="strict"))
+            continue
+        mode, oid = entry
+        if mode not in {"100644", "100755"}:
+            raise SnapshotError(f"publication target has an unsupported Git mode: {rel}")
+        content_sha = _git_blob_sha256(root, oid, cache)
+        digest.update(
+            f"file\0{rel}\0{mode}\0{content_sha}\0".encode("utf-8", errors="strict"),
+        )
+    return digest.hexdigest()
+
+
+def _git_tree_target_fingerprint(root: Path, treeish: str, paths: Iterable[str]) -> str:
+    commit = _git_object_id(treeish)
+    env = _publication_git_env()
+    entries: dict[str, tuple[str, str]] = {}
+    selected = sorted({_safe_relative_path(path) for path in paths})
+    for rel in selected:
+        result = subprocess.run(
+            ["git", "ls-tree", "-z", commit, "--", rel], cwd=root, env=env,
+            capture_output=True, timeout=30, check=True,
+        )
+        records = [record for record in result.stdout.split(b"\0") if record]
+        if not records:
+            continue
+        if len(records) != 1 or b"\t" not in records[0]:
+            raise SnapshotError(f"Git tree returned an ambiguous publication target: {rel}")
+        metadata, raw_path = records[0].split(b"\t", 1)
+        fields = metadata.split()
+        decoded = raw_path.decode("utf-8", errors="strict")
+        if len(fields) != 3 or fields[1] != b"blob" or decoded != rel:
+            raise SnapshotError(f"Git tree returned an invalid publication target: {rel}")
+        entries[rel] = (
+            fields[0].decode("ascii", errors="strict"),
+            _git_object_id(fields[2].decode("ascii", errors="strict")),
+        )
+    return _target_entry_fingerprint(root, selected, entries)
+
+
+def _git_index_target_fingerprint(root: Path, paths: Iterable[str]) -> str:
+    selected = sorted({_safe_relative_path(path) for path in paths})
+    wanted = set(selected)
+    raw = _bounded_command_stdout(
+        ["git", "ls-files", "--stage", "-z"], root,
+        timeout=60, max_bytes=40_000_000,
+    )
+    entries: dict[str, tuple[str, str]] = {}
+    for record in raw.split(b"\0"):
+        if not record or b"\t" not in record:
+            continue
+        metadata, raw_path = record.split(b"\t", 1)
+        rel = raw_path.decode("utf-8", errors="strict")
+        if rel not in wanted:
+            continue
+        fields = metadata.split()
+        if len(fields) != 3 or fields[2] != b"0" or rel in entries:
+            raise SnapshotError(f"publication target has an unmerged index entry: {rel}")
+        entries[rel] = (
+            fields[0].decode("ascii", errors="strict"),
+            _git_object_id(fields[1].decode("ascii", errors="strict")),
+        )
+    flags = _bounded_command_stdout(
+        ["git", "ls-files", "-v", "-z"], root,
+        timeout=60, max_bytes=40_000_000,
+    )
+    for record in flags.split(b"\0"):
+        if not record or len(record) < 3 or record[1:2] != b" ":
+            continue
+        rel = record[2:].decode("utf-8", errors="strict")
+        if rel in wanted and record[:1] != b"H":
+            raise SnapshotError(f"publication target has special Git index flags: {rel}")
+    return _target_entry_fingerprint(root, selected, entries)
+
+
+def _publication_targets_clean(
+    root: Path,
+    head: str,
+    paths: Iterable[str],
+    expected_worktree: str,
+    *,
+    allowed_large: dict[str, dict[str, Any]] | None = None,
+) -> bool:
+    selected = sorted({_safe_relative_path(path) for path in paths})
+    worktree = _git_visible_content_fingerprint(
+        root, paths=selected, allowed_large=allowed_large,
+    )
+    return bool(
+        worktree == expected_worktree
+        and _git_tree_target_fingerprint(root, head, selected) == expected_worktree
+        and _git_index_target_fingerprint(root, selected) == expected_worktree
+    )
+
+
+def _publication_attributes_safe(root: Path, paths: Iterable[str]) -> bool:
+    env = _publication_git_env()
+    for rel in sorted({_safe_relative_path(path) for path in paths}):
+        result = subprocess.run(
+            ["git", "check-attr", "-z", "filter", "working-tree-encoding",
+             "text", "eol", "ident", "--", rel],
+            cwd=root, env=env, capture_output=True, timeout=30,
+        )
+        if result.returncode != 0:
+            return False
+        fields = result.stdout.split(b"\0")
+        triples = [fields[index:index + 3] for index in range(0, len(fields) - 1, 3)]
+        if any(
+            len(triple) != 3
+            or triple[0].decode("utf-8", errors="strict") != rel
+            or triple[2] not in {b"unspecified", b"unset"}
+            for triple in triples
+        ):
+            return False
+    return True
+
+
+def _publication_pathspec_file(run_dir: Path, name: str, paths: Iterable[str]) -> Path:
+    selected = sorted({_safe_relative_path(path) for path in paths})
+    if not selected:
+        raise SnapshotError("publication pathspec cannot be empty")
+    path = run_dir / "work" / name
+    payload = b"".join(rel.encode("utf-8", errors="strict") + b"\0" for rel in selected)
+    _write_private_artifact(run_dir, path, payload)
+    return path.resolve(strict=True)
+
+
+def _publication_new_paths(root: Path, base_head: str, paths: Iterable[str]) -> list[str]:
+    env = _publication_git_env()
+    new_paths: list[str] = []
+    for rel in sorted({_safe_relative_path(path) for path in paths}):
+        result = subprocess.run(
+            ["git", "ls-tree", "-z", base_head, "--", rel], cwd=root, env=env,
+            capture_output=True, timeout=30, check=True,
+        )
+        records = [record for record in result.stdout.split(b"\0") if record]
+        if not records:
+            new_paths.append(rel)
+        elif len(records) != 1:
+            raise SnapshotError(f"Git tree returned an ambiguous baseline target: {rel}")
+    return new_paths
+
+
+def _publication_commit_details(
+    root: Path,
+    commit_sha: str,
+    base_head: str,
+    paths: Iterable[str],
+    expected_targets: str,
+) -> tuple[str, str, str]:
+    commit = _git_object_id(commit_sha)
+    base = _git_object_id(base_head)
+    env = _publication_git_env()
+    parents = subprocess.run(
+        ["git", "rev-list", "--parents", "-n", "1", commit], cwd=root, env=env,
+        capture_output=True, text=True, timeout=30, check=True,
+    ).stdout.split()
+    if len(parents) != 2 or _git_object_id(parents[0]) != commit:
+        raise SnapshotError("publication commit must have exactly one parent")
+    parent = _git_object_id(parents[1])
+    if parent != base:
+        raise SnapshotError("publication commit parent changed before publication")
+    changed = subprocess.run(
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "--no-renames",
+         "-r", "-z", base, commit, "--"],
+        cwd=root, env=env, capture_output=True, timeout=60, check=True,
+    ).stdout
+    changed_paths = sorted({
+        _safe_relative_path(raw.decode("utf-8", errors="strict"))
+        for raw in changed.split(b"\0") if raw
+    })
+    selected = sorted({_safe_relative_path(path) for path in paths})
+    if changed_paths != selected:
+        raise SnapshotError("publication commit changed files outside the verified patch")
+    tree = subprocess.run(
+        ["git", "rev-parse", f"{commit}^{{tree}}"], cwd=root, env=env,
+        capture_output=True, text=True, timeout=30, check=True,
+    ).stdout.strip()
+    tree_sha = _git_object_id(tree)
+    target_fingerprint = _git_tree_target_fingerprint(root, commit, selected)
+    if target_fingerprint != expected_targets:
+        raise SnapshotError("publication commit bytes differ from the verified patch")
+    return parent, tree_sha, target_fingerprint
+
+
+def _publication_next_action(stage: dict[str, Any], reason: str) -> dict[str, Any]:
+    return {
+        "kind": "retry_publish",
+        "method": "POST",
+        "endpoint": "POST /runs/{task_id}/apply_patch",
+        "body": {
+            "expected_repository_fingerprint": str(stage.get("baseline_fingerprint") or ""),
+            "expected_patch_sha256": str(stage.get("patch_sha256") or ""),
+            "expected_checks_sha256": str(stage.get("checks_sha256") or ""),
+            "confirm_apply": True,
+        },
+        "reason": reason,
+    }
+
+
+def _record_linked_publication_progress(run_dir: Path, phase: str, reason: str) -> None:
+    """Expose recoverable publication as working, never as a stale blocker."""
+    if phase == "blocked":
+        return
+    try:
+        mission_dir = _mission_dir(run_dir)
+        if not mission_dir or not mission_dir.exists():
+            return
+        from . import mission_control as mc
+
+        mission = _read_json(mission_dir / "mission.json")
+        mission_id = str(mission.get("mission_id") or mission_dir.name)
+        current = _read_json(mission_dir / "mission_state.json")
+        if (
+            str(current.get("run_status") or "") == phase
+            and str(current.get("phase") or "") == phase
+        ):
+            return
+        mc.record_mission_state(
+            mission_dir,
+            "executing",
+            run_status=phase,
+            active=True,
+            phase=phase,
+        )
+        mc.append_progress_event(
+            mission_dir / "progress_events.jsonl",
+            mc.progress_event(
+                mission_id,
+                "Ceraxia",
+                "governor",
+                "finalizing",
+                "running",
+                "Verified code is being published",
+                reason[:400],
+            ),
+        )
+    except Exception:
+        # The ledger checkpoint remains authoritative and the publisher must not
+        # lose repository recovery merely because a UI projection is unavailable.
+        return
+
+
+def _persist_publication_checkpoint(
+    run_dir: Path,
+    ledger: Any,
+    stage: dict[str, Any],
+    *,
+    phase: str,
+    reason: str,
+) -> None:
+    """Make commit/push recovery durable before the next external side effect."""
+    existing = ledger.data.get("result") if isinstance(getattr(ledger, "data", None), dict) else {}
+    result = dict(existing) if isinstance(existing, dict) else {}
+    artifacts = result.get("artifacts") if isinstance(result.get("artifacts"), list) else []
+    if "work/skitarii.patch" not in artifacts:
+        artifacts = [*artifacts, "work/skitarii.patch"]
+    status = "blocked" if phase == "blocked" else phase
+    result.update({
+        "ok": False,
+        "status": status,
+        "phase": phase,
+        "final_step": "skitarii",
+        "summary": reason,
+        "artifact_root": str(run_dir.resolve()),
+        "artifacts": artifacts,
+        "patch_stage": dict(stage),
+        "ready_to_apply": False,
+        "next_action": (
+            {} if phase == "blocked" else _publication_next_action(stage, reason)
+        ),
+    })
+    ledger.data["result"] = result
+    ledger.force_status(
+        "blocked" if phase == "blocked" else phase,
+        reason=reason,
+    )
+    ledger.record_event(
+        "skitarii_publication_checkpoint",
+        {
+            "phase": phase,
+            "publication_status": str(stage.get("publication_status") or ""),
+            "commit_sha": str(stage.get("commit_sha") or ""),
+            "attempts": int(stage.get("publication_attempts") or 0),
+        },
+    )
+    _record_linked_publication_progress(run_dir, phase, reason)
+
+
+def _clear_publication_intent_entries(
+    root: Path,
+    base_head: str,
+    new_paths: Iterable[str],
+) -> None:
+    """Remove only safe intent-to-add entries left by an interrupted commit."""
+    env = _publication_git_env()
+    for rel in sorted({_safe_relative_path(path) for path in new_paths}):
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "--", rel], cwd=root, env=env,
+            capture_output=True, timeout=30, check=True,
+        ).stdout
+        if not listed:
+            continue
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--quiet", base_head, "--", rel],
+            cwd=root, env=env, capture_output=True, timeout=30,
+        )
+        if staged.returncode != 0:
+            raise SnapshotError(
+                f"new publication target acquired staged content outside the transaction: {rel}",
+            )
+        reset = subprocess.run(
+            ["git", "-c", "core.hooksPath=/dev/null", "reset", "-q",
+             base_head, "--", rel], cwd=root, env=env,
+            capture_output=True, timeout=30,
+        )
+        if reset.returncode != 0:
+            raise SnapshotError("could not clear an interrupted publication intent entry")
+
+
+def _rollback_unverified_publication_commit(
+    root: Path,
+    commit_sha: str,
+    pathspec_file: Path,
+) -> bool:
+    """CAS-remove only the just-created local commit and repair target index entries."""
+    commit = _git_object_id(commit_sha)
+    env = _publication_git_env()
+    try:
+        _branch, head = _publication_branch_and_head(root)
+        if head != commit:
+            return False
+        parents = subprocess.run(
+            ["git", "rev-list", "--parents", "-n", "1", commit], cwd=root, env=env,
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.split()
+        if len(parents) != 2 or _git_object_id(parents[0]) != commit:
+            return False
+        parent = _git_object_id(parents[1])
+        moved = subprocess.run(
+            ["git", "-c", "core.hooksPath=/dev/null", "update-ref",
+             "refs/heads/main", parent, commit],
+            cwd=root, env=env, capture_output=True, timeout=30,
+        )
+        if moved.returncode != 0:
+            return False
+        reset = subprocess.run(
+            ["git", "-c", "core.hooksPath=/dev/null", "reset", "-q", parent,
+             f"--pathspec-from-file={pathspec_file}", "--pathspec-file-nul"],
+            cwd=root, env=env, capture_output=True, timeout=60,
+        )
+        return reset.returncode == 0
+    except (OSError, subprocess.SubprocessError, SnapshotError):
+        return False
+
+
+def _published_stage_proof_valid(
+    stage: dict[str, Any] | None,
+    *,
+    verify_remote: bool = False,
+    root: Path | None = None,
+) -> bool:
+    if not _patch_stage_passed(stage, require_applied=True, require_published=True):
+        return False
+    assert isinstance(stage, dict)
+    changed_paths = _stage_conflict_paths(stage)
+    if not changed_paths:
+        return False
+    publication_root = (root or REPO_ROOT).resolve()
+    try:
+        parent, tree_sha, target_fingerprint = _publication_commit_details(
+            publication_root,
+            str(stage.get("commit_sha") or ""),
+            str(stage.get("publication_base_head") or ""),
+            changed_paths,
+            str(stage.get("patched_target_fingerprint") or ""),
+        )
+        if (
+            parent != str(stage.get("commit_parent_sha") or "")
+            or tree_sha != str(stage.get("commit_tree_sha") or "")
+            or target_fingerprint != str(stage.get("published_target_fingerprint") or "")
+        ):
+            return False
+        if verify_remote:
+            remote_sha = _remote_main_sha(publication_root)
+            matches, remote_targets = _remote_publication_matches(
+                publication_root,
+                str(stage.get("commit_sha") or ""),
+                remote_sha,
+                changed_paths,
+                str(stage.get("patched_target_fingerprint") or ""),
+            )
+            if not matches or remote_targets != str(
+                stage.get("remote_target_fingerprint") or ""
+            ):
+                return False
+    except (OSError, UnicodeError, subprocess.SubprocessError, SnapshotError):
+        return False
+    return True
+
+
+def _completion_stage_proof_valid(stage: dict[str, Any] | None) -> bool:
+    if not _applied_stage_proof_valid(stage):
+        return False
+    if not isinstance(stage, dict) or stage.get("publication_required") is not True:
+        return True
+    return _published_stage_proof_valid(stage, verify_remote=True)
+
+
+def _publish_verified_patch(
+    root: Path,
+    stage: dict[str, Any],
+    run_dir: Path,
+    ledger: Any,
+) -> dict[str, Any]:
+    """Commit only verified targets and prove their presence in origin/main."""
+    root = root.resolve()
+    changed_paths = _stage_conflict_paths(stage)
+    if not changed_paths or not _applied_stage_proof_valid(stage):
+        stage["publication_status"] = "conflict"
+        stage["publication_error"] = "verified live-apply proof is missing"
+        _persist_publication_checkpoint(
+            run_dir, ledger, stage, phase="blocked",
+            reason="autonomous publication stopped: verified live-apply proof is missing",
+        )
+        return stage
+    base_head = _git_object_id(stage.get("publication_base_head"))
+    expected_targets = str(stage.get("patched_target_fingerprint") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_targets):
+        stage["publication_status"] = "conflict"
+        stage["publication_error"] = "verified target fingerprint is missing"
+        _persist_publication_checkpoint(
+            run_dir, ledger, stage, phase="blocked",
+            reason="autonomous publication stopped: verified target fingerprint is missing",
+        )
+        return stage
+    try:
+        with _publication_lock(root, timeout=1800) as wait_seconds:
+            stage["publication_lock_wait_seconds"] = wait_seconds
+            stage["publication_attempts"] = int(stage.get("publication_attempts") or 0) + 1
+            _branch, head = _publication_branch_and_head(root)
+            recorded_commit = str(stage.get("commit_sha") or "")
+
+            if recorded_commit:
+                commit_sha = _git_object_id(recorded_commit)
+                parent, tree_sha, target_fingerprint = _publication_commit_details(
+                    root, commit_sha, base_head, changed_paths, expected_targets,
+                )
+            elif head != base_head:
+                # A crash can happen after git commit updates main and before the
+                # resulting SHA is checkpointed. Adopt it only if every byte and
+                # every changed path proves that it is exactly this mission.
+                commit_sha = head
+                parent, tree_sha, target_fingerprint = _publication_commit_details(
+                    root, commit_sha, base_head, changed_paths, expected_targets,
+                )
+            else:
+                remote_before = _remote_main_sha(root)
+                stage["remote_main_sha"] = remote_before
+                if remote_before != base_head:
+                    raise SnapshotError("origin/main advanced before publication")
+                new_paths = [
+                    _safe_relative_path(path)
+                    for path in (stage.get("publication_new_paths") or [])
+                ]
+                if (
+                    stage.get("publication_intent_owned") is True
+                    or stage.get("publication_intent_prepared") is True
+                ):
+                    _clear_publication_intent_entries(root, base_head, new_paths)
+                    stage["publication_intent_owned"] = False
+                if _git_metadata_fingerprint(root) != str(
+                    stage.get("baseline_metadata_fingerprint") or ""
+                ):
+                    raise SnapshotError("Git HEAD or index changed before publication")
+                if _git_visible_content_fingerprint(root, paths=changed_paths) != expected_targets:
+                    raise SnapshotError("verified patch targets changed before publication")
+                if _git_index_target_fingerprint(root, changed_paths) != str(
+                    stage.get("baseline_target_fingerprint") or ""
+                ):
+                    raise SnapshotError("publication target index changed before commit")
+                if not _publication_attributes_safe(root, changed_paths):
+                    raise SnapshotError("publication target has unsafe Git clean attributes")
+
+                pathspec_file = _publication_pathspec_file(
+                    run_dir, ".skitarii-publication-paths", changed_paths,
+                )
+                stage["publication_status"] = "publishing"
+                stage["publication_error"] = ""
+                stage["publication_intent_prepared"] = bool(new_paths)
+                stage["publication_intent_owned"] = False
+                _persist_publication_checkpoint(
+                    run_dir, ledger, stage, phase="publishing",
+                    reason="verified patch is being committed to main",
+                )
+                env = _publication_git_env()
+                if new_paths:
+                    new_pathspec = _publication_pathspec_file(
+                        run_dir, ".skitarii-publication-new-paths", new_paths,
+                    )
+                    intent = subprocess.run(
+                        ["git", "-c", "core.hooksPath=/dev/null",
+                         "-c", "core.autocrlf=false", "add", "--intent-to-add",
+                         f"--pathspec-from-file={new_pathspec}", "--pathspec-file-nul"],
+                        cwd=root, env=env, capture_output=True, timeout=60,
+                    )
+                    if intent.returncode != 0:
+                        raise SnapshotError("new publication targets could not be prepared")
+                    stage["publication_intent_owned"] = True
+                    _persist_publication_checkpoint(
+                        run_dir, ledger, stage, phase="publishing",
+                        reason="new mission paths are prepared for the verified commit",
+                    )
+                message = f"Ceraxia: {run_dir.name}"[:240]
+                try:
+                    committed = subprocess.run(
+                        ["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false",
+                         "-c", "core.autocrlf=false", "-c", "user.name=Ceraxia",
+                         "-c", "user.email=ceraxia@localhost", "commit", "--only",
+                         "--no-verify", "--no-gpg-sign", "--cleanup=verbatim", "-m", message,
+                         f"--pathspec-from-file={pathspec_file}", "--pathspec-file-nul"],
+                        cwd=root, env=env, capture_output=True, timeout=120,
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    raise RuntimeError("publication commit outcome is unknown and will be recovered") from exc
+                if committed.returncode != 0:
+                    if stage.get("publication_intent_owned") is True:
+                        _clear_publication_intent_entries(root, base_head, new_paths)
+                        stage["publication_intent_owned"] = False
+                    raise RuntimeError("verified publication commit could not be created")
+                _branch, commit_sha = _publication_branch_and_head(root)
+                try:
+                    parent, tree_sha, target_fingerprint = _publication_commit_details(
+                        root, commit_sha, base_head, changed_paths, expected_targets,
+                    )
+                except (OSError, UnicodeError, subprocess.SubprocessError, SnapshotError) as exc:
+                    rolled_back = _rollback_unverified_publication_commit(
+                        root, commit_sha, pathspec_file,
+                    )
+                    stage["unverified_commit_rolled_back"] = rolled_back
+                    if not rolled_back:
+                        stage["local_repository_requires_inspection"] = True
+                    raise SnapshotError(
+                        "new local commit failed publication proof"
+                        + (" and was rolled back" if rolled_back else " and could not be rolled back"),
+                    ) from exc
+
+            stage.update({
+                "commit_sha": commit_sha,
+                "commit_parent_sha": parent,
+                "commit_tree_sha": tree_sha,
+                "published_target_fingerprint": target_fingerprint,
+                "committed_to_main": True,
+                "publication_status": "publishing",
+                "publication_error": "",
+                "publication_intent_owned": False,
+                "publication_intent_prepared": False,
+            })
+            _persist_publication_checkpoint(
+                run_dir, ledger, stage, phase="publishing",
+                reason="verified commit is awaiting origin/main confirmation",
+            )
+
+            try:
+                remote_before = _remote_main_sha(root)
+            except SnapshotError:
+                stage.update({
+                    "publication_status": "push_pending",
+                    "pushed_to_origin": False,
+                    "remote_contains_commit": False,
+                    "publication_error": "origin/main is temporarily unavailable",
+                })
+                _persist_publication_checkpoint(
+                    run_dir, ledger, stage, phase="push_pending",
+                    reason="verified commit exists locally; origin/main is temporarily unavailable",
+                )
+                return stage
+            stage["remote_main_sha"] = remote_before
+            remote_matches, remote_targets = _remote_publication_matches(
+                root, commit_sha, remote_before, changed_paths, expected_targets,
+            )
+            stage["remote_target_fingerprint"] = remote_targets
+            if remote_matches:
+                contains = True
+            else:
+                if remote_before != base_head:
+                    raise SnapshotError("origin/main diverged before the verified commit was pushed")
+                if head != commit_sha and _publication_branch_and_head(root)[1] != commit_sha:
+                    raise SnapshotError("local main changed before the verified commit was pushed")
+                try:
+                    pushed = subprocess.run(
+                        ["git", "-c", "core.hooksPath=/dev/null", "push", "--porcelain",
+                         "--no-verify", "origin", f"{commit_sha}:refs/heads/main"],
+                        cwd=root, env=_publication_git_env(), capture_output=True, timeout=120,
+                    )
+                except subprocess.TimeoutExpired:
+                    pushed = None
+                try:
+                    remote_after = _remote_main_sha(root)
+                except SnapshotError:
+                    remote_after = ""
+                stage["remote_main_sha"] = remote_after
+                if remote_after:
+                    contains, remote_targets = _remote_publication_matches(
+                        root, commit_sha, remote_after, changed_paths, expected_targets,
+                    )
+                    stage["remote_target_fingerprint"] = remote_targets
+                else:
+                    contains = False
+                if not contains and pushed is not None and pushed.returncode == 0:
+                    stage["publication_error"] = "push returned success but remote proof is unavailable"
+            if not contains:
+                remote_after = str(stage.get("remote_main_sha") or "")
+                if remote_after and remote_after != base_head:
+                    stage.update({
+                        "publication_status": "conflict",
+                        "pushed_to_origin": False,
+                        "remote_contains_commit": False,
+                        "publication_error": "origin/main diverged from the verified commit",
+                    })
+                    _persist_publication_checkpoint(
+                        run_dir, ledger, stage, phase="blocked",
+                        reason="origin/main diverged; autonomous publication will not force-push",
+                    )
+                    return stage
+                stage.update({
+                    "publication_status": "push_pending",
+                    "pushed_to_origin": False,
+                    "remote_contains_commit": False,
+                    "publication_error": str(stage.get("publication_error") or
+                                             "origin/main publication will be retried"),
+                })
+                _persist_publication_checkpoint(
+                    run_dir, ledger, stage, phase="push_pending",
+                    reason="verified commit exists locally; origin/main push will be retried",
+                )
+                return stage
+
+            stage.update({
+                "publication_status": "pushed",
+                "pushed_to_origin": True,
+                "remote_contains_commit": True,
+                "publication_error": "",
+            })
+            _persist_publication_checkpoint(
+                run_dir, ledger, stage, phase="publishing",
+                reason="origin/main contains the verified commit; finalizing mission protocol",
+            )
+            return stage
+    except RuntimeError as exc:
+        stage.update({
+            "publication_status": "push_pending",
+            "pushed_to_origin": False,
+            "remote_contains_commit": False,
+            "publication_error": str(exc)[:200],
+        })
+        _persist_publication_checkpoint(
+            run_dir, ledger, stage, phase="push_pending",
+            reason="verified publication transaction will be retried",
+        )
+    except (OSError, UnicodeError, subprocess.SubprocessError, SnapshotError, TimeoutError) as exc:
+        stage.update({
+            "publication_status": "conflict",
+            "pushed_to_origin": False,
+            "remote_contains_commit": False,
+            "publication_error": str(exc)[:200],
+        })
+        _persist_publication_checkpoint(
+            run_dir, ledger, stage, phase="blocked",
+            reason=f"autonomous publication stopped safely: {str(exc)[:180]}",
+        )
+    return stage
 
 
 def _changed_paths_against_head(root: Path) -> list[str]:
@@ -2198,6 +3110,7 @@ def _verify_and_stage_patch(
     expected_metadata = ""
     pre_apply_metadata = ""
     authoritative_changed: list[str] = []
+    publication_guard: Any = None
 
     try:
         out["resource_bounds"] = _validate_patch_resource_bounds(diff)
@@ -2345,7 +3258,9 @@ def _verify_and_stage_patch(
                 control_path = next(
                     (
                         path for path in authoritative_changed
-                        if PurePosixPath(path).name in {".gitignore", ".gitmodules"}
+                        if PurePosixPath(path).name in {
+                            ".gitattributes", ".gitignore", ".gitmodules",
+                        }
                     ),
                     "",
                 )
@@ -2419,6 +3334,27 @@ def _verify_and_stage_patch(
             ledger.record_event("skitarii_patch_stage", out)
             return out
 
+        should_autoapply = (
+            os.environ.get("SKITARII_AUTOAPPLY") == "1"
+            if autoapply is None else bool(autoapply)
+        )
+        should_autopublish = bool(
+            should_autoapply and os.environ.get("SKITARII_AUTOPUBLISH") == "1"
+        )
+        out.update({
+            "publication_required": should_autopublish,
+            "publication_status": "not_required" if not should_autopublish else "preflight",
+            "committed_to_main": False,
+            "pushed_to_origin": False,
+            "remote_contains_commit": False,
+            "publication_attempts": 0,
+        })
+        if should_autopublish:
+            guard = _publication_lock(root, timeout=1800)
+            publication_wait = guard.__enter__()
+            publication_guard = guard
+            out["publication_transaction_lock_wait_seconds"] = publication_wait
+
         with _repo_lock(root) as lock_wait:
             out["lock_wait_seconds"] = lock_wait
             ledger_path = getattr(ledger, "path", None)
@@ -2430,6 +3366,8 @@ def _verify_and_stage_patch(
                     current_status = str(current_ledger.to_dict().get("status") or "")
                     if current_ledger.cancel_requested() or current_status in {"cancelling", "cancelled"}:
                         out["applies_to_live"] = False
+                        if should_autopublish:
+                            out["publication_status"] = "cancelled"
                         out["reason"] = "run was cancelled before repository apply"
                         current_ledger.record_event("skitarii_apply_cancelled", {"status": current_status})
                         return out
@@ -2454,6 +3392,44 @@ def _verify_and_stage_patch(
                 ledger.record_event("skitarii_patch_stage", out)
                 return out
             pre_apply_metadata = live_metadata
+
+            if should_autopublish:
+                try:
+                    branch, base_head = _publication_branch_and_head(root)
+                    remote_base = _remote_main_sha(root)
+                    if remote_base != base_head:
+                        raise SnapshotError(
+                            "autonomous publication requires local main to equal origin/main",
+                        )
+                    if not _publication_targets_clean(
+                        root, base_head, authoritative_changed, expected_baseline_targets,
+                        allowed_large=snapshot.external_assets,
+                    ):
+                        raise SnapshotError(
+                            "autonomous publication refuses a dirty patch target",
+                        )
+                    if not _publication_attributes_safe(root, authoritative_changed):
+                        raise SnapshotError(
+                            "autonomous publication refuses target paths with Git clean attributes",
+                        )
+                    out.update({
+                        "publication_branch": branch,
+                        "publication_remote": "origin",
+                        "publication_base_head": base_head,
+                        "publication_remote_base": remote_base,
+                        "remote_main_sha": remote_base,
+                        "publication_new_paths": _publication_new_paths(
+                            root, base_head, authoritative_changed,
+                        ),
+                        "publication_status": "preflight_passed",
+                    })
+                except (OSError, UnicodeError, subprocess.SubprocessError, SnapshotError) as exc:
+                    out["applies_to_live"] = False
+                    out["publication_status"] = "blocked"
+                    out["publication_error"] = str(exc)[:200]
+                    out["reason"] = f"publication preflight blocked live mutation: {str(exc)[:180]}"
+                    ledger.record_event("skitarii_patch_stage", out)
+                    return out
 
             ignored = subprocess.run(
                 ["git", "check-ignore", "-z", "--stdin"],
@@ -2499,13 +3475,39 @@ def _verify_and_stage_patch(
                 return out
             out["applies_to_live"] = True
 
-            should_autoapply = (
-                os.environ.get("SKITARII_AUTOAPPLY") == "1"
-                if autoapply is None else bool(autoapply)
-            )
             if not should_autoapply:
                 ledger.record_event("skitarii_patch_stage", out)
                 return out
+
+            if should_autopublish:
+                out["publication_status"] = "apply_intent"
+                try:
+                    with _run_apply_lock(run_dir, timeout=30):
+                        final_ledger_path = getattr(ledger, "path", None)
+                        if final_ledger_path:
+                            from .ledger import TaskLedger
+
+                            final_ledger = TaskLedger.load(Path(final_ledger_path))
+                            final_status = str(final_ledger.to_dict().get("status") or "")
+                            if final_ledger.cancel_requested() or final_status in {
+                                "cancelling", "cancelled",
+                            }:
+                                out["applies_to_live"] = False
+                                out["publication_status"] = "cancelled"
+                                out["reason"] = "run was cancelled before durable repository mutation"
+                                return out
+                        _persist_publication_checkpoint(
+                            run_dir, ledger, out, phase="apply_intent",
+                            reason="verified patch is queued for live apply and publication",
+                        )
+                except Exception as checkpoint_exc:  # noqa: BLE001 - fail before mutation.
+                    out["applies_to_live"] = False
+                    out["publication_status"] = "blocked"
+                    out["publication_error"] = (
+                        f"{type(checkpoint_exc).__name__}: {str(checkpoint_exc)[:160]}"
+                    )
+                    out["reason"] = "could not persist live-apply intent"
+                    return out
 
             live_apply = run_git(
                 ["apply", "--binary", "--whitespace=nowarn", "-"],
@@ -2517,6 +3519,21 @@ def _verify_and_stage_patch(
                 out["apply_stderr"] = (live_apply.stderr or live_apply.stdout or "")[:300]
                 ledger.record_event("skitarii_patch_stage", out)
                 return out
+            if should_autopublish:
+                out["publication_status"] = "applied_unverified"
+                try:
+                    _persist_publication_checkpoint(
+                        run_dir, ledger, out, phase="applied_unverified",
+                        reason="live patch was applied; durable post-apply verification is running",
+                    )
+                except Exception as checkpoint_exc:  # noqa: BLE001 - rollback while guarded.
+                    out["post_apply_tests_passed"] = False
+                    out["reason"] = (
+                        "could not checkpoint applied patch: "
+                        f"{type(checkpoint_exc).__name__}: {str(checkpoint_exc)[:160]}"
+                    )
+                    rollback_live_if_safe()
+                    return out
 
             post_snapshot = _full_repo_snapshot(
                 max_files=10_000,
@@ -2585,6 +3602,27 @@ def _verify_and_stage_patch(
 
             if out["post_apply_tests_passed"] is not True:
                 rollback_live_if_safe()
+            elif should_autopublish:
+                out["publication_status"] = "publishing"
+                try:
+                    _persist_publication_checkpoint(
+                        run_dir, ledger, out, phase="publishing",
+                        reason="live verification passed; preparing commit and origin/main push",
+                    )
+                except Exception as checkpoint_exc:  # noqa: BLE001 - mutation needs durable recovery.
+                    out["post_apply_tests_passed"] = False
+                    out["reason"] = (
+                        "publication checkpoint failed before commit: "
+                        f"{type(checkpoint_exc).__name__}: {str(checkpoint_exc)[:160]}"
+                    )
+                    rollback_live_if_safe()
+        if (
+            should_autopublish
+            and out.get("applied_to_live") is True
+            and out.get("post_apply_tests_passed") is True
+            and not out.get("rolled_back")
+        ):
+            out = _publish_verified_patch(root, out, run_dir, ledger)
     except Exception as exc:  # noqa: BLE001
         out["error"] = str(exc)[:300]
         if not out.get("applied_to_live"):
@@ -2597,8 +3635,200 @@ def _verify_and_stage_patch(
         if out.get("applied_to_live") and out.get("post_apply_tests_passed") is not True:
             out["reason"] = "autoapply transaction failed; live repository requires inspection"
             rollback_live_if_safe()
+    finally:
+        if publication_guard is not None:
+            publication_guard.__exit__(None, None, None)
     ledger.record_event("skitarii_patch_stage", out)
     return out
+
+
+def _resume_interrupted_publication_apply(
+    run_dir: Path,
+    ledger: Any,
+    stage: dict[str, Any],
+) -> dict[str, Any]:
+    """Recover a crash between live apply intent and durable post-verification."""
+    changed_paths = _stage_conflict_paths(stage)
+    if not changed_paths or not _stage_artifacts_match(run_dir, stage):
+        stage["publication_status"] = "conflict"
+        stage["publication_error"] = "interrupted apply artifacts or conflict proof are invalid"
+        _persist_publication_checkpoint(
+            run_dir, ledger, stage, phase="blocked",
+            reason="interrupted live apply cannot be recovered safely",
+        )
+        return stage
+    patch_path = (run_dir / "work" / "skitarii.patch").resolve(strict=True)
+    checks_path = (run_dir / "work" / ".skitarii-verification-checks.json").resolve(strict=True)
+    try:
+        patch_bytes = patch_path.read_bytes()
+        checks_bytes = checks_path.read_bytes()
+        patch_text = patch_bytes.decode("utf-8", errors="strict")
+        checks = json.loads(checks_bytes.decode("utf-8", errors="strict"))
+        if not isinstance(checks, list):
+            raise SnapshotError("verification checks are not a list")
+        root = REPO_ROOT.resolve()
+        baseline_metadata = str(stage.get("baseline_metadata_fingerprint") or "")
+        baseline_targets = str(stage.get("baseline_target_fingerprint") or "")
+        patched_targets = str(stage.get("patched_target_fingerprint") or "")
+        base_head = _git_object_id(stage.get("publication_base_head"))
+        with _publication_lock(root, timeout=1800):
+            with _repo_lock(root, timeout=1800):
+                _branch, head = _publication_branch_and_head(root)
+                if head != base_head:
+                    raise SnapshotError("local main changed during interrupted live apply")
+                live_metadata, live_targets = _stable_scoped_live_state(root, changed_paths)
+                if live_metadata != baseline_metadata:
+                    raise SnapshotError("Git index changed during interrupted live apply")
+                if live_targets == patched_targets:
+                    reverse_check = subprocess.run(
+                        ["git", "apply", "--reverse", "--check", "--binary",
+                         "--whitespace=nowarn", "-"],
+                        cwd=root, input=patch_text, text=True, capture_output=True, timeout=60,
+                    )
+                    if reverse_check.returncode != 0:
+                        raise SnapshotError("interrupted live patch cannot be reversed safely")
+                    reversed_patch = subprocess.run(
+                        ["git", "apply", "--reverse", "--binary", "--whitespace=nowarn", "-"],
+                        cwd=root, input=patch_text, text=True, capture_output=True, timeout=60,
+                    )
+                    if reversed_patch.returncode != 0:
+                        raise SnapshotError("interrupted live patch rollback failed")
+                    restored_metadata, restored_targets = _stable_scoped_live_state(
+                        root, changed_paths,
+                    )
+                    if restored_metadata != baseline_metadata or restored_targets != baseline_targets:
+                        raise SnapshotError("interrupted live patch rollback could not be proven")
+                elif live_targets != baseline_targets:
+                    raise SnapshotError("patch targets changed during interrupted live apply")
+                stage.update({
+                    "applied_to_live": False,
+                    "post_apply_tests_passed": None,
+                    "rolled_back": True,
+                    "publication_status": "apply_intent",
+                })
+                _persist_publication_checkpoint(
+                    run_dir, ledger, stage, phase="apply_intent",
+                    reason="interrupted apply was restored to its verified baseline",
+                )
+            snapshot = _full_repo_snapshot()
+            if (
+                snapshot.metadata_fingerprint != baseline_metadata
+                or _snapshot_content_fingerprint(snapshot, paths=changed_paths) != baseline_targets
+            ):
+                raise SnapshotError("baseline changed while interrupted apply was being recovered")
+            verdict = {
+                "accepted": True,
+                "checks": checks,
+                "patch_bundle": {"unified_diff": patch_text},
+            }
+            recovered = _verify_and_stage_patch(
+                verdict,
+                run_dir,
+                ledger,
+                snapshot,
+                autoapply=True,
+                persist_artifacts=False,
+                expected_conflict_fingerprint=str(stage.get("baseline_fingerprint") or ""),
+            )
+            if not isinstance(recovered, dict):
+                raise SnapshotError("interrupted apply recovery returned no patch stage")
+            recovered_status = str(recovered.get("publication_status") or "")
+            if (
+                not _patch_stage_passed(recovered, require_applied=True)
+                or recovered_status in {"blocked", "conflict"}
+            ):
+                recovered["publication_status"] = "conflict"
+                reason = str(
+                    recovered.get("reason") or recovered.get("error")
+                    or "interrupted apply could not pass frozen verification"
+                )
+                recovered["publication_error"] = reason[:200]
+                _persist_publication_checkpoint(
+                    run_dir, ledger, recovered, phase="blocked",
+                    reason=f"interrupted apply recovery stopped safely: {reason[:170]}",
+                )
+            return recovered
+    except (OSError, UnicodeError, json.JSONDecodeError, subprocess.SubprocessError,
+            SnapshotError, TimeoutError) as exc:
+        stage.update({
+            "publication_status": "conflict",
+            "publication_error": str(exc)[:200],
+        })
+        _persist_publication_checkpoint(
+            run_dir, ledger, stage, phase="blocked",
+            reason=f"interrupted live apply stopped safely: {str(exc)[:180]}",
+        )
+        return stage
+
+
+def _complete_applied_skitarii_result(
+    run_dir: Path,
+    ledger: Any,
+    previous_result: dict[str, Any],
+    stage: dict[str, Any],
+) -> dict[str, Any]:
+    published = stage.get("publication_required") is True
+    summary = (
+        "Verified patch was applied, rechecked, committed only on mission paths, "
+        "and confirmed in origin/main."
+        if published else
+        "Verified patch applied to the live repository and rechecked successfully."
+    )
+    updated = dict(previous_result)
+    updated.update({
+        "ok": True,
+        "phase": "completed",
+        "status": "completed",
+        "summary": summary,
+        "patch_stage": stage,
+        "ready_to_apply": False,
+        "protocol_finalize_pending": False,
+        "protocol_finalize_error": "",
+        "next_action": {},
+    })
+    pending = dict(updated)
+    pending.update({
+        "ok": False,
+        "phase": "protocol_finalize_pending",
+        "status": "protocol_finalize_pending",
+        "protocol_finalize_pending": True,
+        "protocol_finalize_error": "",
+        "next_action": {
+            "kind": "reconcile_mission_protocol",
+            "method": "POST",
+            "endpoint": "POST /runs/{task_id}/apply_patch",
+            "body": {
+                "expected_repository_fingerprint": str(stage.get("baseline_fingerprint") or ""),
+                "expected_patch_sha256": str(stage.get("patch_sha256") or ""),
+                "expected_checks_sha256": str(stage.get("checks_sha256") or ""),
+                "confirm_apply": True,
+            },
+            "reason": "repository publication succeeded; mission protocol finalization is in progress",
+        },
+    })
+    ledger.data["result"] = pending
+    ledger.force_status(
+        "protocol_finalize_pending",
+        reason="mission protocol finalization in progress",
+    )
+    try:
+        _finalize_linked_completion(run_dir, ledger, updated)
+    except Exception as exc:  # noqa: BLE001 - repository publication is already durable.
+        error = f"{type(exc).__name__}: {str(exc)[:240]}"
+        pending["protocol_finalize_error"] = error
+        pending["next_action"]["reason"] = (
+            "repository publication succeeded but mission protocol finalization must be retried"
+        )
+        ledger.data["result"] = pending
+        ledger.force_status(
+            "protocol_finalize_pending",
+            reason="mission protocol finalization pending",
+        )
+        ledger.record_event("skitarii_mission_finalize_error", {"error": error})
+        return {**pending, "task_id": str(ledger.to_dict().get("task_id") or run_dir.name)}
+    ledger.data["result"] = updated
+    ledger.force_status("completed", reason="verified publication and mission protocol completed")
+    return {**updated, "task_id": str(ledger.to_dict().get("task_id") or run_dir.name)}
 
 
 def _apply_staged_patch_locked(
@@ -2611,18 +3841,47 @@ def _apply_staged_patch_locked(
 ) -> dict[str, Any]:
     """Controlled apply action for a previously verified ready-to-apply result."""
     ledger_data = ledger.to_dict() if hasattr(ledger, "to_dict") else {}
-    if bool(ledger_data.get("cancel_requested")) or str(ledger_data.get("status") or "") in {"cancelling", "cancelled"}:
-        return {"ok": False, "status": "cancelled", "error": "run was cancelled before apply"}
     result = ledger_data.get("result", {})
     if not isinstance(result, dict) or str(result.get("final_step") or "") != "skitarii":
         return {"ok": False, "status": "blocked", "error": "run has no Skitarii result"}
+    result_phase = str(result.get("phase") or result.get("status") or "")
+    publication_phases = {
+        "apply_intent", "applied_unverified", "publishing", "push_pending",
+        "protocol_finalize_pending",
+    }
+    if bool(ledger_data.get("cancel_requested")) or str(ledger_data.get("status") or "") in {
+        "cancelling", "cancelled",
+    }:
+        if result_phase not in publication_phases:
+            return {"ok": False, "status": "cancelled", "error": "run was cancelled before apply"}
+        cancellation_stage = (
+            result.get("patch_stage") if isinstance(result.get("patch_stage"), dict) else {}
+        )
+        if (
+            expected_fingerprint != str(cancellation_stage.get("baseline_fingerprint") or "")
+            or expected_patch_sha256 != str(cancellation_stage.get("patch_sha256") or "")
+            or expected_checks_sha256 != str(cancellation_stage.get("checks_sha256") or "")
+            or not _stage_artifacts_match(run_dir, cancellation_stage)
+        ):
+            return {
+                "ok": False,
+                "status": str(ledger_data.get("status") or "cancelling"),
+                "error": "publication recovery confirmation mismatch",
+            }
+        ledger.data.pop("cancel_requested", None)
+        ledger.data.pop("cancel_reason", None)
+        ledger.force_status(result_phase, reason="publication is already durable and cannot be cancelled")
+        ledger.record_event(
+            "cancel_rejected_after_repository_mutation",
+            {"phase": result_phase},
+        )
     if result.get("protocol_finalize_pending"):
         stage = result.get("patch_stage") if isinstance(result.get("patch_stage"), dict) else {}
         if (
             expected_fingerprint != str(stage.get("baseline_fingerprint") or "")
             or expected_patch_sha256 != str(stage.get("patch_sha256") or "")
             or expected_checks_sha256 != str(stage.get("checks_sha256") or "")
-            or not _applied_stage_proof_valid(stage)
+            or not _completion_stage_proof_valid(stage)
             or not _stage_artifacts_match(run_dir, stage)
         ):
             return {"ok": False, "status": "blocked", "error": "reconciliation confirmation mismatch"}
@@ -2648,7 +3907,10 @@ def _apply_staged_patch_locked(
                 "protocol_finalize_error": error,
             })
             ledger.data["result"] = pending
-            ledger.force_status("blocked", reason="mission protocol reconciliation still pending")
+            ledger.force_status(
+                "protocol_finalize_pending",
+                reason="mission protocol reconciliation still pending",
+            )
             ledger.record_event("skitarii_mission_finalize_error", {"error": error})
             return {
                 **pending,
@@ -2658,6 +3920,46 @@ def _apply_staged_patch_locked(
         ledger.data["result"] = reconciled
         ledger.force_status("completed", reason="mission protocol reconciliation completed")
         return {**reconciled, "task_id": str(ledger_data.get("task_id") or run_dir.name)}
+    if result_phase in {"apply_intent", "applied_unverified"}:
+        stage = result.get("patch_stage") if isinstance(result.get("patch_stage"), dict) else {}
+        if (
+            expected_fingerprint != str(stage.get("baseline_fingerprint") or "")
+            or expected_patch_sha256 != str(stage.get("patch_sha256") or "")
+            or expected_checks_sha256 != str(stage.get("checks_sha256") or "")
+            or not _stage_conflict_paths(stage)
+            or not _stage_artifacts_match(run_dir, stage)
+        ):
+            return {"ok": False, "status": "blocked", "error": "apply recovery confirmation mismatch"}
+        recovered_stage = _resume_interrupted_publication_apply(run_dir, ledger, stage)
+        if not _published_stage_proof_valid(recovered_stage, verify_remote=True):
+            latest = ledger.to_dict().get("result", {})
+            if isinstance(latest, dict):
+                return {**latest, "task_id": str(ledger_data.get("task_id") or run_dir.name)}
+            return {"ok": False, "status": "blocked", "error": "interrupted apply recovery failed"}
+        return _complete_applied_skitarii_result(
+            run_dir, ledger, result, recovered_stage,
+        )
+    if result_phase in {
+        "publishing", "push_pending",
+    }:
+        stage = result.get("patch_stage") if isinstance(result.get("patch_stage"), dict) else {}
+        if (
+            expected_fingerprint != str(stage.get("baseline_fingerprint") or "")
+            or expected_patch_sha256 != str(stage.get("patch_sha256") or "")
+            or expected_checks_sha256 != str(stage.get("checks_sha256") or "")
+            or not _applied_stage_proof_valid(stage)
+            or not _stage_artifacts_match(run_dir, stage)
+        ):
+            return {"ok": False, "status": "blocked", "error": "publication confirmation mismatch"}
+        published_stage = _publish_verified_patch(REPO_ROOT.resolve(), stage, run_dir, ledger)
+        if not _published_stage_proof_valid(published_stage, verify_remote=True):
+            latest = ledger.to_dict().get("result", {})
+            if isinstance(latest, dict):
+                return {**latest, "task_id": str(ledger_data.get("task_id") or run_dir.name)}
+            return {"ok": False, "status": "push_pending", "error": "publication remains pending"}
+        return _complete_applied_skitarii_result(
+            run_dir, ledger, result, published_stage,
+        )
     if not result.get("ready_to_apply"):
         return {"ok": False, "status": str(result.get("status") or "blocked"),
                 "error": "run is not ready to apply"}
@@ -2751,53 +4053,16 @@ def _apply_staged_patch_locked(
             "status": "blocked",
             "error": "scoped conflict proof changed during apply",
         }
-    updated = dict(result)
-    updated.update({
-        "ok": True,
-        "phase": "completed",
-        "status": "completed",
-        "summary": "Verified patch applied to the live repository and rechecked successfully.",
-        "patch_stage": new_stage,
-        "ready_to_apply": False,
-        "next_action": {},
-    })
-    pending = dict(updated)
-    pending.update({
-        "ok": False,
-        "phase": "protocol_finalize_pending",
-        "status": "protocol_finalize_pending",
-        "protocol_finalize_pending": True,
-        "protocol_finalize_error": "",
-        "next_action": {
-            "kind": "reconcile_mission_protocol",
-            "method": "POST",
-            "endpoint": "POST /runs/{task_id}/apply_patch",
-            "body": {
-                "expected_repository_fingerprint": str(new_stage.get("baseline_fingerprint") or ""),
-                "expected_patch_sha256": str(new_stage.get("patch_sha256") or ""),
-                "expected_checks_sha256": str(new_stage.get("checks_sha256") or ""),
-                "confirm_apply": True,
-            },
-            "reason": "repository apply succeeded; mission protocol finalization is in progress",
-        },
-    })
-    ledger.data["result"] = pending
-    ledger.force_status("blocked", reason="mission protocol finalization in progress")
-    try:
-        _finalize_linked_completion(run_dir, ledger, updated)
-    except Exception as exc:  # noqa: BLE001 - repository apply is already committed
-        error = f"{type(exc).__name__}: {str(exc)[:240]}"
-        pending["protocol_finalize_error"] = error
-        pending["next_action"]["reason"] = (
-            "repository apply succeeded but mission protocol finalization must be retried"
-        )
-        ledger.data["result"] = pending
-        ledger.force_status("blocked", reason="mission protocol finalization pending")
-        ledger.record_event("skitarii_mission_finalize_error", {"error": error})
-        return {**pending, "task_id": str(ledger.to_dict().get("task_id") or run_dir.name)}
-    ledger.data["result"] = updated
-    ledger.force_status("completed", reason="verified staged patch and mission protocol completed")
-    return {**updated, "task_id": str(ledger.to_dict().get("task_id") or run_dir.name)}
+    assert isinstance(new_stage, dict)
+    if (
+        new_stage.get("publication_required") is True
+        and not _published_stage_proof_valid(new_stage, verify_remote=True)
+    ):
+        latest = ledger.to_dict().get("result", {})
+        if isinstance(latest, dict):
+            return {**latest, "task_id": str(ledger.to_dict().get("task_id") or run_dir.name)}
+        return {"ok": False, "status": "push_pending", "error": "publication remains pending"}
+    return _complete_applied_skitarii_result(run_dir, ledger, result, new_stage)
 
 
 def apply_staged_patch(
@@ -2809,28 +4074,58 @@ def apply_staged_patch(
     expected_checks_sha256: str = "",
 ) -> dict[str, Any]:
     """Serialize apply per run and reload durable state before compare-and-set."""
-    import fcntl
     from .ledger import TaskLedger
 
     resolved_run = run_dir.resolve()
-    lock_root = Path(os.environ.get("WARMMASTER_RUNTIME_ROOT", "/tmp")) / "skitarii-apply-locks"
-    lock_root.mkdir(parents=True, exist_ok=True)
-    lock_name = hashlib.sha256(str(resolved_run).encode("utf-8")).hexdigest()
-    lock_path = lock_root / f"{lock_name}.lock"
-    with lock_path.open("a+b") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            ledger_path = resolved_run / "task_ledger.json"
-            fresh_ledger = TaskLedger.load(ledger_path)
-            return _apply_staged_patch_locked(
-                resolved_run,
-                fresh_ledger,
-                expected_fingerprint,
-                expected_patch_sha256=expected_patch_sha256,
-                expected_checks_sha256=expected_checks_sha256,
-            )
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    with _run_apply_lock(resolved_run, timeout=1800):
+        ledger_path = resolved_run / "task_ledger.json"
+        fresh_ledger = TaskLedger.load(ledger_path)
+        return _apply_staged_patch_locked(
+            resolved_run,
+            fresh_ledger,
+            expected_fingerprint,
+            expected_patch_sha256=expected_patch_sha256,
+            expected_checks_sha256=expected_checks_sha256,
+        )
+
+
+def begin_run_cancellation(run_dir: Path, reason: str = "") -> dict[str, Any]:
+    """Atomically order cancellation before, or reject it after, live mutation WAL."""
+    from .ledger import TaskLedger
+
+    resolved = run_dir.resolve()
+    with _run_apply_lock(resolved, timeout=30):
+        ledger = TaskLedger.load(resolved / "task_ledger.json")
+        payload = ledger.to_dict()
+        result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+        phase = str(result.get("phase") or result.get("status") or "")
+        if phase in {
+            "apply_intent", "applied_unverified", "publishing",
+            "push_pending", "protocol_finalize_pending",
+        }:
+            return {
+                "ok": False,
+                "status": phase,
+                "error": "run cannot be cancelled after durable repository mutation began",
+                "ledger": payload,
+            }
+        if str(payload.get("status") or "") in {
+            "completed", "failed", "blocked", "cancelled", "corrupt",
+        }:
+            return {
+                "ok": False,
+                "status": str(payload.get("status") or ""),
+                "error": "run is already terminal",
+                "ledger": payload,
+            }
+        if not ledger.request_cancel(reason):
+            return {
+                "ok": False,
+                "status": str(ledger.to_dict().get("status") or ""),
+                "error": "run is already terminal",
+                "ledger": ledger.to_dict(),
+            }
+        return {"ok": True, "status": "cancelling", "ledger": ledger.to_dict()}
 
 
 def should_handle(run_dir: Path) -> bool:
@@ -2862,6 +4157,11 @@ def _mission_dir(run_dir: Path) -> Path | None:
 
 def _finalize_linked_completion(run_dir: Path, ledger: Any, result: dict[str, Any]) -> None:
     """Write a protocol-complete deterministic Ceraxia/Skitarii acceptance trail."""
+    stage = result.get("patch_stage") if isinstance(result.get("patch_stage"), dict) else {}
+    if stage.get("publication_required") is True and not _published_stage_proof_valid(
+        stage, verify_remote=True,
+    ):
+        raise RuntimeError("origin/main publication proof is missing or no longer valid")
     mission_dir = _mission_dir(run_dir)
     if not mission_dir:
         raise RuntimeError("native run is missing mission_ref.json")
@@ -2883,6 +4183,14 @@ def _finalize_linked_completion(run_dir: Path, ledger: Any, result: dict[str, An
             "checks": [
                 {"name": "skitarii_acceptance", "ok": bool(result.get("ok"))},
                 {"name": "repository_apply", "ok": str(result.get("status") or "") == "completed"},
+                {
+                    "name": "origin_main_publication",
+                    "ok": bool(
+                        not isinstance(result.get("patch_stage"), dict)
+                        or result.get("patch_stage", {}).get("publication_required") is not True
+                        or result.get("patch_stage", {}).get("publication_status") == "pushed"
+                    ),
+                },
             ],
             "final_manifest_summary": {},
         },
@@ -2893,8 +4201,8 @@ def _finalize_linked_completion(run_dir: Path, ledger: Any, result: dict[str, An
         mission_id,
         accepted=True,
         reason=(
-            "Skitarii private verification, isolated host recheck, and transactional "
-            "repository apply all passed."
+            "Skitarii private verification, isolated host recheck, transactional "
+            "repository apply, and required origin/main publication all passed."
         ),
         required_revision={},
         escalate_to_user=False,
@@ -2982,6 +4290,36 @@ def _finalize_linked_blocked(
         terminal_event,
     )
     ledger.record_event("skitarii_protocol_blocked_recorded", {"mission_id": mission_id, "phase": phase})
+
+
+def _finalize_linked_cancelled(
+    run_dir: Path,
+    ledger: Any,
+    summary: str,
+    *,
+    artifacts: list[str] | None = None,
+) -> None:
+    mission_dir = _mission_dir(run_dir)
+    if not mission_dir or not mission_dir.exists():
+        return
+    from . import mission_control as mc
+
+    mission_id = str(_read_json(mission_dir / "mission.json").get("mission_id") or mission_dir.name)
+    final = mc.final_response(
+        mission_id, "cancelled", summary, artifacts=artifacts or [],
+    )
+    mc._write_json(mission_dir / "final_response.json", final)
+    mc.record_mission_state(
+        mission_dir, "cancelled", run_status="cancelled", phase="cancelled",
+    )
+    mc.append_progress_event(
+        mission_dir / "progress_events.jsonl",
+        mc.progress_event(
+            mission_id, "Ceraxia", "governor", "cancelled", "cancelled",
+            "Code mission cancelled", summary,
+        ),
+    )
+    ledger.record_event("skitarii_protocol_cancelled_recorded", {"mission_id": mission_id})
 
 
 def _bridge_failure(
@@ -3932,6 +5270,29 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
             mdest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(patch_path, mdest)
     autoapply = os.environ.get("SKITARII_AUTOAPPLY") == "1"
+    autopublish = bool(autoapply and os.environ.get("SKITARII_AUTOPUBLISH") == "1")
+    publish_pending = False
+    if str((patch_stage or {}).get("publication_status") or "") == "cancelled":
+        cancelled_summary = "Code mission cancelled before durable repository mutation."
+        cancelled = _bridge_failure(
+            run_dir,
+            task_id,
+            cancelled_summary,
+            phase="cancelled",
+            status="cancelled",
+        )
+        cancelled.update({
+            "artifacts": saved,
+            "patch_stage": patch_stage or {},
+            "rounds": rounds,
+            "via": "skitarii",
+        })
+        ledger.set_result(cancelled)
+        ledger.force_status("cancelled", reason="cancelled before repository mutation")
+        _finalize_linked_cancelled(
+            run_dir, ledger, cancelled_summary, artifacts=saved,
+        )
+        return cancelled
     if accepted and deliverable_error:
         accepted = False
         summary = f"Unsafe deliverable path blocked completion: {deliverable_error}"
@@ -3943,6 +5304,20 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
     elif accepted and is_patch and autoapply and not _patch_stage_passed(patch_stage, require_applied=True):
         accepted = False
         summary = "Patch passed verification but could not be applied to the live repository."
+    elif (
+        accepted and is_patch and autopublish
+        and not _patch_stage_passed(
+            patch_stage, require_applied=True, require_published=True,
+        )
+    ):
+        accepted = False
+        publication_status = str((patch_stage or {}).get("publication_status") or "")
+        publish_pending = publication_status in {"publishing", "push_pending"}
+        summary = (
+            "Verified patch is applied and committed; origin/main publication will resume automatically."
+            if publish_pending else
+            "Verified patch publication stopped safely before autonomous completion."
+        )
     elif accepted and is_patch and not autoapply:
         accepted = False
         ready_to_apply = True
@@ -3954,13 +5329,19 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
         )
     if not accepted:
         verdict["accepted"] = False
-        verdict["status"] = "ready_to_apply" if ready_to_apply else "blocked"
+        verdict["status"] = (
+            "ready_to_apply" if ready_to_apply
+            else ("push_pending" if publish_pending else "blocked")
+        )
 
     needs_user = bool(verdict.get("needs_user"))
     question = str(verdict.get("question") or "")
     status = (
         "completed" if accepted
-        else ("ready_to_apply" if ready_to_apply else ("needs_user" if needs_user else "blocked"))
+        else (
+            "ready_to_apply" if ready_to_apply
+            else ("push_pending" if publish_pending else ("needs_user" if needs_user else "blocked"))
+        )
     )
     next_action = {}
     if ready_to_apply:
@@ -3982,6 +5363,8 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
             ),
             "reason": "verification passed; operator apply policy is disabled",
         }
+    elif publish_pending:
+        next_action = _publication_next_action(patch_stage or {}, summary)
     elif needs_user:
         next_action = _expired_clarification_action(question)
     ledger.record_event("skitarii_verdict", {"accepted": accepted, "status": status,
@@ -4009,7 +5392,7 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
                 "expected_checks_sha256": str((patch_stage or {}).get("checks_sha256") or ""),
                 "confirm_apply": True,
             },
-            "reason": "repository apply succeeded; mission protocol finalization is in progress",
+            "reason": "repository publication succeeded; mission protocol finalization is in progress",
         }
         pending = dict(result_payload)
         pending.update({
@@ -4021,42 +5404,49 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
             "next_action": reconcile_action,
         })
         ledger.set_result(pending)
-        ledger.force_status("blocked", reason="mission protocol finalization in progress")
+        ledger.force_status(
+            "protocol_finalize_pending",
+            reason="mission protocol finalization in progress",
+        )
         try:
             _finalize_linked_completion(run_dir, ledger, result_payload)
-        except Exception as exc:  # noqa: BLE001 - repository apply is already committed
+        except Exception as exc:  # noqa: BLE001 - repository publication is already durable.
             error = f"{type(exc).__name__}: {str(exc)[:240]}"
             ledger.record_event("skitarii_finalize_error", {"error": error})
             accepted = False
             status = "protocol_finalize_pending"
             next_action = reconcile_action
             next_action["reason"] = (
-                "repository apply succeeded but mission protocol finalization must be retried"
+                "repository publication succeeded but mission protocol finalization must be retried"
             )
             pending.update({"protocol_finalize_error": error, "next_action": next_action})
             ledger.data["result"] = pending
-            ledger.force_status("blocked", reason="mission protocol finalization pending")
+            ledger.force_status(
+                "protocol_finalize_pending",
+                reason="mission protocol finalization pending",
+            )
         else:
             ledger.data["result"] = result_payload
-            ledger.force_status("completed", reason="repository apply and mission protocol completed")
+            ledger.force_status("completed", reason="repository publication and mission protocol completed")
     else:
         ledger.set_result(result_payload)
-        ledger.set_status("blocked")
-        try:
-            _finalize_linked_blocked(
-                run_dir,
-                ledger,
-                summary,
-                phase=status,
-                artifacts=saved,
-                next_action=next_action,
-                needs_user=bool(verdict.get("needs_user")),
-                question=str(verdict.get("question") or ""),
-            )
-        except Exception as exc:  # noqa: BLE001 - blocked finalization is best-effort
-            ledger.record_event(
-                "skitarii_finalize_error", {"error": f"{type(exc).__name__}: {str(exc)[:240]}"},
-            )
+        ledger.force_status("push_pending" if publish_pending else "blocked", reason=status)
+        if not publish_pending:
+            try:
+                _finalize_linked_blocked(
+                    run_dir,
+                    ledger,
+                    summary,
+                    phase=status,
+                    artifacts=saved,
+                    next_action=next_action,
+                    needs_user=bool(verdict.get("needs_user")),
+                    question=str(verdict.get("question") or ""),
+                )
+            except Exception as exc:  # noqa: BLE001 - blocked finalization is best-effort
+                ledger.record_event(
+                    "skitarii_finalize_error", {"error": f"{type(exc).__name__}: {str(exc)[:240]}"},
+                )
 
     return {"ok": accepted, "phase": status,
             "task_id": task_id, "status": status, "summary": summary,
