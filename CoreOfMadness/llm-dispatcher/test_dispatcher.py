@@ -254,6 +254,10 @@ class DispatcherTest(unittest.TestCase):
         health = dispatcher.dispatcher_health()
         self.assertEqual(health["routes"]["gemma"]["capacity"], dispatcher.GEMMA_CONCURRENCY)
         self.assertEqual(health["routes"]["qwen"]["capacity"], dispatcher.QWEN_CONCURRENCY)
+        self.assertEqual(health["routes"]["gemma"]["upstream_timeout_sec"], 600.0)
+        self.assertEqual(health["routes"]["gemma"]["queue_timeout_sec"], 300.0)
+        self.assertEqual(health["routes"]["qwen"]["upstream_timeout_sec"], 90000.0)
+        self.assertEqual(health["routes"]["qwen"]["queue_timeout_sec"], 0.0)
 
     def test_proxy_forwards_four_gemma_requests_concurrently(self):
         backend = self.backend("gemma", blocked=True, expected=4)

@@ -1,0 +1,3 @@
+Synthetic mission archive A
+
+Archive A reports that the flight lasted 108 minutes. Its timing convention starts at launch and ends at landing.

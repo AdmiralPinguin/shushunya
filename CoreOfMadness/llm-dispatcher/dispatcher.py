@@ -90,7 +90,7 @@ QWEN_QUEUE_TIMEOUT_SEC = _env_float(
     "LLM_DISPATCH_QWEN_QUEUE_TIMEOUT_SEC", 0.0, minimum=0.0,
 )
 GEMMA_TIMEOUT_SEC = _env_float("LLM_DISPATCH_GEMMA_TIMEOUT_SEC", 600.0, minimum=1.0)
-QWEN_TIMEOUT_SEC = _env_float("LLM_DISPATCH_QWEN_TIMEOUT_SEC", 7200.0, minimum=1.0)
+QWEN_TIMEOUT_SEC = _env_float("LLM_DISPATCH_QWEN_TIMEOUT_SEC", 90000.0, minimum=1.0)
 LISTEN_BACKLOG = _env_int("LLM_DISPATCH_LISTEN_BACKLOG", 128, minimum=4)
 
 # Cheap, non-generating upstream requests must never wait behind a generation.

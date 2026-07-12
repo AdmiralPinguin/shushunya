@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "dispatcher": {
+    "base_url": "http://127.0.0.1:8079",
+    "service_version": 2,
+    "routes": {
+      "gemma": {
+        "model": "gemma-4-12b-it-UD-Q5_K_XL.gguf",
+        "upstream": "http://127.0.0.1:8080",
+        "advertised_capacity": 4,
+        "upstream_timeout_sec": 600,
+        "queue_timeout_sec": 300
+      },
+      "qwen": {
+        "model": "Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf",
+        "upstream": "http://127.0.0.1:8081",
+        "advertised_capacity": 1,
+        "upstream_timeout_sec": 90000,
+        "queue_timeout_sec": 0
+      }
+    }
+  },
+  "gemma": {
+    "base_url": "http://127.0.0.1:8080",
+    "model_id": "gemma-4-12b-it-UD-Q5_K_XL.gguf",
+    "canonical_model_id": "google/gemma-4-31B-it-qat-w4a16-ct",
+    "root": "CoreOfMadness/models/google-gemma-4-31B-it-qat-w4a16-ct",
+    "owned_by": "vllm",
+    "max_model_len": 7936,
+    "tokenizer_canary_version": 1,
+    "tokenizer_canary_count": 38,
+    "tokenizer_canary_max_model_len": 7936,
+    "tokenizer_canary_token_ids_sha256": "3fa78bb2d2211c01dce24204a116fe71ba9ae90fe1a27ecd401b4d202b82a2f6"
+  },
+  "qwen": {
+    "base_url": "http://127.0.0.1:8081",
+    "model_id": "Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf",
+    "model_path": "CoreOfMadness/models/Qwen3-Coder-Next-Q6_K/Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf",
+    "owned_by": "llamacpp",
+    "n_ctx": 32768,
+    "chat_template_sha256": "0b5c439b5b14126c0ae8b14ca93240c3cef1e7e29d684102b07f10727523dbdb",
+    "build_info": "b9524-59917d392",
+    "chat_format": "Content-only"
+  },
+  "operator_profile": {
+    "gemma_max_num_seqs": 2,
+    "research_max_active": 1,
+    "gemma_max_tokens": 3072,
+    "gemma_max_context_chars": 16000,
+    "qwen_max_tokens": 8192,
+    "qwen_max_context_chars": 80000,
+    "gemma_timeout_sec": 7200,
+    "qwen_timeout_sec": 86400,
+    "reader_chunk_chars": 8000,
+    "tensor_parallel_size": 1,
+    "modality": "text_only"
+  }
+}

@@ -62,8 +62,8 @@ class ReviewAttestation:
     subject_sha256: str
 
     def __post_init__(self) -> None:
-        if self.subject_kind not in {"claim", "edge"}:
-            raise ValueError("attestation subject_kind must be claim or edge")
+        if self.subject_kind not in {"claim", "edge", "final"}:
+            raise ValueError("attestation subject_kind must be claim, edge, or final")
         for field_name in ("subject_id", "reviewer_id"):
             value = getattr(self, field_name)
             if type(value) is not str or not value.strip():
@@ -120,11 +120,17 @@ def edge_review_digest(
         raise TypeError("span must be a SourceSpan")
     if not isinstance(snapshot, SourceSnapshot):
         raise TypeError("snapshot must be a SourceSnapshot")
+    claim_content = claim.to_dict()
+    # Claim review status has its own attestation. Edge entailment binds the
+    # proposition and provenance content, not a second copy of mutable review
+    # metadata; this also lets a review boundary predeclare exact edge variants.
+    claim_content.pop("verification_status", None)
+    claim_content.pop("verified_by", None)
     return _canonical_digest(
         {
             "attestation_schema": "edge-semantic-v1",
             "edge": edge.to_dict(),
-            "claim": claim.to_dict(),
+            "claim": claim_content,
             "span": span.to_dict(),
             "snapshot": snapshot.to_dict(),
         }
@@ -172,8 +178,18 @@ _MAJOR_CODES = frozenset(
         "unsupported_inference_premise",
         "no_major_claim",
         "unacceptable_assumption",
+        "unresolved_claim_conflict",
+        "unresolved_research_gap",
     }
 )
+
+
+# These values explicitly mean that offsets address the trusted canonical
+# normalized representation.  They are not claims about a live DOM or an EPUB
+# package path.  Rich source-native locator maps need a separate, parser-bound
+# artifact before they can participate in acceptance.
+CANONICAL_HTML_SELECTOR = "canonical-normalized-document"
+CANONICAL_EPUB_HREF_PREFIX = "canonical-normalized-spine:"
 
 
 class EvidenceVerifier:
@@ -228,7 +244,13 @@ class EvidenceVerifier:
     @classmethod
     def _extract_excerpt(cls, span: SourceSpan, normalized: str) -> str:
         locator = span.locator
-        if isinstance(locator, (TextLocator, HtmlLocator)):
+        if isinstance(locator, TextLocator):
+            return cls._slice(normalized, locator.start_char, locator.end_char)
+        if isinstance(locator, HtmlLocator):
+            if locator.selector != CANONICAL_HTML_SELECTOR:
+                raise ValueError(
+                    "HTML selector is not the trusted canonical-text sentinel"
+                )
             return cls._slice(normalized, locator.start_char, locator.end_char)
         if isinstance(locator, PdfLocator):
             pages = normalized.split("\f")
@@ -240,6 +262,11 @@ class EvidenceVerifier:
             spine_items = normalized.split("\f")
             if locator.spine_index >= len(spine_items):
                 raise IndexError("EPUB spine index is outside normalized snapshot")
+            expected_href = f"{CANONICAL_EPUB_HREF_PREFIX}{locator.spine_index}"
+            if locator.href != expected_href:
+                raise ValueError(
+                    "EPUB href is not bound to the canonical normalized spine"
+                )
             return cls._slice(
                 spine_items[locator.spine_index],
                 locator.start_char,
@@ -329,7 +356,7 @@ class EvidenceVerifier:
             normalized = normalized_by_snapshot[span.snapshot_id]
             try:
                 actual = self._extract_excerpt(span, normalized)
-            except (IndexError, TypeError) as exc:
+            except (IndexError, TypeError, ValueError) as exc:
                 issues.append(
                     VerificationIssue("locator_out_of_range", span.id, str(exc))
                 )
@@ -486,6 +513,7 @@ class EvidenceVerifier:
                     )
                 )
 
+        for claim in ledger.claims:
             has_independent_refutation = any(
                 edge.relation == "refutes"
                 and edge_review_is_trusted(edge, claim)
@@ -497,9 +525,29 @@ class EvidenceVerifier:
                     VerificationIssue(
                         "unresolved_refutation",
                         claim.id,
-                        "major entailed claim has independently entailed refuting evidence",
+                        "entailed claim has independently entailed refuting evidence",
                     )
                 )
+
+            if claim.conflict_claim_ids:
+                issues.append(
+                    VerificationIssue(
+                        "unresolved_claim_conflict",
+                        claim.id,
+                        "claim has an explicit unresolved conflict; only a separately verified uncertainty disclosure may publish it",
+                    )
+                )
+
+        for gap in ledger.gaps:
+            if gap.status == "resolved":
+                continue
+            issues.append(
+                VerificationIssue(
+                    "unresolved_research_gap",
+                    gap.id,
+                    "an unresolved research gap requires explicit uncertainty disclosure",
+                )
+            )
 
         integrity_ok = not any(issue.code in _INTEGRITY_CODES for issue in issues)
         major_claims_supported = not any(

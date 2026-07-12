@@ -1,0 +1,3 @@
+Synthetic prototype record
+
+The prototype did not use J-type encoding. It used a compact table-driven control format instead.

@@ -221,12 +221,17 @@ class EvidenceCoreTests(unittest.TestCase):
     def test_all_medium_specific_locators_extract_exact_quotes(self) -> None:
         cases = (
             ("text", "before quote after", TextLocator(7, 12), "quote"),
-            ("html", "before quote after", HtmlLocator("main p", 7, 12), "quote"),
+            (
+                "html",
+                "before quote after",
+                HtmlLocator("canonical-normalized-document", 7, 12),
+                "quote",
+            ),
             ("pdf", "first page\fsecond quote page", PdfLocator(2, 7, 12), "quote"),
             (
                 "epub",
                 "first spine\fchapter quote text",
-                EpubLocator(1, "chapter.xhtml", 8, 13),
+                EpubLocator(1, "canonical-normalized-spine:1", 8, 13),
                 "quote",
             ),
             (
@@ -265,6 +270,43 @@ class EvidenceCoreTests(unittest.TestCase):
                     edges=(edge,),
                 )
                 self.assertTrue(self.verifier_for(ledger).verify(ledger).accepted)
+
+    def test_unbound_html_selector_and_epub_href_fail_closed(self) -> None:
+        for index, (medium, locator) in enumerate(
+            (
+                ("html", HtmlLocator("invented-css-selector", 0, 5)),
+                ("epub", EpubLocator(0, "invented/chapter.xhtml", 0, 5)),
+            )
+        ):
+            with self.subTest(medium=medium):
+                snapshot = self.put_snapshot(
+                    snapshot_id=f"source-unbound-{index}",
+                    medium=medium,
+                    normalized="quote evidence",
+                )
+                span = SourceSpan(
+                    id=f"span-unbound-{index}",
+                    snapshot_id=snapshot.id,
+                    locator=locator,
+                    excerpt="quote",
+                )
+                claim = self.reviewed_claim(claim_id=f"claim-unbound-{index}")
+                edge = EvidenceEdge(
+                    id=f"edge-unbound-{index}",
+                    claim_id=claim.id,
+                    span_id=span.id,
+                    relation="supports",
+                    entailment_status="entailed",
+                    assessed_by="semantic-verifier",
+                )
+                ledger = self.ledger(
+                    snapshots=(snapshot,), spans=(span,), claims=(claim,), edges=(edge,)
+                )
+                report = self.verifier_for(ledger).verify(ledger)
+                self.assertFalse(report.accepted)
+                self.assertIn(
+                    "locator_out_of_range", {issue.code for issue in report.issues}
+                )
 
     def test_every_schema_rejects_unknown_and_missing_fields(self) -> None:
         ledger, snapshot, span, claim, edge = self.supported_fixture()
@@ -826,6 +868,107 @@ class EvidenceCoreTests(unittest.TestCase):
         report = self.verifier_for(refuted_ledger).verify(refuted_ledger)
         self.assertIn("unresolved_refutation", {issue.code for issue in report.issues})
         self.assertFalse(report.accepted)
+
+    def test_explicit_major_conflict_requires_separate_disclosure_gate(self) -> None:
+        ledger, snapshot, span, first, first_edge = self.supported_fixture()
+        second = replace(
+            self.reviewed_claim(claim_id="claim-2"),
+            conflict_claim_ids=(first.id,),
+        )
+        first = replace(first, conflict_claim_ids=(second.id,))
+        first_edge = replace(first_edge, claim_id=first.id)
+        second_edge = EvidenceEdge(
+            id="edge-2",
+            claim_id=second.id,
+            span_id=span.id,
+            relation="supports",
+            entailment_status="entailed",
+            assessed_by="semantic-verifier",
+        )
+        conflicted = self.ledger(
+            snapshots=(snapshot,),
+            spans=(span,),
+            claims=(first, second),
+            edges=(first_edge, second_edge),
+        )
+        report = self.verifier_for(conflicted).verify(conflicted)
+        self.assertFalse(report.accepted)
+        self.assertIn(
+            "unresolved_claim_conflict", {issue.code for issue in report.issues}
+        )
+
+    def test_conflict_references_must_be_symmetric(self) -> None:
+        first = replace(
+            self.reviewed_claim(claim_id="claim-a"),
+            conflict_claim_ids=("claim-b",),
+        )
+        second = self.reviewed_claim(claim_id="claim-b")
+        with self.assertRaisesRegex(SchemaError, "asymmetric conflict refs"):
+            self.ledger(claims=(first, second))
+
+    def test_minor_conflict_and_minor_refutation_cannot_hide_behind_a_major(self) -> None:
+        ledger, snapshot, span, major, major_edge = self.supported_fixture()
+        minor_a = replace(
+            self.reviewed_claim(claim_id="claim-minor-a", importance="minor"),
+            conflict_claim_ids=("claim-minor-b",),
+        )
+        minor_b = replace(
+            self.reviewed_claim(claim_id="claim-minor-b", importance="minor"),
+            conflict_claim_ids=(minor_a.id,),
+        )
+        minor_edges = (
+            EvidenceEdge(
+                id="edge-minor-a",
+                claim_id=minor_a.id,
+                span_id=span.id,
+                relation="supports",
+                entailment_status="entailed",
+                assessed_by="semantic-verifier",
+            ),
+            EvidenceEdge(
+                id="edge-minor-b",
+                claim_id=minor_b.id,
+                span_id=span.id,
+                relation="supports",
+                entailment_status="entailed",
+                assessed_by="semantic-verifier",
+            ),
+            EvidenceEdge(
+                id="edge-minor-refute",
+                claim_id=minor_a.id,
+                span_id=span.id,
+                relation="refutes",
+                entailment_status="entailed",
+                assessed_by="second-verifier",
+            ),
+        )
+        mixed = self.ledger(
+            snapshots=(snapshot,),
+            spans=(span,),
+            claims=(major, minor_a, minor_b),
+            edges=(major_edge, *minor_edges),
+        )
+        report = self.verifier_for(mixed).verify(mixed)
+        codes = {issue.code for issue in report.issues}
+        self.assertFalse(report.accepted)
+        self.assertIn("unresolved_claim_conflict", codes)
+        self.assertIn("unresolved_refutation", codes)
+
+    def test_open_material_gap_requires_separate_disclosure_gate(self) -> None:
+        ledger, _, _, claim, _ = self.supported_fixture()
+        gap = Gap(
+            id="gap-material",
+            question="Which material evidence is still unavailable?",
+            status="open",
+            related_claim_ids=(claim.id,),
+            search_attempts=("bounded catalog search",),
+        )
+        with_gap = replace(ledger, gaps=(gap,))
+        report = self.verifier_for(with_gap).verify(with_gap)
+        self.assertFalse(report.accepted)
+        self.assertIn(
+            "unresolved_research_gap", {issue.code for issue in report.issues}
+        )
 
 
 if __name__ == "__main__":

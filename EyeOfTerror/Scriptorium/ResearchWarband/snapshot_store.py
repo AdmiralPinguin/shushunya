@@ -317,6 +317,8 @@ class SnapshotStore:
         raw: bytes,
         normalized: str | None = None,
         normalizer_version: str,
+        source_class: str = "unknown",
+        source_classifier_id: str = "unknown",
     ) -> SourceSnapshot:
         """Persist immutable bytes and return their strict snapshot metadata."""
 
@@ -363,6 +365,8 @@ class SnapshotStore:
             raw_path=raw_path,
             normalized_path=normalized_path,
             normalizer_version=normalizer_version,
+            source_class=source_class,
+            source_classifier_id=source_classifier_id,
         )
         self.verify(snapshot)
         return snapshot

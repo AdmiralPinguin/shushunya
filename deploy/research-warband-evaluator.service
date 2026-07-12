@@ -1,0 +1,31 @@
+[Unit]
+Description=Isolated ResearchWarband external-evaluator subject (loopback 7202)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/media/shushunya/SHUSHUNYA/shushunya
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPYCACHEPREFIX=/dev/null
+Environment=PYTHONPATH=/media/shushunya/SHUSHUNYA/shushunya
+EnvironmentFile=/media/shushunya/SHUSHUNYA/shushunya/deploy/research-warband-evaluator.env
+ExecStartPre=/media/shushunya/SHUSHUNYA/shushunya/DemonsForge/DemonsForge/bin/python -B -m EyeOfTerror.Scriptorium.ResearchWarband.deployment_profile --expect external-evaluator
+ExecStart=/media/shushunya/SHUSHUNYA/shushunya/DemonsForge/DemonsForge/bin/python -B -m EyeOfTerror.Scriptorium.ResearchWarband.service
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=mixed
+Delegate=yes
+TasksMax=512
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/media/shushunya/SHUSHUNYA/shushunya/runtime/research-warband-evaluator
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=default.target

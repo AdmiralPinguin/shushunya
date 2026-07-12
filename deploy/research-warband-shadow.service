@@ -1,0 +1,32 @@
+[Unit]
+Description=Iskandar ResearchWarband production shadow (loopback 7201; no legacy cutover)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/media/shushunya/SHUSHUNYA/shushunya
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPYCACHEPREFIX=/dev/null
+Environment=PYTHONPATH=/media/shushunya/SHUSHUNYA/shushunya
+EnvironmentFile=/media/shushunya/SHUSHUNYA/shushunya/deploy/research-warband-shadow.env
+EnvironmentFile=/media/shushunya/SHUSHUNYA/shushunya/.secrets/research-warband-shadow.env
+ExecStartPre=/media/shushunya/SHUSHUNYA/shushunya/DemonsForge/DemonsForge/bin/python -B -m EyeOfTerror.Scriptorium.ResearchWarband.deployment_profile --expect shadow-production
+ExecStart=/media/shushunya/SHUSHUNYA/shushunya/DemonsForge/DemonsForge/bin/python -B -m EyeOfTerror.Scriptorium.ResearchWarband.service
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=120
+KillMode=mixed
+Delegate=yes
+TasksMax=512
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/media/shushunya/SHUSHUNYA/shushunya/runtime/research-warband-shadow
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=default.target

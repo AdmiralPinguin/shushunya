@@ -16,6 +16,22 @@ from typing import Any, ClassVar, Mapping, TypeAlias
 
 SCHEMA_VERSION = "1.0"
 MEDIA = frozenset({"text", "html", "pdf", "epub", "fb2"})
+SOURCE_CLASSES = frozenset(
+    {
+        "primary_source",
+        "official_documentation",
+        "standards_specification",
+        "legal_or_regulatory",
+        "peer_reviewed_research",
+        "scholarly_secondary",
+        "reputable_journalism",
+        "archival_catalog",
+        "user_provided_corpus",
+        "community_source",
+        "anonymous_or_unverified_web",
+        "machine_generated_summary",
+    }
+)
 CLAIM_KINDS = frozenset(
     {"source_assertion", "direct_observation", "inference", "assumption"}
 )
@@ -363,6 +379,10 @@ class SourceSnapshot:
     raw_path: str
     normalized_path: str
     normalizer_version: str
+    # ``unknown`` exists only for backwards-compatible evidence-core objects.
+    # The execution engine rejects it before acquisition or acceptance.
+    source_class: str = "unknown"
+    source_classifier_id: str = "unknown"
 
     _FIELDS: ClassVar[frozenset[str]] = frozenset(
         {
@@ -377,6 +397,8 @@ class SourceSnapshot:
             "raw_path",
             "normalized_path",
             "normalizer_version",
+            "source_class",
+            "source_classifier_id",
         }
     )
 
@@ -392,6 +414,9 @@ class SourceSnapshot:
         _relative_store_path(self.raw_path, "SourceSnapshot.raw_path")
         _relative_store_path(self.normalized_path, "SourceSnapshot.normalized_path")
         _string(self.normalizer_version, "SourceSnapshot.normalizer_version")
+        if self.source_class != "unknown":
+            _choice(self.source_class, SOURCE_CLASSES, "SourceSnapshot.source_class")
+        _string(self.source_classifier_id, "SourceSnapshot.source_classifier_id")
 
     def to_dict(self) -> dict[str, Any]:
         return {field: getattr(self, field) for field in self._FIELDS}
@@ -806,6 +831,15 @@ class EvidenceLedger:
             if missing:
                 raise SchemaError(
                     f"Claim {claim.id} has missing conflict refs: {', '.join(sorted(missing))}"
+                )
+            asymmetric = {
+                other_id
+                for other_id in claim.conflict_claim_ids
+                if claim.id not in claims_by_id[other_id].conflict_claim_ids
+            }
+            if asymmetric:
+                raise SchemaError(
+                    f"Claim {claim.id} has asymmetric conflict refs: {', '.join(sorted(asymmetric))}"
                 )
 
         conclusion_ids: set[str] = set()

@@ -19,7 +19,11 @@ import json,sys
 d=json.load(sys.stdin); r=d.get("routes", {})
 ok=(type(d.get("version")) is int and d["version"]==2
     and type(r.get("gemma",{}).get("capacity")) is int and r["gemma"]["capacity"]==4
-    and type(r.get("qwen",{}).get("capacity")) is int and r["qwen"]["capacity"]==1)
+    and type(r.get("qwen",{}).get("capacity")) is int and r["qwen"]["capacity"]==1
+    and r["gemma"].get("upstream_timeout_sec")==600.0
+    and r["gemma"].get("queue_timeout_sec")==300.0
+    and r["qwen"].get("upstream_timeout_sec")==90000.0
+    and r["qwen"].get("queue_timeout_sec")==0.0)
 raise SystemExit(0 if ok else 1)' >/dev/null 2>&1
 }
 listener_pid() {
@@ -38,6 +42,10 @@ stop_dispatcher() {
 
 export LLM_DISPATCH_GEMMA_CONCURRENCY=4
 export LLM_DISPATCH_QWEN_CONCURRENCY=1
+export LLM_DISPATCH_GEMMA_TIMEOUT_SEC=600
+export LLM_DISPATCH_GEMMA_QUEUE_TIMEOUT_SEC=300
+export LLM_DISPATCH_QWEN_TIMEOUT_SEC=90000
+export LLM_DISPATCH_QWEN_QUEUE_TIMEOUT_SEC=0
 exec 9> "$DRUNTIME/dispatcher-${DPORT}.lock"
 flock -w 15 9 || { echo "dispatcher startup lock timeout" >&2; exit 1; }
 
@@ -75,7 +83,7 @@ else
   if (( ! READY )); then
     is_dispatcher "$DPID" && kill -TERM "$DPID" 2>/dev/null || true
     rm -f "$DPID_FILE"
-    echo "dispatcher failed readiness contract v2/gemma=4/qwen=1" >&2
+    echo "dispatcher failed readiness contract v2/gemma=4:600:300/qwen=1:90000:0" >&2
     exit 1
   fi
 fi
