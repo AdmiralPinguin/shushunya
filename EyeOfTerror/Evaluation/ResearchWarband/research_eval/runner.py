@@ -15,10 +15,15 @@ from .fixtures import load_fixture
 from .manifest import LoadedSuite, load_suite
 from .metrics import aggregate_metrics
 from .oracles import OracleReport, evaluate_task
-from .subjects import SubjectAdapter
+from .subjects import (
+    SubjectAdapter,
+    SubjectProcessBoundary,
+    SubjectTimeoutError,
+)
 
 
-RUNNER_VERSION = "research-external-eval/0.2"
+RUNNER_VERSION = "research-external-eval/0.3"
+HEALTH_WALL_SEC = 10.0
 
 
 def build_service_payload(task: dict[str, Any], *, fixture_base_url: str) -> dict[str, Any]:
@@ -84,11 +89,28 @@ def _fixture_access_failures(
     task: dict[str, Any], fixture: Any, accesses: list[dict[str, object]],
 ) -> list[str]:
     required = _required_fixture_routes(task, fixture)
-    observed = {
-        str(item.get("path") or "").split("?", 1)[0]
-        for item in accesses
-        if item.get("method") in {"GET", "HEAD"} and item.get("status") == 200
+    expected = {
+        str(document.data["route"]): (
+            len(document.raw),
+            str(document.data["raw_sha256"]),
+        )
+        for document in fixture.documents.values()
+        if str(document.data["route"]) in required
     }
+    observed: set[str] = set()
+    for item in accesses:
+        route = str(item.get("path") or "").split("?", 1)[0]
+        expected_body = expected.get(route)
+        if expected_body is None:
+            continue
+        expected_bytes, expected_sha256 = expected_body
+        if (
+            item.get("method") == "GET"
+            and item.get("status") == 200
+            and item.get("body_bytes") == expected_bytes
+            and item.get("body_sha256") == expected_sha256
+        ):
+            observed.add(route)
     missing = sorted(required - observed)
     return [f"subject did not acquire required fixture source: {path}" for path in missing]
 
@@ -105,8 +127,10 @@ def run_suite(
     generated_at = datetime.now(timezone.utc).isoformat()
     rows: list[dict[str, Any]] = []
     infrastructure_errors: list[str] = []
+    boundary: SubjectProcessBoundary | None = None
     try:
-        health_start = subject.health()
+        boundary = SubjectProcessBoundary(subject)
+        health_start = boundary.health(timeout_sec=HEALTH_WALL_SEC)
     except Exception as exc:  # noqa: BLE001
         health_start = {"status": "unavailable", "error": f"{type(exc).__name__}: {exc}"}
         infrastructure_errors.append("subject health failed at start")
@@ -124,7 +148,12 @@ def run_suite(
             }
             payload = build_service_payload(task, fixture_base_url=gateway.base_url)
             try:
-                execution = subject.execute(payload, timeout_sec=task["limits"]["wall_sec"])
+                if boundary is None:
+                    raise RuntimeError("isolated subject process was not started")
+                execution = boundary.execute(
+                    payload,
+                    timeout_sec=task["limits"]["wall_sec"],
+                )
                 if not execution.terminal or not execution.cleanup_proven:
                     row["failures"] = [f"subject lifecycle cleanup was not proven: {execution.cleanup_detail}"]
                     infrastructure_errors.append(f"{task['id']}: cleanup not proven")
@@ -158,6 +187,9 @@ def run_suite(
                     row["failures"] = list(report.failures)
                     row["counters"] = dict(report.counters)
                     row["fixture_access_count"] = len(task_accesses)
+            except SubjectTimeoutError as exc:
+                row["failures"] = [f"subject wall timeout: {str(exc)[:200]}"]
+                infrastructure_errors.append(f"{task['id']}: execution timeout")
             except Exception as exc:  # noqa: BLE001
                 row["failures"] = [f"evaluator/subject infrastructure error: {type(exc).__name__}: {str(exc)[:200]}"]
                 infrastructure_errors.append(f"{task['id']}: execution error")
@@ -165,10 +197,15 @@ def run_suite(
             rows.append(row)
         fixture_access_log = list(gateway.access_log)
     try:
-        health_end = subject.health()
+        if boundary is None:
+            raise RuntimeError("isolated subject process was not started")
+        health_end = boundary.health(timeout_sec=HEALTH_WALL_SEC)
     except Exception as exc:  # noqa: BLE001
         health_end = {"status": "unavailable", "error": f"{type(exc).__name__}: {exc}"}
         infrastructure_errors.append("subject health failed at end")
+    finally:
+        if boundary is not None:
+            boundary.close()
     identity_stable = (
         _healthy(health_start)
         and _healthy(health_end)

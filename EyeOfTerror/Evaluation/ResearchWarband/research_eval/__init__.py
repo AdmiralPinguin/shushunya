@@ -3,7 +3,14 @@
 from .fixtures import FixtureError, LoadedFixture, load_fixture
 from .manifest import ManifestError, LoadedSuite, load_suite
 from .runner import run_suite
-from .subjects import FakeSubjectAdapter, SubjectAdapter, SubjectExecution
+from .subjects import (
+    FakeSubjectAdapter,
+    SubjectAdapter,
+    SubjectBoundaryError,
+    SubjectExecution,
+    SubjectProcessBoundary,
+    SubjectTimeoutError,
+)
 
 __all__ = [
     "FakeSubjectAdapter",
@@ -12,7 +19,10 @@ __all__ = [
     "LoadedSuite",
     "ManifestError",
     "SubjectAdapter",
+    "SubjectBoundaryError",
     "SubjectExecution",
+    "SubjectProcessBoundary",
+    "SubjectTimeoutError",
     "load_fixture",
     "load_suite",
     "run_suite",

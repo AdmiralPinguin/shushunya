@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,9 +34,23 @@ class FixtureServer:
             def log_message(self, _format: str, *_args: object) -> None:
                 return
 
-            def _record(self, status: int) -> None:
+            def _record(
+                self,
+                status: int,
+                *,
+                body_bytes: int,
+                body_sha256: str,
+            ) -> None:
                 with outer._lock:
-                    outer.access_log.append({"method": self.command, "path": self.path, "status": status})
+                    outer.access_log.append(
+                        {
+                            "method": self.command,
+                            "path": self.path,
+                            "status": status,
+                            "body_bytes": body_bytes,
+                            "body_sha256": body_sha256,
+                        }
+                    )
 
             def _send(self, status: int, body: bytes, content_type: str, *, sha256: str = "") -> None:
                 self.send_response(status)
@@ -46,9 +61,18 @@ class FixtureServer:
                     self.send_header("X-Eval-Snapshot-Sha256", sha256)
                     self.send_header("ETag", f'"sha256:{sha256}"')
                 self.end_headers()
+                delivered_bytes = 0
+                delivered_sha256 = ""
                 if self.command != "HEAD":
                     self.wfile.write(body)
-                self._record(status)
+                    self.wfile.flush()
+                    delivered_bytes = len(body)
+                    delivered_sha256 = hashlib.sha256(body).hexdigest()
+                self._record(
+                    status,
+                    body_bytes=delivered_bytes,
+                    body_sha256=delivered_sha256,
+                )
 
             def do_HEAD(self) -> None:  # noqa: N802
                 self.do_GET()

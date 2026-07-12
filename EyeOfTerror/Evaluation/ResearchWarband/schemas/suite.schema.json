@@ -18,10 +18,12 @@
     "stringList": {"type": "array", "items": {"type": "string", "minLength": 1}},
     "fact": {
       "type": "object", "additionalProperties": false,
-      "required": ["id", "claim_contains_all", "final_contains_all", "source_ids", "relations", "span_contains_all"],
+      "required": ["id", "claim_contains_all", "claim_text_any", "final_contains_all", "final_ref_text_any", "source_ids", "relations", "span_contains_all"],
       "properties": {
         "id": {"type": "string"}, "claim_contains_all": {"$ref": "#/$defs/stringList"},
+        "claim_text_any": {"$ref": "#/$defs/stringList"},
         "final_contains_all": {"$ref": "#/$defs/stringList"}, "source_ids": {"$ref": "#/$defs/stringList"},
+        "final_ref_text_any": {"$ref": "#/$defs/stringList"},
         "relations": {"$ref": "#/$defs/stringList"}, "span_contains_all": {"$ref": "#/$defs/stringList"}
       }
     },

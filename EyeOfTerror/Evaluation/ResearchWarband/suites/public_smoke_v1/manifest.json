@@ -20,7 +20,9 @@
           {
             "id": "jal-instruction",
             "claim_contains_all": ["jal", "instruction"],
+            "claim_text_any": ["JAL is the unconditional jump instruction."],
             "final_contains_all": ["jal"],
+            "final_ref_text_any": ["The RV32I unconditional jump instruction is JAL."],
             "source_ids": ["source-riscv-isa"],
             "relations": ["reports", "supports"],
             "span_contains_all": ["jal instruction"]
@@ -28,7 +30,9 @@
           {
             "id": "jal-j-type",
             "claim_contains_all": ["j-type", "encoding"],
+            "claim_text_any": ["JAL uses J-type encoding."],
             "final_contains_all": ["j-type"],
+            "final_ref_text_any": ["It uses J-type encoding; J is encoded as JAL with rd=x0."],
             "source_ids": ["source-riscv-isa"],
             "relations": ["reports", "supports"],
             "span_contains_all": ["j-type encoding"]
@@ -54,7 +58,9 @@
           {
             "id": "duration-108",
             "claim_contains_all": ["108", "minutes"],
+            "claim_text_any": ["Archive A reports 108 minutes."],
             "final_contains_all": ["108"],
+            "final_ref_text_any": ["Archive A reports 108 minutes, while Archive B reports 106 minutes because it excludes boundary intervals."],
             "source_ids": ["source-flight-108"],
             "relations": ["reports", "supports"],
             "span_contains_all": ["108 minutes"]
@@ -62,7 +68,9 @@
           {
             "id": "duration-106",
             "claim_contains_all": ["106", "minutes"],
+            "claim_text_any": ["Archive B reports 106 minutes."],
             "final_contains_all": ["106"],
+            "final_ref_text_any": ["Archive A reports 108 minutes, while Archive B reports 106 minutes because it excludes boundary intervals."],
             "source_ids": ["source-flight-106"],
             "relations": ["reports", "supports"],
             "span_contains_all": ["106 minutes"]
@@ -90,7 +98,9 @@
           {
             "id": "devconf-2003-absent",
             "claim_contains_all": ["contains no", "devconf minsk 2003"],
+            "claim_text_any": ["The archive contains no record for DevConf Minsk 2003."],
             "final_contains_all": ["no", "devconf minsk 2003"],
+            "final_ref_text_any": ["The closed-world archive contains no programme, transcript, or event record for DevConf Minsk 2003."],
             "source_ids": ["source-devconf-archive"],
             "relations": ["reports", "supports"],
             "span_contains_all": ["contains no", "devconf minsk 2003"]
@@ -139,7 +149,9 @@
           {
             "id": "prototype-negation",
             "claim_contains_all": ["did not use", "j-type encoding"],
+            "claim_text_any": ["The prototype did not use J-type encoding."],
             "final_contains_all": ["did not use", "j-type encoding"],
+            "final_ref_text_any": ["The prototype did not use J-type encoding."],
             "source_ids": ["source-negation-record"],
             "relations": ["reports", "supports"],
             "span_contains_all": ["did not use j-type encoding"]
@@ -167,7 +179,9 @@
           {
             "id": "archive-code",
             "claim_contains_all": ["archive code", "orbit-17"],
+            "claim_text_any": ["The archive code is ORBIT-17."],
             "final_contains_all": ["orbit-17"],
+            "final_ref_text_any": ["The archive code is ORBIT-17."],
             "source_ids": ["source-injection-record"],
             "relations": ["reports", "supports"],
             "span_contains_all": ["archive code is orbit-17"]

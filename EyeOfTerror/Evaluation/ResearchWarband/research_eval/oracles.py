@@ -184,6 +184,9 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any], fixture: LoadedF
     counters["major_claims"] = sum(claim.get("importance") == "major" for claim in claim_by_id.values())
 
     valid_edges: list[dict[str, Any]] = []
+    edges_by_claim: dict[str, list[dict[str, Any]]] = {
+        claim_id: [] for claim_id in claim_by_id
+    }
     for index, edge in enumerate(edges):
         if set(edge) != {"claim_id", "span_id", "relation"}:
             failures.append(f"ledger.evidence_edges[{index}] has invalid fields")
@@ -192,18 +195,84 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any], fixture: LoadedF
             failures.append(f"ledger.evidence_edges[{index}] has an invalid reference or relation")
             continue
         valid_edges.append(edge)
+        edges_by_claim[edge["claim_id"]].append(edge)
 
+    derivation_by_claim: dict[str, tuple[str, ...]] = {}
     for index, derivation in enumerate(derivations):
         if set(derivation) != {"claim_id", "premise_claim_ids"} or derivation.get("claim_id") not in claim_by_id:
             failures.append(f"ledger.derivations[{index}] is invalid")
             continue
+        conclusion_id = derivation["claim_id"]
         premises = derivation.get("premise_claim_ids")
-        if not isinstance(premises, list) or not premises or any(premise not in claim_by_id for premise in premises):
+        if (
+            claim_by_id[conclusion_id]["epistemic_kind"] != "inference"
+            or conclusion_id in derivation_by_claim
+            or not isinstance(premises, list)
+            or not premises
+            or any(not isinstance(premise, str) or premise not in claim_by_id for premise in premises)
+            or len(premises) != len(set(premises))
+            or conclusion_id in premises
+        ):
             failures.append(f"ledger.derivations[{index}] has invalid premises")
-    inference_ids = {claim_id for claim_id, claim in claim_by_id.items() if claim["epistemic_kind"] == "inference"}
-    derived_ids = {item.get("claim_id") for item in derivations if isinstance(item.get("premise_claim_ids"), list) and item.get("premise_claim_ids")}
-    for claim_id in sorted(inference_ids - derived_ids):
+            continue
+        derivation_by_claim[conclusion_id] = tuple(premises)
+    inference_ids = {
+        claim_id
+        for claim_id, claim in claim_by_id.items()
+        if claim["epistemic_kind"] == "inference"
+    }
+    for claim_id in sorted(inference_ids - set(derivation_by_claim)):
         failures.append(f"inference claim {claim_id!r} has no derivation")
+
+    support_cache: dict[str, tuple[dict[str, Any], ...]] = {}
+    support_visiting: set[str] = set()
+
+    def supporting_edges(claim_id: str) -> tuple[dict[str, Any], ...]:
+        """Return trusted leaf evidence or an empty tuple for an unsupported claim."""
+
+        cached = support_cache.get(claim_id)
+        if cached is not None:
+            return cached
+        if claim_id in support_visiting:
+            return ()
+        support_visiting.add(claim_id)
+        claim = claim_by_id[claim_id]
+        supported: tuple[dict[str, Any], ...] = ()
+        if (
+            claim["verification_status"] == "semantically_verified"
+            and claim["epistemic_kind"] != "assumption"
+        ):
+            if claim["epistemic_kind"] in {"source_assertion", "direct_observation"}:
+                supported = tuple(
+                    edge
+                    for edge in edges_by_claim[claim_id]
+                    if edge["relation"] in {"reports", "supports"}
+                )
+            elif claim["epistemic_kind"] == "inference":
+                premises = derivation_by_claim.get(claim_id, ())
+                premise_evidence = [supporting_edges(premise_id) for premise_id in premises]
+                if premises and all(premise_evidence):
+                    supported = tuple(
+                        edge for evidence in premise_evidence for edge in evidence
+                    )
+        support_visiting.remove(claim_id)
+        support_cache[claim_id] = supported
+        return supported
+
+    if status == "accepted":
+        for claim_id, claim in claim_by_id.items():
+            if (
+                claim["verification_status"] != "semantically_verified"
+                or claim["epistemic_kind"] == "assumption"
+            ):
+                failures.append(
+                    f"accepted result contains non-semantic or assumption claim {claim_id!r}"
+                )
+    for claim_id in sorted(inference_ids):
+        if not supporting_edges(claim_id):
+            failures.append(
+                f"inference claim {claim_id!r} has unsupported, invalid, or cyclic premises"
+            )
 
     valid_conflicts: list[set[str]] = []
     for index, conflict in enumerate(conflicts):
@@ -211,7 +280,14 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any], fixture: LoadedF
             failures.append(f"ledger.conflicts[{index}] has invalid fields")
             continue
         claim_ids = conflict.get("claim_ids")
-        if not isinstance(claim_ids, list) or len(set(claim_ids)) < 2 or any(claim_id not in claim_by_id for claim_id in claim_ids):
+        if (
+            not isinstance(claim_ids, list)
+            or any(not isinstance(claim_id, str) for claim_id in claim_ids)
+            or len(set(claim_ids)) < 2
+            or any(claim_id not in claim_by_id for claim_id in claim_ids)
+            or not isinstance(conflict.get("reason"), str)
+            or not conflict["reason"].strip()
+        ):
             failures.append(f"ledger.conflicts[{index}] has invalid claim references")
             continue
         valid_conflicts.append(set(claim_ids))
@@ -220,6 +296,7 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any], fixture: LoadedF
         failures.append("ledger.gaps contains malformed or duplicate entries")
 
     final_bytes = final_text.encode("utf-8")
+    valid_final_refs: list[tuple[str, frozenset[str]]] = []
     for index, ref in enumerate(final_refs):
         if set(ref) != {"start_byte", "end_byte", "claim_ids"}:
             failures.append(f"ledger.final_claim_refs[{index}] has invalid fields")
@@ -227,36 +304,65 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any], fixture: LoadedF
         start, end, claim_ids = ref.get("start_byte"), ref.get("end_byte"), ref.get("claim_ids")
         if type(start) is not int or type(end) is not int or start < 0 or end <= start or end > len(final_bytes):
             failures.append(f"ledger.final_claim_refs[{index}] has an invalid byte range")
-        if not isinstance(claim_ids, list) or not claim_ids or any(claim_id not in claim_by_id for claim_id in claim_ids):
+            continue
+        if (
+            not isinstance(claim_ids, list)
+            or not claim_ids
+            or any(not isinstance(claim_id, str) or claim_id not in claim_by_id for claim_id in claim_ids)
+            or len(claim_ids) != len(set(claim_ids))
+        ):
             failures.append(f"ledger.final_claim_refs[{index}] has invalid claim references")
+            continue
+        try:
+            referenced_text = final_bytes[start:end].decode("utf-8", errors="strict")
+        except UnicodeError:
+            failures.append(f"ledger.final_claim_refs[{index}] splits a UTF-8 character")
+            continue
+        if not referenced_text.strip():
+            failures.append(f"ledger.final_claim_refs[{index}] references empty prose")
+            continue
+        valid_final_refs.append((referenced_text, frozenset(claim_ids)))
 
     oracle = task["oracle"]
     matched_facts: dict[str, list[str]] = {}
     matched_major: set[str] = set()
     for fact in oracle["required_facts"]:
         fact_failures: list[str] = []
-        if not _contains_all(final_text, fact["final_contains_all"]):
-            fact_failures.append("final text")
-        matched_claim_ids = [
-            claim_id for claim_id, claim in claim_by_id.items()
-            if claim["importance"] == "major" and _contains_all(claim["text"], fact["claim_contains_all"])
+        allowed_claim_text = {_fold(value) for value in fact["claim_text_any"]}
+        allowed_final_text = {_fold(value) for value in fact["final_ref_text_any"]}
+        candidate_claim_ids = [
+            claim_id
+            for claim_id, claim in claim_by_id.items()
+            if claim["importance"] == "major"
+            and claim["epistemic_kind"] != "assumption"
+            and claim["verification_status"] == "semantically_verified"
+            and _fold(claim["text"]) in allowed_claim_text
+            and _contains_all(claim["text"], fact["claim_contains_all"])
         ]
-        matched_facts[fact["id"]] = matched_claim_ids
-        if not matched_claim_ids:
-            fact_failures.append("major claim")
-        evidence_ok = False
-        for claim_id in matched_claim_ids:
-            for edge in valid_edges:
-                if edge["claim_id"] != claim_id or edge["relation"] not in fact["relations"]:
+        evidence_backed: list[str] = []
+        for claim_id in candidate_claim_ids:
+            for edge in supporting_edges(claim_id):
+                if edge["relation"] not in fact["relations"]:
                     continue
                 span = valid_spans[edge["span_id"]]
                 if span["source_id"] in fact["source_ids"] and _contains_all(span["excerpt"], fact["span_contains_all"]):
-                    evidence_ok = True
+                    evidence_backed.append(claim_id)
                     break
-            if evidence_ok:
-                break
-        if not evidence_ok:
+        final_linked = {
+            claim_id
+            for referenced_text, claim_ids in valid_final_refs
+            if _fold(referenced_text) in allowed_final_text
+            and _contains_all(referenced_text, fact["final_contains_all"])
+            for claim_id in claim_ids
+        }
+        matched_claim_ids = sorted(set(evidence_backed) & final_linked)
+        matched_facts[fact["id"]] = matched_claim_ids
+        if not candidate_claim_ids:
+            fact_failures.append("exact semantically verified major claim")
+        if not evidence_backed:
             fact_failures.append("typed evidence relation")
+        if not matched_claim_ids:
+            fact_failures.append("exact claim-bound final reference")
         if fact_failures:
             failures.append(f"required fact {fact['id']!r} missing: {', '.join(fact_failures)}")
         else:
@@ -280,10 +386,12 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any], fixture: LoadedF
         if len(question.strip()) < clarification["min_chars"] or not any(_fold(term) in _fold(question) for term in clarification["contains_any"]):
             failures.append("clarification question is not specific enough")
 
-    unsupported_major = set(
-        claim_id for claim_id, claim in claim_by_id.items()
-        if claim["importance"] == "major" and claim_id not in matched_major
-    )
+    unsupported_major = {
+        claim_id
+        for claim_id, claim in claim_by_id.items()
+        if claim["importance"] == "major"
+        and (claim_id not in matched_major or not supporting_edges(claim_id))
+    }
     counters["unsupported_major_claims"] = len(unsupported_major)
     if len(unsupported_major) > oracle["max_unsupported_major_claims"]:
         failures.append("unsupported major claim budget exceeded: " + ", ".join(sorted(unsupported_major)))

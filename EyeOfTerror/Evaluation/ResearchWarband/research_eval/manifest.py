@@ -80,16 +80,44 @@ def _validate_fact(value: Any, where: str) -> None:
     fact = require_object(value, where)
     exact_keys(
         fact,
-        allowed={"id", "claim_contains_all", "final_contains_all", "source_ids", "relations", "span_contains_all"},
-        required={"id", "claim_contains_all", "final_contains_all", "source_ids", "relations", "span_contains_all"},
+        allowed={
+            "id",
+            "claim_contains_all",
+            "claim_text_any",
+            "final_contains_all",
+            "final_ref_text_any",
+            "source_ids",
+            "relations",
+            "span_contains_all",
+        },
+        required={
+            "id",
+            "claim_contains_all",
+            "claim_text_any",
+            "final_contains_all",
+            "final_ref_text_any",
+            "source_ids",
+            "relations",
+            "span_contains_all",
+        },
         where=where,
     )
     if not isinstance(fact["id"], str) or not _ID.fullmatch(fact["id"]):
         raise ManifestError(f"{where}.id is invalid")
-    for key in ("claim_contains_all", "final_contains_all", "source_ids", "relations", "span_contains_all"):
+    for key in (
+        "claim_contains_all",
+        "claim_text_any",
+        "final_contains_all",
+        "final_ref_text_any",
+        "source_ids",
+        "relations",
+        "span_contains_all",
+    ):
         items = require_list(fact[key], f"{where}.{key}")
         if not items or any(not isinstance(item, str) or not item for item in items):
             raise ManifestError(f"{where}.{key} must contain non-empty strings")
+        if len(items) != len(set(items)):
+            raise ManifestError(f"{where}.{key} must not contain duplicates")
 
 
 def _validate_oracle(value: Any, where: str) -> None:
