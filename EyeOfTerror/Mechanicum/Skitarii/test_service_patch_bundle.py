@@ -33,6 +33,16 @@ class AliveLocalExecutor(LocalExecutor):
         return True
 
 
+class RecordingLocalExecutor(LocalExecutor):
+    def __init__(self, workdir: Path):
+        super().__init__(workdir)
+        self.bash_commands: list[str] = []
+
+    def bash(self, command: str, timeout: int = 120):
+        self.bash_commands.append(command)
+        return super().bash(command, timeout=timeout)
+
+
 def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True,
@@ -333,6 +343,75 @@ class TestPatchBundle(unittest.TestCase):
             hidden.chmod(0o700)
 
 
+@unittest.skipUnless(
+    os.name == "posix" and hasattr(os, "O_NOFOLLOW"),
+    "atomic no-follow fd traversal requires POSIX",
+)
+class TestAtomicArtifactRead(unittest.TestCase):
+    def test_same_open_fd_is_read_even_if_leaf_name_is_replaced(self):
+        root = Path(tempfile.mkdtemp(prefix="atomic-artifact-race-"))
+        path = root / "artifact.txt"
+        path.write_bytes(b"ORIGINAL")
+        ex = LocalExecutor(root)
+        original_fstat = executor.os.fstat
+        swapped = False
+
+        def swap_after_open(descriptor):
+            nonlocal swapped
+            info = original_fstat(descriptor)
+            if not swapped:
+                swapped = True
+                path.unlink()
+                path.write_bytes(b"REPLACED")
+            return info
+
+        with patch.object(executor.os, "fstat", side_effect=swap_after_open):
+            observed = ex.read_regular_artifact("artifact.txt", len(b"ORIGINAL"))
+        self.assertEqual(observed, b"ORIGINAL")
+        self.assertEqual(path.read_bytes(), b"REPLACED")
+
+    def test_leaf_and_parent_symlinks_are_rejected(self):
+        root = Path(tempfile.mkdtemp(prefix="atomic-artifact-links-"))
+        outside = Path(tempfile.mkdtemp(prefix="atomic-artifact-outside-"))
+        (outside / "value.txt").write_bytes(b"OUTSIDE")
+        (root / "leaf.txt").symlink_to(outside / "value.txt")
+        (root / "linked-parent").symlink_to(outside, target_is_directory=True)
+        ex = LocalExecutor(root)
+
+        for relative in ("leaf.txt", "linked-parent/value.txt"):
+            with self.subTest(relative=relative):
+                with self.assertRaisesRegex(ValueError, "non-regular, or linked"):
+                    ex.read_regular_artifact(relative, 64)
+
+    def test_bounded_reader_returns_one_extra_byte_for_mismatch_detection(self):
+        root = Path(tempfile.mkdtemp(prefix="atomic-artifact-bound-"))
+        (root / "value.txt").write_bytes(b"EXACT+")
+        ex = LocalExecutor(root)
+        self.assertEqual(ex.read_regular_artifact("value.txt", 5), b"EXACT+")
+
+    def test_fifo_is_rejected_without_waiting_for_a_writer(self):
+        root = Path(tempfile.mkdtemp(prefix="atomic-artifact-fifo-"))
+        os.mkfifo(root / "blocked.pipe")
+        ex = LocalExecutor(root)
+        started = time.monotonic()
+        with self.assertRaisesRegex(ValueError, "non-regular, or linked"):
+            ex.read_regular_artifact("blocked.pipe", 64)
+        self.assertLess(time.monotonic() - started, 1.0)
+
+    def test_vm_reader_uses_one_fixed_no_follow_same_fd_program(self):
+        ex = VmExecutor(key="/tmp/test-key", workdir="/home/skitarii/work/mission-test")
+        completed = subprocess.CompletedProcess([], 0, stdout=b"EXACT", stderr=b"")
+        with patch.object(executor.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(ex.read_regular_artifact("nested/value.txt", 5), b"EXACT")
+        run.assert_called_once()
+        remote = run.call_args.args[0][-1]
+        self.assertIn("O_NOFOLLOW", remote)
+        self.assertIn("O_NONBLOCK", remote)
+        self.assertIn("os.fstat(file_fd)", remote)
+        self.assertNotIn("head -c", remote)
+        self.assertNotIn("cat --", remote)
+
+
 class TestWorkspaceSnapshot(unittest.TestCase):
     def test_deleted_modes_and_symlinks_are_materialised_before_baseline(self):
         root = Path(tempfile.mkdtemp(prefix="workspace-snapshot-"))
@@ -369,6 +448,66 @@ class TestWorkspaceSnapshot(unittest.TestCase):
         self.assertTrue(base)
         self.assertEqual((root / "ignored.bin").read_bytes(), b"\x00\xffexact")
         self.assertIn("ignored.bin", _git(root, "ls-files").splitlines())
+
+    def test_large_mode_set_uses_one_bounded_boundary_command(self):
+        root = Path(tempfile.mkdtemp(prefix="workspace-modes-batched-"))
+        ex = RecordingLocalExecutor(root)
+        files = {f"src/file-{index}.txt": f"{index}\n" for index in range(549)}
+        modes = {path: "100644" for path in files}
+
+        service._prepare_workspace(ex, files, {}, [], modes, {})
+
+        self.assertEqual(len(ex.bash_commands), 1)
+        self.assertFalse(list(root.glob(".skitarii-workspace-modes-*")))
+
+    def test_regular_mode_rejects_symlink_without_chmodding_its_target(self):
+        root = Path(tempfile.mkdtemp(prefix="workspace-mode-symlink-"))
+        target = root / "target.sh"
+        target.write_text("#!/bin/sh\n", encoding="utf-8")
+        target.chmod(0o755)
+        os.symlink("target.sh", root / "link.sh")
+
+        with self.assertRaises(RuntimeError):
+            service._prepare_workspace(
+                LocalExecutor(root), {}, {}, [], {"link.sh": "100644"}, {},
+            )
+
+        self.assertTrue(os.access(target, os.X_OK))
+        self.assertFalse(list(root.glob(".skitarii-workspace-modes-*")))
+
+    def test_regular_mode_rejects_symlinked_parent_without_chmodding_target(self):
+        root = Path(tempfile.mkdtemp(prefix="workspace-mode-parent-symlink-"))
+        real = root / "real"
+        real.mkdir()
+        target = real / "target.sh"
+        target.write_text("#!/bin/sh\n", encoding="utf-8")
+        target.chmod(0o755)
+        os.symlink("real", root / "alias")
+
+        with self.assertRaises(RuntimeError):
+            service._prepare_workspace(
+                LocalExecutor(root), {}, {}, [], {"alias/target.sh": "100644"}, {},
+            )
+
+        self.assertTrue(os.access(target, os.X_OK))
+        self.assertFalse(list(root.glob(".skitarii-workspace-modes-*")))
+
+    def test_invalid_mode_is_rejected_before_any_mode_is_applied(self):
+        root = Path(tempfile.mkdtemp(prefix="workspace-mode-invalid-"))
+        ex = LocalExecutor(root)
+
+        with self.assertRaises(ValueError):
+            service._prepare_workspace(
+                ex,
+                {"first.sh": "#!/bin/sh\n", "second.sh": "#!/bin/sh\n"},
+                {},
+                [],
+                {"first.sh": "100755", "second.sh": "100600"},
+                {},
+            )
+
+        self.assertFalse(os.access(root / "first.sh", os.X_OK))
+        self.assertFalse(list(root.glob(".skitarii-workspace-modes-*")))
 
     def test_snapshot_metadata_cannot_escape_or_modify_git_metadata(self):
         root = Path(tempfile.mkdtemp(prefix="workspace-safety-"))
@@ -1456,6 +1595,55 @@ class TestHeldOutLifecycle(unittest.TestCase):
                 "workspace_files": baseline or {"app.py": "print('baseline')\n"},
             })
 
+    def test_user_clarification_is_authoritative_but_explorer_brief_is_not(self):
+        root = Path(tempfile.mkdtemp(prefix="heldout-clarification-authority-"))
+        sandbox = AliveLocalExecutor(root)
+        captured = {}
+
+        class AnsweringMission:
+            cancelled = threading.Event()
+            executor = None
+            executor_attempt = ""
+
+            def ask_user(self, question):
+                self.question = question
+                return "Output exactly 'USER_OK'."
+
+            def record(self, kind, payload):
+                return None
+
+        def capture_plan(full_goal, *, task_goal=None):
+            captured["full_goal"] = full_goal
+            captured["task_goal"] = task_goal
+            return {
+                "status": "invalid_spec", "checks": [],
+                "error": "stop after authority capture",
+            }
+
+        with (
+            patch.dict(os.environ, {"SKITARII_REQUIRE_HELD_OUT": "1"}),
+            patch.object(service, "needs_clarification", return_value="What exact output?"),
+            patch.object(service, "_mission_executor", return_value=sandbox),
+            patch.object(service, "_prepare_workspace", return_value=1),
+            patch.object(service, "_create_baseline", return_value="a" * 40),
+            patch.object(service, "explore", return_value={"files": ["app.py"]}),
+            patch.object(service, "brief_for_fighter", return_value="\nExplorer predicts 'BAD'."),
+            patch.object(service, "build_held_out_plan", side_effect=capture_plan),
+            patch.object(service, "_memory"),
+        ):
+            verdict = service._execute_mission_body(
+                {
+                    "goal": "Implement app.py.", "task_id": "clarified-authority",
+                    "workspace_files": {"app.py": "print('old')\n"},
+                },
+                mission=AnsweringMission(),
+            )
+
+        self.assertEqual(verdict["held_out_status"], "invalid_spec")
+        self.assertIn("Output exactly 'USER_OK'.", captured["task_goal"])
+        self.assertNotIn("Explorer predicts", captured["task_goal"])
+        self.assertIn("Explorer predicts 'BAD'.", captured["full_goal"])
+
     def test_public_replay_recovers_deliverable_only_acceptance_exactly(self):
         verdict = {
             "checks": [],
@@ -1498,6 +1686,24 @@ class TestHeldOutLifecycle(unittest.TestCase):
         self.assertEqual(verdict["held_out_status"], "passed")
         self.assertEqual(len(verdict["checks"]), 2)
         self.assertEqual(verdict["patch_bundle"]["apply_gate"], "accepted")
+
+    def test_goal_linked_file_bytes_is_valid_immutable_hidden_evidence(self):
+        checks = [{
+            "kind": "file_bytes", "path": "app.py",
+            "expect_bytes": "print('candidate')\n",
+        }]
+        self.assertEqual(service._held_out_evidence_violation(checks), "")
+
+    def test_generator_failure_is_not_misreported_as_empty_evidence(self):
+        plan = {
+            "status": "invalid_spec", "checks": [],
+            "error": "model reply did not match private verifier grammar",
+        }
+        status, error = service._held_out_plan_failure(
+            plan, service._held_out_evidence_violation(plan["checks"]),
+        )
+        self.assertEqual(status, "invalid_spec")
+        self.assertEqual(error, plan["error"])
 
     def test_hidden_timeout_is_infrastructure_block_not_candidate_failure(self):
         verdict = self._run(lambda ex, deliverables, checks: {
@@ -1708,8 +1914,8 @@ class TestHeldOutLifecycle(unittest.TestCase):
         plan = {
             "status": "ok",
             "checks": [{
-                "cmd": "python3 app.py silent",
-                "oracle": "python3 -c 'print(str())'",
+                "cmd": "python3 app.py x 0",
+                "oracle": "python3 -c 'print(\"x\"*0)'",
             }],
             "error": "",
         }
@@ -1729,7 +1935,7 @@ class TestHeldOutLifecycle(unittest.TestCase):
         plan = {
             "status": "ok",
             "checks": [{
-                "cmd": "python3 -c 'print(3.0)'",
+                "cmd": "python3 app.py 9",
                 "oracle": "python3 -c 'import math; print(math.sqrt(9))'",
             }],
             "error": "",
@@ -1763,7 +1969,7 @@ class TestHeldOutLifecycle(unittest.TestCase):
 
     def test_service_accepts_spec_precanonicalized_private_oracle_idempotently(self):
         generated = {"checks": [{
-                "cmd": "python3 app.py",
+                "cmd": "python3 app.py 9",
                 "oracle": "python3 -c 'import math; print(math.sqrt(9))'",
             }]}
         with patch.object(spec, "_held_out_chat_json", return_value=generated):
@@ -1784,6 +1990,15 @@ class TestHeldOutLifecycle(unittest.TestCase):
             hidden_plan_override=plan,
         )
         self.assertTrue(verdict["accepted"], verdict.get("held_out_error"))
+
+    def test_service_rejects_encoded_constant_oracle_in_injected_plan(self):
+        checks = [{
+                "cmd": "python3 app.py",
+                "expect_stdout": "HALLUCINATED",
+                "oracle": "python3 -c 'print(\"HALL\"+\"UCINATED\")'",
+        }]
+        with self.assertRaisesRegex(ValueError, "positive grammar"):
+            service._isolate_private_oracles(checks, "fix app.py")
 
     def test_private_stage_scrubs_external_marker_and_preserves_opaque_cache(self):
         marker = Path(tempfile.mkdtemp(prefix="heldout-marker-")) / "fighter-marker"

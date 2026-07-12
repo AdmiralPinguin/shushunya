@@ -51,7 +51,7 @@ from executor import (  # noqa: E402
 from explorer import explore, brief_for_fighter  # noqa: E402
 from reviewer import review  # noqa: E402
 from clarify import needs_clarification  # noqa: E402
-from spec import _private_oracle, build_held_out_plan  # noqa: E402
+from spec import _private_oracle_for_check, build_held_out_plan  # noqa: E402
 from acceptor import accept  # noqa: E402
 import mission_store  # noqa: E402
 
@@ -68,6 +68,8 @@ MAX_PATCH_BYTES = int(os.environ.get("SKITARII_MAX_PATCH_BYTES", "20000000"))
 MAX_CHANGED_MANIFEST_BYTES = int(os.environ.get("SKITARII_MAX_CHANGED_MANIFEST_BYTES", "1000000"))
 MAX_RETURNED_FILE_BYTES = int(os.environ.get("SKITARII_MAX_RETURNED_FILE_BYTES", "100000"))
 MAX_RETURNED_TOTAL_BYTES = int(os.environ.get("SKITARII_MAX_RETURNED_TOTAL_BYTES", "1200000"))
+_WORKSPACE_MODE_BATCH_BYTES = 256_000
+_WORKSPACE_MODE_BATCH_ENTRIES = 4_096
 BEARER_TOKEN = os.environ.get("SKITARII_BEARER_TOKEN", "")
 SERVICE_STARTED_AT = int(time.time())
 SERVICE_INSTANCE_ID = uuid.uuid4().hex
@@ -418,7 +420,7 @@ def _held_out_failure_class(acceptance: dict) -> str:
     for result in acceptance.get("results") or []:
         if result.get("ok"):
             continue
-        if result.get("exit") in {124, 127, 255}:
+        if result.get("exit") in {124, 125, 126, 127, 255}:
             return "verifier_infra"
         if str(result.get("why") or "").startswith("oracle failed"):
             return "verifier_infra"
@@ -429,6 +431,14 @@ def _held_out_evidence_violation(checks: list[dict]) -> str:
     """Require private evidence that cannot be reduced to candidate-controlled exit 0."""
     invalid: list[str] = []
     for index, check in enumerate(checks):
+        if (
+            isinstance(check, dict)
+            and check.get("kind") == "file_bytes"
+            and isinstance(check.get("path"), str)
+            and bool(check["path"].strip())
+            and isinstance(check.get("expect_bytes"), str)
+        ):
+            continue
         if not isinstance(check, dict) or not str(check.get("cmd") or "").strip():
             invalid.append(str(index + 1))
             continue
@@ -447,7 +457,19 @@ def _held_out_evidence_violation(checks: list[dict]) -> str:
     return ""
 
 
-def _isolate_private_oracles(checks: list[dict]) -> list[dict]:
+def _held_out_plan_failure(plan: dict, evidence_violation: str) -> tuple[str, str]:
+    """Preserve generator provenance instead of relabelling zero checks as evidence."""
+    status = str(plan.get("status") or "invalid_spec")
+    if status != "ok":
+        return status, str(plan.get("error") or "private verifier generator failed")
+    if evidence_violation:
+        return "invalid_evidence", str(evidence_violation)
+    return "", ""
+
+
+def _isolate_private_oracles(
+    checks: list[dict], authoritative_goal: str,
+) -> list[dict]:
     """Canonicalize validated oracle code into isolated stdlib-only Python."""
     isolated: list[dict] = []
     for check in checks:
@@ -468,7 +490,11 @@ def _isolate_private_oracles(checks: list[dict]) -> list[dict]:
             else:
                 validation_form = raw
                 code = tokens[2] if len(tokens) == 3 else ""
-            if not _private_oracle(validation_form):
+            if not _private_oracle_for_check(
+                validation_form,
+                str(copied.get("cmd") or ""),
+                authoritative_goal,
+            ):
                 raise ValueError("private oracle is outside the trusted positive grammar")
             copied["oracle"] = f"/usr/bin/python3 -I -S -c {shlex.quote(code)}"
         isolated.append(copied)
@@ -733,18 +759,72 @@ def _prepare_workspace(ex: VmExecutor, files: dict, blobs: dict, deleted: list,
         )
         prepared += 1
 
+    _apply_workspace_modes(ex, modes)
+    return prepared
+
+
+def _apply_workspace_modes(ex: VmExecutor, modes: dict) -> None:
+    """Apply caller modes in a few bounded process-boundary invocations.
+
+    Paths are validated before any chmod happens.  A NUL-delimited manifest keeps
+    arbitrary safe filenames out of the shell program and lets one bounded VM
+    command replace hundreds of systemd/SSH round trips.
+    """
+    entries: list[tuple[str, str, bytes]] = []
     for raw_path, raw_mode in modes.items():
         path = _safe_workspace_path(raw_path)
         mode = str(raw_mode)
-        if mode == "100755":
-            _checked_bash(ex, f"test -e {shlex.quote(path)} && chmod a+x -- {shlex.quote(path)}")
-        elif mode == "100644":
-            _checked_bash(ex, f"test -e {shlex.quote(path)} && chmod a-x -- {shlex.quote(path)}")
-        elif mode == "120000":
-            _checked_bash(ex, f"test -L {shlex.quote(path)}")
-        else:
+        if mode not in {"100755", "100644", "120000"}:
             raise ValueError(f"unsupported git mode for {path!r}: {mode!r}")
-    return prepared
+        record = mode.encode("ascii") + b"\0" + path.encode("utf-8") + b"\0"
+        if len(record) > _WORKSPACE_MODE_BATCH_BYTES:
+            raise ValueError(f"workspace mode record is too large for {path!r}")
+        entries.append((mode, path, record))
+
+    batch: list[bytes] = []
+    batch_bytes = 0
+    for _mode, _path, record in entries:
+        if batch and (
+            len(batch) >= _WORKSPACE_MODE_BATCH_ENTRIES
+            or batch_bytes + len(record) > _WORKSPACE_MODE_BATCH_BYTES
+        ):
+            _apply_workspace_mode_batch(ex, batch)
+            batch = []
+            batch_bytes = 0
+        batch.append(record)
+        batch_bytes += len(record)
+    if batch:
+        _apply_workspace_mode_batch(ex, batch)
+
+
+def _apply_workspace_mode_batch(ex: VmExecutor, records: list[bytes]) -> None:
+    manifest = f".skitarii-workspace-modes-{uuid.uuid4().hex}"
+    ex.write_bytes(manifest, b"".join(records))
+    command = (
+        "set -euo pipefail; "
+        f"manifest={shlex.quote(manifest)}; expected={len(records)}; seen=0; "
+        "cleanup() { /usr/bin/rm -f -- \"$manifest\"; }; "
+        "trap cleanup EXIT; "
+        "no_symlink_parents() { "
+        "candidate=$1; parent=${candidate%/*}; "
+        "test \"$parent\" != \"$candidate\" || return 0; "
+        "while :; do "
+        "test ! -L \"$parent\" || return 1; "
+        "case \"$parent\" in */*) parent=${parent%/*};; *) break;; esac; "
+        "done; }; "
+        "while IFS= read -r -d '' mode && IFS= read -r -d '' path; do "
+        "no_symlink_parents \"$path\" || exit 65; "
+        "case \"$mode\" in "
+        "100755) if test ! -f \"$path\" || test -L \"$path\"; then exit 65; fi; "
+        "/usr/bin/chmod a+x -- \"$path\" ;; "
+        "100644) if test ! -f \"$path\" || test -L \"$path\"; then exit 65; fi; "
+        "/usr/bin/chmod a-x -- \"$path\" ;; "
+        "120000) if test ! -L \"$path\"; then exit 65; fi ;; "
+        "*) exit 64 ;; esac; "
+        "seen=$((seen + 1)); "
+        "done < \"$manifest\"; test \"$seen\" -eq \"$expected\""
+    )
+    _checked_bash(ex, command, timeout=60)
 
 
 def _create_baseline(ex: VmExecutor) -> str:
@@ -1047,6 +1127,10 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
                         "summary": clar, "needs_user": True, "task_id": task_id, "files": {}}
             goal += f"\n\nУточнение пользователя: {answer}"
 
+    # Freeze the only text allowed to authorize private expected values after a
+    # real user clarification, but before repo/workspace annotations and Explorer.
+    authoritative_goal = goal
+
     try:
         ex = _mission_executor(task_id)
     except ProcessBoundaryBusy as exc:
@@ -1125,28 +1209,30 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
     held_out_required = (
         os.environ.get("SKITARII_REQUIRE_HELD_OUT", "1") == "1" and not trusted_bypass
     )
-    held_out_plan = build_held_out_plan(goal) if held_out_required else {
+    held_out_plan = build_held_out_plan(goal, task_goal=authoritative_goal) if held_out_required else {
         "status": "not_required", "checks": [], "error": "",
     }
     held_out_checks = list(held_out_plan.get("checks") or [])
     if held_out_required:
         note(f"Private verifier prepared {len(held_out_checks)} undisclosed behavioural check(s).")
         try:
-            held_out_checks = _isolate_private_oracles(held_out_checks)
+            held_out_checks = _isolate_private_oracles(
+                held_out_checks, authoritative_goal,
+            )
             evidence_violation = _held_out_evidence_violation(held_out_checks)
         except (TypeError, ValueError) as exc:
             evidence_violation = str(exc)
-        if held_out_plan.get("status") != "ok" or evidence_violation:
+        held_out_failure_status, held_out_failure_error = _held_out_plan_failure(
+            held_out_plan, evidence_violation,
+        )
+        if held_out_failure_status:
             return {
                 "status": "blocked", "accepted": False, "task_id": task_id,
                 "summary": "Blocked: private verifier infrastructure could not produce valid checks.",
                 "held_out_required": True,
                 "held_out_check_count": 0,
-                "held_out_status": (
-                    "invalid_evidence" if evidence_violation
-                    else held_out_plan.get("status") or "invalid_spec"
-                ),
-                "held_out_error": str(evidence_violation or held_out_plan.get("error") or "")[:500],
+                "held_out_status": held_out_failure_status,
+                "held_out_error": held_out_failure_error[:500],
                 "files": {},
             }
 

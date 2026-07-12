@@ -83,6 +83,42 @@ class TestOracleAndExpect(unittest.TestCase):
         r = run_check(ex, {"cmd": "python3 hi.py", "expect_stdout": "hello"})
         self.assertFalse(r["ok"])
 
+    def test_file_bytes_check_is_exact_including_trailing_newline(self):
+        class AtomicExecutor:
+            data = b""
+
+            def read_regular_artifact(self, path, max_bytes):
+                return self.data[:max_bytes + 1]
+
+        ex = AtomicExecutor()
+        check = {
+            "kind": "file_bytes", "path": "marker.txt",
+            "expect_bytes": "EXACT",
+        }
+        ex.data = b"EXACT"
+        self.assertTrue(accept(ex, [], [check])["accepted"])
+        ex.data = b"EXACT\n"
+        verdict = accept(ex, [], [check])
+        self.assertFalse(verdict["accepted"])
+        self.assertIn("bytes differ", verdict["results"][0]["why"])
+
+    def test_file_bytes_check_rejects_symlink_before_reading(self):
+        class SymlinkExecutor:
+            def read_regular_artifact(self, path, max_bytes):
+                raise ValueError("artifact is a symlink")
+
+            def attest_regular_file(self, path):
+                raise AssertionError("split attestation must not be used")
+
+            def fetch_artifact(self, path, max_bytes=None):
+                raise AssertionError("split fetch must not be used")
+
+        verdict = run_check(SymlinkExecutor(), {
+            "kind": "file_bytes", "path": "marker.txt", "expect_bytes": "EXACT",
+        })
+        self.assertFalse(verdict["ok"])
+        self.assertIn("symlink", verdict["why"])
+
 
 class TestSpecFallback(unittest.TestCase):
     def test_model_json_parser_uses_one_complete_object_and_ignores_trailing_output(self):
@@ -113,6 +149,17 @@ class TestSpecFallback(unittest.TestCase):
         self.assertIn("py_compile", cmds)
         self.assertIn("php -l", cmds)
 
+    def test_public_spec_preserves_task_authored_expect_stdout(self):
+        import spec
+
+        generated = {
+            "deliverables": ["app.py"],
+            "checks": [{"cmd": "python3 app.py", "expect_stdout": "OK"}],
+        }
+        with patch.object(spec, "_chat_json", return_value=generated):
+            result = spec.build_spec("Create app.py; output exactly 'OK'.")
+        self.assertEqual(result, generated)
+
     def test_malformed_llm_output_yields_no_false_success(self):
         import spec
         orig = spec._chat_json
@@ -135,10 +182,386 @@ class TestSpecFallback(unittest.TestCase):
             ]
         }
         try:
-            checks = spec.build_held_out_checks("write app.py")
+            checks = spec.build_held_out_checks("write app.py; output exactly 'EDGE'")
         finally:
             spec._held_out_chat_json = orig
         self.assertEqual(checks, [{"cmd": "/usr/bin/python3 app.py edge", "expect_stdout": "EDGE"}])
+
+    def test_private_verifier_supports_goal_linked_exact_static_artifact(self):
+        import spec
+
+        generated = {"checks": [{
+            "kind": "file_bytes",
+            "path": "ceraxia-live-smoke.txt",
+            "expect_bytes": "CERAXIA_NATIVE_SMOKE",
+        }]}
+        with patch.object(spec, "_held_out_chat_json", return_value=generated):
+            plan = spec.build_held_out_plan(
+                "Create ceraxia-live-smoke.txt with exact bytes CERAXIA_NATIVE_SMOKE"
+            )
+        self.assertEqual(plan, {
+            "status": "ok",
+            "checks": [generated["checks"][0]],
+            "error": "",
+        })
+
+    def test_private_file_bytes_requires_safe_literal_goal_path_and_bounded_value(self):
+        import spec
+
+        goal = "Create output.txt with exact content OK"
+        rejected = [
+            {"kind": "file_bytes", "path": "other.txt", "expect_bytes": "OK"},
+            {"kind": "file_bytes", "path": "output.txt", "expect_bytes": "HALLUCINATED"},
+            {"kind": "file_bytes", "path": "../output.txt", "expect_bytes": "OK"},
+            {"kind": "file_bytes", "path": "output.txt\nignored", "expect_bytes": "OK"},
+            {
+                "kind": "file_bytes", "path": "output.txt",
+                "expect_bytes": "x" * (spec._MAX_PRIVATE_EXPECT_BYTES + 1),
+            },
+        ]
+        for candidate in rejected:
+            with self.subTest(candidate=candidate):
+                self.assertEqual(
+                    spec._structured_checks([candidate], allow_bare=False, goal=goal),
+                    [],
+                )
+
+    def test_private_literals_are_whole_positive_values_not_substrings_or_negations(self):
+        import spec
+
+        cases = [
+            ("Create artifact.txt using the configured output filename.", "output"),
+            (
+                "Create artifact.txt with exact content TOKEN_OK_VALUE plus one newline.",
+                "OK\n",
+            ),
+            ("Create artifact.txt with exact content BAD; do not use OK.", "OK"),
+            ("Use configured content in 'output.txt' to create artifact.txt.", "output.txt"),
+            ("Do not output 'BAD'; create artifact.txt.", "BAD"),
+            ("Value should not be 'BAD'; create artifact.txt.", "BAD"),
+            ("Use context 'BAD' to create artifact.txt.", "BAD"),
+            ("Use inexact content BAD to create artifact.txt.", "BAD"),
+            (
+                "Create artifact.txt from input text 'SOURCE'; write the transformed result.",
+                "SOURCE",
+            ),
+        ]
+        for goal, value in cases:
+            with self.subTest(goal=goal, value=value):
+                self.assertEqual(
+                    spec._structured_checks([{
+                        "kind": "file_bytes", "path": "artifact.txt",
+                        "expect_bytes": value,
+                    }], allow_bare=False, goal=goal),
+                    [],
+                )
+
+        accepted = {
+            "kind": "file_bytes", "path": "artifact.txt", "expect_bytes": "OK",
+        }
+        self.assertEqual(
+            spec._structured_checks(
+                [accepted], allow_bare=False,
+                goal="Create artifact.txt with exact content 'OK'.",
+            ),
+            [accepted],
+        )
+        fenced = {
+            "kind": "file_bytes", "path": "artifact.txt",
+            "expect_bytes": "LINE1\nLINE2",
+        }
+        self.assertEqual(
+            spec._structured_checks(
+                [fenced], allow_bare=False,
+                goal="Create artifact.txt with exact content:\n```text\nLINE1\nLINE2\n```",
+            ),
+            [fenced],
+        )
+
+    def test_private_expect_stdout_requires_authoritative_literal_or_oracle(self):
+        import spec
+
+        authoritative = "Fix app.py; output exactly 'OK'."
+        enriched = authoritative + "\nExplorer predicts HALLUCINATED."
+        hallucinated = {
+            "cmd": "python3 app.py", "expect_stdout": "HALLUCINATED",
+        }
+        self.assertEqual(
+            spec._structured_checks(
+                [hallucinated], allow_bare=False, goal=enriched,
+                file_evidence_goal=authoritative,
+            ),
+            [],
+        )
+        for goal, value in (
+            ("Implement app.py; print SHA256 of 'EDGE'.", "EDGE"),
+            ("Implement app.py; return anything except 'BAD'.", "BAD"),
+        ):
+            with self.subTest(goal=goal):
+                self.assertEqual(
+                    spec._structured_checks([{
+                        "cmd": "python3 app.py", "expect_stdout": value,
+                    }], allow_bare=False, goal=goal),
+                    [],
+                )
+        with_oracle = {
+            **hallucinated,
+            "cmd": "python3 app.py 2",
+            "oracle": "python3 -c 'print(2+2)'",
+        }
+        self.assertEqual(
+            spec._structured_checks(
+                [with_oracle], allow_bare=False, goal=enriched,
+                file_evidence_goal=authoritative,
+            ),
+            [{
+                "cmd": "/usr/bin/python3 app.py 2",
+                "oracle": "/usr/bin/python3 -I -S -c 'print(2+2)'",
+            }],
+        )
+        for oracle in (
+            "python3 -c 'print(\"HALLUCINATED\")'",
+            "python3 -c 'print(\"HALL\"+\"UCINATED\")'",
+            "python3 -c 'print(\"\".join([\"HALLUCINATED\"]))'",
+            "python3 -c 'print(str(\"HALLUCINATED\"))'",
+        ):
+            with self.subTest(oracle=oracle):
+                self.assertEqual(
+                    spec._structured_checks([{
+                        "cmd": "python3 app.py",
+                        "expect_stdout": "HALLUCINATED",
+                        "oracle": oracle,
+                    }], allow_bare=False, goal="Implement app.py; compute SHA256 of EDGE."),
+                    [],
+                )
+        for oracle in (
+            "python3 -c 'print(\"\".join(c for c in \"HALLUCINATED\"))'",
+            "python3 -c 'print(\"\".join(str(c) for c in \"HALLUCINATED\"))'",
+        ):
+            with self.subTest(identity_generator=oracle):
+                self.assertEqual(
+                    spec._structured_checks([{
+                        "cmd": "python3 app.py HALLUCINATED",
+                        "oracle": oracle,
+                    }], allow_bare=False, goal="Implement app.py."),
+                    [],
+                )
+
+    def test_private_oracle_accepts_candidate_expression_operands(self):
+        import spec
+
+        check = {
+            "cmd": "python3 calc.py '2+3*4'",
+            "oracle": "python3 -c 'print(2+3*4)'",
+        }
+        self.assertEqual(
+            spec._structured_checks(
+                [check], allow_bare=False,
+                goal="Implement calc.py to evaluate arithmetic expressions.",
+            ),
+            [{
+                "cmd": "/usr/bin/python3 calc.py '2+3*4'",
+                "oracle": "/usr/bin/python3 -I -S -c 'print(2+3*4)'",
+            }],
+        )
+
+    def test_private_oracle_accepts_computed_space_separated_generator(self):
+        import spec
+
+        check = {
+            "cmd": "python3 seq.py 1 4",
+            "oracle": "python3 -c 'print(\" \".join(str(i*2) for i in range(1,4)))'",
+        }
+        self.assertEqual(
+            spec._structured_checks(
+                [check], allow_bare=False,
+                goal="Implement seq.py; multiply values by 2; output is space-separated.",
+            ),
+            [{
+                "cmd": "/usr/bin/python3 seq.py 1 4",
+                "oracle": (
+                    "/usr/bin/python3 -I -S -c "
+                    "'print(\" \".join(str(i*2) for i in range(1,4)))'"
+                ),
+            }],
+        )
+    def test_private_literal_provenance_is_typed_by_output_channel(self):
+        import spec
+
+        goal = (
+            "Create output.txt with exact content 'FILE_OK'. "
+            "Implement app.py; print 'STDOUT_OK'."
+        )
+        wrong_file = {
+            "kind": "file_bytes", "path": "output.txt", "expect_bytes": "STDOUT_OK",
+        }
+        wrong_stdout = {
+            "cmd": "python3 app.py", "expect_stdout": "FILE_OK",
+        }
+        self.assertEqual(
+            spec._structured_checks([wrong_file], allow_bare=False, goal=goal),
+            [],
+        )
+        self.assertEqual(
+            spec._structured_checks([wrong_stdout], allow_bare=False, goal=goal),
+            [],
+        )
+        self.assertEqual(
+            spec._structured_checks([{
+                "kind": "file_bytes", "path": "output.txt", "expect_bytes": "FILE_OK",
+            }], allow_bare=False, goal=goal),
+            [{"kind": "file_bytes", "path": "output.txt", "expect_bytes": "FILE_OK"}],
+        )
+        self.assertEqual(
+            spec._structured_checks([{
+                "cmd": "python3 app.py", "expect_stdout": "STDOUT_OK",
+            }], allow_bare=False, goal=goal),
+            [{"cmd": "/usr/bin/python3 app.py", "expect_stdout": "STDOUT_OK"}],
+        )
+
+    def test_private_literals_are_bound_to_their_exact_target(self):
+        import spec
+
+        file_goal = (
+            "Create a.txt with exact content 'A'. "
+            "Create b.txt with exact content 'B'."
+        )
+        self.assertEqual(
+            spec._structured_checks([{
+                "kind": "file_bytes", "path": "a.txt", "expect_bytes": "B",
+            }], allow_bare=False, goal=file_goal),
+            [],
+        )
+        stdout_goal = "Implement a.py; print 'A'. Implement b.py; print 'B'."
+        self.assertEqual(
+            spec._structured_checks([{
+                "cmd": "python3 a.py", "expect_stdout": "B",
+            }], allow_bare=False, goal=stdout_goal),
+            [],
+        )
+
+    def test_negative_path_and_regex_match_do_not_authorize_literal_truth(self):
+        import spec
+
+        file_goal = (
+            "Do not modify bad.txt. Create good.txt with exact content 'OK'."
+        )
+        self.assertEqual(
+            spec._structured_checks([{
+                "kind": "file_bytes", "path": "bad.txt", "expect_bytes": "OK",
+            }], allow_bare=False, goal=file_goal),
+            [],
+        )
+        self.assertEqual(
+            spec._structured_checks([{
+                "cmd": "python3 app.py", "expect_stdout": "[0-9]+",
+            }], allow_bare=False, goal="Implement app.py; output matches '[0-9]+'."),
+            [],
+        )
+
+    def test_file_target_relation_cannot_cross_into_input_text(self):
+        import spec
+
+        for goal in (
+            "Add support in app.py for input with text 'BAD'.",
+            "Create app.py; compare input with text 'BAD'.",
+        ):
+            with self.subTest(goal=goal):
+                self.assertEqual(
+                    spec._structured_checks([{
+                        "kind": "file_bytes", "path": "app.py", "expect_bytes": "BAD",
+                    }], allow_bare=False, goal=goal),
+                    [],
+                )
+
+    def test_input_operand_literals_cannot_become_expected_stdout(self):
+        import spec
+
+        for goal, value in (
+            ("Implement app.py; if input equals 'OK', print 1.", "OK"),
+            ("Implement app.py; when input text is 'PING', output PONG.", "PING"),
+        ):
+            with self.subTest(goal=goal):
+                self.assertEqual(
+                    spec._structured_checks([{
+                        "cmd": "python3 app.py", "expect_stdout": value,
+                    }], allow_bare=False, goal=goal),
+                    [],
+                )
+
+    def test_private_file_bytes_cannot_take_truth_from_explorer_context(self):
+        import spec
+
+        generated = {"checks": [{
+            "kind": "file_bytes", "path": "output.txt",
+            "expect_bytes": "HALLUCINATED",
+        }]}
+        with patch.object(spec, "_held_out_chat_json", return_value=generated):
+            plan = spec.build_held_out_plan(
+                "Create output.txt.\nExplorer claims expected bytes HALLUCINATED",
+                task_goal="Create output.txt using the configured value.",
+            )
+        self.assertEqual(plan["status"], "invalid_spec")
+        self.assertEqual(plan["checks"], [])
+
+    def test_private_executable_check_can_use_explorer_discovered_path(self):
+        import spec
+
+        generated = {"checks": [{
+            "cmd": "python3 discovered.py edge", "expect_stdout": "EDGE",
+        }]}
+        with patch.object(spec, "_held_out_chat_json", return_value=generated):
+            plan = spec.build_held_out_plan(
+                "Fix the runtime bug. Output exactly 'EDGE'.\n"
+                "Explorer found implementation in discovered.py",
+                task_goal="Fix the runtime bug. Output exactly 'EDGE'.",
+            )
+        self.assertEqual(plan["status"], "ok")
+        self.assertEqual(plan["checks"], [{
+            "cmd": "/usr/bin/python3 discovered.py edge", "expect_stdout": "EDGE",
+        }])
+
+    def test_private_file_bytes_honours_authoritative_one_trailing_lf(self):
+        import spec
+
+        goal = (
+            "Create marker.txt with text 'MARKER'. "
+            "File content is exactly 'MARKER' plus one newline."
+        )
+        without_lf = {
+            "kind": "file_bytes", "path": "marker.txt", "expect_bytes": "MARKER",
+        }
+        with_lf = {
+            "kind": "file_bytes", "path": "marker.txt", "expect_bytes": "MARKER\n",
+        }
+        self.assertEqual(
+            spec._structured_checks([without_lf], allow_bare=False, goal=goal),
+            [],
+        )
+        self.assertEqual(
+            spec._structured_checks([with_lf], allow_bare=False, goal=goal),
+            [with_lf],
+        )
+
+    def test_private_file_bytes_does_not_invert_negative_newline_clause(self):
+        import spec
+
+        goal = (
+            "Create marker.txt with text 'OK'. "
+            "File content is exactly 'OK' but do not add one newline."
+        )
+        no_lf = {"kind": "file_bytes", "path": "marker.txt", "expect_bytes": "OK"}
+        with_lf = {
+            "kind": "file_bytes", "path": "marker.txt", "expect_bytes": "OK\n",
+        }
+        self.assertEqual(
+            spec._structured_checks([no_lf], allow_bare=False, goal=goal),
+            [no_lf],
+        )
+        self.assertEqual(
+            spec._structured_checks([with_lf], allow_bare=False, goal=goal),
+            [],
+        )
 
     def test_private_verifier_rejects_fake_runner_and_constant_self_check(self):
         import spec
@@ -186,13 +609,12 @@ class TestSpecFallback(unittest.TestCase):
             ]
         }
         try:
-            plan = spec.build_held_out_plan("fix app.py")
+            plan = spec.build_held_out_plan("fix app.py; output exactly 'EDGE'")
         finally:
             spec._held_out_chat_json = orig
         self.assertEqual(plan["status"], "ok")
         self.assertEqual(plan["checks"], [
             {"cmd": "/usr/bin/python3 -c 'import app; print(app.edge())'", "expect_stdout": "EDGE"},
-            {"cmd": "/usr/bin/python3 app.py edge", "oracle": "/usr/bin/python3 -I -S -c 'print(\"EDGE\")'"},
             {"cmd": "/usr/bin/python3 app.py edge", "expect_stdout": "EDGE"},
         ])
 
@@ -200,11 +622,11 @@ class TestSpecFallback(unittest.TestCase):
         import spec
 
         rejected = [
-            ({"cmd": "./python3 app.py edge", "expect_stdout": "EDGE"}, "fix app.py"),
-            ({"cmd": "python3 ../../app.py edge", "expect_stdout": "EDGE"}, "fix app.py"),
-            ({"cmd": "python3 app.py edge", "expect_stdout": "EDGE"}, "fix App.py"),
-            ({"cmd": "python3 -c 'import app; print(app.edge())'", "expect_stdout": "EDGE"}, "fix src/app.py"),
-            ({"cmd": "python3 -c 'import src.app; print(src.edge())'", "expect_stdout": "EDGE"}, "fix src/app.py"),
+            ({"cmd": "./python3 app.py edge", "expect_stdout": "EDGE"}, "fix app.py; output exactly 'EDGE'"),
+            ({"cmd": "python3 ../../app.py edge", "expect_stdout": "EDGE"}, "fix app.py; output exactly 'EDGE'"),
+            ({"cmd": "python3 app.py edge", "expect_stdout": "EDGE"}, "fix App.py; output exactly 'EDGE'"),
+            ({"cmd": "python3 -c 'import app; print(app.edge())'", "expect_stdout": "EDGE"}, "fix src/app.py; output exactly 'EDGE'"),
+            ({"cmd": "python3 -c 'import src.app; print(src.edge())'", "expect_stdout": "EDGE"}, "fix src/app.py; output exactly 'EDGE'"),
         ]
         for check, goal in rejected:
             with self.subTest(check=check, goal=goal):
@@ -226,7 +648,10 @@ class TestSpecFallback(unittest.TestCase):
                 },
             ],
             allow_bare=False,
-            goal="fix app.py and src/app.py",
+            goal=(
+                "fix app.py; app.py output exactly 'EDGE'. "
+                "fix src/app.py; src/app.py output exactly 'EDGE'."
+            ),
         )
         self.assertEqual(accepted, [
             {"cmd": "/usr/bin/python3 app.py 'a|b'", "expect_stdout": "EDGE"},
@@ -274,7 +699,7 @@ class TestSpecFallback(unittest.TestCase):
             {"checks": [{"cmd": "python3 app.py edge", "expect_stdout": "EDGE"}]},
         ])
         with patch.object(spec, "_held_out_chat_json", side_effect=lambda prompt: next(replies)) as chat:
-            plan = spec.build_held_out_plan("fix app.py")
+            plan = spec.build_held_out_plan("fix app.py; output exactly 'EDGE'")
         self.assertEqual(plan, {
             "status": "ok",
             "checks": [{"cmd": "/usr/bin/python3 app.py edge", "expect_stdout": "EDGE"}],

@@ -6,6 +6,7 @@ A fighter's tools never touch the host directly: they go through an Executor.
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import posixpath
 import os
@@ -27,6 +28,61 @@ MAX_SANDBOX_STORAGE_BYTES = int(os.environ.get("SKITARII_MAX_STORAGE_BYTES", "10
 MAX_SANDBOX_FILES = int(os.environ.get("SKITARII_MAX_STORAGE_FILES", "50000"))
 BOUNDARY_HELPER_VERSION = "skitarii-boundary-v3"
 BOUNDARY_HELPER_SHA256 = "3d41c67e619aa0260201137094b25c1d1bfcf9167916bfecd81cfb4a23aafda2"
+_ARTIFACT_POLICY_ERRNOS = {
+    errno.ENOENT, errno.ENOTDIR, errno.ELOOP, errno.EISDIR,
+    errno.EACCES, errno.EPERM, errno.EINVAL, errno.ENXIO, errno.ENODEV,
+}
+
+
+_ATOMIC_REGULAR_READ_SCRIPT = r"""
+import errno
+import os
+import stat
+import sys
+
+path = sys.argv[1]
+limit = int(sys.argv[2])
+parts = path.split('/')
+fds = []
+try:
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    file_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+    directory_fd = os.open('.', directory_flags)
+    fds.append(directory_fd)
+    for part in parts[:-1]:
+        directory_fd = os.open(part, directory_flags, dir_fd=directory_fd)
+        fds.append(directory_fd)
+    file_fd = os.open(parts[-1], file_flags, dir_fd=directory_fd)
+    fds.append(file_fd)
+    info = os.fstat(file_fd)
+    if not stat.S_ISREG(info.st_mode):
+        raise OSError(errno.EINVAL, 'artifact is not a regular file')
+    remaining = limit + 1
+    chunks = []
+    while remaining:
+        chunk = os.read(file_fd, min(65536, remaining))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    data = b''.join(chunks)
+    while data:
+        written = os.write(1, data)
+        data = data[written:]
+except OSError as exc:
+    expected = {
+        errno.ENOENT, errno.ENOTDIR, errno.ELOOP, errno.EISDIR,
+        errno.EACCES, errno.EPERM, errno.EINVAL, errno.ENXIO, errno.ENODEV,
+    }
+    sys.stderr.write(str(exc))
+    raise SystemExit(3 if exc.errno in expected else 4)
+finally:
+    for descriptor in reversed(fds):
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+"""
 
 
 def _systemd_exec_literal(value: str) -> str:
@@ -162,6 +218,70 @@ class ExecResult(dict):
         return cls(returncode=returncode, stdout=stdout[-20_000:], stderr=stderr[-20_000:])
 
 
+def _regular_artifact_parts(rel: str) -> tuple[str, ...]:
+    value = str(rel)
+    path = PurePosixPath(value)
+    if (
+        not value or "\\" in value or any(ord(char) < 32 for char in value)
+        or path.is_absolute() or not path.parts or ".." in path.parts
+        or path.parts[0].endswith(":") or path.as_posix() in {"", "."}
+    ):
+        raise ValueError(f"unsafe artifact path: {rel}")
+    return tuple(path.parts)
+
+
+def _regular_artifact_limit(max_bytes: int) -> int:
+    try:
+        limit = int(max_bytes)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("artifact byte limit must be an integer") from exc
+    if limit < 0 or limit >= MAX_COMMAND_OUTPUT_BYTES:
+        raise ValueError("artifact byte limit is outside the bounded read contract")
+    return limit
+
+
+def _read_regular_artifact_local(root: Path, rel: str, max_bytes: int) -> bytes:
+    """Open every path component without following links, then read the same leaf fd."""
+    parts = _regular_artifact_parts(rel)
+    limit = _regular_artifact_limit(max_bytes)
+    required_flags = ("O_DIRECTORY", "O_CLOEXEC", "O_NOFOLLOW")
+    if any(not hasattr(os, name) for name in required_flags):
+        raise OSError(errno.ENOTSUP, "atomic no-follow artifact reads are unavailable")
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    file_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+    descriptors: list[int] = []
+    try:
+        directory_fd = os.open(root, directory_flags)
+        descriptors.append(directory_fd)
+        for part in parts[:-1]:
+            directory_fd = os.open(part, directory_flags, dir_fd=directory_fd)
+            descriptors.append(directory_fd)
+        file_fd = os.open(parts[-1], file_flags, dir_fd=directory_fd)
+        descriptors.append(file_fd)
+        info = os.fstat(file_fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError(errno.EINVAL, "artifact is not a regular file")
+        remaining = limit + 1
+        chunks: list[bytes] = []
+        while remaining:
+            chunk = os.read(file_fd, min(65_536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+    except OSError as exc:
+        if exc.errno in _ARTIFACT_POLICY_ERRNOS:
+            raise ValueError(f"artifact is missing, non-regular, or linked: {exc}") from exc
+        raise
+    finally:
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
 class ProcessBoundaryBusy(RuntimeError):
     """Another process owns the single sandbox mission lifecycle lock."""
 
@@ -219,6 +339,10 @@ class LocalExecutor:
             end = (offset + limit) if limit else len(lines)
             text = "\n".join(lines[offset:end])
         return text[:max_bytes]
+
+    def read_regular_artifact(self, rel: str, max_bytes: int) -> bytes:
+        """Atomically read one bounded regular artifact without following links."""
+        return _read_regular_artifact_local(self.workdir, rel, max_bytes)
 
     def child(self, name: str) -> "LocalExecutor":
         child_workdir = self.workdir.parent / f"mission-{uuid.uuid4().hex[:16]}"
@@ -1066,6 +1190,31 @@ fi
         if result["returncode"] != 0:
             raise FileNotFoundError(result["stderr"] or rel)
         return result["stdout"]
+
+    def read_regular_artifact(self, rel: str, max_bytes: int) -> bytes:
+        """Bounded same-fd read with O_NOFOLLOW on every guest path component."""
+        safe = self._safe_rel(rel)
+        _regular_artifact_parts(safe)
+        limit = _regular_artifact_limit(max_bytes)
+        remote = (
+            f"cd {shlex.quote(self.workdir)} && "
+            f"/usr/bin/python3 -I -S -c {shlex.quote(_ATOMIC_REGULAR_READ_SCRIPT)} "
+            f"{shlex.quote(safe)} {limit}"
+        )
+        try:
+            proc = subprocess.run(
+                self._ssh_base() + [remote], capture_output=True, timeout=60,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise OSError(f"atomic artifact read transport failed: {exc}") from exc
+        stderr = proc.stderr.decode("utf-8", errors="replace")[-500:]
+        if proc.returncode == 3:
+            raise ValueError(stderr or "artifact is missing, non-regular, or linked")
+        if proc.returncode != 0:
+            raise OSError(stderr or f"atomic artifact reader failed with {proc.returncode}")
+        if len(proc.stdout) > limit + 1:
+            raise OSError("atomic artifact reader exceeded its byte contract")
+        return proc.stdout
 
     def bash_background(self, command: str) -> dict[str, Any]:
         """Start a long-running process (server, watcher) detached in the VM and return
