@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
@@ -18,6 +19,7 @@ class FixtureServer:
         self._lock = threading.Lock()
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
+        self._served_documents: dict[str, bytes] = {}
 
     @property
     def base_url(self) -> str:
@@ -25,8 +27,29 @@ class FixtureServer:
             raise RuntimeError("fixture server is not running")
         return f"http://127.0.0.1:{self._server.server_port}"
 
+    def served_document(self, source_id: str) -> bytes:
+        try:
+            return self._served_documents[source_id]
+        except KeyError as exc:
+            raise RuntimeError(f"served fixture representation unavailable: {source_id}") from exc
+
+    @property
+    def served_documents(self) -> dict[str, bytes]:
+        return dict(self._served_documents)
+
     def __enter__(self) -> "FixtureServer":
         outer = self
+        self._served_documents = {}
+        for source_id, document in self.fixture.documents.items():
+            separator = b"" if document.raw.endswith(b"\n") else b"\n"
+            nonce = secrets.token_hex(32).encode("ascii")
+            self._served_documents[source_id] = (
+                document.raw
+                + separator
+                + b"[EVALUATOR-BODY-NONCE:"
+                + nonce
+                + b"]\n"
+            )
 
         class Handler(BaseHTTPRequestHandler):
             server_version = "ResearchFixture/1"
@@ -52,14 +75,11 @@ class FixtureServer:
                         }
                     )
 
-            def _send(self, status: int, body: bytes, content_type: str, *, sha256: str = "") -> None:
+            def _send(self, status: int, body: bytes, content_type: str) -> None:
                 self.send_response(status)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "no-store")
-                if sha256:
-                    self.send_header("X-Eval-Snapshot-Sha256", sha256)
-                    self.send_header("ETag", f'"sha256:{sha256}"')
                 self.end_headers()
                 delivered_bytes = 0
                 delivered_sha256 = ""
@@ -104,7 +124,11 @@ class FixtureServer:
                     return
                 for document in outer.fixture.documents.values():
                     if parsed.path == document.data["route"]:
-                        self._send(200, document.raw, document.data["mime"], sha256=document.data["raw_sha256"])
+                        self._send(
+                            200,
+                            outer.served_document(document.source_id),
+                            document.data["mime"],
+                        )
                         return
                 for route in outer.fixture.data["explicit_routes"]:
                     if parsed.path == route["path"]:
@@ -128,3 +152,4 @@ class FixtureServer:
             self._thread.join(timeout=5)
         self._server = None
         self._thread = None
+        self._served_documents = {}

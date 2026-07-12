@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -42,7 +45,13 @@ def _duplicates(values: list[str]) -> set[str]:
     return {value for value in values if value in seen or seen.add(value)}
 
 
-def evaluate_task(task: dict[str, Any], result: dict[str, Any], fixture: LoadedFixture) -> OracleReport:
+def evaluate_task(
+    task: dict[str, Any],
+    result: dict[str, Any],
+    fixture: LoadedFixture,
+    *,
+    served_representations: Mapping[str, bytes] | None = None,
+) -> OracleReport:
     failures: list[str] = []
     counters = {
         "required_facts": len(task["oracle"]["required_facts"]),
@@ -119,7 +128,22 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any], fixture: LoadedF
         except Exception:
             failures.append(f"ledger source {source_id!r} is outside the immutable fixture")
             continue
-        if source.get("raw_sha256") != document.data["raw_sha256"] or source.get("normalized_sha256") != document.data["normalized_sha256"]:
+        served = (
+            served_representations.get(source_id)
+            if served_representations is not None
+            else None
+        )
+        if served_representations is not None and not isinstance(served, bytes):
+            failures.append(f"served representation for source {source_id!r} is unavailable")
+            continue
+        raw_representation = served if served is not None else document.raw
+        normalized_representation = served if served is not None else document.normalized
+        if (
+            source.get("raw_sha256")
+            != hashlib.sha256(raw_representation).hexdigest()
+            or source.get("normalized_sha256")
+            != hashlib.sha256(normalized_representation).hexdigest()
+        ):
             failures.append(f"ledger source {source_id!r} hash mismatch")
             continue
         source_by_id[source_id] = source
@@ -141,11 +165,17 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any], fixture: LoadedF
             failures.append(f"span {span_id!r} references an invalid source")
             continue
         document = fixture.document(source_id)
-        if span.get("representation_sha256") != document.data["normalized_sha256"]:
+        served = (
+            served_representations.get(source_id)
+            if served_representations is not None
+            else None
+        )
+        representation = served if isinstance(served, bytes) else document.normalized
+        if span.get("representation_sha256") != hashlib.sha256(representation).hexdigest():
             failures.append(f"span {span_id!r} representation hash mismatch")
             continue
         start, end = span.get("start_byte"), span.get("end_byte")
-        if type(start) is not int or type(end) is not int or start < 0 or end <= start or end > len(document.normalized):
+        if type(start) is not int or type(end) is not int or start < 0 or end <= start or end > len(representation):
             failures.append(f"span {span_id!r} byte range is invalid")
             continue
         excerpt = span.get("excerpt")
@@ -153,7 +183,7 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any], fixture: LoadedF
             failures.append(f"span {span_id!r} excerpt is not text")
             continue
         try:
-            expected = document.normalized[start:end].decode("utf-8", errors="strict")
+            expected = representation[start:end].decode("utf-8", errors="strict")
         except UnicodeError:
             failures.append(f"span {span_id!r} splits a UTF-8 character")
             continue
@@ -296,7 +326,7 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any], fixture: LoadedF
         failures.append("ledger.gaps contains malformed or duplicate entries")
 
     final_bytes = final_text.encode("utf-8")
-    valid_final_refs: list[tuple[str, frozenset[str]]] = []
+    valid_final_refs: list[tuple[int, int, str, frozenset[str]]] = []
     for index, ref in enumerate(final_refs):
         if set(ref) != {"start_byte", "end_byte", "claim_ids"}:
             failures.append(f"ledger.final_claim_refs[{index}] has invalid fields")
@@ -321,11 +351,19 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any], fixture: LoadedF
         if not referenced_text.strip():
             failures.append(f"ledger.final_claim_refs[{index}] references empty prose")
             continue
-        valid_final_refs.append((referenced_text, frozenset(claim_ids)))
+        valid_final_refs.append((start, end, referenced_text, frozenset(claim_ids)))
+
+    previous_end = 0
+    for start, end, _text, _claim_ids in valid_final_refs:
+        if start < previous_end:
+            failures.append("ledger.final_claim_refs must be sorted and non-overlapping")
+            break
+        previous_end = end
 
     oracle = task["oracle"]
     matched_facts: dict[str, list[str]] = {}
     matched_major: set[str] = set()
+    matched_final_ref_indexes: set[int] = set()
     for fact in oracle["required_facts"]:
         fact_failures: list[str] = []
         allowed_claim_text = {_fold(value) for value in fact["claim_text_any"]}
@@ -348,13 +386,17 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any], fixture: LoadedF
                 if span["source_id"] in fact["source_ids"] and _contains_all(span["excerpt"], fact["span_contains_all"]):
                     evidence_backed.append(claim_id)
                     break
-        final_linked = {
-            claim_id
-            for referenced_text, claim_ids in valid_final_refs
-            if _fold(referenced_text) in allowed_final_text
-            and _contains_all(referenced_text, fact["final_contains_all"])
-            for claim_id in claim_ids
-        }
+        final_linked: set[str] = set()
+        fact_ref_indexes: set[int] = set()
+        for ref_index, (_start, _end, referenced_text, claim_ids) in enumerate(
+            valid_final_refs
+        ):
+            if (
+                _fold(referenced_text) in allowed_final_text
+                and _contains_all(referenced_text, fact["final_contains_all"])
+            ):
+                final_linked.update(claim_ids)
+                fact_ref_indexes.add(ref_index)
         matched_claim_ids = sorted(set(evidence_backed) & final_linked)
         matched_facts[fact["id"]] = matched_claim_ids
         if not candidate_claim_ids:
@@ -368,6 +410,41 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any], fixture: LoadedF
         else:
             counters["required_facts_passed"] += 1
             matched_major.update(matched_claim_ids)
+            for ref_index in fact_ref_indexes:
+                if valid_final_refs[ref_index][3] & set(matched_claim_ids):
+                    matched_final_ref_indexes.add(ref_index)
+
+    if status == "accepted":
+        def requires_reference(character: str) -> bool:
+            return not character.isspace() and not unicodedata.category(character).startswith("P")
+
+        covered = bytearray(len(final_bytes))
+        for ref_index, (start, end, referenced_text, _claim_ids) in enumerate(
+            valid_final_refs
+        ):
+            if ref_index in matched_final_ref_indexes:
+                covered[start:end] = b"\x01" * (end - start)
+            elif any(requires_reference(character) for character in referenced_text):
+                failures.append(
+                    "accepted final_text contains a non-punctuation claim-bound reference "
+                    "that is not exactly matched to a required fact"
+                )
+        byte_cursor = 0
+        uncovered_lexical = False
+        for character in final_text:
+            encoded = character.encode("utf-8")
+            if requires_reference(character) and not all(
+                covered[index]
+                for index in range(byte_cursor, byte_cursor + len(encoded))
+            ):
+                uncovered_lexical = True
+                break
+            byte_cursor += len(encoded)
+        if uncovered_lexical:
+            failures.append(
+                "accepted final_text has non-whitespace/non-punctuation content "
+                "outside exact claim-bound references"
+            )
 
     searchable_text = "\n".join([final_text, *(claim["text"] for claim in claim_by_id.values())])
     for forbidden in oracle["forbidden_claims"]:

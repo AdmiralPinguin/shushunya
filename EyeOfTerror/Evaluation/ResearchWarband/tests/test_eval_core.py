@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import copy
+import contextlib
+import hashlib
+import io
 import json
+import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -23,6 +29,7 @@ from research_eval.oracles import evaluate_legacy_artifact, evaluate_task  # noq
 from research_eval.results import ResultWriteError, write_result_atomic  # noqa: E402
 from research_eval.runner import build_service_payload, run_suite  # noqa: E402
 from research_eval.subjects import FakeSubjectAdapter, SubjectAdapter, SubjectExecution  # noqa: E402
+from run_eval import main as run_eval_main  # noqa: E402
 
 
 SUITE = ROOT / "suites/public_smoke_v1/manifest.json"
@@ -76,6 +83,75 @@ class HungSubjectAdapter(SubjectAdapter):
         del payload, timeout_sec
         while True:
             time.sleep(1)
+
+
+class HeaderOnlyReplaySubject(FakeSubjectAdapter):
+    """Issue real GETs but deliberately consume none of the served body."""
+
+    def _read_replayed_sources(self, payload: dict, result: dict) -> None:
+        ledger = result.get("ledger") if isinstance(result.get("ledger"), dict) else {}
+        sources = ledger.get("sources") if isinstance(ledger.get("sources"), list) else []
+        gateway = str(payload.get("source_gateway_url") or "").rstrip("/")
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            source_id = str(source.get("source_id") or "")
+            slug = source_id.removeprefix("source-")
+            with urllib.request.urlopen(
+                gateway + "/documents/" + urllib.parse.quote(slug, safe="-"),
+                timeout=5,
+            ):
+                pass
+
+
+class HashTamperingSubject(FakeSubjectAdapter):
+    def _read_replayed_sources(self, payload: dict, result: dict) -> None:
+        super()._read_replayed_sources(payload, result)
+        ledger = result.get("ledger") if isinstance(result.get("ledger"), dict) else {}
+        sources = ledger.get("sources") if isinstance(ledger.get("sources"), list) else []
+        if sources:
+            sources[0]["raw_sha256"] = "f" * 64
+
+
+class LeakingHungSubjectAdapter(HungSubjectAdapter):
+    def __init__(self, pid_path: str) -> None:
+        self.pid_path = pid_path
+
+    def execute(self, payload: dict, *, timeout_sec: int) -> SubjectExecution:
+        del payload, timeout_sec
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        Path(self.pid_path).write_text(str(child.pid), encoding="ascii")
+        while True:
+            time.sleep(1)
+
+
+class OversizedSubjectAdapter(HungSubjectAdapter):
+    def execute(self, payload: dict, *, timeout_sec: int) -> SubjectExecution:
+        del payload, timeout_sec
+        return SubjectExecution(result={"padding": "x" * (2 * 1024 * 1024)})
+
+
+def process_exists(process_id: int) -> bool:
+    if os.name != "nt":
+        try:
+            os.kill(process_id, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+    import ctypes
+
+    handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, process_id)
+    if not handle:
+        return False
+    ctypes.windll.kernel32.CloseHandle(handle)
+    return True
 
 
 class ExternalEvalCoreTests(unittest.TestCase):
@@ -146,8 +222,12 @@ class ExternalEvalCoreTests(unittest.TestCase):
                 payload = json.loads(response.read())
             self.assertEqual([item["source_id"] for item in payload["results"]], ["source-riscv-isa"])
             with urllib.request.urlopen(f"{server.base_url}/documents/riscv-isa", timeout=5) as response:
-                self.assertEqual(response.headers["X-Eval-Snapshot-Sha256"], fixture.document("source-riscv-isa").data["raw_sha256"])
-                self.assertEqual(response.read(), fixture.document("source-riscv-isa").raw)
+                self.assertNotIn("X-Eval-Snapshot-Sha256", response.headers)
+                self.assertNotIn("ETag", response.headers)
+                served = response.read()
+                self.assertEqual(served, server.served_document("source-riscv-isa"))
+                self.assertTrue(served.startswith(fixture.document("source-riscv-isa").raw))
+                self.assertGreater(len(served), len(fixture.document("source-riscv-isa").raw))
             document_access = next(
                 item
                 for item in server.access_log
@@ -156,17 +236,24 @@ class ExternalEvalCoreTests(unittest.TestCase):
             self.assertEqual(document_access["method"], "GET")
             self.assertEqual(
                 document_access["body_bytes"],
-                len(fixture.document("source-riscv-isa").raw),
+                len(served),
             )
             self.assertEqual(
                 document_access["body_sha256"],
-                fixture.document("source-riscv-isa").data["raw_sha256"],
+                __import__("hashlib").sha256(served).hexdigest(),
             )
             with self.assertRaises(urllib.error.HTTPError) as missing:
                 urllib.request.urlopen(f"{server.base_url}/missing/devconf-2003-transcript", timeout=5)
             self.assertEqual(missing.exception.code, 404)
             with self.assertRaises(urllib.error.HTTPError):
                 urllib.request.urlopen(f"{server.base_url}/", timeout=5)
+        with FixtureServer(fixture) as second_server:
+            self.assertNotEqual(
+                hashlib.sha256(served).hexdigest(),
+                hashlib.sha256(
+                    second_server.served_document("source-riscv-isa")
+                ).hexdigest(),
+            )
 
     def test_public_replay_passes_all_six_outcome_classes(self) -> None:
         result = run_suite(SUITE, FakeSubjectAdapter(replay_results()), allowed_root=ROOT)
@@ -248,6 +335,44 @@ class ExternalEvalCoreTests(unittest.TestCase):
             report.failures,
         )
 
+    def test_contextual_negation_outside_exact_refs_is_rejected(self) -> None:
+        result = replay_results()["known-riscv-jal"]
+        prefix = "Everything after this is false: "
+        result["final_text"] = prefix + result["final_text"]
+        shift = len(prefix.encode("utf-8"))
+        for ref in result["ledger"]["final_claim_refs"]:
+            ref["start_byte"] += shift
+            ref["end_byte"] += shift
+        report = evaluate_replay("known-riscv-jal", result)
+        self.assertFalse(report.passed)
+        self.assertTrue(
+            any("outside exact claim-bound references" in failure for failure in report.failures),
+            report.failures,
+        )
+
+    def test_overlapping_or_unsorted_final_refs_are_rejected(self) -> None:
+        result = replay_results()["known-riscv-jal"]
+        result["ledger"]["final_claim_refs"] = list(
+            reversed(result["ledger"]["final_claim_refs"])
+        )
+        report = evaluate_replay("known-riscv-jal", result)
+        self.assertFalse(report.passed)
+        self.assertTrue(any("sorted and non-overlapping" in item for item in report.failures))
+
+    def test_unreferenced_unicode_format_control_is_rejected(self) -> None:
+        result = replay_results()["known-riscv-jal"]
+        prefix = "\u202e"
+        result["final_text"] = prefix + result["final_text"]
+        shift = len(prefix.encode("utf-8"))
+        for ref in result["ledger"]["final_claim_refs"]:
+            ref["start_byte"] += shift
+            ref["end_byte"] += shift
+        report = evaluate_replay("known-riscv-jal", result)
+        self.assertFalse(report.passed)
+        self.assertTrue(
+            any("outside exact claim-bound references" in item for item in report.failures)
+        )
+
     def test_head_request_does_not_prove_fixture_acquisition(self) -> None:
         subject = FakeSubjectAdapter(
             replay_results(),
@@ -265,6 +390,19 @@ class ExternalEvalCoreTests(unittest.TestCase):
             )
         )
 
+    def test_get_without_reading_body_cannot_guess_nonce_bound_hashes(self) -> None:
+        result = run_suite(
+            SUITE,
+            HeaderOnlyReplaySubject(replay_results()),
+            allowed_root=ROOT,
+        )
+        self.assertTrue(result["run_valid"])
+        self.assertFalse(result["run_passed"])
+        row = next(row for row in result["tasks"] if row["id"] == "known-riscv-jal")
+        self.assertGreater(row.get("fixture_access_count", 0), 0)
+        self.assertEqual(row["verdict"], "FALSE_ACCEPT")
+        self.assertTrue(any("hash mismatch" in failure for failure in row["failures"]))
+
     def test_hung_subject_is_killed_by_external_wall_watchdog(self) -> None:
         suite = single_task_suite("known-riscv-jal", wall_sec=1)
         started = time.monotonic()
@@ -277,6 +415,34 @@ class ExternalEvalCoreTests(unittest.TestCase):
         self.assertTrue(
             any("wall timeout" in failure for failure in result["tasks"][0]["failures"]),
             result["tasks"][0],
+        )
+
+    def test_watchdog_kills_subject_descendant_process_tree(self) -> None:
+        suite = single_task_suite("known-riscv-jal", wall_sec=1)
+        with tempfile.TemporaryDirectory() as temp:
+            pid_path = Path(temp) / "descendant.pid"
+            result = run_suite(suite, LeakingHungSubjectAdapter(str(pid_path)))
+            self.assertFalse(result["run_valid"])
+            self.assertTrue(pid_path.is_file(), result)
+            process_id = int(pid_path.read_text(encoding="ascii"))
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline and process_exists(process_id):
+                time.sleep(0.05)
+            self.assertFalse(process_exists(process_id), result)
+            self.assertIn("cleanup_proven=True", result["tasks"][0]["failures"][0])
+
+    def test_oversized_subject_frame_fails_within_wall_deadline(self) -> None:
+        suite = single_task_suite("known-riscv-jal", wall_sec=2)
+        started = time.monotonic()
+        result = run_suite(suite, OversizedSubjectAdapter())
+        self.assertLess(time.monotonic() - started, 6)
+        self.assertFalse(result["run_valid"])
+        self.assertEqual(result["tasks"][0]["verdict"], "unverified")
+        self.assertTrue(
+            any(
+                "exceeds" in failure or "execution error" in failure
+                for failure in result["tasks"][0]["failures"]
+            )
         )
 
     def test_claiming_private_fixture_without_acquiring_it_is_false_accept(self) -> None:
@@ -295,8 +461,8 @@ class ExternalEvalCoreTests(unittest.TestCase):
                 for failure in row["failures"]
             )
         )
-        self.assertEqual(result["metrics"]["unsupported_major_claim_rate_pct"], 0.0)
-        self.assertEqual(result["metrics"]["quote_accuracy_pct"], 100.0)
+        self.assertGreater(result["metrics"]["unsupported_major_claim_rate_pct"], 0.0)
+        self.assertLess(result["metrics"]["quote_accuracy_pct"], 100.0)
 
     def test_private_oracles_are_never_sent_to_subject(self) -> None:
         suite = load_suite(SUITE, allowed_root=ROOT)
@@ -341,9 +507,11 @@ class ExternalEvalCoreTests(unittest.TestCase):
         self.assertTrue(any("forbidden claim" in failure for failure in row["failures"]))
 
     def test_source_hash_tamper_is_false_accept(self) -> None:
-        replays = replay_results()
-        replays["known-riscv-jal"]["ledger"]["sources"][0]["raw_sha256"] = "f" * 64
-        result = run_suite(SUITE, FakeSubjectAdapter(replays), allowed_root=ROOT)
+        result = run_suite(
+            SUITE,
+            HashTamperingSubject(replay_results()),
+            allowed_root=ROOT,
+        )
         row = next(row for row in result["tasks"] if row["id"] == "known-riscv-jal")
         self.assertEqual(row["verdict"], "FALSE_ACCEPT")
         self.assertTrue(any("hash mismatch" in failure for failure in row["failures"]))
@@ -407,6 +575,64 @@ class ExternalEvalCoreTests(unittest.TestCase):
             self.assertFalse(persisted["run_valid"])
             self.assertFalse(persisted["run_passed"])
             self.assertNotEqual(target.read_text(encoding="utf-8"), "trusted-old-result")
+
+    def test_non_json_health_is_bounded_and_publishes_current_invalid_result(self) -> None:
+        identity = {
+            "instance_id": "non-json-health",
+            "source_sha256": "4" * 64,
+            "standalone_test_mode": True,
+            "not_json": {"set-member"},
+        }
+        result = run_suite(
+            single_task_suite("known-riscv-jal", wall_sec=2),
+            FakeSubjectAdapter(replay_results(), identity=identity),
+        )
+        self.assertFalse(result["run_valid"])
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "result.json"
+            target.write_text('{"run_valid":true,"run_passed":true}', encoding="utf-8")
+            published = write_result_atomic(result, target)
+            persisted = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(persisted, published)
+            self.assertFalse(persisted["run_valid"])
+            self.assertFalse(persisted["run_passed"])
+
+    def test_atomic_writer_replaces_stale_pass_even_for_non_json_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "result.json"
+            target.write_text('{"run_valid":true,"run_passed":true}', encoding="utf-8")
+            published = write_result_atomic(
+                {"run_valid": False, "run_passed": False, "bad": {1}},
+                target,
+            )
+            persisted = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(persisted, published)
+            self.assertFalse(persisted["run_valid"])
+            self.assertFalse(persisted["run_passed"])
+            self.assertIn("publication_error", persisted)
+
+    def test_cli_preflight_failure_replaces_stale_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            malformed = root / "malformed.json"
+            malformed.write_text("{not-json", encoding="utf-8")
+            target = root / "result.json"
+            target.write_text('{"run_valid":true,"run_passed":true}', encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = run_eval_main(
+                    [
+                        "--suite",
+                        str(SUITE),
+                        "--fake-results",
+                        str(malformed),
+                        "--out",
+                        str(target),
+                    ]
+                )
+            self.assertEqual(code, 2)
+            persisted = json.loads(target.read_text(encoding="utf-8"))
+            self.assertFalse(persisted["run_valid"])
+            self.assertFalse(persisted["run_passed"])
 
     def test_atomic_result_uses_unique_temps_under_concurrent_writers(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

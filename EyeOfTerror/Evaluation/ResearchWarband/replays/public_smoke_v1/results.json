@@ -36,7 +36,7 @@
     "mission_id": "eval-conflicting-flight-duration",
     "status": "accepted",
     "accepted": true,
-    "final_text": "Archive A reports 108 minutes, while Archive B reports 106 minutes because it excludes boundary intervals. The sources conflict by timing method.",
+    "final_text": "Archive A reports 108 minutes, while Archive B reports 106 minutes because it excludes boundary intervals.",
     "question": "",
     "ledger": {
       "sources": [

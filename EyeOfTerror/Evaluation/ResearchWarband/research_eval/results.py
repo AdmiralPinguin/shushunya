@@ -16,8 +16,52 @@ class ResultWriteError(RuntimeError):
     pass
 
 
+MAX_PUBLISHED_RESULT_BYTES = 128 * 1024 * 1024
+
+
+def publication_safe_result(result: Any) -> dict[str, Any]:
+    """Return strict bounded JSON, or a current fail-closed publication record."""
+
+    try:
+        if not isinstance(result, dict):
+            raise TypeError("run result is not an object")
+        compact = json.dumps(
+            result,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        if len(compact) > MAX_PUBLISHED_RESULT_BYTES:
+            raise ValueError("run result exceeds publication byte limit")
+        restored = json.loads(compact)
+        if not isinstance(restored, dict):
+            raise TypeError("run result is not an object")
+        return restored
+    except (TypeError, ValueError, RecursionError, UnicodeError) as exc:
+        return {
+            "schema_version": 1,
+            "run_valid": False,
+            "run_passed": False,
+            "publication_error": (
+                "current evaluator result was rejected before publication: "
+                + type(exc).__name__
+            ),
+        }
+
+
 def render_result(result: dict[str, Any]) -> bytes:
-    return (json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    safe = publication_safe_result(result)
+    return (
+        json.dumps(
+            safe,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
 
 
 def result_sha256(result: dict[str, Any]) -> str:
@@ -71,7 +115,7 @@ def _replace_with_retry(source: Path, target: Path) -> None:
             time.sleep(0.01)
 
 
-def write_result_atomic(result: dict[str, Any], target: str | Path) -> None:
+def write_result_atomic(result: dict[str, Any], target: str | Path) -> dict[str, Any]:
     """Publish the current outcome, including invalid runs, without stale passes.
 
     Each writer gets an exclusive temporary file in the destination directory.
@@ -86,7 +130,8 @@ def write_result_atomic(result: dict[str, Any], target: str | Path) -> None:
     _reject_link_components(path.parent)
     if _is_link_like(path):
         raise ResultWriteError("refusing to replace a symlink or junction result")
-    payload = render_result(result)
+    published = publication_safe_result(result)
+    payload = render_result(published)
     descriptor = -1
     temporary: Path | None = None
     try:
@@ -118,3 +163,4 @@ def write_result_atomic(result: dict[str, Any], target: str | Path) -> None:
                 temporary.unlink(missing_ok=True)
             except OSError:
                 pass
+    return published

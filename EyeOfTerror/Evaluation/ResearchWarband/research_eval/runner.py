@@ -22,7 +22,7 @@ from .subjects import (
 )
 
 
-RUNNER_VERSION = "research-external-eval/0.3"
+RUNNER_VERSION = "research-external-eval/0.4"
 HEALTH_WALL_SEC = 10.0
 
 
@@ -86,13 +86,16 @@ def _required_fixture_routes(task: dict[str, Any], fixture: Any) -> set[str]:
 
 
 def _fixture_access_failures(
-    task: dict[str, Any], fixture: Any, accesses: list[dict[str, object]],
+    task: dict[str, Any],
+    fixture: Any,
+    accesses: list[dict[str, object]],
+    served_representations: dict[str, bytes],
 ) -> list[str]:
     required = _required_fixture_routes(task, fixture)
     expected = {
         str(document.data["route"]): (
-            len(document.raw),
-            str(document.data["raw_sha256"]),
+            len(served_representations[document.source_id]),
+            hashlib.sha256(served_representations[document.source_id]).hexdigest(),
         )
         for document in fixture.documents.values()
         if str(document.data["route"]) in required
@@ -153,6 +156,7 @@ def run_suite(
                 execution = boundary.execute(
                     payload,
                     timeout_sec=task["limits"]["wall_sec"],
+                    max_result_bytes=task["limits"]["max_result_bytes"],
                 )
                 if not execution.terminal or not execution.cleanup_proven:
                     row["failures"] = [f"subject lifecycle cleanup was not proven: {execution.cleanup_detail}"]
@@ -171,9 +175,19 @@ def run_suite(
                         }
                         report = OracleReport(False, ["subject result exceeds the task byte limit"], _empty_counters(task), {})
                     else:
-                        report = evaluate_task(task, result, fixture)
+                        report = evaluate_task(
+                            task,
+                            result,
+                            fixture,
+                            served_representations=gateway.served_documents,
+                        )
                     task_accesses = list(gateway.access_log[access_cursor:])
-                    access_failures = _fixture_access_failures(task, fixture, task_accesses)
+                    access_failures = _fixture_access_failures(
+                        task,
+                        fixture,
+                        task_accesses,
+                        gateway.served_documents,
+                    )
                     if access_failures:
                         report = OracleReport(
                             False,
@@ -190,9 +204,13 @@ def run_suite(
             except SubjectTimeoutError as exc:
                 row["failures"] = [f"subject wall timeout: {str(exc)[:200]}"]
                 infrastructure_errors.append(f"{task['id']}: execution timeout")
+                if "cleanup_proven=False" in str(exc):
+                    infrastructure_errors.append(f"{task['id']}: cleanup not proven")
             except Exception as exc:  # noqa: BLE001
                 row["failures"] = [f"evaluator/subject infrastructure error: {type(exc).__name__}: {str(exc)[:200]}"]
                 infrastructure_errors.append(f"{task['id']}: execution error")
+                if "cleanup_proven=False" in str(exc):
+                    infrastructure_errors.append(f"{task['id']}: cleanup not proven")
             row["seconds"] = round(time.monotonic() - task_started, 3)
             rows.append(row)
         fixture_access_log = list(gateway.access_log)
@@ -205,7 +223,8 @@ def run_suite(
         infrastructure_errors.append("subject health failed at end")
     finally:
         if boundary is not None:
-            boundary.close()
+            if not boundary.close():
+                infrastructure_errors.append("subject process-tree cleanup not proven")
     identity_stable = (
         _healthy(health_start)
         and _healthy(health_end)
