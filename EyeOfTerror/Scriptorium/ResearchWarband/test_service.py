@@ -274,6 +274,36 @@ class ServiceTests(unittest.TestCase):
         self.assertTrue(body["startup_adoption"])
         self.assertTrue(body["exact_request_idempotency"])
 
+    def test_model_identity_separates_legacy_alias_from_physical_31b(self) -> None:
+        contract = Path(self.temp.name) / "runtime.json"
+        contract.write_text(
+            json.dumps(
+                {
+                    "gemma": {
+                        "canonical_model_id": "google/gemma-4-31B-it",
+                        "root": "models/gemma-4-31B-it",
+                        "max_model_len": 6144,
+                    },
+                    "operator_profile": {"writer_max_tokens": 1024},
+                }
+            ),
+            encoding="utf-8",
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                "RESEARCH_WARBAND_LLM_MODEL": "legacy-12b-served-alias",
+                "RESEARCH_WARBAND_MODEL_RUNTIME_CONTRACT": str(contract),
+            },
+            clear=False,
+        ):
+            identity = service._public_model_runtime_identity()
+        self.assertEqual("legacy-12b-served-alias", identity["served_alias"])
+        self.assertEqual("google/gemma-4-31B-it", identity["canonical_model_id"])
+        self.assertEqual("models/gemma-4-31B-it", identity["physical_model_root"])
+        self.assertEqual(6144, identity["max_model_len"])
+        self.assertEqual(1024, identity["writer_max_tokens"])
+
     def test_post_start_dependency_tamper_degrades_health_and_rejects_mutations(self) -> None:
         self.stop_server()
         trusted = Path(self.temp.name) / "trusted_dependency.py"

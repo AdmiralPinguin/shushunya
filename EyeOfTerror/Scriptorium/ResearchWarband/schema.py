@@ -1,7 +1,7 @@
 """Strict, stdlib-only evidence ledger schemas.
 
 The schemas deliberately distinguish provenance, semantic entailment, and truth.
-They can record that an independent reviewer judged an excerpt to entail a claim;
+They can record that a context-isolated review pass judged an excerpt to entail a claim;
 they do not assert that either the source or the claim is true.
 """
 

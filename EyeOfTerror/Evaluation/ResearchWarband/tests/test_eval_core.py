@@ -221,6 +221,18 @@ class ExternalEvalCoreTests(unittest.TestCase):
             with urllib.request.urlopen(f"{server.base_url}/search?{query}", timeout=5) as response:
                 payload = json.loads(response.read())
             self.assertEqual([item["source_id"] for item in payload["results"]], ["source-riscv-isa"])
+            with urllib.request.urlopen(f"{server.base_url}/catalog", timeout=5) as response:
+                catalog = json.loads(response.read())
+            self.assertTrue(catalog["closed_world"])
+            self.assertEqual(
+                list(fixture.documents),
+                [item["source_id"] for item in catalog["results"]],
+            )
+            self.assertTrue(
+                catalog["results"][0]["title"].startswith(
+                    "Synthetic evaluator source"
+                )
+            )
             with urllib.request.urlopen(f"{server.base_url}/documents/riscv-isa", timeout=5) as response:
                 self.assertNotIn("X-Eval-Snapshot-Sha256", response.headers)
                 self.assertNotIn("ETag", response.headers)

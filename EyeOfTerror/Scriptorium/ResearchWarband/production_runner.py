@@ -2,9 +2,10 @@
 
 The HTTP service owns lifecycle and process supervision.  This module is the
 spawn-importable execution adapter: it validates the native Iskandar boundary,
-constructs physically distinct Gemma/Qwen model routes, runs the evidence
-pipeline against a persistent CAS, and publishes an exact external-evaluator
-view alongside the internal lifecycle outcome.
+constructs separate author and review contexts on the attested Gemma 31B route,
+runs the evidence pipeline against a persistent CAS, and publishes an exact
+external-evaluator view alongside the internal lifecycle outcome.  The review
+pass is context-isolated; it does not claim a second physical model.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urldefrag, urlsplit
 
 from .model_client import (
-    LlamaCppChatTokenCounter,
     ModelClientError,
     RoutedOpenAIModelClient,
     TrustedReviewBoundary,
@@ -96,6 +96,11 @@ EXTERNAL_LEDGER_FIELDS = frozenset(
 )
 _ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}\Z")
 FIXTURE_NORMALIZER_VERSION = "research-eval-utf8-exact-v1"
+AUTHOR_CONTEXT_PASS_ID = "gemma-author-context-v1"
+REVIEW_CONTEXT_PASS_ID = "gemma-review-context-v1"
+REVIEW_ASSURANCE_MODE = "same_model_context_isolated"
+AUTHOR_MODEL_ROLES = frozenset({"planner", "reader", "analyst", "writer"})
+REVIEW_MODEL_ROLES = frozenset({"reader_coverage", "semantic_verifier"})
 
 
 class ProductionRunnerError(RuntimeError):
@@ -103,25 +108,51 @@ class ProductionRunnerError(RuntimeError):
 
 
 class RuntimeGuardedModelClient:
-    """Re-prove static model facts before and after every model operation."""
+    """Re-prove Gemma facts and bind one explicitly isolated role context.
 
-    def __init__(self, client: Any, *, expected_attestation_sha256: str) -> None:
+    Author and reviewer wrappers may delegate to the same physical Gemma
+    runtime.  Their protocol identities differ only because their request
+    contexts and allowed roles are isolated; this is not a physical
+    independence claim.
+    """
+
+    def __init__(
+        self,
+        client: Any,
+        *,
+        expected_attestation_sha256: str,
+        context_pass_id: str,
+        allowed_roles: frozenset[str],
+    ) -> None:
         if not callable(getattr(client, "preflight", None)) or not callable(
             getattr(client, "decide", None)
         ):
             raise TypeError("runtime guard requires a strict model client")
         if not re.fullmatch(r"[0-9a-f]{64}", expected_attestation_sha256):
             raise ValueError("runtime guard attestation must be lowercase SHA-256")
+        if not _ID_RE.fullmatch(context_pass_id):
+            raise ValueError("runtime guard context_pass_id is invalid")
+        if (
+            not isinstance(allowed_roles, frozenset)
+            or not allowed_roles
+            or any(type(role) is not str or not role for role in allowed_roles)
+        ):
+            raise TypeError("runtime guard allowed_roles must be a non-empty frozenset")
         self.client = client
         self.expected_attestation_sha256 = expected_attestation_sha256
-        independence = getattr(client, "independence_identity", None)
-        if type(independence) is not str or not independence:
-            raise TypeError("runtime guard requires an explicit physical independence identity")
-        self._independence_identity = independence
+        self.context_pass_id = context_pass_id
+        self.allowed_roles = allowed_roles
+        runtime_model_identity = getattr(client, "independence_identity", None)
+        if type(runtime_model_identity) is not str or not runtime_model_identity:
+            raise TypeError("runtime guard requires an explicit model runtime identity")
+        self.runtime_model_identity = runtime_model_identity
+        self._independence_identity = runtime_model_identity
         identity = json.dumps(
             {
                 "client": str(client.stable_identity),
                 "runtime_attestation_sha256": expected_attestation_sha256,
+                "context_pass_id": context_pass_id,
+                "allowed_roles": sorted(allowed_roles),
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -134,28 +165,36 @@ class RuntimeGuardedModelClient:
 
     @property
     def independence_identity(self) -> str:
-        # The shared runtime digest must not make distinct Gemma/Qwen physical
-        # identities appear equal. Preserve the inner physical authority fact.
+        # Both isolated contexts intentionally expose the same model authority;
+        # assurance_mode records that this is not physical independence.
         return self._independence_identity
+
+    def _authorize_role(self, role: str) -> None:
+        if role not in self.allowed_roles:
+            raise ModelClientError(
+                f"{self.context_pass_id} is not authorized for model role {role!r}"
+            )
 
     def _guard(self) -> None:
         try:
             observed = validate_runtime_dependencies().get("attestation_sha256")
         except Exception as exc:
             raise ModelClientError(
-                "physical model runtime could not be re-attested"
+                "Gemma runtime could not be re-attested"
             ) from exc
         if observed != self.expected_attestation_sha256:
             raise ModelClientError(
-                "physical model runtime changed during the research mission"
+                "Gemma runtime changed during the research mission"
             )
 
     def preflight(self, role: str, payload: Mapping[str, Any]) -> None:
+        self._authorize_role(role)
         self._guard()
         self.client.preflight(role, payload)
         self._guard()
 
     def decide(self, role: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        self._authorize_role(role)
         self._guard()
         result = self.client.decide(role, payload)
         self._guard()
@@ -205,6 +244,18 @@ def _dispatcher_url(value: str, field: str) -> str:
 
 
 def _validate_runtime_environment(contract: Mapping[str, Any]) -> None:
+    if contract.get("version") != 2 or contract.get("review_pass") != {
+        "assurance_mode": REVIEW_ASSURANCE_MODE,
+        "route": "gemma",
+        "priority": "other",
+        "semantic_max_tokens": 1_280,
+        "roles": ["reader_coverage", "semantic_verifier"],
+        "separate_physical_model": False,
+        "epistemic_independence_claimed": False,
+    }:
+        raise ProductionRunnerError(
+            "ResearchWarband requires the Gemma-only context-isolated runtime contract"
+        )
     profile = _required_env("RESEARCH_WARBAND_PROFILE")
     if profile not in {PRODUCTION_PROFILE, EVALUATOR_PROFILE}:
         raise ProductionRunnerError("RESEARCH_WARBAND_PROFILE is unsupported")
@@ -219,27 +270,14 @@ def _validate_runtime_environment(contract: Mapping[str, Any]) -> None:
         _required_env("RESEARCH_WARBAND_LLM_BASE_URL"),
         "RESEARCH_WARBAND_LLM_BASE_URL",
     )
-    _dispatcher_url(
-        _required_env("RESEARCH_WARBAND_VERIFIER_BASE_URL"),
-        "RESEARCH_WARBAND_VERIFIER_BASE_URL",
-    )
     routes = contract["dispatcher"]["routes"]
     if _required_env("RESEARCH_WARBAND_LLM_MODEL") != routes["gemma"]["model"]:
         raise ProductionRunnerError("Gemma alias differs from the runtime contract")
-    if _required_env("RESEARCH_WARBAND_VERIFIER_MODEL") != routes["qwen"]["model"]:
-        raise ProductionRunnerError("Qwen alias differs from the runtime contract")
     operator = contract["operator_profile"]
-    if operator["qwen_timeout_sec"] >= routes["qwen"]["upstream_timeout_sec"]:
-        raise ProductionRunnerError(
-            "Qwen runner timeout must be strictly below dispatcher upstream timeout"
-        )
     exact_integers = {
         "RESEARCH_GEMMA_MAX_TOKENS": operator["gemma_max_tokens"],
         "RESEARCH_GEMMA_MAX_CONTEXT_CHARS": operator["gemma_max_context_chars"],
-        "RESEARCH_QWEN_MAX_TOKENS": operator["qwen_max_tokens"],
-        "RESEARCH_QWEN_MAX_CONTEXT_CHARS": operator["qwen_max_context_chars"],
         "RESEARCH_GEMMA_TIMEOUT_SEC": operator["gemma_timeout_sec"],
-        "RESEARCH_QWEN_TIMEOUT_SEC": operator["qwen_timeout_sec"],
         "RESEARCH_READER_CHUNK_CHARS": operator["reader_chunk_chars"],
     }
     for name, expected in exact_integers.items():
@@ -638,6 +676,68 @@ class FixtureGatewaySearchAdapter:
         self.identity = "fixture-gateway-" + hashlib.sha256(
             self.client.base_url.encode("utf-8")
         ).hexdigest()[:32]
+        self._source_ids_by_url: dict[str, str] = {}
+
+    @property
+    def catalog_identity(self) -> str:
+        return self.identity + "-closed-world"
+
+    def _parse_hits(
+        self, raw_results: Any, *, catalog: bool = False
+    ) -> tuple[SearchHit, ...]:
+        if type(raw_results) is not list:
+            raise ProductionRunnerError("fixture gateway search results are malformed")
+        hits: list[SearchHit] = []
+        for item in raw_results:
+            expected_fields = {"source_id", "url", "original_url"}
+            if catalog:
+                expected_fields.add("title")
+            if not isinstance(item, dict) or set(item) != expected_fields:
+                raise ProductionRunnerError("fixture gateway returned an invalid search hit")
+            source_id = item.get("source_id")
+            url = item.get("url")
+            if type(source_id) is not str or not _ID_RE.fullmatch(source_id):
+                raise ProductionRunnerError("fixture gateway source_id is invalid")
+            title = item.get("title") if catalog else source_id
+            if type(title) is not str or not title.strip() or len(title) > 512:
+                raise ProductionRunnerError("fixture gateway catalog title is invalid")
+            parsed_url = urlsplit(url) if type(url) is str else None
+            if (
+                parsed_url is None
+                or f"{parsed_url.scheme}://{parsed_url.netloc}" != self.client.base_url
+                or not parsed_url.path.startswith("/")
+                or parsed_url.username is not None
+                or parsed_url.password is not None
+                or parsed_url.query
+                or parsed_url.fragment
+            ):
+                raise ProductionRunnerError("fixture gateway returned an off-origin URL")
+            previous_source_id = self._source_ids_by_url.get(url)
+            if previous_source_id is not None and previous_source_id != source_id:
+                raise ProductionRunnerError(
+                    "fixture gateway changed the source identity for a document URL"
+                )
+            self._source_ids_by_url[url] = source_id
+            hits.append(
+                SearchHit(
+                    title=title,
+                    url=url,
+                    snippet=str(item.get("original_url") or ""),
+                    source_class="user_provided_corpus",
+                    classification_identity=self.identity,
+                )
+            )
+        return tuple(hits)
+
+    def source_id_for_hit(self, hit: SearchHit) -> str:
+        if not isinstance(hit, SearchHit):
+            raise TypeError("fixture source identity lookup requires a SearchHit")
+        source_id = self._source_ids_by_url.get(hit.url)
+        if source_id is None or not _ID_RE.fullmatch(source_id):
+            raise AcquisitionError(
+                "fixture SearchHit is not bound to a gateway source identity"
+            )
+        return source_id
 
     def search(self, query: str, limit: int) -> tuple[SearchHit, ...]:
         if type(query) is not str or not query.strip():
@@ -651,42 +751,15 @@ class FixtureGatewaySearchAdapter:
             response.get("closed_world") is not True
         ):
             raise ProductionRunnerError("fixture gateway search response is not closed-world")
-        raw_results = response.get("results")
-        if type(raw_results) is not list:
-            raise ProductionRunnerError("fixture gateway search results are malformed")
-        hits: list[SearchHit] = []
-        for item in raw_results[:limit]:
-            if not isinstance(item, dict) or set(item) != {
-                "source_id",
-                "url",
-                "original_url",
-            }:
-                raise ProductionRunnerError("fixture gateway returned an invalid search hit")
-            source_id = item.get("source_id")
-            url = item.get("url")
-            if type(source_id) is not str or not _ID_RE.fullmatch(source_id):
-                raise ProductionRunnerError("fixture gateway source_id is invalid")
-            parsed_url = urlsplit(url) if type(url) is str else None
-            if (
-                parsed_url is None
-                or f"{parsed_url.scheme}://{parsed_url.netloc}" != self.client.base_url
-                or not parsed_url.path.startswith("/")
-                or parsed_url.username is not None
-                or parsed_url.password is not None
-                or parsed_url.query
-                or parsed_url.fragment
-            ):
-                raise ProductionRunnerError("fixture gateway returned an off-origin URL")
-            hits.append(
-                SearchHit(
-                    title=source_id,
-                    url=url,
-                    snippet=str(item.get("original_url") or ""),
-                    source_class="user_provided_corpus",
-                    classification_identity=self.identity,
-                )
-            )
-        return tuple(hits)
+        return self._parse_hits(response.get("results"))[:limit]
+
+    def catalog(self) -> tuple[SearchHit, ...]:
+        response = self.client.request_json("GET", "/catalog", timeout_sec=10)
+        if set(response) != {"closed_world", "results"} or (
+            response.get("closed_world") is not True
+        ):
+            raise ProductionRunnerError("fixture gateway catalog is not closed-world")
+        return self._parse_hits(response.get("results"), catalog=True)
 
 
 class FixtureGatewayFetchAdapter:
@@ -735,7 +808,7 @@ class FixtureGatewayFetchAdapter:
             normalized = _normalize_fixture_exact(response.body, "text")
         except Exception as exc:
             raise AcquisitionError(f"fixture source normalization failed: {exc}") from exc
-        source_id = hit.title
+        source_id = self.search.source_id_for_hit(hit)
         final_uri = urldefrag(hit.url).url + "#" + urlencode(
             {"eval_source_id": source_id}
         )
@@ -788,26 +861,14 @@ def _build_pipeline(
         _required_env("RESEARCH_WARBAND_LLM_BASE_URL"),
         "RESEARCH_WARBAND_LLM_BASE_URL",
     )
-    reviewer_base = _dispatcher_url(
-        _required_env("RESEARCH_WARBAND_VERIFIER_BASE_URL"),
-        "RESEARCH_WARBAND_VERIFIER_BASE_URL",
-    )
     author_model_name = _required_env("RESEARCH_WARBAND_LLM_MODEL")
-    reviewer_model_name = _required_env("RESEARCH_WARBAND_VERIFIER_MODEL")
-    if author_model_name == reviewer_model_name:
-        raise ProductionRunnerError("author and reviewer model names must be distinct")
     if author_model_name != runtime_contract["dispatcher"]["routes"]["gemma"]["model"]:
         raise ProductionRunnerError("Gemma alias does not match the attested dispatcher route")
-    if reviewer_model_name != runtime_contract["dispatcher"]["routes"]["qwen"]["model"]:
-        raise ProductionRunnerError("Qwen alias does not match the attested dispatcher route")
     gemma_max_tokens = _env_int(
         "RESEARCH_GEMMA_MAX_TOKENS", 2048, minimum=256, maximum=32768
     )
     gemma_context_chars = _env_int(
-        "RESEARCH_GEMMA_MAX_CONTEXT_CHARS", 16000, minimum=1000, maximum=1_000_000
-    )
-    qwen_context_chars = _env_int(
-        "RESEARCH_QWEN_MAX_CONTEXT_CHARS", 80000, minimum=1000, maximum=1_000_000
+        "RESEARCH_GEMMA_MAX_CONTEXT_CHARS", 24000, minimum=1000, maximum=1_000_000
     )
     reader_chunk_chars = _env_int(
         "RESEARCH_READER_CHUNK_CHARS", 8000, minimum=2000, maximum=100_000
@@ -820,59 +881,62 @@ def _build_pipeline(
     if any(operator_profile[key] != value for key, value in expected_operator.items()):
         raise ProductionRunnerError("runner limits do not match the attested operator profile")
     gemma_physical = runtime_contract["gemma"]
-    raw_author = RoutedOpenAIModelClient(
-        route="gemma",
-        base_url=author_base,
-        model=author_model_name,
-        priority="other",
-        max_tokens=gemma_max_tokens,
-        max_context_chars=gemma_context_chars,
-        timeout_sec=float(
-            _env_int(
-                "RESEARCH_GEMMA_TIMEOUT_SEC", 7200, minimum=1, maximum=86_400
-            )
-        ),
-        physical_model_identity=(
-            f"{gemma_physical['root']}|{gemma_physical['owned_by']}"
-        ),
-        attested_max_model_len=gemma_physical["max_model_len"],
-        token_counter=VLLMChatTokenCounter(
-            gemma_physical["base_url"] + "/tokenize", timeout_sec=30
-        ),
+    gemma_timeout = float(
+        _env_int("RESEARCH_GEMMA_TIMEOUT_SEC", 7200, minimum=1, maximum=86_400)
     )
-    qwen_physical = runtime_contract["qwen"]
-    raw_reviewer = RoutedOpenAIModelClient(
-        route="qwen",
-        base_url=reviewer_base,
-        model=reviewer_model_name,
-        priority="background",
-        max_tokens=_env_int(
-            "RESEARCH_QWEN_MAX_TOKENS", 8192, minimum=256, maximum=32768
-        ),
-        max_context_chars=qwen_context_chars,
-        timeout_sec=float(
-            _env_int(
-                "RESEARCH_QWEN_TIMEOUT_SEC", 86_400, minimum=1, maximum=604_800
-            )
-        ),
-        physical_model_identity=(
-            f"{qwen_physical['model_path']}|{qwen_physical['owned_by']}|"
-            f"n_ctx={qwen_physical['n_ctx']}|build={qwen_physical['build_info']}"
-        ),
-        attested_max_model_len=qwen_physical["n_ctx"],
-        token_counter=LlamaCppChatTokenCounter(
-            qwen_physical["base_url"],
-            max_model_len=qwen_physical["n_ctx"],
-            chat_template_sha256=qwen_physical["chat_template_sha256"],
-            timeout_sec=30,
-        ),
+    gemma_runtime_identity = f"{gemma_physical['root']}|{gemma_physical['owned_by']}"
+
+    def build_gemma_pass(
+        *, role_max_tokens: Mapping[str, int] | None = None
+    ) -> RoutedOpenAIModelClient:
+        return RoutedOpenAIModelClient(
+            route="gemma",
+            base_url=author_base,
+            model=author_model_name,
+            priority="other",
+            max_tokens=gemma_max_tokens,
+            role_max_tokens=role_max_tokens,
+            max_context_chars=gemma_context_chars,
+            timeout_sec=gemma_timeout,
+            physical_model_identity=gemma_runtime_identity,
+            attested_max_model_len=gemma_physical["max_model_len"],
+            token_counter=VLLMChatTokenCounter(
+                gemma_physical["base_url"] + "/tokenize", timeout_sec=30
+            ),
+        )
+
+    semantic_max_tokens = runtime_contract["review_pass"]["semantic_max_tokens"]
+    writer_max_tokens = operator_profile["writer_max_tokens"]
+    if (
+        type(writer_max_tokens) is not int
+        or not 256 <= writer_max_tokens <= gemma_max_tokens
+    ):
+        raise ProductionRunnerError(
+            "Writer output reserve is outside the Gemma generation budget"
+        )
+    if (
+        type(semantic_max_tokens) is not int
+        or not 256 <= semantic_max_tokens <= gemma_max_tokens
+    ):
+        raise ProductionRunnerError(
+            "semantic review output reserve is outside the Gemma generation budget"
+        )
+    raw_author = build_gemma_pass(role_max_tokens={"writer": writer_max_tokens})
+    raw_reviewer = build_gemma_pass(
+        role_max_tokens={"semantic_verifier": semantic_max_tokens}
     )
     runtime_digest = str(runtime_attestation["attestation_sha256"])
     author = RuntimeGuardedModelClient(
-        raw_author, expected_attestation_sha256=runtime_digest
+        raw_author,
+        expected_attestation_sha256=runtime_digest,
+        context_pass_id=AUTHOR_CONTEXT_PASS_ID,
+        allowed_roles=AUTHOR_MODEL_ROLES,
     )
     reviewer = RuntimeGuardedModelClient(
-        raw_reviewer, expected_attestation_sha256=runtime_digest
+        raw_reviewer,
+        expected_attestation_sha256=runtime_digest,
+        context_pass_id=REVIEW_CONTEXT_PASS_ID,
+        allowed_roles=REVIEW_MODEL_ROLES,
     )
     authority = _required_env("RESEARCH_WARBAND_REVIEWER_AUTHORITY_ID")
     trusted = {
@@ -884,9 +948,14 @@ def _build_pipeline(
     }
     if trusted != {authority}:
         raise ProductionRunnerError(
-            "trusted reviewer configuration must contain exactly the Qwen authority"
+            "trusted reviewer configuration must contain exactly the context-isolated "
+            "review authority"
         )
-    review_boundary = TrustedReviewBoundary(client=reviewer, authority_id=authority)
+    review_boundary = TrustedReviewBoundary(
+        client=reviewer,
+        authority_id=authority,
+        assurance_mode=REVIEW_ASSURANCE_MODE,
+    )
     snapshot_root = Path(_required_env("RESEARCH_WARBAND_SNAPSHOT_ROOT"))
     normalizers = [default_registered_normalizer()]
     if profile == EVALUATOR_PROFILE:

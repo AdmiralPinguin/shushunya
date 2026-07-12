@@ -2,9 +2,6 @@
 
 from .execution_policy import ExecutionPolicy, ExecutionPolicyError
 from .model_client import (
-    DefaultModelClient,
-    EyeOfTerrorModelClient,
-    LlamaCppChatTokenCounter,
     ModelClientError,
     ModelProtocolError,
     ResearchModelClient,
@@ -89,7 +86,6 @@ __all__ = [
     "ClarificationTurn",
     "ConfiguredDomainSourceClassifier",
     "DefaultFetchAdapter",
-    "DefaultModelClient",
     "DefaultSearchAdapter",
     "DraftUnit",
     "EpubLocator",
@@ -98,7 +94,6 @@ __all__ = [
     "EvidenceVerifier",
     "ExecutionPolicy",
     "ExecutionPolicyError",
-    "EyeOfTerrorModelClient",
     "EyeWebFetchAdapter",
     "EyeWebSearchAdapter",
     "Fb2Locator",
@@ -107,7 +102,6 @@ __all__ = [
     "HtmlLocator",
     "Hypothesis",
     "HypothesisSpec",
-    "LlamaCppChatTokenCounter",
     "Inference",
     "MAX_CLARIFICATION_FIELD_BYTES",
     "MAX_CLARIFICATION_TOTAL_BYTES",

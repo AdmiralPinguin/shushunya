@@ -55,21 +55,36 @@ This HTTP command defaults to the versioned `public_smoke_long_v1` real-model
 gate: clarification gets 1,800 seconds and the evidence cases get 21,600
 seconds. The immutable `public_smoke_v1` 20–120 second suite remains the fast
 fake-subject/evaluator self-test and must not be used to judge the temporary 31B
-and FIFO Qwen deployment.
+Gemma-only ResearchWarband deployment.
 
-The current attested author is the temporary TP1, text-only Gemma 31B runtime:
-the dispatcher still advertises four legacy slots, while the physical upstream
+All internal model-backed roles use the temporary TP1, text-only Gemma 31B
+runtime. This includes planning, Reader coverage, analysis, writing, and
+semantic review. Reader coverage and semantic review are fresh,
+context-isolated same-model passes; they are not a second physical authority
+and publish `epistemic_independence_claimed=false`.
+
+The dispatcher still advertises four legacy slots, while the physical upstream
 has `max_num_seqs=1`, `max_num_batched_tokens=1024`, `max_model_len=6144`, and
 `gpu_memory_utilization=0.94` to preserve activation headroom. ResearchWarband
-therefore uses `max_active=1`, `max_tokens=2048`, a conservative 16,000-character
-request bound, and 8,000-character reader chunks.
+therefore uses `max_active=1`, `max_tokens=2048`, an attested 1,024-token
+Writer reserve, a 1,280-token semantic-review reserve, and a 24,000-character outer
+guard backed by exact physical-token preflight with the role's output reserve,
+and 8,000-character reader chunks. Trust comes from exact
+application-owned source snapshots, locators, evidence/provenance records,
+content-bound review sessions, and deterministic gates—not from pretending that
+two contexts of one model are independent. Independent judgment belongs only
+to the external evaluator, whose sealed fixtures and rubrics are unavailable to
+the Warband.
+
+Qwen Coder belongs to the coding Warband. It is not used by Iskandar, is not a
+ResearchWarband dependency, and must not participate in Iskandar readiness;
+Qwen availability or queue state cannot block a research mission.
+
 Vision is intentionally not required or advertised by this profile. After the
 second 3090 is installed, TP2/32k/vision and `max_active=4` require a new
 versioned runtime contract and a clean service restart; do not edit this profile
 in place.
 
-Qwen is routed through the independent dispatcher lane on `8079` with
-`X-LLM-Route: qwen`, background priority, and an `86400` second transport
-timeout. The production attempt envelope is seven days; bounded rounds and
-model-call budgets remain enforced inside the pipeline. Evidence remains in the
-persistent CAS, while trusted knowledge-graph merge stays disabled.
+The production attempt envelope is seven days; bounded rounds and model-call
+budgets remain enforced inside the pipeline. Evidence remains in the persistent
+CAS, while trusted knowledge-graph merge stays disabled.

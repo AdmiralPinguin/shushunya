@@ -139,6 +139,16 @@ class SearchAdapter(Protocol):
 
 
 @runtime_checkable
+class ClosedWorldCatalogAdapter(Protocol):
+    @property
+    def catalog_identity(self) -> str:
+        """Return the attested identity of a complete closed-world catalog."""
+
+    def catalog(self) -> Sequence[SearchHit]:
+        """Return the complete catalog without ranking, sampling, or truncation."""
+
+
+@runtime_checkable
 class FetchAdapter(Protocol):
     def fetch(self, hit: SearchHit, max_bytes: int) -> FetchedSource:
         """Fetch one exact classified hit without re-resolving its pinned IP."""
@@ -824,6 +834,7 @@ DefaultFetchAdapter = EyeWebFetchAdapter
 __all__ = [
     "AcquisitionError",
     "ConfiguredDomainSourceClassifier",
+    "ClosedWorldCatalogAdapter",
     "DefaultFetchAdapter",
     "DefaultSearchAdapter",
     "EPUB_MAX_COMPRESSION_RATIO",

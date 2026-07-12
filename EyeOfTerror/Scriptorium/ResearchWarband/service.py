@@ -52,6 +52,52 @@ STANDALONE_FIELDS = frozenset(
         "source_gateway_url",
     }
 )
+
+
+def _public_model_runtime_identity() -> dict[str, Any]:
+    """Expose the served alias and attested physical Gemma identity separately."""
+
+    served_alias = os.environ.get("RESEARCH_WARBAND_LLM_MODEL", "")
+    canonical_model_id = ""
+    physical_model_root = ""
+    max_model_len: int | None = None
+    writer_max_tokens: int | None = None
+    selected = os.environ.get("RESEARCH_WARBAND_MODEL_RUNTIME_CONTRACT", "").strip()
+    if selected:
+        try:
+            contract = json.loads(Path(selected).read_text(encoding="utf-8"))
+            gemma = contract.get("gemma") if isinstance(contract, dict) else None
+            operator = (
+                contract.get("operator_profile") if isinstance(contract, dict) else None
+            )
+            if isinstance(gemma, dict):
+                raw_canonical = gemma.get("canonical_model_id")
+                raw_root = gemma.get("root")
+                raw_limit = gemma.get("max_model_len")
+                if type(raw_canonical) is str:
+                    canonical_model_id = raw_canonical
+                if type(raw_root) is str:
+                    physical_model_root = raw_root
+                if type(raw_limit) is int:
+                    max_model_len = raw_limit
+            if isinstance(operator, dict):
+                raw_writer_limit = operator.get("writer_max_tokens")
+                if type(raw_writer_limit) is int:
+                    writer_max_tokens = raw_writer_limit
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            # Readiness owns the fail-closed decision. Identity remains non-secret and
+            # explicitly blank rather than guessing a physical model from the alias.
+            pass
+    return {
+        "model": served_alias,
+        "served_alias": served_alias,
+        "canonical_model_id": canonical_model_id,
+        "physical_model_root": physical_model_root,
+        "max_model_len": max_model_len,
+        "writer_max_tokens": writer_max_tokens,
+    }
+
+
 REQUEST_FIELDS = PRODUCTION_FIELDS | STANDALONE_FIELDS
 ANSWER_FIELDS = frozenset({"answer"})
 CLIENT_FORBIDDEN_AUTHORITY_FIELDS = frozenset(
@@ -77,6 +123,8 @@ ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 
 SERVICE_STARTED_AT = int(time.time())
 SERVICE_INSTANCE_ID = uuid.uuid4().hex
+
+
 def _env_int(name: str, default: int, minimum: int = 1) -> int:
     try:
         return max(minimum, int(os.environ.get(name, str(default))))
@@ -175,8 +223,14 @@ def _deployment_source_sha256(
             "standalone_test_mode": bool(standalone_test_mode),
             "research_model": os.environ.get("RESEARCH_WARBAND_LLM_MODEL", ""),
             "research_base_url": os.environ.get("RESEARCH_WARBAND_LLM_BASE_URL", ""),
-            "verifier_model": os.environ.get("RESEARCH_WARBAND_VERIFIER_MODEL", ""),
-            "verifier_base_url": os.environ.get("RESEARCH_WARBAND_VERIFIER_BASE_URL", ""),
+            "review_pass": {
+                "assurance_mode": "same_model_context_isolated",
+                "route": "gemma",
+                "priority": "other",
+                "semantic_max_tokens": 1_280,
+                "separate_physical_model": False,
+                "epistemic_independence_claimed": False,
+            },
             "trusted_reviewer_ids": os.environ.get(
                 "RESEARCH_WARBAND_TRUSTED_REVIEWER_IDS", ""
             ),
@@ -584,8 +638,7 @@ class ResearchServiceRuntime:
         deployment_ok = bool(readiness["deployment_integrity"]["ok"])
         lead_model = os.environ.get("RESEARCH_WARBAND_LLM_MODEL", "")
         lead_base = os.environ.get("RESEARCH_WARBAND_LLM_BASE_URL", "")
-        verifier_model = os.environ.get("RESEARCH_WARBAND_VERIFIER_MODEL", lead_model)
-        verifier_base = os.environ.get("RESEARCH_WARBAND_VERIFIER_BASE_URL", lead_base)
+        model_runtime_identity = _public_model_runtime_identity()
         return {
             "source_sha256": self.source_sha256 if deployment_ok else None,
             "authorized_source_sha256": self.source_sha256,
@@ -607,10 +660,21 @@ class ResearchServiceRuntime:
                 "tokenless_evaluator_only": self._tokenless_test_only,
             },
             "models": {
-                "research": {"model": lead_model, "base_url": lead_base},
-                "semantic_verifier": {
-                    "model": verifier_model,
-                    "base_url": verifier_base,
+                "research": {
+                    **model_runtime_identity,
+                    "base_url": lead_base,
+                    "route": "gemma",
+                    "priority": "other",
+                },
+                "context_isolated_review_pass": {
+                    **model_runtime_identity,
+                    "base_url": lead_base,
+                    "route": "gemma",
+                    "priority": "other",
+                    "semantic_max_tokens": 1_280,
+                    "roles": ["reader_coverage", "semantic_verifier"],
+                    "separate_physical_model": False,
+                    "epistemic_independence_claimed": False,
                 },
             },
             "store_recovery": self.store.recovery_status(),
@@ -642,6 +706,15 @@ class ResearchServiceRuntime:
             "ready": readiness["ready"],
             "deployment_integrity_verified": readiness["deployment_integrity"]["ok"],
             "runner_deployment_ready": readiness["runner_deployment"]["ready"],
+            "review_pass": {
+                "assurance_mode": "same_model_context_isolated",
+                "route": "gemma",
+                "priority": "other",
+                "semantic_max_tokens": 1_280,
+                "roles": ["reader_coverage", "semantic_verifier"],
+                "separate_physical_model": False,
+                "epistemic_independence_claimed": False,
+            },
         }
 
 

@@ -1,7 +1,7 @@
 """Deterministic provenance verifier for an :class:`EvidenceLedger`.
 
 This module verifies immutable bytes, locators, exact excerpts, references, and
-the presence of independent semantic-entailment decisions. It deliberately
+the presence of application-attested semantic-review decisions. It deliberately
 does not decide whether a source or claim is true and contains no model or HTTP
 calls.
 """
@@ -171,7 +171,7 @@ _INTEGRITY_CODES = frozenset(
 _MAJOR_CODES = frozenset(
     {
         "major_entailment_missing",
-        "major_entailment_not_independent",
+        "major_entailment_review_untrusted",
         "unsupported_major_claim",
         "unresolved_refutation",
         "missing_inference",
@@ -409,7 +409,7 @@ class EvidenceVerifier:
                 digest=edge_review_digest(edge, claim, span, snapshot),
             )
 
-        def independently_supported(claim_id: str) -> bool:
+        def review_attested_support(claim_id: str) -> bool:
             cached = support_cache.get(claim_id)
             if cached is not None:
                 return cached
@@ -429,7 +429,7 @@ class EvidenceVerifier:
             elif supported and claim.kind == "inference":
                 inference = inference_by_conclusion.get(claim_id)
                 supported = inference is not None and all(
-                    independently_supported(premise_id)
+                    review_attested_support(premise_id)
                     for premise_id in inference.premise_claim_ids
                 )
             elif claim.kind == "assumption":
@@ -453,17 +453,17 @@ class EvidenceVerifier:
 
         for inference in ledger.inferences:
             for premise_id in inference.premise_claim_ids:
-                if not independently_supported(premise_id):
+                if not review_attested_support(premise_id):
                     issues.append(
                         VerificationIssue(
                             "unsupported_inference_premise",
                             inference.id,
-                            f"premise claim {premise_id} lacks independently reviewed provenance",
+                            f"premise claim {premise_id} lacks review-attested provenance",
                         )
                     )
 
         for claim_id in sorted(inference_claim_ids):
-            if not independently_supported(claim_id):
+            if not review_attested_support(claim_id):
                 issues.append(
                     VerificationIssue(
                         "unsupported_inference_claim",
@@ -475,7 +475,7 @@ class EvidenceVerifier:
         for claim in ledger.claims:
             if claim.kind not in {"source_assertion", "direct_observation"}:
                 continue
-            if not independently_supported(claim.id):
+            if not review_attested_support(claim.id):
                 issues.append(
                     VerificationIssue(
                         "unsupported_factual_claim",
@@ -492,40 +492,40 @@ class EvidenceVerifier:
                     VerificationIssue(
                         "major_entailment_missing",
                         claim.id,
-                        "major claim lacks an independent semantic status of entailed",
+                        "major claim lacks a review-attested semantic status of entailed",
                     )
                 )
             elif not claim_review_is_trusted(claim):
                 issues.append(
                     VerificationIssue(
-                        "major_entailment_not_independent",
+                        "major_entailment_review_untrusted",
                         claim.id,
                         "major claim review is self-authored, untrusted, or lacks a content-bound attestation",
                     )
                 )
 
-            if not independently_supported(claim.id):
+            if not review_attested_support(claim.id):
                 issues.append(
                     VerificationIssue(
                         "unsupported_major_claim",
                         claim.id,
-                        "major claim lacks intact, independently entailed support or premises",
+                        "major claim lacks intact, review-entailed support or premises",
                     )
                 )
 
         for claim in ledger.claims:
-            has_independent_refutation = any(
+            has_review_attested_refutation = any(
                 edge.relation == "refutes"
                 and edge_review_is_trusted(edge, claim)
                 and edge.span_id in valid_spans
                 for edge in edges_by_claim[claim.id]
             )
-            if claim.verification_status == "entailed" and has_independent_refutation:
+            if claim.verification_status == "entailed" and has_review_attested_refutation:
                 issues.append(
                     VerificationIssue(
                         "unresolved_refutation",
                         claim.id,
-                        "entailed claim has independently entailed refuting evidence",
+                        "entailed claim has review-entailed refuting evidence",
                     )
                 )
 

@@ -10,7 +10,11 @@ import stat
 import sys
 from urllib.parse import urlsplit
 
-from .production_runner import EVALUATOR_PROFILE, PRODUCTION_PROFILE
+from .production_runner import (
+    EVALUATOR_PROFILE,
+    PRODUCTION_PROFILE,
+    REVIEW_ASSURANCE_MODE,
+)
 from .research_tools import ConfiguredDomainSourceClassifier
 from .runtime_dependencies import (
     load_runtime_contract,
@@ -154,6 +158,18 @@ def validate_deployment_profile(expected: str) -> dict[str, object]:
         "model runtime contract",
     )
     runtime_contract = load_runtime_contract(runtime_contract_path)
+    if runtime_contract.get("version") != 2 or runtime_contract.get("review_pass") != {
+        "assurance_mode": REVIEW_ASSURANCE_MODE,
+        "route": "gemma",
+        "priority": "other",
+        "semantic_max_tokens": 1_280,
+        "roles": ["reader_coverage", "semantic_verifier"],
+        "separate_physical_model": False,
+        "epistemic_independence_claimed": False,
+    }:
+        raise DeploymentProfileError(
+            "deployment requires the Gemma-only context-isolated runtime contract"
+        )
     operator_profile = runtime_contract["operator_profile"]
     if (
         operator_profile.get("tensor_parallel_size") != 1
@@ -172,8 +188,6 @@ def validate_deployment_profile(expected: str) -> dict[str, object]:
     minimum_attempt = 604_800 if production else 86_400
     if attempt_timeout < minimum_attempt:
         raise DeploymentProfileError("attempt timeout is below the profile contract")
-    if _integer("RESEARCH_QWEN_TIMEOUT_SEC") != operator_profile["qwen_timeout_sec"]:
-        raise DeploymentProfileError("Qwen timeout differs from the attested operator profile")
     if _integer("RESEARCH_GEMMA_TIMEOUT_SEC") != operator_profile["gemma_timeout_sec"]:
         raise DeploymentProfileError("Gemma timeout differs from the attested operator profile")
     if _integer("RESEARCH_GEMMA_MAX_TOKENS") != operator_profile["gemma_max_tokens"]:
@@ -183,13 +197,6 @@ def validate_deployment_profile(expected: str) -> dict[str, object]:
         != operator_profile["gemma_max_context_chars"]
     ):
         raise DeploymentProfileError("Gemma context chars differ from the attested 31B profile")
-    if _integer("RESEARCH_QWEN_MAX_TOKENS") != operator_profile["qwen_max_tokens"]:
-        raise DeploymentProfileError("Qwen max_tokens differs from the attested operator profile")
-    if (
-        _integer("RESEARCH_QWEN_MAX_CONTEXT_CHARS")
-        != operator_profile["qwen_max_context_chars"]
-    ):
-        raise DeploymentProfileError("Qwen context chars differ from the attested operator profile")
     if _integer("RESEARCH_READER_CHUNK_CHARS") != operator_profile["reader_chunk_chars"]:
         raise DeploymentProfileError("reader chunk size differs from the attested model profile")
     if _integer("SHUSHUNYA_SEARCH_MAX_WEB_BYTES") != 200_000:
@@ -215,15 +222,8 @@ def validate_deployment_profile(expected: str) -> dict[str, object]:
             "normalizer identity does not match the active fetch boundary"
         )
     _dispatcher("RESEARCH_WARBAND_LLM_BASE_URL")
-    _dispatcher("RESEARCH_WARBAND_VERIFIER_BASE_URL")
-    if _required("RESEARCH_WARBAND_LLM_MODEL") == _required(
-        "RESEARCH_WARBAND_VERIFIER_MODEL"
-    ):
-        raise DeploymentProfileError("author and reviewer model identities must differ")
     if _required("RESEARCH_WARBAND_LLM_MODEL") != runtime_contract["dispatcher"]["routes"]["gemma"]["model"]:
         raise DeploymentProfileError("Gemma alias differs from the attested dispatcher route")
-    if _required("RESEARCH_WARBAND_VERIFIER_MODEL") != runtime_contract["dispatcher"]["routes"]["qwen"]["model"]:
-        raise DeploymentProfileError("Qwen alias differs from the attested dispatcher route")
     if {
         item.strip()
         for item in _required("RESEARCH_WARBAND_TRUSTED_REVIEWER_IDS").split(",")
@@ -288,7 +288,14 @@ def validate_deployment_profile(expected: str) -> dict[str, object]:
         "port": expected_port,
         "max_active": max_active,
         "attempt_timeout_seconds": attempt_timeout,
-        "qwen_timeout_seconds": _integer("RESEARCH_QWEN_TIMEOUT_SEC"),
+        "review_pass": {
+            "assurance_mode": REVIEW_ASSURANCE_MODE,
+            "route": "gemma",
+            "priority": "other",
+            "semantic_max_tokens": 1_280,
+            "separate_physical_model": False,
+            "epistemic_independence_claimed": False,
+        },
         "mission_root": str(mission_root),
         "snapshot_root": str(snapshot_root),
         "source_classifier": str(classifier),

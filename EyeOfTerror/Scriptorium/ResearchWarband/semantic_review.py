@@ -1,4 +1,4 @@
-"""Independent semantic-review orchestration for ResearchWarband.
+"""Context-isolated semantic-review orchestration for ResearchWarband.
 
 The mission pipeline owns sequencing and budgets.  This module owns the
 security-sensitive semantic review protocol: the immutable request, exact
@@ -10,6 +10,7 @@ it does not depend on pipeline domain types or create an import cycle.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import hashlib
 import re
 from typing import Any, Mapping, Sequence
 
@@ -21,6 +22,7 @@ from .model_client import (
     final_review_attestation_digest,
     parse_json_object,
 )
+from .reader import ReaderCandidate, REVIEW_PASS_COVERAGE_ROLES
 from .schema import EvidenceLedger
 from .verifier import (
     ReviewAttestation,
@@ -31,10 +33,39 @@ from .verifier import (
 
 _ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._:-]{0,127}$")
 _ALIGNMENTS = frozenset({"entailed", "not_entailed", "uncertain"})
+_PROJECTION_SCHEMA = "research-semantic-review-projection-v1"
+_MODEL_REQUEST_DIGEST_CONTEXT = "model-visible semantic review request"
 
 
 class SemanticReviewError(ModelProtocolError):
     """A semantic reviewer or its trust boundary violated the protocol."""
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewCoverageCandidate:
+    """Trusted exact Reader output prepared for semantic coverage review."""
+
+    candidate: ReaderCandidate
+    coverage_role: str
+    normalized_text: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.candidate, ReaderCandidate):
+            raise TypeError("coverage candidate must be a ReaderCandidate")
+        if self.coverage_role not in REVIEW_PASS_COVERAGE_ROLES:
+            raise ValueError("coverage candidate role is unsupported")
+        if type(self.normalized_text) is not str or not self.normalized_text:
+            raise TypeError("coverage candidate normalized_text must be non-empty")
+        candidate = self.candidate
+        if (
+            candidate.end_char > len(self.normalized_text)
+            or candidate.end_char - candidate.start_char != len(candidate.excerpt)
+            or self.normalized_text[candidate.start_char : candidate.end_char]
+            != candidate.excerpt
+        ):
+            raise ValueError(
+                "coverage candidate excerpt is not exact at its trusted source bounds"
+            )
 
 
 def _nonempty(value: Any, context: str) -> str:
@@ -124,6 +155,183 @@ def _strict_units(
     return tuple(result)
 
 
+def _required_value(data: Mapping[str, Any], field: str, context: str) -> Any:
+    if field not in data:
+        raise SemanticReviewError(f"{context} missing field: {field}")
+    return data[field]
+
+
+def _review_mission_contract(spec: Mapping[str, Any]) -> dict[str, Any]:
+    """Project the complete mission semantics without duplicated policy fields.
+
+    ``ResearchSpec.to_dict`` intentionally carries both the derived research view
+    and the governor execution policy.  Several values are therefore serialized
+    twice.  The reviewer needs every distinct policy fact, but not two copies or
+    the application-owned content digests.  The original, unprojected spec remains
+    bound into the final attestation by :func:`_final_base_sha256`.
+    """
+
+    policy = _required_value(spec, "execution_policy", "ResearchSpec")
+    if not isinstance(policy, Mapping):
+        raise SemanticReviewError("ResearchSpec.execution_policy must be an object")
+    return {
+        "task_id": _required_value(spec, "task_id", "ResearchSpec"),
+        "mission_id": _required_value(spec, "mission_id", "ResearchSpec"),
+        "question": _required_value(spec, "question", "ResearchSpec"),
+        "mode": _required_value(spec, "mode", "ResearchSpec"),
+        "depth": _required_value(policy, "depth", "execution policy"),
+        "error_tolerance": _required_value(
+            policy, "error_tolerance", "execution policy"
+        ),
+        "answer_mode": _required_value(policy, "answer_mode", "execution policy"),
+        "priorities": _required_value(spec, "priorities", "ResearchSpec"),
+        "scope_boundaries": _required_value(
+            spec, "scope_boundaries", "ResearchSpec"
+        ),
+        "execution_source_policy": _required_value(
+            policy, "source_policy", "execution policy"
+        ),
+        "research_source_policy": _required_value(
+            spec, "source_policy", "ResearchSpec"
+        ),
+        "allowed_source_classes": _required_value(
+            policy, "allowed_source_classes", "execution policy"
+        ),
+        "prohibited_source_classes": _required_value(
+            policy, "prohibited_source_classes", "execution policy"
+        ),
+        "constraints": _required_value(policy, "constraints", "execution policy"),
+        "language_policy": _required_value(spec, "language_policy", "ResearchSpec"),
+        "success_conditions": _required_value(
+            spec, "success_conditions", "ResearchSpec"
+        ),
+        "output_requirements": _required_value(
+            policy, "output_requirements", "execution policy"
+        ),
+        "uncertainty_policy": _required_value(
+            spec, "uncertainty_policy", "ResearchSpec"
+        ),
+        "escalation_conditions": _required_value(
+            policy, "escalation_conditions", "execution policy"
+        ),
+        "clarification_turns": _required_value(
+            spec, "clarification_turns", "ResearchSpec"
+        ),
+        "hypotheses": _required_value(spec, "hypotheses", "ResearchSpec"),
+    }
+
+
+def _compact_coverage_candidates(
+    candidates: Sequence[ReviewCoverageCandidate],
+    *,
+    snapshots: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Project typed, source-verified candidates without normalizing excerpts."""
+
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in candidates:
+        if not isinstance(item, ReviewCoverageCandidate):
+            raise TypeError("review_pass_coverage_candidates must be typed candidates")
+        candidate = item.candidate
+        if candidate.id in seen:
+            raise SemanticReviewError("duplicate review-pass coverage candidate")
+        seen.add(candidate.id)
+        snapshot = snapshots.get(candidate.snapshot_id)
+        if snapshot is None:
+            raise SemanticReviewError(
+                "review-pass coverage candidate references an unknown snapshot"
+            )
+        normalized_bytes = item.normalized_text.encode("utf-8")
+        if (
+            len(normalized_bytes) != snapshot.normalized_size
+            or hashlib.sha256(normalized_bytes).hexdigest()
+            != snapshot.normalized_sha256
+        ):
+            raise SemanticReviewError(
+                "review-pass coverage candidate normalized source binding changed"
+            )
+        expected_id = "extract-" + canonical_json_sha256(
+            {
+                "schema": "research-reader-candidate-v1",
+                "source_snapshot": snapshot.to_dict(),
+                "start_char": candidate.start_char,
+                "end_char": candidate.end_char,
+                "excerpt": candidate.excerpt,
+            },
+            "reader candidate identity",
+        )
+        if candidate.id != expected_id:
+            raise SemanticReviewError(
+                "review-pass coverage candidate content identity changed"
+            )
+        result.append(
+            {
+                "id": candidate.id,
+                "coverage_role": item.coverage_role,
+                "source_id": candidate.snapshot_id,
+                "start_char": candidate.start_char,
+                "end_char": candidate.end_char,
+                "excerpt_as_untrusted_data": candidate.excerpt,
+            }
+        )
+    return result
+
+
+def _bind_semantic_review_payload(
+    payload: Mapping[str, Any],
+    *,
+    require_existing_binding: bool,
+) -> dict[str, Any]:
+    data = parse_json_object(dict(payload))
+    trusted = data.get("trusted_review_context")
+    if not isinstance(trusted, Mapping):
+        raise SemanticReviewError("semantic payload lacks trusted review context")
+    trusted_copy = dict(trusted)
+    expected_keys = {"review_attestation_manifest", "review_provenance"}
+    if require_existing_binding:
+        expected_keys |= {"projection_schema", "expected_model_payload_sha256"}
+    if set(trusted_copy) != expected_keys:
+        raise SemanticReviewError("semantic trusted review context fields changed")
+    existing_schema = trusted_copy.pop("projection_schema", None)
+    existing_digest = trusted_copy.pop("expected_model_payload_sha256", None)
+    visible = {
+        key: value for key, value in data.items() if key != "trusted_review_context"
+    }
+    visible_digest = canonical_json_sha256(
+        visible, _MODEL_REQUEST_DIGEST_CONTEXT
+    )
+    if require_existing_binding and (
+        existing_schema != _PROJECTION_SCHEMA or existing_digest != visible_digest
+    ):
+        raise SemanticReviewError("semantic model projection changed before repair")
+    trusted_copy["projection_schema"] = _PROJECTION_SCHEMA
+    trusted_copy["expected_model_payload_sha256"] = visible_digest
+    return {**visible, "trusted_review_context": trusted_copy}
+
+
+def build_semantic_review_repair_payload(
+    payload: Mapping[str, Any], repair_request: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Add an app-owned repair overlay and bind the exact new visible request."""
+
+    rebound = _bind_semantic_review_payload(
+        payload, require_existing_binding=True
+    )
+    if "repair_request" in rebound:
+        raise SemanticReviewError("semantic review payload already contains repair_request")
+    if not isinstance(repair_request, Mapping):
+        raise TypeError("semantic review repair_request must be a mapping")
+    trusted = dict(rebound["trusted_review_context"])
+    trusted.pop("projection_schema")
+    trusted.pop("expected_model_payload_sha256")
+    rebound["trusted_review_context"] = trusted
+    rebound["repair_request"] = parse_json_object(dict(repair_request))
+    return _bind_semantic_review_payload(
+        rebound, require_existing_binding=False
+    )
+
+
 def _final_base_sha256(
     spec_payload: Mapping[str, Any],
     spec_sha256: str,
@@ -196,12 +404,13 @@ def build_semantic_review_payload(
     spec_payload: Mapping[str, Any],
     ledger: EvidenceLedger,
     draft_units: Sequence[Mapping[str, Any]],
-    independent_coverage_candidates: Sequence[Mapping[str, Any]],
+    review_pass_coverage_candidates: Sequence[ReviewCoverageCandidate],
     round_number: int,
     author_identity: str,
     reviewer_model_identity: str,
-    author_independence_identity: str,
-    reviewer_independence_identity: str,
+    author_model_authority_identity: str,
+    reviewer_model_authority_identity: str,
+    review_assurance_mode: str,
     reviewer_identity: str,
 ) -> dict[str, Any]:
     """Build the immutable reviewer request and all allowed attestation variants."""
@@ -216,42 +425,38 @@ def build_semantic_review_payload(
     reviewer_model_identity = _identifier(
         reviewer_model_identity, "review model identity"
     )
-    author_independence_identity = _identifier(
-        author_independence_identity, "author independence identity"
+    author_model_authority_identity = _identifier(
+        author_model_authority_identity, "author model authority identity"
     )
-    reviewer_independence_identity = _identifier(
-        reviewer_independence_identity, "reviewer independence identity"
+    reviewer_model_authority_identity = _identifier(
+        reviewer_model_authority_identity, "reviewer model authority identity"
     )
     reviewer_identity = _identifier(reviewer_identity, "reviewer identity")
-    if author_identity in {reviewer_model_identity, reviewer_identity}:
-        raise SemanticReviewError("semantic reviewer must be independent from author")
-    if author_independence_identity == reviewer_independence_identity:
+    if review_assurance_mode != "same_model_context_isolated":
+        raise SemanticReviewError("semantic review assurance mode is unsupported")
+    shares_model_authority = (
+        author_model_authority_identity == reviewer_model_authority_identity
+    )
+    if not shares_model_authority:
         raise SemanticReviewError(
-            "semantic reviewer must use a distinct physical/model authority"
+            "same-model semantic review requires one shared model authority"
         )
+    if author_identity == reviewer_identity:
+        raise SemanticReviewError("review role authority must differ from author identity")
 
     spec = _strict_spec(spec_payload)
     units = _strict_units(draft_units)
-    if isinstance(independent_coverage_candidates, (str, bytes)) or not isinstance(
-        independent_coverage_candidates, Sequence
+    if isinstance(review_pass_coverage_candidates, (str, bytes)) or not isinstance(
+        review_pass_coverage_candidates, Sequence
     ):
-        raise TypeError("independent_coverage_candidates must be a sequence")
-    coverage_candidates: list[dict[str, Any]] = []
-    coverage_ids: set[str] = set()
-    for index, item in enumerate(independent_coverage_candidates, 1):
-        if not isinstance(item, Mapping):
-            raise TypeError(f"independent_coverage_candidates[{index}] must be a mapping")
-        strict = parse_json_object(dict(item))
-        candidate_id = _identifier(
-            strict.get("id"), f"independent_coverage_candidates[{index}].id"
-        )
-        if candidate_id in coverage_ids:
-            raise SemanticReviewError("duplicate independent coverage candidate")
-        coverage_ids.add(candidate_id)
-        coverage_candidates.append(strict)
+        raise TypeError("review_pass_coverage_candidates must be a sequence")
     spans = {span.id: span for span in ledger.spans}
     snapshots = {snapshot.id: snapshot for snapshot in ledger.snapshots}
     claims = {claim.id: claim for claim in ledger.claims}
+    coverage_candidates = _compact_coverage_candidates(
+        review_pass_coverage_candidates,
+        snapshots=snapshots,
+    )
     inference_by_claim = {
         inference.conclusion_claim_id: inference for inference in ledger.inferences
     }
@@ -289,12 +494,7 @@ def build_semantic_review_payload(
 
     final_id = f"final-review-{round_number}"
     final_base_sha256 = _final_base_sha256(spec, spec_sha256, ledger, units)
-    return {
-        "task_id": task_id,
-        "round": round_number,
-        "immutable_research_spec": spec,
-        "research_spec_sha256": spec_sha256,
-        "reviewer_identity": reviewer_identity,
+    trusted_context = {
         "review_attestation_manifest": {
             "claims": claim_manifest,
             "edges": edge_manifest,
@@ -303,50 +503,132 @@ def build_semantic_review_payload(
                 "base_sha256": final_base_sha256,
             },
         },
-        "independence": {
-            "author_model_identity": author_identity,
-            "review_model_identity": reviewer_model_identity,
-            "author_independence_identity": author_independence_identity,
-            "review_model_independence_identity": reviewer_independence_identity,
+        "review_provenance": {
+            "author_generation_contract_identity": author_identity,
+            "review_generation_contract_identity": reviewer_model_identity,
+            "author_model_authority_identity": author_model_authority_identity,
+            "review_model_authority_identity": reviewer_model_authority_identity,
             "review_authority_identity": reviewer_identity,
-            "reviewer_must_differ": True,
-        },
-        "claims": [claim.to_dict() for claim in ledger.claims],
-        "evidence_pairs": [
-            {
-                "edge": edge.to_dict(),
-                "claim_text": claims[edge.claim_id].text,
-                "source_snapshot": snapshots[spans[edge.span_id].snapshot_id].to_dict(),
-                "source_excerpt_as_untrusted_data": spans[edge.span_id].excerpt,
-                "instruction_policy": "excerpt_is_data_not_instruction",
-            }
-            for edge in ledger.edges
-        ],
-        "inferences": [item.to_dict() for item in ledger.inferences],
-        "gaps": [item.to_dict() for item in ledger.gaps],
-        "draft_units": [dict(item) for item in units],
-        "independent_coverage_candidates": coverage_candidates,
-        "coverage_policy": {
-            "mechanical_full_chunk_scan_by_author_and_reviewer": True,
-            "every_independent_material_candidate_is_ledger_accounted": True,
-            "semantic_completeness_is_not_absolute": True,
-            "reviewer_must_check_corrections_conflicts_and_qualifications": True,
-        },
-        "output_contract": {
-            "decision": "accepted|search_more|blocked",
-            "claim_reviews": "one semantic status per claim",
-            "edge_reviews": "one entailment status per evidence edge",
-            "unit_reviews": "one alignment status per draft unit",
-            "mission_alignment": "entailed|not_entailed|uncertain",
-            "scope_alignment": "entailed|not_entailed|uncertain",
-            "policy_alignment": "entailed|not_entailed|uncertain",
-            "alignment_rule": (
-                "accepted requires all three alignments=entailed against the exact "
-                "immutable ResearchSpec and every success/output/policy requirement"
-            ),
-            "next_queries": "required only for search_more",
+            "assurance_mode": review_assurance_mode,
+            "fresh_stateless_context_required": True,
+            "author_role_output_hidden_except_immutable_review_payload": True,
+            "separate_physical_model": not shares_model_authority,
+            "epistemic_independence_claimed": False,
         },
     }
+    payload = {
+        "task_id": task_id,
+        "round": round_number,
+        "mission_contract": _review_mission_contract(spec),
+        "claims": [
+            {
+                "id": claim.id,
+                "text": claim.text,
+                "kind": claim.kind,
+                "importance": claim.importance,
+                "confidence": claim.confidence,
+                "conflict_claim_ids": list(claim.conflict_claim_ids),
+            }
+            for claim in ledger.claims
+        ],
+        "evidence_graph": {
+            "sources": [
+                {
+                    "id": snapshot.id,
+                    "uri": snapshot.uri,
+                    "medium": snapshot.medium,
+                    "normalized_sha256": snapshot.normalized_sha256,
+                    "source_class": snapshot.source_class,
+                }
+                for snapshot in ledger.snapshots
+            ],
+            "spans": [
+                {
+                    "id": span.id,
+                    "source_id": span.snapshot_id,
+                    "locator": span.locator.to_dict(),
+                    "excerpt_as_untrusted_data": span.excerpt,
+                }
+                for span in ledger.spans
+            ],
+            "edges": [
+                {
+                    "id": edge.id,
+                    "claim_id": edge.claim_id,
+                    "span_id": edge.span_id,
+                    "relation": edge.relation,
+                }
+                for edge in ledger.edges
+            ],
+        },
+        "inferences": [
+            {
+                "id": item.id,
+                "conclusion_claim_id": item.conclusion_claim_id,
+                "premise_claim_ids": list(item.premise_claim_ids),
+                "rationale": item.rationale,
+            }
+            for item in ledger.inferences
+        ],
+        "gaps": [item.to_dict() for item in ledger.gaps],
+        "draft_units": [dict(item) for item in units],
+        "review_material_candidates": coverage_candidates,
+        "coverage_requirements": {
+            "supplied_source_chunks_completely_scanned": True,
+            "every_material_candidate_must_be_ledger_accounted": True,
+            "check_corrections_conflicts_and_qualifications": True,
+            "absolute_semantic_completeness_claimed": False,
+        },
+        "response_contract": {
+            "exact_fields": [
+                "decision",
+                "reason",
+                "claim_reviews",
+                "edge_reviews",
+                "unit_reviews",
+                "mission_alignment",
+                "scope_alignment",
+                "policy_alignment",
+                "next_queries",
+            ],
+            "unknown_fields_forbidden": True,
+            "decision_enum": ["accepted", "search_more", "blocked"],
+            "review_items": {
+                "claim_reviews": {
+                    "exact_fields": ["claim_id", "status"],
+                    "ids_from": "claims.id",
+                    "status_enum": [
+                        "entailed",
+                        "not_entailed",
+                        "uncertain",
+                        "contested",
+                    ],
+                },
+                "edge_reviews": {
+                    "exact_fields": ["edge_id", "status"],
+                    "ids_from": "evidence_graph.edges.id",
+                    "status_enum": ["entailed", "not_entailed", "uncertain"],
+                },
+                "unit_reviews": {
+                    "exact_fields": ["unit_id", "status"],
+                    "ids_from": "draft_units.id",
+                    "status_enum": ["entailed", "not_entailed", "uncertain"],
+                },
+            },
+            "alignment_status_enum": ["entailed", "not_entailed", "uncertain"],
+            "accepted_requires": (
+                "exactly one entailed review per claim, edge, and unit; mission, "
+                "scope, and policy alignments all entailed"
+            ),
+            "next_queries_rule": (
+                "non-empty only for search_more; [] for accepted or blocked"
+            ),
+        },
+        "trusted_review_context": trusted_context,
+    }
+    return _bind_semantic_review_payload(
+        payload, require_existing_binding=False
+    )
 
 
 def _parse_review_items(
@@ -430,6 +712,10 @@ def apply_semantic_review(
         raise SemanticReviewError(
             "semantic search_more requires at least one next query"
         )
+    if decision != "search_more" and next_queries:
+        raise SemanticReviewError(
+            "semantic accepted/blocked decisions require next_queries=[]"
+        )
     mission_alignment = _choice(
         data["mission_alignment"], _ALIGNMENTS, "mission_alignment"
     )
@@ -466,6 +752,36 @@ def apply_semantic_review(
         {_identifier(item["id"], "draft unit ID") for item in units},
         frozenset({"entailed", "not_entailed", "uncertain"}),
     )
+    if decision == "accepted":
+        expected_claim_ids = {claim.id for claim in ledger.claims}
+        expected_edge_ids = {edge.id for edge in ledger.edges}
+        expected_unit_ids = {
+            _identifier(item["id"], "draft unit ID") for item in units
+        }
+        if set(claim_statuses) != expected_claim_ids:
+            raise SemanticReviewError(
+                "accepted semantic review must cover every claim exactly once"
+            )
+        if set(edge_statuses) != expected_edge_ids:
+            raise SemanticReviewError(
+                "accepted semantic review must cover every evidence edge exactly once"
+            )
+        if set(unit_statuses) != expected_unit_ids:
+            raise SemanticReviewError(
+                "accepted semantic review must cover every draft unit exactly once"
+            )
+        if any(status != "entailed" for status in claim_statuses.values()):
+            raise SemanticReviewError(
+                "accepted semantic review requires every claim status=entailed"
+            )
+        if any(status != "entailed" for status in edge_statuses.values()):
+            raise SemanticReviewError(
+                "accepted semantic review requires every edge status=entailed"
+            )
+        if any(status != "entailed" for status in unit_statuses.values()):
+            raise SemanticReviewError(
+                "accepted semantic review requires every unit status=entailed"
+            )
 
     reviewed_claims = tuple(
         replace(
@@ -634,16 +950,18 @@ def require_complete_semantic_acceptance(
     for claim in ledger.claims:
         if claim.importance == "major" and claim.verification_status != "entailed":
             raise SemanticReviewError(
-                f"major claim {claim.id} was not independently entailed"
+                f"major claim {claim.id} was not review-entailed"
             )
         if claim.kind == "assumption" and claim.importance == "major":
             raise SemanticReviewError("a major assumption cannot be accepted")
 
 
 __all__ = [
+    "ReviewCoverageCandidate",
     "SemanticReviewError",
     "SemanticReviewRecord",
     "apply_semantic_review",
     "build_semantic_review_payload",
+    "build_semantic_review_repair_payload",
     "require_complete_semantic_acceptance",
 ]

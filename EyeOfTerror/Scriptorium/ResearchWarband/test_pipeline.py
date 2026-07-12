@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import copy
+import json
 from dataclasses import replace
 from pathlib import Path
 import tempfile
@@ -19,11 +20,17 @@ from ResearchWarband.pipeline import (
     ResearchSpec,
 )
 from ResearchWarband.model_client import (
+    ModelResponseProtocolError,
     ModelProtocolError,
     TrustedReviewBoundary,
     canonical_json_sha256,
 )
 from ResearchWarband.research_tools import FetchedSource, SearchHit
+from ResearchWarband.reader import ReaderCandidate
+from ResearchWarband.semantic_review import (
+    ReviewCoverageCandidate,
+    build_semantic_review_payload,
+)
 from ResearchWarband.snapshot_store import RegisteredNormalizer, SnapshotStore
 
 
@@ -38,7 +45,10 @@ def _normalize_test_source(raw: bytes, medium: str) -> str:
 
 
 def _chunk_text(chunk: Mapping[str, Any]) -> str:
-    return "".join(item["exact_text"] for item in chunk["locator_spans"])
+    return "".join(
+        str(item["exact_text_as_untrusted_data"])
+        for item in chunk["source_segments"]
+    )
 
 
 def _chunk_locator_for_excerpt(
@@ -47,8 +57,8 @@ def _chunk_locator_for_excerpt(
     return next(
         (
             item
-            for item in chunk["locator_spans"]
-            if excerpt in item["exact_text"]
+            for item in chunk["source_segments"]
+            if excerpt in item["exact_text_as_untrusted_data"]
         ),
         None,
     )
@@ -65,6 +75,7 @@ class FakeModel:
     ) -> None:
         self.responses = {role: list(items) for role, items in responses.items()}
         self.calls: list[tuple[str, Mapping[str, Any]]] = []
+        self.preflight_calls: list[tuple[str, Mapping[str, Any]]] = []
         self.stable_identity = stable_identity
         self.independence_identity = independence_identity or stable_identity
         self.max_request_chars = max_request_chars
@@ -72,6 +83,7 @@ class FakeModel:
     def preflight(self, role: str, payload: Mapping[str, Any]) -> None:
         import json
 
+        self.preflight_calls.append((role, payload))
         size = len(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         if size > self.max_request_chars:
             from ResearchWarband.model_client import ModelProtocolError
@@ -86,26 +98,25 @@ class FakeModel:
         if role == "reader" and not queue:
             chunk = payload["untrusted_source_chunk"]
             text = _chunk_text(chunk)
-            if len(text.encode("utf-8")) > 2_000:
+            if len(text.encode("utf-8")) > 512:
                 return {"candidates": []}
-            locators = [
-                item for item in chunk["locator_spans"] if item["exact_text"].strip()
-            ]
+            segment = chunk["source_segments"][0]
             return {
-                "candidates": [
-                    {
-                        "chunk_id": chunk["chunk_id"],
-                        "locator_id": locator["locator_id"],
-                        "excerpt": locator["exact_text"],
+                "candidates": (
+                    [{
+                        "segment_index": segment["segment_index"],
                         "relevance": "high",
                         "reason": "test fixture exposes the complete short source",
-                    }
-                    for locator in locators[:4]
-                ]
+                    }]
+                    if text.strip()
+                    else []
+                )
             }
         if not queue:
             raise AssertionError(f"unexpected model call for role {role}")
         response = queue.pop(0)
+        if isinstance(response, Exception):
+            raise response
         if callable(response):
             response = response(payload)
         if not isinstance(response, Mapping):
@@ -168,6 +179,25 @@ class FakeSearch:
     def search(self, query: str, limit: int):
         self.calls.append((query, limit))
         return self.results.get(query, ())[:limit]
+
+
+class FakeCatalogSearch(FakeSearch):
+    def __init__(
+        self,
+        results: Mapping[str, list[SearchHit]],
+        catalog_hits: list[SearchHit],
+    ) -> None:
+        super().__init__(results)
+        self._catalog_hits = tuple(catalog_hits)
+        self.catalog_calls = 0
+
+    @property
+    def catalog_identity(self) -> str:
+        return "test-closed-world-catalog-v1"
+
+    def catalog(self) -> tuple[SearchHit, ...]:
+        self.catalog_calls += 1
+        return self._catalog_hits
 
 
 class FakeFetch:
@@ -283,15 +313,13 @@ def semantic_accept(
 def reader_find(excerpt: str) -> Callable[[Mapping[str, Any]], Mapping[str, Any]]:
     def respond(payload: Mapping[str, Any]) -> Mapping[str, Any]:
         chunk = payload["untrusted_source_chunk"]
-        locator = _chunk_locator_for_excerpt(chunk, excerpt)
-        if locator is None:
+        segment = _chunk_locator_for_excerpt(chunk, excerpt)
+        if segment is None:
             return {"candidates": []}
         return {
             "candidates": [
                 {
-                    "chunk_id": chunk["chunk_id"],
-                    "locator_id": locator["locator_id"],
-                    "excerpt": excerpt,
+                    "segment_index": segment["segment_index"],
                     "relevance": "high",
                     "reason": "exact text is relevant to the test question",
                 }
@@ -306,17 +334,15 @@ def independent_reader_find(
 ) -> Callable[[Mapping[str, Any]], Mapping[str, Any]]:
     def respond(payload: Mapping[str, Any]) -> Mapping[str, Any]:
         chunk = payload["untrusted_source_chunk"]
-        locator = _chunk_locator_for_excerpt(chunk, excerpt)
-        if locator is None:
+        segment = _chunk_locator_for_excerpt(chunk, excerpt)
+        if segment is None:
             return {"candidates": []}
         return {
             "candidates": [
                 {
-                    "chunk_id": chunk["chunk_id"],
-                    "locator_id": locator["locator_id"],
-                    "excerpt": excerpt,
+                    "segment_index": segment["segment_index"],
                     "relevance": "high",
-                    "reason": "independent scan found material correction or qualification",
+                    "reason": "context-isolated scan found material correction or qualification",
                     "coverage_role": coverage_role,
                 }
             ]
@@ -402,6 +428,7 @@ class ResearchPipelineTests(unittest.TestCase):
         review_model = FakeModel(
             review_responses,
             stable_identity="review-model",
+            independence_identity=model.independence_identity,
         )
         self.last_review_model = review_model
         return ResearchPipeline(
@@ -409,6 +436,7 @@ class ResearchPipelineTests(unittest.TestCase):
             review_boundary=TrustedReviewBoundary(
                 client=review_model,
                 authority_id="semantic-verifier",
+                assurance_mode="same_model_context_isolated",
             ),
             search=search,
             fetch=fetcher,
@@ -447,6 +475,260 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertEqual("semantic-verifier", result.ledger.edges[0].assessed_by)
         self.assertEqual(3, len(result.semantic_reviews[0].attestations))
         self.assertEqual(["primary query"], [item[0] for item in search.calls])
+        self.assertIn(
+            "review_assurance: mode=same_model_context_isolated; "
+            "separate_physical_model=false; epistemic_independence_claimed=false",
+            result.diagnostics,
+        )
+        semantic_payload = next(
+            payload
+            for role, payload in self.last_review_model.calls
+            if role == "semantic_verifier"
+        )
+        self.assertNotIn("trusted_review_context", semantic_payload)
+        self.assertNotIn("review_attestation_manifest", semantic_payload)
+        self.assertNotIn("review_provenance", semantic_payload)
+        self.assertNotIn("independence", semantic_payload)
+        self.assertNotIn("research_spec_sha256", semantic_payload)
+        self.assertEqual(
+            {
+                "id": "edge-1-1",
+                "claim_id": "claim-1",
+                "span_id": "span-1-1",
+                "relation": "supports",
+            },
+            semantic_payload["evidence_graph"]["edges"][0],
+        )
+        self.assertEqual(
+            "The answer is Alpha.",
+            semantic_payload["evidence_graph"]["spans"][0][
+                "excerpt_as_untrusted_data"
+            ],
+        )
+        self.assertEqual(
+            snapshot.normalized_sha256,
+            semantic_payload["evidence_graph"]["sources"][0][
+                "normalized_sha256"
+            ],
+        )
+
+    def test_author_model_contract_cannot_change_after_pipeline_setup(self) -> None:
+        model, search, fetcher = self.accepted_fixture()
+        pipeline = self.pipeline(model, search, fetcher)
+        model.stable_identity = "mutated-author-model"
+
+        result = pipeline.run(self.spec())
+
+        self.assertEqual("blocked", result.outcome)
+        self.assertIn("author model identity changed", result.reason)
+        self.assertEqual([], model.preflight_calls)
+        self.assertEqual([], model.calls)
+
+    def test_semantic_projection_hides_reader_cache_and_keeps_coverage_binding(self) -> None:
+        model, search, fetcher = self.accepted_fixture("  The answer is Alpha.  ")
+        result = self.pipeline(model, search, fetcher).run(self.spec())
+        snapshot = result.ledger.snapshots[0]
+        source_text = self.store.read_normalized(snapshot)
+        candidate_id = "extract-" + canonical_json_sha256(
+            {
+                "schema": "research-reader-candidate-v1",
+                "source_snapshot": snapshot.to_dict(),
+                "start_char": 0,
+                "end_char": len(source_text),
+                "excerpt": source_text,
+            },
+            "reader candidate identity",
+        )
+        coverage_candidate = ReaderCandidate(
+            id=candidate_id,
+            snapshot_id=snapshot.id,
+            start_char=0,
+            end_char=len(source_text),
+            excerpt=source_text,
+            relevance="high",
+            reason="material exact support",
+            chunk_index=1,
+            reader_cache_key="reader-cache-secret-must-not-reach-model",
+            selected_by="review-model",
+        )
+        review_spec = replace(self.spec(), source_policy=())
+        envelope = build_semantic_review_payload(
+            task_id="task-1",
+            spec_payload=review_spec.to_dict(),
+            ledger=result.ledger,
+            draft_units=tuple(item.to_dict() for item in result.draft_units),
+            review_pass_coverage_candidates=(
+                ReviewCoverageCandidate(
+                    candidate=coverage_candidate,
+                    coverage_role="supporting_evidence",
+                    normalized_text=source_text,
+                ),
+            ),
+            round_number=1,
+            author_identity="author-model",
+            reviewer_model_identity="review-model",
+            author_model_authority_identity="shared-model-authority",
+            reviewer_model_authority_identity="shared-model-authority",
+            review_assurance_mode="same_model_context_isolated",
+            reviewer_identity="semantic-verifier",
+        )
+        review_client = FakeModel(
+            {"semantic_verifier": [semantic_accept()]},
+            stable_identity="review-model",
+            independence_identity="shared-model-authority",
+        )
+        boundary = TrustedReviewBoundary(
+            client=review_client,
+            authority_id="semantic-verifier",
+            assurance_mode="same_model_context_isolated",
+        )
+
+        for section, field in (
+            ("claims", "text"),
+            ("evidence_graph", "excerpt_as_untrusted_data"),
+            ("draft_units", "text"),
+        ):
+            with self.subTest(mutated_section=section):
+                changed = copy.deepcopy(envelope)
+                if section == "evidence_graph":
+                    changed[section]["spans"][0][field] = "mutated evidence"
+                else:
+                    changed[section][0][field] = "mutated content"
+                rejected_client = FakeModel(
+                    {"semantic_verifier": [semantic_accept()]},
+                    stable_identity="review-model",
+                    independence_identity="shared-model-authority",
+                )
+                rejected_boundary = TrustedReviewBoundary(
+                    client=rejected_client,
+                    authority_id="semantic-verifier",
+                    assurance_mode="same_model_context_isolated",
+                )
+                with self.assertRaisesRegex(
+                    ModelProtocolError, "projection changed"
+                ):
+                    rejected_boundary.begin(changed)
+                self.assertEqual([], rejected_client.preflight_calls)
+                self.assertEqual([], rejected_client.calls)
+
+        session = boundary.begin(envelope)
+        visible = review_client.calls[0][1]
+
+        serialized = json.dumps(visible, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("reader-cache-secret", serialized)
+        self.assertNotIn("review_provenance", serialized)
+        self.assertNotIn("review_attestation_manifest", serialized)
+        self.assertEqual(
+            "balanced", visible["mission_contract"]["execution_source_policy"]
+        )
+        self.assertEqual(
+            [], visible["mission_contract"]["research_source_policy"]
+        )
+        self.assertEqual(
+            [
+                {
+                    "id": candidate_id,
+                    "coverage_role": "supporting_evidence",
+                    "source_id": snapshot.id,
+                    "start_char": 0,
+                    "end_char": len(source_text),
+                    "excerpt_as_untrusted_data": source_text,
+                }
+            ],
+            visible["review_material_candidates"],
+        )
+        self.assertEqual(
+            canonical_json_sha256(
+                visible, "model-visible semantic review request"
+            ),
+            session.request_sha256,
+        )
+
+    def test_zero_hit_catalog_selects_best_metadata_without_claiming_complete_scan(self) -> None:
+        url = "https://example.test/catalog-answer"
+        source = "The answer is Alpha."
+        hit = SearchHit(
+            "Catalog answer",
+            url,
+            "",
+            "official_documentation",
+            "test-classifier",
+        )
+        irrelevant = SearchHit(
+            "Remote memorandum",
+            "https://example.test/unrelated",
+            "",
+            "official_documentation",
+            "test-classifier",
+        )
+        search = FakeCatalogSearch({}, [hit, irrelevant])
+        model = FakeModel(
+            {
+                "planner": [planner("catalog answer")],
+                "analyst": [analyst_ready([claim_item(excerpt=source)])],
+                "writer": [writer_claim(text=source)],
+                "semantic_verifier": [semantic_accept()],
+            }
+        )
+
+        result = self.pipeline(
+            model,
+            search,
+            FakeFetch({url: fetched(url, source)}),
+        ).run(self.spec())
+
+        self.assertEqual("accepted", result.outcome)
+        self.assertEqual(1, search.catalog_calls)
+        self.assertEqual((url,), result.acquired_uris)
+        self.assertTrue(
+            any(
+                item.startswith("closed_world_catalog_discovery[")
+                for item in result.diagnostics
+            )
+        )
+        analyst_payload = next(
+            payload for role, payload in model.calls if role == "analyst"
+        )
+        self.assertTrue(
+            analyst_payload["closed_world_catalog"]["catalog_discovery_performed"]
+        )
+        self.assertFalse(
+            analyst_payload["closed_world_catalog"]["complete_scan_performed"]
+        )
+        self.assertEqual(
+            1,
+            analyst_payload["closed_world_catalog"]["selected_source_count"],
+        )
+
+    def test_closed_world_catalog_never_partially_scans_over_source_budget(self) -> None:
+        first = SearchHit(
+            "Result First",
+            "https://example.test/catalog-first",
+            "",
+            "official_documentation",
+            "test-classifier",
+        )
+        second = SearchHit(
+            "Result Second",
+            "https://example.test/catalog-second",
+            "",
+            "official_documentation",
+            "test-classifier",
+        )
+        search = FakeCatalogSearch({}, [first, second])
+        fetcher = FakeFetch({})
+        model = FakeModel({"planner": [planner("result")]})
+
+        result = self.pipeline(
+            model,
+            search,
+            fetcher,
+            budgets=ResearchBudgets(max_sources=1),
+        ).run(self.spec())
+
+        self.assertEqual("blocked", result.outcome)
+        self.assertIn("partial tie selection is forbidden", result.reason)
+        self.assertEqual([], fetcher.calls)
 
     def test_reader_finds_fact_only_in_last_chunk_without_tail_loss(self) -> None:
         url = "https://example.test/last-chunk"
@@ -502,7 +784,7 @@ class ResearchPipelineTests(unittest.TestCase):
             any("mechanically covered 1 snapshot" in item for item in result.diagnostics)
         )
 
-    def test_independent_reader_blocks_omitted_later_correction(self) -> None:
+    def test_review_pass_reader_blocks_omitted_later_correction(self) -> None:
         url = "https://example.test/later-correction"
         support = "The product launched in 2020."
         correction = (
@@ -523,6 +805,7 @@ class ResearchPipelineTests(unittest.TestCase):
                 "analyst": [
                     invalid_analysis,
                     copy.deepcopy(invalid_analysis),
+                    copy.deepcopy(invalid_analysis),
                 ],
                 "writer": [writer_claim(text=support)],
                 "semantic_verifier": [semantic_accept()],
@@ -535,8 +818,8 @@ class ResearchPipelineTests(unittest.TestCase):
         ).run(self.spec())
 
         self.assertEqual("blocked", result.outcome)
-        self.assertIn("omitted independently selected material", result.reason)
-        self.assertEqual(2, sum(role == "analyst" for role, _ in model.calls))
+        self.assertIn("omitted review-pass selected material", result.reason)
+        self.assertEqual(3, sum(role == "analyst" for role, _ in model.calls))
         self.assertNotIn("writer", [role for role, _ in model.calls])
         coverage_calls = [
             payload
@@ -621,9 +904,11 @@ class ResearchPipelineTests(unittest.TestCase):
             payload for role, payload in model.calls if role == "reader"
         ]
         self.assertEqual(2, len(reader_payloads))
-        self.assertNotEqual(
-            reader_payloads[0]["reader_cache_key"],
-            reader_payloads[1]["reader_cache_key"],
+        self.assertNotIn("reader_cache_key", reader_payloads[0])
+        self.assertNotIn("reader_cache_key", reader_payloads[1])
+        self.assertEqual(
+            {"snapshot-1", "snapshot-2"},
+            {payload["source_snapshot"]["id"] for payload in reader_payloads},
         )
         analyst_payload = next(
             payload for role, payload in model.calls if role == "analyst"
@@ -679,7 +964,7 @@ class ResearchPipelineTests(unittest.TestCase):
 
     def test_reader_candidate_overflow_blocks_without_silent_drop(self) -> None:
         url = "https://example.test/candidate-overflow"
-        source = "Alpha Beta"
+        source = "Alpha " + ("x" * 600) + "\nBeta"
         model = FakeModel(
             {
                 "planner": [planner()],
@@ -687,20 +972,12 @@ class ResearchPipelineTests(unittest.TestCase):
                     lambda payload: {
                         "candidates": [
                             {
-                                "chunk_id": payload["untrusted_source_chunk"]["chunk_id"],
-                                "locator_id": _chunk_locator_for_excerpt(
-                                    payload["untrusted_source_chunk"], "Alpha"
-                                )["locator_id"],
-                                "excerpt": "Alpha",
+                                "segment_index": 1,
                                 "relevance": "high",
                                 "reason": "first candidate",
                             },
                             {
-                                "chunk_id": payload["untrusted_source_chunk"]["chunk_id"],
-                                "locator_id": _chunk_locator_for_excerpt(
-                                    payload["untrusted_source_chunk"], "Beta"
-                                )["locator_id"],
-                                "excerpt": "Beta",
+                                "segment_index": 2,
                                 "relevance": "high",
                                 "reason": "second candidate",
                             },
@@ -718,7 +995,7 @@ class ResearchPipelineTests(unittest.TestCase):
                 max_search_queries=1,
                 max_sources=1,
                 max_results_per_query=1,
-                max_model_calls=9,
+                max_model_calls=11,
                 max_reader_candidates_per_source=1,
                 max_reader_candidates_per_round=1,
             ),
@@ -760,8 +1037,9 @@ class ResearchPipelineTests(unittest.TestCase):
                 self.assertGreater(len(reader_payloads), 1)
                 self.assertTrue(
                     all(
-                        payload["untrusted_source_chunk"]["end_char"]
-                        - payload["untrusted_source_chunk"]["start_char"]
+                        len(
+                            _chunk_text(payload["untrusted_source_chunk"])
+                        )
                         <= 8_000
                         for payload in reader_payloads
                     )
@@ -777,7 +1055,7 @@ class ResearchPipelineTests(unittest.TestCase):
                 )
                 self.assertTrue(
                     analyst_payload["reader_coverage"][
-                        "independent_dual_semantic_scan_complete"
+                        "context_isolated_second_scan_complete"
                     ]
                 )
                 self.assertFalse(
@@ -851,18 +1129,21 @@ class ResearchPipelineTests(unittest.TestCase):
                     payload: Mapping[str, Any],
                     *, field: str = alignment_field,
                 ) -> Mapping[str, Any]:
-                    exact_spec = spec.to_dict()
-                    self.assertEqual(exact_spec, payload["immutable_research_spec"])
-                    self.assertEqual(
-                        canonical_json_sha256(exact_spec, "ResearchSpec"),
-                        payload["research_spec_sha256"],
-                    )
+                    mission = payload["mission_contract"]
+                    self.assertEqual(spec.question, mission["question"])
                     self.assertEqual(
                         list(spec.execution_policy.success_conditions),
-                        payload["immutable_research_spec"]["execution_policy"][
-                            "success_conditions"
-                        ],
+                        mission["success_conditions"],
                     )
+                    self.assertEqual(
+                        list(spec.execution_policy.output_requirements),
+                        mission["output_requirements"],
+                    )
+                    self.assertEqual(
+                        list(spec.execution_policy.constraints), mission["constraints"]
+                    )
+                    self.assertNotIn("immutable_research_spec", payload)
+                    self.assertNotIn("research_spec_sha256", payload)
                     response = semantic_accept()
                     response[field] = "not_entailed"
                     return response
@@ -873,7 +1154,10 @@ class ResearchPipelineTests(unittest.TestCase):
                         "planner": [planner()],
                         "analyst": [analyst_ready([claim_item()])],
                         "writer": [writer_claim()],
-                        "semantic_verifier": [reject_misalignment],
+                        "semantic_verifier": [
+                            reject_misalignment,
+                            reject_misalignment,
+                        ],
                     }
                 )
                 result = self.pipeline(
@@ -914,6 +1198,10 @@ class ResearchPipelineTests(unittest.TestCase):
                 "planner": [planner()],
                 "analyst": [analyst_ready(claims)],
                 "writer": [
+                    writer_claim(
+                        claim_refs=["claim-a"],
+                        text="The launch was in 2020.",
+                    ),
                     {
                         "units": [
                             {
@@ -956,6 +1244,12 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertFalse(result.verification_report.accepted)
         self.assertEqual("conflict", result.draft_units[0].classification)
         self.assertEqual(("claim-b",), result.ledger.claims[0].conflict_claim_ids)
+        writer_calls = [payload for role, payload in model.calls if role == "writer"]
+        self.assertEqual(2, len(writer_calls))
+        self.assertIn(
+            "conflict claim-a<->claim-b is not disclosed",
+            writer_calls[1]["repair_request"]["validator_error"],
+        )
 
         hidden = DraftUnit(
             id="unit-hidden-conflict",
@@ -1009,15 +1303,12 @@ class ResearchPipelineTests(unittest.TestCase):
                 "writer": [
                     writer_claim(
                         claim_refs=["claim-a"], text="The launch was in 2020."
-                    )
+                    ),
+                    writer_claim(
+                        claim_refs=["claim-a"], text="The launch was in 2020."
+                    ),
                 ],
-                # A permissive reviewer blindly approves every emitted/referenced item.
-                "semantic_verifier": [
-                    semantic_accept(
-                        claim_ids=("claim-a", "claim-b"),
-                        edge_ids=("edge-1-1", "edge-2-1"),
-                    )
-                ],
+                "semantic_verifier": [],
             }
         )
         result = self.pipeline(
@@ -1039,18 +1330,189 @@ class ResearchPipelineTests(unittest.TestCase):
         ).run(self.spec())
 
         self.assertEqual("blocked", result.outcome)
-        self.assertIsNotNone(result.verification_report)
-        self.assertEqual(
-            {"unresolved_claim_conflict", "unresolved_research_gap"},
-            {issue.code for issue in result.verification_report.issues},
-        )
-        self.assertTrue(
-            any("conflict claim-a<->claim-b is not disclosed" in item for item in result.diagnostics)
-        )
-        self.assertTrue(
-            any("gap gap-cause is not disclosed" in item for item in result.diagnostics)
-        )
+        self.assertIsNone(result.verification_report)
+        self.assertIn("writer omitted required uncertainty disclosure", result.reason)
+        writer_calls = [payload for role, payload in model.calls if role == "writer"]
+        self.assertEqual(2, len(writer_calls))
+        validator_error = writer_calls[1]["repair_request"]["validator_error"]
+        self.assertIn("conflict claim-a<->claim-b is not disclosed", validator_error)
+        self.assertIn("gap gap-cause is not disclosed", validator_error)
+        self.assertNotIn("semantic_verifier", [role for role, _ in self.last_review_model.calls])
         self.assertEqual((), result.ledger.gaps[0].search_attempts)
+
+    def test_writer_repairs_missing_open_gap_disclosure_once(self) -> None:
+        url = "https://example.test/open-gap"
+        analysis = analyst_ready([claim_item()])
+        analysis["gaps"] = [
+            {
+                "id": "gap-cause",
+                "question": "What caused the discrepancy?",
+                "status": "open",
+                "related_claim_ids": ["claim-1"],
+                "search_attempt_ids": ["search-0001"],
+            }
+        ]
+        repaired_writer = {
+            "units": [
+                writer_claim()["units"][0],
+                {
+                    "id": "unit-gap",
+                    "classification": "uncertainty",
+                    "text": "The cause remains unresolved.",
+                    "claim_refs": ["claim-1"],
+                    "gap_refs": ["gap-cause"],
+                    "searched_scope": [],
+                },
+            ]
+        }
+        model = FakeModel(
+            {
+                "planner": [planner()],
+                "analyst": [analysis],
+                "writer": [writer_claim(), repaired_writer],
+                "semantic_verifier": [
+                    semantic_accept(unit_ids=("unit-1", "unit-gap"))
+                ],
+            }
+        )
+
+        result = self.pipeline(
+            model,
+            FakeSearch({"primary query": [SearchHit("Gap source", url)]}),
+            FakeFetch({url: fetched(url, "The answer is Alpha.")}),
+        ).run(self.spec())
+
+        self.assertEqual("accepted_with_uncertainty", result.outcome)
+        writer_calls = [payload for role, payload in model.calls if role == "writer"]
+        self.assertEqual(2, len(writer_calls))
+        self.assertIn(
+            "gap gap-cause is not disclosed",
+            writer_calls[1]["repair_request"]["validator_error"],
+        )
+
+    def test_writer_repairs_missing_qualification_disclosure_once(self) -> None:
+        url = "https://example.test/qualified"
+        qualified_claim = claim_item()
+        qualified_claim["evidence"].append(
+            {
+                "snapshot_id": "snapshot-1",
+                "excerpt": "The answer is Alpha.",
+                "relation": "qualifies",
+            }
+        )
+        repaired_writer = {
+            "units": [
+                writer_claim()["units"][0],
+                {
+                    "id": "unit-qualification",
+                    "classification": "uncertainty",
+                    "text": "The source records a qualification affecting the answer.",
+                    "claim_refs": ["claim-1"],
+                    "gap_refs": [],
+                    "searched_scope": [],
+                },
+            ]
+        }
+        model = FakeModel(
+            {
+                "planner": [planner()],
+                "analyst": [analyst_ready([qualified_claim])],
+                "writer": [writer_claim(), repaired_writer],
+                "semantic_verifier": [
+                    semantic_accept(
+                        edge_ids=("edge-1-1", "edge-1-2"),
+                        unit_ids=("unit-1", "unit-qualification"),
+                    )
+                ],
+            }
+        )
+
+        result = self.pipeline(
+            model,
+            FakeSearch({"primary query": [SearchHit("Qualified source", url)]}),
+            FakeFetch({url: fetched(url, "The answer is Alpha.")}),
+        ).run(self.spec())
+
+        self.assertEqual("accepted_with_uncertainty", result.outcome)
+        writer_calls = [payload for role, payload in model.calls if role == "writer"]
+        self.assertEqual(2, len(writer_calls))
+        self.assertIn(
+            "qualification affecting claim claim-1 is not disclosed",
+            writer_calls[1]["repair_request"]["validator_error"],
+        )
+
+    def test_closed_world_disclosure_omissions_repair_once_then_block(self) -> None:
+        url = "https://example.test/closed-world-invalid"
+        source = "The archive contains no record for Event 2003."
+        analysis = analyst_ready([claim_item(text=source, excerpt=source)])
+        analysis["gaps"] = [
+            {
+                "id": "not_found_closed_world",
+                "question": "Does the archive contain Event 2003?",
+                "status": "resolved",
+                "related_claim_ids": ["claim-1"],
+                "search_attempt_ids": ["search-0001", "search-0002"],
+            }
+        ]
+
+        def scoped(claim_refs: list[str], scope: list[str]) -> dict[str, Any]:
+            return {
+                "units": [
+                    {
+                        "id": "unit-closed-world",
+                        "classification": "scoped_not_found",
+                        "text": source,
+                        "claim_refs": claim_refs,
+                        "gap_refs": ["not_found_closed_world"],
+                        "searched_scope": scope,
+                    }
+                ]
+            }
+
+        variants = {
+            "omitted": writer_claim(text=source),
+            "empty_claims": scoped([], ["primary query", "secondary query"]),
+            "case_changed": scoped(
+                ["claim-1"], ["PRIMARY QUERY", "secondary query"]
+            ),
+            "partial_scope": scoped(["claim-1"], ["primary query"]),
+        }
+        for name, invalid_writer in variants.items():
+            with self.subTest(name=name):
+                model = FakeModel(
+                    {
+                        "planner": [
+                            {
+                                "decision": "proceed",
+                                "queries": ["primary query", "secondary query"],
+                            }
+                        ],
+                        "analyst": [analysis],
+                        "writer": [invalid_writer, invalid_writer],
+                        "semantic_verifier": [],
+                    }
+                )
+                result = self.pipeline(
+                    model,
+                    FakeSearch(
+                        {
+                            "primary query": [SearchHit("Archive", url)],
+                            "secondary query": [],
+                        }
+                    ),
+                    FakeFetch({url: fetched(url, source)}),
+                ).run(self.spec())
+
+                self.assertEqual("blocked", result.outcome)
+                writer_calls = [
+                    payload for role, payload in model.calls if role == "writer"
+                ]
+                self.assertEqual(2, len(writer_calls))
+                self.assertIn("repair_request", writer_calls[1])
+                self.assertNotIn(
+                    "semantic_verifier",
+                    [role for role, _ in self.last_review_model.calls],
+                )
 
     def test_closed_world_absence_uses_validated_search_ids_and_stays_blocked(self) -> None:
         url = "https://example.test/closed-world"
@@ -1249,7 +1711,7 @@ class ResearchPipelineTests(unittest.TestCase):
         def resumed_review(payload: Mapping[str, Any]) -> Mapping[str, Any]:
             self.assertEqual(
                 [{"question": question, "answer": answer}],
-                payload["immutable_research_spec"]["clarification_turns"],
+                payload["mission_contract"]["clarification_turns"],
             )
             return semantic_accept()
 
@@ -1325,11 +1787,9 @@ class ResearchPipelineTests(unittest.TestCase):
             return {
                 "candidates": [
                     {
-                        "chunk_id": source_view["chunk_id"],
-                        "locator_id": _chunk_locator_for_excerpt(
+                        "segment_index": _chunk_locator_for_excerpt(
                             source_view, excerpt
-                        )["locator_id"],
-                        "excerpt": excerpt,
+                        )["segment_index"],
                         "relevance": "high",
                         "reason": "the exact sentence answers the research question",
                     }
@@ -1490,6 +1950,128 @@ class ResearchPipelineTests(unittest.TestCase):
             set(unit_schema["classification_values"]),
         )
 
+    def test_semantic_verifier_repairs_malformed_review_item_once(self) -> None:
+        model, search, fetcher = self.accepted_fixture()
+        invalid = semantic_accept()
+        invalid["reason"] = "PREVIOUS-SEMANTIC-OUTPUT-MARKER"
+        invalid["claim_reviews"][0]["explanation"] = "extra field is forbidden"
+        model.responses["semantic_verifier"] = [invalid, semantic_accept()]
+
+        result = self.pipeline(model, search, fetcher).run(self.spec())
+
+        self.assertEqual("accepted", result.outcome)
+        reviewer_calls = [
+            payload
+            for role, payload in self.last_review_model.calls
+            if role == "semantic_verifier"
+        ]
+        self.assertEqual(2, len(reviewer_calls))
+        repair = reviewer_calls[1]["repair_request"]
+        self.assertIn("claim_reviews item is malformed", repair["validator_error"])
+        self.assertNotIn("PREVIOUS-SEMANTIC-OUTPUT-MARKER", str(reviewer_calls[1]))
+        self.assertEqual(
+            {
+                "decision",
+                "reason",
+                "claim_reviews",
+                "edge_reviews",
+                "unit_reviews",
+                "mission_alignment",
+                "scope_alignment",
+                "policy_alignment",
+                "next_queries",
+            },
+            set(reviewer_calls[0]["response_contract"]["exact_fields"]),
+        )
+        self.assertTrue(
+            any(
+                item.startswith("semantic_verifier_repair[1/1]")
+                for item in result.diagnostics
+            )
+        )
+
+    def test_second_malformed_semantic_review_fails_without_third_call(self) -> None:
+        model, search, fetcher = self.accepted_fixture()
+        invalid = semantic_accept()
+        invalid["claim_reviews"][0]["explanation"] = "extra field is forbidden"
+        model.responses["semantic_verifier"] = [invalid, invalid, semantic_accept()]
+
+        result = self.pipeline(model, search, fetcher).run(self.spec())
+
+        self.assertEqual("blocked", result.outcome)
+        self.assertIn("claim_reviews item is malformed", result.reason)
+        reviewer_calls = [
+            payload
+            for role, payload in self.last_review_model.calls
+            if role == "semantic_verifier"
+        ]
+        self.assertEqual(2, len(reviewer_calls))
+        self.assertEqual(1, len(self.last_review_model.responses["semantic_verifier"]))
+        self.assertEqual((), result.semantic_reviews)
+
+    def test_incomplete_accepted_semantic_review_repairs_before_attestation(self) -> None:
+        model, search, fetcher = self.accepted_fixture()
+        incomplete = semantic_accept()
+        incomplete["claim_reviews"] = []
+        model.responses["semantic_verifier"] = [incomplete, semantic_accept()]
+
+        result = self.pipeline(model, search, fetcher).run(self.spec())
+
+        self.assertEqual("accepted", result.outcome)
+        reviewer_calls = [
+            payload
+            for role, payload in self.last_review_model.calls
+            if role == "semantic_verifier"
+        ]
+        self.assertEqual(2, len(reviewer_calls))
+        self.assertIn(
+            "cover every claim exactly once",
+            reviewer_calls[1]["repair_request"]["validator_error"],
+        )
+        self.assertEqual(3, len(result.semantic_reviews[0].attestations))
+
+    def test_invalid_semantic_model_content_repairs_but_gateway_error_does_not(self) -> None:
+        model, search, fetcher = self.accepted_fixture()
+        model.responses["semantic_verifier"] = [
+            ModelResponseProtocolError("semantic model content is invalid"),
+            semantic_accept(),
+        ]
+
+        repaired = self.pipeline(model, search, fetcher).run(self.spec())
+
+        self.assertEqual("accepted", repaired.outcome)
+        self.assertEqual(
+            2,
+            len(
+                [
+                    role
+                    for role, _payload in self.last_review_model.calls
+                    if role == "semantic_verifier"
+                ]
+            ),
+        )
+
+        model, search, fetcher = self.accepted_fixture()
+        model.responses["semantic_verifier"] = [
+            ModelProtocolError("model gateway envelope is invalid"),
+            semantic_accept(),
+        ]
+        blocked = self.pipeline(model, search, fetcher).run(self.spec())
+
+        self.assertEqual("blocked", blocked.outcome)
+        self.assertIn("gateway envelope is invalid", blocked.reason)
+        self.assertEqual(
+            1,
+            len(
+                [
+                    role
+                    for role, _payload in self.last_review_model.calls
+                    if role == "semantic_verifier"
+                ]
+            ),
+        )
+        self.assertEqual(1, len(self.last_review_model.responses["semantic_verifier"]))
+
     def test_reader_fabricated_excerpt_is_rejected_before_analyst(self) -> None:
         url = "https://example.test/exact"
 
@@ -1497,11 +2079,7 @@ class ResearchPipelineTests(unittest.TestCase):
             return {
                 "candidates": [
                     {
-                        "chunk_id": payload["untrusted_source_chunk"]["chunk_id"],
-                        "locator_id": payload["untrusted_source_chunk"][
-                            "locator_spans"
-                        ][0]["locator_id"],
-                        "excerpt": "This",
+                        "segment_index": 999,
                         "relevance": "high",
                         "reason": "fabricated test excerpt",
                     }
@@ -1521,7 +2099,7 @@ class ResearchPipelineTests(unittest.TestCase):
         ).run(self.spec())
 
         self.assertEqual("blocked", result.outcome)
-        self.assertIn("does not occur exactly in its labeled chunk", result.reason)
+        self.assertIn("segment_index is outside the current chunk", result.reason)
         self.assertEqual(2, len([role for role, _ in model.calls if role == "reader"]))
         self.assertNotIn("analyst", [role for role, _ in model.calls])
 
@@ -1548,7 +2126,7 @@ class ResearchPipelineTests(unittest.TestCase):
             model,
             FakeSearch({"primary query": [SearchHit("Reader repair", url)]}),
             FakeFetch({url: fetched(url, source)}),
-            budgets=ResearchBudgets(max_model_calls=9),
+            budgets=ResearchBudgets(max_model_calls=11),
         ).run(self.spec())
 
         self.assertEqual("accepted", result.outcome)
@@ -1635,11 +2213,7 @@ class ResearchPipelineTests(unittest.TestCase):
             return {
                 "candidates": [
                     {
-                        "chunk_id": payload["untrusted_source_chunk"]["chunk_id"],
-                        "locator_id": payload["untrusted_source_chunk"][
-                            "locator_spans"
-                        ][0]["locator_id"],
-                        "excerpt": "Omega",
+                        "segment_index": 999,
                         "relevance": "high",
                         "reason": "fabricated independent excerpt",
                         "coverage_role": "counterevidence",
@@ -1661,7 +2235,7 @@ class ResearchPipelineTests(unittest.TestCase):
         ).run(self.spec())
 
         self.assertEqual("blocked", result.outcome)
-        self.assertIn("does not occur exactly in its labeled chunk", result.reason)
+        self.assertIn("segment_index is outside the current chunk", result.reason)
         self.assertNotIn("analyst", [role for role, _ in model.calls])
         self.assertNotIn("writer", [role for role, _ in model.calls])
 
@@ -1718,10 +2292,10 @@ class ResearchPipelineTests(unittest.TestCase):
 
     def test_depth_call_budgets_cover_one_reader_repair_per_chunk(self) -> None:
         expected = {
-            "brief": (32, 104),
-            "standard": (168, 521),
-            "deep": (640, 1_947),
-            "exhaustive": (1_680, 5_082),
+            "brief": (32, 105),
+            "standard": (168, 527),
+            "deep": (640, 1_957),
+            "exhaustive": (1_680, 5_098),
         }
         for depth, (chunks, calls) in expected.items():
             with self.subTest(depth=depth):
@@ -1731,7 +2305,7 @@ class ResearchPipelineTests(unittest.TestCase):
                 allowance = calls - (3 * chunks)
                 self.assertGreaterEqual(
                     allowance,
-                    2 + (5 * budget.max_rounds),
+                    2 + (7 * budget.max_rounds),
                 )
                 adjusted = budget.with_reader_chunk_chars(16_000)
                 self.assertEqual(

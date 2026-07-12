@@ -635,7 +635,7 @@ class EvidenceCoreTests(unittest.TestCase):
         codes = {
             issue.code for issue in self.verifier_for(self_ledger).verify(self_ledger).issues
         }
-        self.assertIn("major_entailment_not_independent", codes)
+        self.assertIn("major_entailment_review_untrusted", codes)
         self.assertIn("unsupported_major_claim", codes)
 
     def test_empty_minor_only_and_assumption_ledgers_are_not_eligible(self) -> None:
@@ -711,7 +711,7 @@ class EvidenceCoreTests(unittest.TestCase):
         ).verify(fake_ledger)
         self.assertFalse(fake_context.accepted)
         self.assertIn(
-            "major_entailment_not_independent",
+            "major_entailment_review_untrusted",
             {issue.code for issue in fake_context.issues},
         )
 
@@ -776,7 +776,7 @@ class EvidenceCoreTests(unittest.TestCase):
         ).verify(ledger)
         self.assertFalse(report.accepted)
         self.assertIn(
-            "major_entailment_not_independent",
+            "major_entailment_review_untrusted",
             {issue.code for issue in report.issues},
         )
 

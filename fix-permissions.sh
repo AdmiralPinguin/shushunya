@@ -19,6 +19,8 @@ find "$ROOT" -name .git -prune -o -type f \( \
   -path '*/android-tools/android-sdk/build-tools/*/*' -o \
   -path '*/android-tools/whisper.cpp/build/bin/*' -o \
   -path '*/.gradle-home/caches/*/transformed/aapt2-*-linux/aapt2' -o \
+  -path '*/vllm-host/venv/bin/*' -o \
+  -path '*/vllm-host/venv/*/bin/*' -o \
   -path '*/llama.cpp/*' -o \
   -path '*/WarpWails/tools/ffmpeg-*-static/ffmpeg' -o \
   -path '*/WarpWails/tools/ffmpeg-*-static/ffprobe' -o \

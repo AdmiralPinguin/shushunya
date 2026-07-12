@@ -69,8 +69,10 @@ def load_runtime_contract(path: str | os.PathLike[str] | None = None) -> dict[st
         )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise RuntimeDependencyError(f"model runtime contract is invalid: {exc}") from exc
-    required = {"version", "dispatcher", "gemma", "qwen", "operator_profile"}
-    if not isinstance(value, dict) or set(value) != required or value.get("version") != 1:
+    if not isinstance(value, dict):
+        raise RuntimeDependencyError("model runtime contract has missing or unknown fields")
+    required = {"version", "dispatcher", "gemma", "operator_profile", "review_pass"}
+    if value.get("version") != 2 or set(value) != required:
         raise RuntimeDependencyError("model runtime contract has missing or unknown fields")
     dispatcher = value.get("dispatcher")
     if not isinstance(dispatcher, dict) or set(dispatcher) != {
@@ -80,9 +82,10 @@ def load_runtime_contract(path: str | os.PathLike[str] | None = None) -> dict[st
     }:
         raise RuntimeDependencyError("runtime dispatcher contract is malformed")
     routes = dispatcher.get("routes")
-    if not isinstance(routes, dict) or set(routes) != {"gemma", "qwen"}:
+    expected_routes = {"gemma"}
+    if not isinstance(routes, dict) or set(routes) != expected_routes:
         raise RuntimeDependencyError("runtime dispatcher routes are malformed")
-    for route_name in ("gemma", "qwen"):
+    for route_name in sorted(expected_routes):
         route = routes.get(route_name)
         if not isinstance(route, dict) or set(route) != {
             "model",
@@ -115,56 +118,36 @@ def load_runtime_contract(path: str | os.PathLike[str] | None = None) -> dict[st
         "tokenizer_canary_token_ids_sha256",
     }:
         raise RuntimeDependencyError("runtime Gemma contract is malformed")
-    qwen = value.get("qwen")
-    if not isinstance(qwen, dict) or set(qwen) != {
-        "base_url",
-        "model_id",
-        "model_path",
-        "owned_by",
-        "n_ctx",
-        "chat_template_sha256",
-        "build_info",
-        "chat_format",
-    }:
-        raise RuntimeDependencyError("runtime Qwen contract is malformed")
     operator = value.get("operator_profile")
-    if not isinstance(operator, dict) or set(operator) != {
+    operator_fields = {
         "gemma_max_num_seqs",
         "research_max_active",
         "gemma_max_tokens",
+        "writer_max_tokens",
         "gemma_max_context_chars",
-        "qwen_max_tokens",
-        "qwen_max_context_chars",
         "gemma_timeout_sec",
-        "qwen_timeout_sec",
         "reader_chunk_chars",
         "tensor_parallel_size",
         "modality",
-    }:
+    }
+    if not isinstance(operator, dict) or set(operator) != operator_fields:
         raise RuntimeDependencyError("runtime operator profile is malformed")
-    integer_fields = (
+    integer_fields = [
         (gemma, "max_model_len"),
         (gemma, "tokenizer_canary_version"),
         (gemma, "tokenizer_canary_count"),
         (gemma, "tokenizer_canary_max_model_len"),
-        (qwen, "n_ctx"),
         (operator, "gemma_max_num_seqs"),
         (operator, "research_max_active"),
         (operator, "gemma_max_tokens"),
+        (operator, "writer_max_tokens"),
         (operator, "gemma_max_context_chars"),
-        (operator, "qwen_max_tokens"),
-        (operator, "qwen_max_context_chars"),
         (operator, "gemma_timeout_sec"),
-        (operator, "qwen_timeout_sec"),
         (operator, "reader_chunk_chars"),
         (operator, "tensor_parallel_size"),
-    )
+    ]
     if any(type(obj.get(field)) is not int or obj[field] < 1 for obj, field in integer_fields):
         raise RuntimeDependencyError("runtime contract contains an invalid integer")
-    if operator["qwen_timeout_sec"] >= routes["qwen"]["upstream_timeout_sec"]:
-        raise RuntimeDependencyError(
-            "Qwen runner timeout must be strictly below dispatcher upstream timeout"
-        )
     if operator.get("modality") != "text_only":
         raise RuntimeDependencyError("current model runtime must remain explicitly text-only")
     for field in ("base_url", "model_id", "canonical_model_id", "root", "owned_by"):
@@ -181,24 +164,18 @@ def load_runtime_contract(path: str | os.PathLike[str] | None = None) -> dict[st
         raise RuntimeDependencyError("runtime Gemma tokenizer-canary version is unsupported")
     if gemma["tokenizer_canary_max_model_len"] != gemma["max_model_len"]:
         raise RuntimeDependencyError("runtime Gemma tokenizer-canary context is inconsistent")
-    for field in (
-        "base_url",
-        "model_id",
-        "model_path",
-        "owned_by",
-        "chat_template_sha256",
-        "build_info",
-        "chat_format",
-    ):
-        if type(qwen.get(field)) is not str or not qwen[field]:
-            raise RuntimeDependencyError(f"runtime Qwen {field} is invalid")
-    template_digest = qwen["chat_template_sha256"]
-    try:
-        digest_bytes = bytes.fromhex(template_digest)
-    except ValueError as exc:
-        raise RuntimeDependencyError("runtime Qwen chat-template digest is invalid") from exc
-    if len(template_digest) != 64 or len(digest_bytes) != 32:
-        raise RuntimeDependencyError("runtime Qwen chat-template digest is invalid")
+    review_pass = value.get("review_pass")
+    expected_review_pass = {
+        "assurance_mode": "same_model_context_isolated",
+        "route": "gemma",
+        "priority": "other",
+        "semantic_max_tokens": 1_280,
+        "roles": ["reader_coverage", "semantic_verifier"],
+        "separate_physical_model": False,
+        "epistemic_independence_claimed": False,
+    }
+    if review_pass != expected_review_pass:
+        raise RuntimeDependencyError("runtime review pass contract is malformed")
     return value
 
 
@@ -216,6 +193,31 @@ def validate_runtime_dependencies(
     contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     expected = load_runtime_contract() if contract is None else contract
+    required = {"version", "dispatcher", "gemma", "operator_profile", "review_pass"}
+    required_review_pass = {
+        "assurance_mode": "same_model_context_isolated",
+        "route": "gemma",
+        "priority": "other",
+        "semantic_max_tokens": 1_280,
+        "roles": ["reader_coverage", "semantic_verifier"],
+        "separate_physical_model": False,
+        "epistemic_independence_claimed": False,
+    }
+    dispatcher_value = expected.get("dispatcher") if isinstance(expected, dict) else None
+    routes_value = (
+        dispatcher_value.get("routes") if isinstance(dispatcher_value, dict) else None
+    )
+    if (
+        not isinstance(expected, dict)
+        or expected.get("version") != 2
+        or set(expected) != required
+        or not isinstance(routes_value, dict)
+        or set(routes_value) != {"gemma"}
+        or expected.get("review_pass") != required_review_pass
+    ):
+        raise RuntimeDependencyError(
+            "runtime dependency validation requires an exact Gemma-only v2 contract"
+        )
     dispatcher_contract = expected["dispatcher"]
     dispatcher_client = LoopbackJSONClient(
         dispatcher_contract["base_url"], expected_port=8079, max_response_bytes=2_000_000
@@ -232,31 +234,31 @@ def validate_runtime_dependencies(
     observed_routes = dispatcher.get("routes")
     if not isinstance(observed_routes, dict):
         raise RuntimeDependencyError("dispatcher health omitted route facts")
-    stable_routes: dict[str, Any] = {}
-    for route_name in ("gemma", "qwen"):
-        wanted = dispatcher_contract["routes"][route_name]
-        observed = observed_routes.get(route_name)
-        if not isinstance(observed, dict):
-            raise RuntimeDependencyError(f"dispatcher omitted {route_name} route")
-        for field, minimum in (
-            ("upstream_timeout_sec", 1.0),
-            ("queue_timeout_sec", 0.0),
-        ):
-            observed_value = observed.get(field)
-            if type(observed_value) not in (int, float) or observed_value < minimum:
-                raise RuntimeDependencyError(
-                    f"dispatcher {route_name} timeout facts are malformed"
-                )
-        stable = {
-            "model": observed.get("model"),
-            "upstream": observed.get("upstream"),
-            "advertised_capacity": observed.get("capacity"),
-            "upstream_timeout_sec": observed.get("upstream_timeout_sec"),
-            "queue_timeout_sec": observed.get("queue_timeout_sec"),
-        }
-        if stable != wanted:
-            raise RuntimeDependencyError(f"dispatcher {route_name} route changed")
-        stable_routes[route_name] = stable
+    # This is the ResearchWarband/Iskandar runtime attestation.  The shared
+    # dispatcher contract may describe routes used by other warbands, but a
+    # dead or changed Qwen service must not gate Iskandar startup or missions.
+    wanted = dispatcher_contract["routes"]["gemma"]
+    observed = observed_routes.get("gemma")
+    if not isinstance(observed, dict):
+        raise RuntimeDependencyError("dispatcher omitted gemma route")
+    for field, minimum in (
+        ("upstream_timeout_sec", 1.0),
+        ("queue_timeout_sec", 0.0),
+    ):
+        observed_value = observed.get(field)
+        if type(observed_value) not in (int, float) or observed_value < minimum:
+            raise RuntimeDependencyError(
+                f"dispatcher gemma {field} fact is malformed"
+            )
+    gemma_route = {
+        "model": observed.get("model"),
+        "upstream": observed.get("upstream"),
+        "advertised_capacity": observed.get("capacity"),
+        "upstream_timeout_sec": observed.get("upstream_timeout_sec"),
+        "queue_timeout_sec": observed.get("queue_timeout_sec"),
+    }
+    if gemma_route != wanted:
+        raise RuntimeDependencyError("dispatcher gemma route changed")
 
     gemma_contract = expected["gemma"]
     gemma_client = LoopbackJSONClient(
@@ -323,63 +325,14 @@ def validate_runtime_dependencies(
         raise RuntimeDependencyError("Gemma tokenizer/template canary changed")
     gemma_stable["tokenizer_canary"] = canary_stable
 
-    qwen_contract = expected["qwen"]
-    qwen_client = LoopbackJSONClient(
-        qwen_contract["base_url"], expected_port=8081, max_response_bytes=2_000_000
-    )
-    qwen_payload = qwen_client.request_json("GET", "/v1/models", timeout_sec=5)
-    qwen_model = _matching_model(qwen_payload, qwen_contract["model_id"], "Qwen")
-    meta = qwen_model.get("meta")
-    qwen_model_stable = {
-        "model_id": qwen_model.get("id"),
-        "owned_by": qwen_model.get("owned_by"),
-        "n_ctx": meta.get("n_ctx") if isinstance(meta, dict) else None,
-    }
-    if qwen_model_stable != {
-        key: qwen_contract[key] for key in ("model_id", "owned_by", "n_ctx")
-    }:
-        raise RuntimeDependencyError("Qwen upstream owner/context changed")
-    qwen_props = qwen_client.request_json("GET", "/props", timeout_sec=5)
-    generation = qwen_props.get("default_generation_settings")
-    params = generation.get("params") if isinstance(generation, dict) else None
-    template = qwen_props.get("chat_template")
-    template_sha256 = (
-        hashlib.sha256(template.encode("utf-8")).hexdigest()
-        if isinstance(template, str)
-        else None
-    )
-    qwen_props_stable = {
-        "model_id": qwen_props.get("model_alias"),
-        "model_path": qwen_props.get("model_path"),
-        "n_ctx": generation.get("n_ctx") if isinstance(generation, dict) else None,
-        "chat_template_sha256": template_sha256,
-        "build_info": qwen_props.get("build_info"),
-        "chat_format": params.get("chat_format") if isinstance(params, dict) else None,
-    }
-    if qwen_props_stable != {
-        key: qwen_contract[key]
-        for key in (
-            "model_id",
-            "model_path",
-            "n_ctx",
-            "chat_template_sha256",
-            "build_info",
-            "chat_format",
-        )
-    }:
-        raise RuntimeDependencyError(
-            "Qwen upstream path/context/template/build facts changed"
-        )
-    qwen_stable = {**qwen_model_stable, **qwen_props_stable}
-
     stable = {
         "contract_version": expected["version"],
         "dispatcher": {
             "service_version": dispatcher["version"],
-            "routes": stable_routes,
+            "routes": {"gemma": gemma_route},
         },
         "gemma": gemma_stable,
-        "qwen": qwen_stable,
+        "review_pass": dict(expected["review_pass"]),
     }
     canonical = json.dumps(
         stable,

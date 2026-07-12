@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 import io
 import json
-import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -13,12 +12,13 @@ from typing import Any, Mapping
 
 from ResearchWarband.execution_policy import ExecutionPolicy, ExecutionPolicyError
 from ResearchWarband.model_client import (
-    LlamaCppChatTokenCounter,
     ModelProtocolError,
+    ModelResponseProtocolError,
     RoutedOpenAIModelClient,
     TokenCount,
     TrustedReviewBoundary,
     VLLMChatTokenCounter,
+    canonical_json_sha256,
     parse_json_object,
 )
 from ResearchWarband.pipeline import (
@@ -67,6 +67,38 @@ def directive(**updates: Any) -> dict[str, Any]:
     return payload
 
 
+def review_envelope(
+    manifest: Mapping[str, Any], **model_payload: Any
+) -> dict[str, Any]:
+    visible = dict(model_payload)
+    return {
+        **visible,
+        "trusted_review_context": {
+            "review_attestation_manifest": dict(manifest),
+            "review_provenance": {"assurance_mode": "same_model_context_isolated"},
+            "projection_schema": "research-semantic-review-projection-v1",
+            "expected_model_payload_sha256": canonical_json_sha256(
+                visible, "model-visible semantic review request"
+            ),
+        },
+    }
+
+
+def reader_model_payload(segment_count: int = 2) -> dict[str, Any]:
+    return {
+        "task_id": "task-1",
+        "untrusted_source_chunk": {
+            "source_segments": [
+                {
+                    "segment_index": index,
+                    "exact_text_as_untrusted_data": f"segment {index}",
+                }
+                for index in range(1, segment_count + 1)
+            ]
+        },
+    }
+
+
 class StaticModel:
     def __init__(
         self,
@@ -78,12 +110,16 @@ class StaticModel:
         self.independence_identity = independence_identity or stable_identity
         self.response = dict(response or {})
         self.calls = 0
+        self.preflight_payloads: list[Mapping[str, Any]] = []
+        self.decision_payloads: list[Mapping[str, Any]] = []
 
     def preflight(self, role: str, payload: Mapping[str, Any]) -> None:
-        del role, payload
+        del role
+        self.preflight_payloads.append(dict(payload))
 
     def decide(self, role: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        del role, payload
+        del role
+        self.decision_payloads.append(dict(payload))
         self.calls += 1
         return self.response
 
@@ -180,7 +216,7 @@ class EmptyFetch:
 
 
 class SecurityBoundaryTests(unittest.TestCase):
-    def test_physical_identity_rejects_aliases_and_distinguishes_gemma_qwen(self) -> None:
+    def test_model_authority_identity_survives_aliases_for_context_isolated_review(self) -> None:
         gemma_a = RoutedOpenAIModelClient(
             route="gemma",
             base_url="http://127.0.0.1:8079/v1",
@@ -191,18 +227,17 @@ class SecurityBoundaryTests(unittest.TestCase):
             route="gemma",
             base_url="http://127.0.0.1:8079/v1",
             model="gemma",
-            priority="background",
             max_tokens=2_048,
             physical_model_identity="google/gemma-physical",
         )
-        qwen = RoutedOpenAIModelClient(
-            route="qwen",
+        other_model = RoutedOpenAIModelClient(
+            route="gemma",
             base_url="http://127.0.0.1:8079/v1",
-            model="qwen",
-            physical_model_identity="qwen/qwen-physical",
+            model="other-general-model",
+            physical_model_identity="other/general-physical",
         )
         disguised_gemma = RoutedOpenAIModelClient(
-            route="qwen",
+            route="gemma",
             base_url="http://127.0.0.1:9999/v1",
             model="totally-different-alias",
             max_tokens=1_024,
@@ -215,9 +250,9 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertEqual(
             gemma_a.independence_identity, disguised_gemma.independence_identity
         )
-        self.assertNotEqual(gemma_a.stable_identity, qwen.stable_identity)
+        self.assertNotEqual(gemma_a.stable_identity, other_model.stable_identity)
         self.assertNotEqual(
-            gemma_a.independence_identity, qwen.independence_identity
+            gemma_a.independence_identity, other_model.independence_identity
         )
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -231,22 +266,22 @@ class SecurityBoundaryTests(unittest.TestCase):
                     ),
                 ),
             )
-            with self.assertRaisesRegex(ValueError, "different physical/model authorities"):
-                ResearchPipeline(
-                    author_model=gemma_a,
-                    review_boundary=TrustedReviewBoundary(
-                        client=gemma_b, authority_id="semantic-verifier"
-                    ),
-                    search=EmptySearch(),
-                    fetch=EmptyFetch(),
-                    snapshot_store=store,
+            with self.assertRaisesRegex(ValueError, "assurance_mode is unsupported"):
+                TrustedReviewBoundary(
+                    client=gemma_b,
+                    authority_id="gemma-context-review",
+                    assurance_mode="physically_independent",
                 )
 
-            with self.assertRaisesRegex(ValueError, "different physical/model authorities"):
+            with self.assertRaisesRegex(
+                ValueError, "same_model_context_isolated review requires"
+            ):
                 ResearchPipeline(
                     author_model=gemma_a,
                     review_boundary=TrustedReviewBoundary(
-                        client=disguised_gemma, authority_id="semantic-verifier"
+                        client=other_model,
+                        authority_id="gemma-context-review",
+                        assurance_mode="same_model_context_isolated",
                     ),
                     search=EmptySearch(),
                     fetch=EmptyFetch(),
@@ -256,16 +291,18 @@ class SecurityBoundaryTests(unittest.TestCase):
             pipeline = ResearchPipeline(
                 author_model=gemma_a,
                 review_boundary=TrustedReviewBoundary(
-                    client=qwen, authority_id="semantic-verifier"
+                    client=gemma_b,
+                    authority_id="gemma-context-review",
+                    assurance_mode="same_model_context_isolated",
                 ),
                 search=EmptySearch(),
                 fetch=EmptyFetch(),
                 snapshot_store=store,
             )
             self.assertEqual(gemma_a.stable_identity, pipeline.author_identity)
-            self.assertEqual(qwen.stable_identity, pipeline.review_boundary.client_identity)
+            self.assertEqual(gemma_b.stable_identity, pipeline.review_boundary.client_identity)
             self.assertEqual(
-                qwen.independence_identity,
+                gemma_a.independence_identity,
                 pipeline.review_boundary.client_independence_identity,
             )
 
@@ -307,6 +344,83 @@ class SecurityBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ModelProtocolError, "silent truncation"):
             client.preflight("planner", {"task_id": "t", "blob": "x" * 5_000})
 
+    def test_reader_roles_use_distinct_strict_schemas_and_other_roles_use_json(self) -> None:
+        client = RoutedOpenAIModelClient(
+            route="gemma",
+            base_url="http://127.0.0.1:8079/v1",
+            model="gemma",
+            physical_model_identity="google/gemma-physical",
+        )
+        captured: list[dict[str, Any]] = []
+
+        def generation(request: Any, timeout: float) -> FakeGatewayResponse:
+            del timeout
+            captured.append(json.loads(request.data.decode("utf-8")))
+            return FakeGatewayResponse(
+                json.dumps(
+                    {"choices": [{"finish_reason": "stop", "message": {"content": "{}"}}]}
+                ).encode("utf-8")
+            )
+
+        with patch(
+            "ResearchWarband.model_client.urllib.request.urlopen",
+            side_effect=generation,
+        ):
+            client.decide("reader_coverage", reader_model_payload(3))
+            client.decide("planner", {"task_id": "task-1"})
+
+        coverage_format = captured[0]["response_format"]
+        self.assertEqual("json_schema", coverage_format["type"])
+        item = coverage_format["json_schema"]["schema"]["properties"][
+            "candidates"
+        ]["items"]
+        self.assertEqual(
+            ["segment_index", "relevance", "reason", "coverage_role"],
+            item["required"],
+        )
+        self.assertEqual([1, 2, 3], item["properties"]["segment_index"]["enum"])
+        self.assertEqual(
+            ["supporting_evidence", "counterevidence", "qualification"],
+            item["properties"]["coverage_role"]["enum"],
+        )
+        worst_candidate = {
+            "segment_index": 3,
+            "relevance": "high",
+            "reason": "r" * 96,
+            "coverage_role": "counterevidence",
+        }
+        self.assertLess(
+            len(
+                json.dumps(
+                    {"candidates": [worst_candidate] * 4},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ),
+            2_048,
+        )
+        self.assertEqual({"type": "json_object"}, captured[1]["response_format"])
+
+    def test_non_stop_or_missing_finish_reason_is_repairable_content_failure(self) -> None:
+        client = RoutedOpenAIModelClient(
+            route="gemma",
+            base_url="http://127.0.0.1:8079/v1",
+            model="gemma",
+            physical_model_identity="google/gemma-physical",
+        )
+        for finish_reason in (None, "length", "content_filter"):
+            choice: dict[str, Any] = {"message": {"content": "{}"}}
+            if finish_reason is not None:
+                choice["finish_reason"] = finish_reason
+            body = json.dumps({"choices": [choice]}).encode("utf-8")
+            with self.subTest(finish_reason=finish_reason), patch(
+                "ResearchWarband.model_client.urllib.request.urlopen",
+                return_value=FakeGatewayResponse(body),
+            ), self.assertRaisesRegex(
+                ModelResponseProtocolError, "did not finish cleanly"
+            ):
+                client.decide("reader", reader_model_payload())
+
     def test_exact_token_preflight_binds_generation_messages_and_physical_limit(self) -> None:
         counter = StaticTokenCounter(input_tokens=3_800, max_model_len=7_936)
         client = RoutedOpenAIModelClient(
@@ -325,7 +439,7 @@ class SecurityBoundaryTests(unittest.TestCase):
             captured.update(json.loads(request.data.decode("utf-8")))
             return FakeGatewayResponse(
                 json.dumps(
-                    {"choices": [{"message": {"content": "{}"}}]}
+                    {"choices": [{"finish_reason": "stop", "message": {"content": "{}"}}]}
                 ).encode("utf-8")
             )
 
@@ -333,11 +447,33 @@ class SecurityBoundaryTests(unittest.TestCase):
             "ResearchWarband.model_client.urllib.request.urlopen",
             side_effect=generation,
         ):
-            self.assertEqual({}, client.decide("reader", {"task_id": "task-1"}))
+            self.assertEqual({}, client.decide("reader", reader_model_payload(7)))
         self.assertEqual(captured["messages"], counter.calls[0][1])
         self.assertEqual(
             captured["chat_template_kwargs"], counter.calls[0][2]
         )
+        response_format = captured["response_format"]
+        self.assertEqual("json_schema", response_format["type"])
+        self.assertTrue(response_format["json_schema"]["strict"])
+        schema = response_format["json_schema"]["schema"]
+        self.assertFalse(schema["additionalProperties"])
+        candidate_schema = schema["properties"]["candidates"]["items"]
+        self.assertEqual(
+            ["segment_index", "relevance", "reason"],
+            candidate_schema["required"],
+        )
+        self.assertFalse(candidate_schema["additionalProperties"])
+        self.assertEqual(
+            list(range(1, 8)),
+            candidate_schema["properties"]["segment_index"]["enum"],
+        )
+        self.assertEqual(
+            r"\S", candidate_schema["properties"]["reason"]["pattern"]
+        )
+        self.assertEqual(
+            96, candidate_schema["properties"]["reason"]["maxLength"]
+        )
+        self.assertEqual(4, schema["properties"]["candidates"]["maxItems"])
 
         different_root = RoutedOpenAIModelClient(
             route="gemma",
@@ -362,6 +498,37 @@ class SecurityBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ModelProtocolError, "exceeding physical"):
             overflow.preflight("reader", {"task_id": "task-1"})
 
+    def test_mutated_tokenizer_route_is_rejected_before_cache_or_network(self) -> None:
+        counter = VLLMChatTokenCounter("http://127.0.0.1:8080/tokenize")
+        client = RoutedOpenAIModelClient(
+            route="gemma",
+            base_url="http://127.0.0.1:8079/v1",
+            model="gemma",
+            max_tokens=2_048,
+            physical_model_identity="google/gemma-physical",
+            attested_max_model_len=6_144,
+            token_counter=counter,
+        )
+        token_response = FakeGatewayResponse(
+            json.dumps(
+                {"count": 1, "max_model_len": 6_144, "tokens": [1]}
+            ).encode("utf-8")
+        )
+        with patch(
+            "ResearchWarband.model_client.urllib.request.urlopen",
+            return_value=token_response,
+        ):
+            client.preflight("planner", {"task_id": "task-1"})
+
+        counter.tokenize_url = "http://127.0.0.1:8081/tokenize"
+        with patch(
+            "ResearchWarband.model_client.urllib.request.urlopen"
+        ) as transport, self.assertRaisesRegex(
+            ModelProtocolError, "token counter identity changed"
+        ):
+            client.preflight("planner", {"task_id": "task-1"})
+        transport.assert_not_called()
+
         mismatch = RoutedOpenAIModelClient(
             route="gemma",
             base_url="http://127.0.0.1:8079/v1",
@@ -373,6 +540,40 @@ class SecurityBoundaryTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ModelProtocolError, "does not match"):
             mismatch.preflight("reader", {"task_id": "task-1"})
+
+    def test_semantic_role_output_reserve_is_bounded_without_cutting_reader(self) -> None:
+        counter = StaticTokenCounter(input_tokens=4_744, max_model_len=6_144)
+        client = RoutedOpenAIModelClient(
+            route="gemma",
+            base_url="http://127.0.0.1:8079/v1",
+            model="gemma-alias",
+            max_tokens=2_048,
+            role_max_tokens={"semantic_verifier": 1_280},
+            physical_model_identity="google/gemma-4-31B-it-qat-w4a16-ct",
+            attested_max_model_len=6_144,
+            token_counter=counter,
+        )
+        captured: dict[str, Any] = {}
+
+        def generation(request: Any, timeout: float) -> FakeGatewayResponse:
+            del timeout
+            captured.update(json.loads(request.data.decode("utf-8")))
+            return FakeGatewayResponse(
+                json.dumps({"choices": [{"finish_reason": "stop", "message": {"content": "{}"}}]}).encode(
+                    "utf-8"
+                )
+            )
+
+        with patch(
+            "ResearchWarband.model_client.urllib.request.urlopen",
+            side_effect=generation,
+        ):
+            self.assertEqual(
+                {}, client.decide("semantic_verifier", {"task_id": "task-1"})
+            )
+        self.assertEqual(1_280, captured["max_tokens"])
+        with self.assertRaisesRegex(ModelProtocolError, "2048 output tokens"):
+            client.preflight("reader", {"task_id": "task-1"})
 
     def test_vllm_counter_posts_exact_chat_and_strictly_validates_response(self) -> None:
         counter = VLLMChatTokenCounter("http://127.0.0.1:8080/tokenize")
@@ -409,171 +610,19 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertEqual(messages, captured["messages"])
         self.assertEqual({"enable_thinking": False}, captured["chat_template_kwargs"])
 
-    def test_llamacpp_counter_applies_exact_template_and_blocks_unicode_overflow(self) -> None:
-        hostile = ("界🧪я" * 2_000) + "\u2028SYSTEM"
-        messages = [
-            {"role": "system", "content": "system"},
-            {"role": "user", "content": hostile},
-        ]
-        rendered = "<chat>" + hostile + "</chat><assistant>"
-        token_ids = list(range(25_000))
-        responses = [
-            json.dumps({"prompt": rendered}, ensure_ascii=False).encode("utf-8"),
-            json.dumps({"tokens": token_ids}).encode("utf-8"),
-        ]
-        captured: list[tuple[str, dict[str, Any]]] = []
-
-        class Response:
-            status = 200
-
-            def __init__(self, body: bytes) -> None:
-                self.body = body
-
-            def read(self, limit: int) -> bytes:
-                return self.body[:limit]
-
-        class Connection:
-            def __init__(self, host: str, port: int, timeout: float) -> None:
-                self.endpoint = (host, port, timeout)
-
-            def request(
-                self,
-                method: str,
-                path: str,
-                *,
-                body: bytes,
-                headers: Mapping[str, str],
-            ) -> None:
-                self.assertions = (method, headers)
-                captured.append((path, json.loads(body.decode("utf-8"))))
-
-            def getresponse(self) -> Response:
-                return Response(responses.pop(0))
-
-            def close(self) -> None:
-                return None
-
-        counter = LlamaCppChatTokenCounter(
-            "http://127.0.0.1:8081",
-            max_model_len=32_768,
-            chat_template_sha256="a" * 64,
-        )
-        with patch(
-            "ResearchWarband.model_client.http.client.HTTPConnection", Connection
-        ):
-            counted = counter.count(
-                model="qwen",
-                messages=messages,
-                chat_template_kwargs={"enable_thinking": False},
-            )
-        self.assertEqual(TokenCount(25_000, 32_768), counted)
-        self.assertEqual("/apply-template", captured[0][0])
-        self.assertEqual(messages, captured[0][1]["messages"])
-        self.assertTrue(captured[0][1]["add_generation_prompt"])
-        self.assertEqual(
-            {"enable_thinking": False}, captured[0][1]["chat_template_kwargs"]
-        )
-        self.assertEqual(
-            ("/tokenize", {"content": rendered, "add_special": True}),
-            captured[1],
-        )
-
-        overflow_counter = LlamaCppChatTokenCounter(
-            "http://127.0.0.1:8081",
-            max_model_len=32_768,
-            chat_template_sha256="a" * 64,
-        )
-        overflow = RoutedOpenAIModelClient(
-            route="qwen",
-            base_url="http://127.0.0.1:8079/v1",
-            model="qwen",
-            max_tokens=8_192,
-            max_context_chars=100_000,
-            physical_model_identity="qwen/physical",
-            attested_max_model_len=32_768,
-            token_counter=overflow_counter,
-        )
-        responses.extend(
-            [
-                json.dumps({"prompt": rendered}, ensure_ascii=False).encode("utf-8"),
-                json.dumps({"tokens": token_ids}).encode("utf-8"),
-            ]
-        )
-        with patch(
-            "ResearchWarband.model_client.http.client.HTTPConnection", Connection
-        ), self.assertRaisesRegex(ModelProtocolError, "exceeding physical"):
-            overflow.preflight("semantic_verifier", {"task_id": "task-1", "text": hostile})
-
-    def test_llamacpp_counter_is_loopback_strict_and_bounded(self) -> None:
-        with self.assertRaisesRegex(ValueError, "literal-loopback"):
-            LlamaCppChatTokenCounter(
-                "http://localhost:8081",
-                max_model_len=32_768,
-                chat_template_sha256="a" * 64,
-            )
-        counter = LlamaCppChatTokenCounter(
-            "http://127.0.0.1:8081",
-            max_model_len=32_768,
-            chat_template_sha256="a" * 64,
-        )
-        with self.assertRaisesRegex(ModelProtocolError, "request exceeded"):
-            counter.count(
-                model="qwen",
-                messages=[{"role": "user", "content": "x" * (4 * 1024 * 1024)}],
-                chat_template_kwargs={"enable_thinking": False},
-            )
-
-        response_bodies = [b'{"prompt":"a","prompt":"b"}']
-
-        class Response:
-            status = 200
-
-            def read(self, limit: int) -> bytes:
-                return response_bodies.pop(0)[:limit]
-
-        class Connection:
-            def __init__(self, *args: Any, **kwargs: Any) -> None:
-                pass
-
-            def request(self, *args: Any, **kwargs: Any) -> None:
-                pass
-
-            def getresponse(self) -> Response:
-                return Response()
-
-            def close(self) -> None:
-                pass
-
-        with patch(
-            "ResearchWarband.model_client.http.client.HTTPConnection", Connection
-        ), self.assertRaisesRegex(ModelProtocolError, "invalid JSON"):
-            counter.count(
-                model="qwen",
-                messages=[{"role": "user", "content": "hello"}],
-                chat_template_kwargs={"enable_thinking": False},
-            )
-
-    def test_qwen_timeout_allows_superlong_fifo_waits(self) -> None:
-        with patch.dict(os.environ, {"RESEARCH_QWEN_TIMEOUT_SEC": "86400"}):
-            qwen = RoutedOpenAIModelClient(
-                route="qwen",
-                base_url="http://127.0.0.1:8079/v1",
-                model="qwen",
-            )
-        self.assertEqual(86_400.0, qwen.timeout_sec)
-        week = RoutedOpenAIModelClient(
-            route="qwen",
-            base_url="http://127.0.0.1:8079/v1",
-            model="qwen",
-            timeout_sec=604_800,
-        )
-        self.assertEqual(604_800.0, week.timeout_sec)
-        with self.assertRaisesRegex(ValueError, "604800"):
+    def test_qwen_and_background_dispatch_are_rejected_by_research_client(self) -> None:
+        with self.assertRaisesRegex(ValueError, "route must be gemma"):
             RoutedOpenAIModelClient(
                 route="qwen",
                 base_url="http://127.0.0.1:8079/v1",
                 model="qwen",
-                timeout_sec=604_801,
+            )
+        with self.assertRaisesRegex(ValueError, "priority must be other"):
+            RoutedOpenAIModelClient(
+                route="gemma",
+                base_url="http://127.0.0.1:8079/v1",
+                model="gemma",
+                priority="background",
             )
 
     def test_model_json_rejects_duplicate_keys_and_malformed_review_status(self) -> None:
@@ -589,14 +638,15 @@ class SecurityBoundaryTests(unittest.TestCase):
                 },
             ),
             authority_id="semantic-verifier",
+            assurance_mode="same_model_context_isolated",
         )
-        request = {
-            "review_attestation_manifest": {
+        request = review_envelope(
+            {
                 "claims": {"claim-1": {"entailed": "a" * 64}},
                 "edges": {},
                 "final": {"subject_id": "final-1", "base_sha256": "b" * 64},
             }
-        }
+        )
         with self.assertRaisesRegex(ModelProtocolError, "status must be a string"):
             boundary.begin(request)
 
@@ -610,7 +660,7 @@ class SecurityBoundaryTests(unittest.TestCase):
 
         def envelope(content: str) -> bytes:
             return json.dumps(
-                {"choices": [{"message": {"content": content}}]}
+                {"choices": [{"finish_reason": "stop", "message": {"content": content}}]}
             ).encode("utf-8")
 
         duplicate_envelope = (
@@ -621,7 +671,7 @@ class SecurityBoundaryTests(unittest.TestCase):
             return_value=FakeGatewayResponse(duplicate_envelope),
         ):
             with self.assertRaisesRegex(ModelProtocolError, "invalid JSON"):
-                client.decide("reader", {"task_id": "task-1"})
+                client.decide("reader", reader_model_payload())
 
         role_duplicates = {
             "reader": '{"candidates":[],"candidates":[]}',
@@ -633,20 +683,24 @@ class SecurityBoundaryTests(unittest.TestCase):
                 return_value=FakeGatewayResponse(envelope(duplicate_content)),
             ):
                 with self.assertRaisesRegex(ModelProtocolError, "duplicate JSON object key"):
-                    client.decide(role, {"task_id": "task-1"})
+                    client.decide(
+                        role,
+                        reader_model_payload() if role == "reader" else {"task_id": "task-1"},
+                    )
 
         reviewer = TrustedReviewBoundary(
             client=client,
             authority_id="semantic-verifier",
+            assurance_mode="same_model_context_isolated",
         )
-        semantic_request = {
-            "task_id": "task-1",
-            "review_attestation_manifest": {
+        semantic_request = review_envelope(
+            {
                 "claims": {},
                 "edges": {},
                 "final": {"subject_id": "final-1", "base_sha256": "b" * 64},
             },
-        }
+            task_id="task-1",
+        )
         with patch(
             "ResearchWarband.model_client.urllib.request.urlopen",
             return_value=FakeGatewayResponse(
@@ -749,28 +803,136 @@ class SecurityBoundaryTests(unittest.TestCase):
         boundary = TrustedReviewBoundary(
             client=StaticModel("review-model", response),
             authority_id="semantic-verifier",
+            assurance_mode="same_model_context_isolated",
         )
-        missing = {
-            "review_attestation_manifest": {
+        missing = review_envelope(
+            {
                 "claims": {},
                 "edges": {},
                 "final": {"subject_id": "final-1", "base_sha256": "b" * 64},
             }
-        }
+        )
         with self.assertRaisesRegex(ModelProtocolError, "not covered"):
             boundary.begin(missing)
 
-        covered = {
-            "review_attestation_manifest": {
+        covered = review_envelope(
+            {
                 "claims": {"claim-1": {"entailed": "a" * 64}},
                 "edges": {},
                 "final": {"subject_id": "final-1", "base_sha256": "b" * 64},
             }
-        }
+        )
         session = boundary.begin(covered)
         changed = replace(session, request_sha256="c" * 64)
         with self.assertRaisesRegex(ModelProtocolError, "changed"):
             boundary.issue_attestations(changed)
+
+    def test_review_boundary_hashes_only_exact_model_visible_projection(self) -> None:
+        manifest = {
+            "claims": {"claim-1": {"entailed": "a" * 64}},
+            "edges": {},
+            "final": {"subject_id": "final-1", "base_sha256": "b" * 64},
+        }
+        visible = {
+            "task_id": "task-1",
+            "claims": [{"id": "claim-1", "text": "Alpha"}],
+        }
+        client = StaticModel(
+            "review-model",
+            {
+                "claim_reviews": [{"claim_id": "claim-1", "status": "entailed"}],
+                "edge_reviews": [],
+            },
+        )
+        boundary = TrustedReviewBoundary(
+            client=client,
+            authority_id="semantic-verifier",
+            assurance_mode="same_model_context_isolated",
+        )
+
+        session = boundary.begin(review_envelope(manifest, **visible))
+
+        self.assertEqual([visible], client.preflight_payloads)
+        self.assertEqual([visible], client.decision_payloads)
+        self.assertEqual(
+            canonical_json_sha256(visible, "model-visible semantic review request"),
+            session.request_sha256,
+        )
+        for payload in (*client.preflight_payloads, *client.decision_payloads):
+            self.assertNotIn("trusted_review_context", payload)
+            self.assertNotIn("review_attestation_manifest", payload)
+            self.assertNotIn("review_provenance", payload)
+
+    def test_review_response_json_cannot_be_replaced_after_boundary_decision(self) -> None:
+        manifest = {
+            "claims": {
+                "claim-1": {
+                    "entailed": "a" * 64,
+                    "not_entailed": "b" * 64,
+                }
+            },
+            "edges": {},
+            "final": {"subject_id": "final-1", "base_sha256": "c" * 64},
+        }
+        client = StaticModel(
+            "review-model",
+            {
+                "claim_reviews": [
+                    {"claim_id": "claim-1", "status": "not_entailed"}
+                ],
+                "edge_reviews": [],
+            },
+        )
+        boundary = TrustedReviewBoundary(
+            client=client,
+            authority_id="semantic-verifier",
+            assurance_mode="same_model_context_isolated",
+        )
+        session = boundary.begin(review_envelope(manifest, task_id="task-1"))
+        forged_response = json.dumps(
+            {
+                "claim_reviews": [
+                    {"claim_id": "claim-1", "status": "entailed"}
+                ],
+                "edge_reviews": [],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        forged = replace(session, response_json=forged_response)
+
+        with self.assertRaisesRegex(ModelProtocolError, "response content changed"):
+            forged.response()
+        with self.assertRaisesRegex(ModelProtocolError, "response content changed"):
+            boundary.issue_attestations(forged)
+
+    def test_review_client_contract_cannot_change_after_boundary_setup(self) -> None:
+        client = RoutedOpenAIModelClient(
+            route="gemma",
+            base_url="http://127.0.0.1:8079/v1",
+            model="gemma-original",
+            physical_model_identity="google/gemma-physical",
+        )
+        boundary = TrustedReviewBoundary(
+            client=client,
+            authority_id="semantic-verifier",
+            assurance_mode="same_model_context_isolated",
+        )
+        client.model = "gemma-mutated"
+        manifest = {
+            "claims": {},
+            "edges": {},
+            "final": {"subject_id": "final-1", "base_sha256": "a" * 64},
+        }
+
+        with patch(
+            "ResearchWarband.model_client.urllib.request.urlopen"
+        ) as transport, self.assertRaisesRegex(
+            ModelProtocolError, "identity changed"
+        ):
+            boundary.begin(review_envelope(manifest, task_id="task-1"))
+        transport.assert_not_called()
 
     def test_domain_classifier_is_label_safe_and_content_identified(self) -> None:
         config = {

@@ -21,7 +21,7 @@ def _build_root() -> Path:
     current = Path(__file__).resolve()
     for candidate in current.parents:
         if (
-            candidate / "deploy" / "research-warband-model-runtime.31b-v1.json"
+            candidate / "deploy" / "research-warband-model-runtime.31b-v2.json"
         ).is_file():
             return candidate
     raise RuntimeError("ResearchWarband build/repository root is unavailable")
@@ -46,7 +46,12 @@ for path in (EVAL_ROOT, NATIVE_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from ResearchWarband import deployment_profile, production_runner, runtime_dependencies
+from ResearchWarband import (
+    deployment_guard,
+    deployment_profile,
+    production_runner,
+    runtime_dependencies,
+)
 from ResearchWarband.deployment_profile import (
     DeploymentProfileError,
     validate_deployment_profile,
@@ -113,6 +118,23 @@ class NoHashFixtureHandler(BaseHTTPRequestHandler):
         self.wfile.write(value)
 
     def do_GET(self) -> None:  # noqa: N802
+        if self.path == "/catalog":
+            raw = json.dumps(
+                {
+                    "closed_world": True,
+                    "results": [
+                        {
+                            "source_id": "source-alpha",
+                            "title": "Alpha catalog record",
+                            "url": self.base_url + "/documents/alpha",
+                            "original_url": "https://example.invalid/alpha",
+                        }
+                    ],
+                },
+                separators=(",", ":"),
+            ).encode("utf-8")
+            self._send(raw, "application/json")
+            return
         if self.path.startswith("/search?"):
             url = self.base_url + "/documents/alpha"
             if self.fragment:
@@ -310,11 +332,18 @@ class WiringTests(unittest.TestCase):
             )
             hits = search.search("alpha", 3)
             self.assertEqual(len(hits), 1)
-            fetched = production_runner.FixtureGatewayFetchAdapter(search).fetch(
+            catalog_hits = search.catalog()
+            self.assertEqual("Alpha catalog record", catalog_hits[0].title)
+            self.assertEqual(hits[0].url, catalog_hits[0].url)
+            self.assertRegex(search.catalog_identity, r"^fixture-gateway-.+-closed-world$")
+            fetcher = production_runner.FixtureGatewayFetchAdapter(search)
+            fetched = fetcher.fetch(
                 hits[0], 4096
             )
+            catalog_fetched = fetcher.fetch(catalog_hits[0], 4096)
         self.assertEqual(fetched.raw, NoHashFixtureHandler.body)
         self.assertEqual(fetched.normalized.encode("utf-8"), NoHashFixtureHandler.body)
+        self.assertIn("#eval_source_id=source-alpha", catalog_fetched.final_uri)
         self.assertEqual(
             fetched.metadata["raw_sha256"],
             __import__("hashlib").sha256(NoHashFixtureHandler.body).hexdigest(),
@@ -382,7 +411,7 @@ class WiringTests(unittest.TestCase):
                 importance="major",
                 verification_status="entailed",
                 authored_by="author-gemma",
-                verified_by="reviewer-qwen",
+                verified_by="gemma-semantic-review-pass-v1",
                 confidence="high",
                 conflict_claim_ids=(),
             )
@@ -392,7 +421,7 @@ class WiringTests(unittest.TestCase):
                 span_id=span.id,
                 relation="reports",
                 entailment_status="entailed",
-                assessed_by="reviewer-qwen",
+                assessed_by="gemma-semantic-review-pass-v1",
             )
             ledger = EvidenceLedger(
                 schema_version="1.0",
@@ -538,14 +567,16 @@ class WiringTests(unittest.TestCase):
             ],
         )
 
-    def test_pipeline_factory_pins_gemma_and_qwen_dispatcher_routes(self) -> None:
+    def test_pipeline_factory_uses_only_gemma_for_context_isolated_review(self) -> None:
         calls: list[dict[str, object]] = []
 
         class FakeClient:
             def __init__(self, **kwargs: object) -> None:
+                if kwargs.get("route") == "qwen":
+                    raise AssertionError("build_pipeline must never construct a qwen route")
                 calls.append(dict(kwargs))
                 self.stable_identity = "model-" + str(kwargs["route"])
-                self.independence_identity = "physical-" + str(kwargs["route"])
+                self.independence_identity = "runtime-" + str(kwargs["route"])
 
             def preflight(self, _role: str, _payload: object) -> None:
                 pass
@@ -553,17 +584,8 @@ class WiringTests(unittest.TestCase):
             def decide(self, _role: str, _payload: object) -> dict[str, object]:
                 return {}
 
-        class FakeBoundary:
-            def __init__(self, *, client: object, authority_id: str) -> None:
-                self.client_identity = getattr(client, "stable_identity")
-                self.authority_id = authority_id
-
-        class FakePipeline:
-            def __init__(self, **kwargs: object) -> None:
-                self.kwargs = kwargs
-
         runtime_contract = {
-            "version": 1,
+            "version": 2,
             "dispatcher": {
                 "base_url": "http://127.0.0.1:8079",
                 "service_version": 2,
@@ -574,13 +596,6 @@ class WiringTests(unittest.TestCase):
                         "advertised_capacity": 4,
                         "upstream_timeout_sec": 600,
                         "queue_timeout_sec": 300,
-                    },
-                    "qwen": {
-                        "model": "qwen.gguf",
-                        "upstream": "http://127.0.0.1:8081",
-                        "advertised_capacity": 1,
-                        "upstream_timeout_sec": 90000,
-                        "queue_timeout_sec": 0,
                     },
                 },
             },
@@ -596,28 +611,25 @@ class WiringTests(unittest.TestCase):
                 "tokenizer_canary_max_model_len": 6144,
                 "tokenizer_canary_token_ids_sha256": "c" * 64,
             },
-            "qwen": {
-                "base_url": "http://127.0.0.1:8081",
-                "model_id": "qwen.gguf",
-                "model_path": "models/qwen.gguf",
-                "owned_by": "llamacpp",
-                "n_ctx": 32768,
-                "chat_template_sha256": "a" * 64,
-                "build_info": "build-v1",
-                "chat_format": "Content-only",
-            },
             "operator_profile": {
                 "gemma_max_num_seqs": 1,
                 "research_max_active": 1,
                 "gemma_max_tokens": 2048,
-                "gemma_max_context_chars": 16000,
-                "qwen_max_tokens": 8192,
-                "qwen_max_context_chars": 80000,
+                "writer_max_tokens": 1024,
+                "gemma_max_context_chars": 24000,
                 "gemma_timeout_sec": 7200,
-                "qwen_timeout_sec": 86400,
                 "reader_chunk_chars": 8000,
                 "tensor_parallel_size": 1,
                 "modality": "text_only",
+            },
+            "review_pass": {
+                "assurance_mode": "same_model_context_isolated",
+                "route": "gemma",
+                "priority": "other",
+                "semantic_max_tokens": 1280,
+                "roles": ["reader_coverage", "semantic_verifier"],
+                "separate_physical_model": False,
+                "epistemic_independence_claimed": False,
             },
         }
         runtime_report = {"attestation_sha256": "b" * 64}
@@ -626,28 +638,23 @@ class WiringTests(unittest.TestCase):
             os.environ,
             {
                 "RESEARCH_WARBAND_LLM_BASE_URL": "http://127.0.0.1:8079/v1",
-                "RESEARCH_WARBAND_VERIFIER_BASE_URL": "http://127.0.0.1:8079/v1",
                 "RESEARCH_WARBAND_LLM_MODEL": "gemma.gguf",
-                "RESEARCH_WARBAND_VERIFIER_MODEL": "qwen.gguf",
                 "RESEARCH_GEMMA_TIMEOUT_SEC": "7200",
-                "RESEARCH_QWEN_TIMEOUT_SEC": "86400",
                 "RESEARCH_GEMMA_MAX_TOKENS": "2048",
-                "RESEARCH_GEMMA_MAX_CONTEXT_CHARS": "16000",
-                "RESEARCH_QWEN_MAX_TOKENS": "8192",
-                "RESEARCH_QWEN_MAX_CONTEXT_CHARS": "80000",
+                "RESEARCH_GEMMA_MAX_CONTEXT_CHARS": "24000",
                 "RESEARCH_READER_CHUNK_CHARS": "8000",
-                "RESEARCH_WARBAND_REVIEWER_AUTHORITY_ID": "reviewer-qwen",
-                "RESEARCH_WARBAND_TRUSTED_REVIEWER_IDS": "reviewer-qwen",
+                "RESEARCH_WARBAND_REVIEWER_AUTHORITY_ID": (
+                    "gemma-semantic-review-pass-v1"
+                ),
+                "RESEARCH_WARBAND_TRUSTED_REVIEWER_IDS": (
+                    "gemma-semantic-review-pass-v1"
+                ),
                 "RESEARCH_WARBAND_SNAPSHOT_ROOT": directory,
                 "RESEARCH_WARBAND_NORMALIZER_ID": "research-eval-utf8-exact-v1",
             },
-            clear=False,
+            clear=True,
         ), mock.patch.object(
             production_runner, "RoutedOpenAIModelClient", FakeClient
-        ), mock.patch.object(
-            production_runner, "TrustedReviewBoundary", FakeBoundary
-        ), mock.patch.object(
-            production_runner, "ResearchPipeline", FakePipeline
         ), mock.patch.object(
             production_runner, "load_runtime_contract", return_value=runtime_contract
         ), mock.patch.object(
@@ -661,20 +668,106 @@ class WiringTests(unittest.TestCase):
                 production_runner.EVALUATOR_PROFILE,
                 {"source_gateway_url": "http://127.0.0.1:9999"},
             )
-        self.assertIsInstance(pipeline, FakePipeline)
+        self.assertIsInstance(pipeline, production_runner.ResearchPipeline)
         self.assertIsInstance(store, SnapshotStore)
         self.assertEqual(observed_runtime, runtime_report)
-        self.assertEqual(calls[0]["route"], "gemma")
-        self.assertEqual(calls[0]["priority"], "other")
-        self.assertEqual(calls[0]["base_url"], "http://127.0.0.1:8079/v1")
-        self.assertEqual(calls[1]["route"], "qwen")
-        self.assertEqual(calls[1]["priority"], "background")
-        self.assertEqual(calls[1]["timeout_sec"], 86400.0)
-        self.assertEqual(calls[1]["attested_max_model_len"], 32768)
-        self.assertIsInstance(
-            calls[1]["token_counter"], production_runner.LlamaCppChatTokenCounter
+        self.assertEqual(2, len(calls))
+        self.assertEqual(["gemma", "gemma"], [call["route"] for call in calls])
+        self.assertEqual(["other", "other"], [call["priority"] for call in calls])
+        self.assertNotIn("qwen", [call["route"] for call in calls])
+        self.assertEqual({"writer": 1024}, calls[0]["role_max_tokens"])
+        self.assertEqual(
+            {"semantic_verifier": 1280}, calls[1]["role_max_tokens"]
         )
-        self.assertEqual(pipeline.kwargs["reader_chunk_chars"], 8000)
+
+        self.assertTrue(
+            all(call["base_url"] == "http://127.0.0.1:8079/v1" for call in calls)
+        )
+        self.assertTrue(all(call["model"] == "gemma.gguf" for call in calls))
+        self.assertTrue(all(call["timeout_sec"] == 7200.0 for call in calls))
+        self.assertTrue(all(call["attested_max_model_len"] == 6144 for call in calls))
+        self.assertEqual(
+            calls[0]["physical_model_identity"], calls[1]["physical_model_identity"]
+        )
+        author = pipeline.author_model
+        review = pipeline.review_boundary.client
+        self.assertEqual(author.runtime_model_identity, review.runtime_model_identity)
+        self.assertEqual(author.independence_identity, review.independence_identity)
+        self.assertNotEqual(author.stable_identity, review.stable_identity)
+        self.assertEqual(
+            production_runner.AUTHOR_CONTEXT_PASS_ID, author.context_pass_id
+        )
+        self.assertEqual(
+            production_runner.REVIEW_CONTEXT_PASS_ID, review.context_pass_id
+        )
+        self.assertEqual(
+            production_runner.REVIEW_MODEL_ROLES, review.allowed_roles
+        )
+        self.assertEqual(
+            production_runner.REVIEW_ASSURANCE_MODE,
+            pipeline.review_boundary.assurance_mode,
+        )
+        self.assertEqual(pipeline._reader_chunk_chars, 8000)
+
+    def test_runtime_readiness_probe_preserves_the_supervisor_exact_contract(self) -> None:
+        contract: dict[str, object] = {}
+        with mock.patch.object(
+            production_runner, "load_runtime_contract", return_value=contract
+        ), mock.patch.object(
+            production_runner, "_validate_runtime_environment"
+        ), mock.patch.object(
+            production_runner,
+            "validate_runtime_dependencies",
+            return_value={
+                "attestation_sha256": "a" * 64,
+                "review_pass": {
+                    "assurance_mode": "same_model_context_isolated"
+                },
+            },
+        ):
+            self.assertEqual(
+                {"ready": True, "attestation_sha256": "a" * 64},
+                production_runner.runtime_readiness_probe(),
+            )
+
+    def test_runtime_environment_accepts_the_bounded_gemma_review_contract(self) -> None:
+        runtime_contract_path = (
+            BUILD_ROOT / "deploy" / "research-warband-model-runtime.31b-v2.json"
+        )
+        runtime_contract = json.loads(
+            runtime_contract_path.read_text(encoding="utf-8")
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                "RESEARCH_WARBAND_PROFILE": production_runner.EVALUATOR_PROFILE,
+                "RESEARCH_WARBAND_NORMALIZER_ID": "research-eval-utf8-exact-v1",
+                "RESEARCH_WARBAND_LLM_BASE_URL": "http://127.0.0.1:8079/v1",
+                "RESEARCH_WARBAND_LLM_MODEL": runtime_contract["dispatcher"]["routes"][
+                    "gemma"
+                ]["model"],
+                "RESEARCH_GEMMA_TIMEOUT_SEC": str(
+                    runtime_contract["operator_profile"]["gemma_timeout_sec"]
+                ),
+                "RESEARCH_GEMMA_MAX_TOKENS": str(
+                    runtime_contract["operator_profile"]["gemma_max_tokens"]
+                ),
+                "RESEARCH_GEMMA_MAX_CONTEXT_CHARS": str(
+                    runtime_contract["operator_profile"]["gemma_max_context_chars"]
+                ),
+                "RESEARCH_READER_CHUNK_CHARS": str(
+                    runtime_contract["operator_profile"]["reader_chunk_chars"]
+                ),
+                "RESEARCH_WARBAND_MODEL_RUNTIME_CONTRACT": str(
+                    runtime_contract_path
+                ),
+                "RESEARCH_WARBAND_TRUSTED_CONTRACT_FILES": str(
+                    runtime_contract_path
+                ),
+            },
+            clear=True,
+        ):
+            production_runner._validate_runtime_environment(runtime_contract)
 
     def test_deployment_preflight_attests_classifier_and_separate_stores(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -693,7 +786,7 @@ class WiringTests(unittest.TestCase):
                 (
                     BUILD_ROOT
                     / "deploy"
-                    / "research-warband-model-runtime.31b-v1.json"
+                    / "research-warband-model-runtime.31b-v2.json"
                 ).read_text(encoding="utf-8"),
                 encoding="utf-8",
             )
@@ -712,11 +805,8 @@ class WiringTests(unittest.TestCase):
                 "RESEARCH_WARBAND_MAX_ACTIVE": "1",
                 "RESEARCH_WARBAND_ATTEMPT_TIMEOUT_SECONDS": "604800",
                 "RESEARCH_GEMMA_TIMEOUT_SEC": "7200",
-                "RESEARCH_QWEN_TIMEOUT_SEC": "86400",
                 "RESEARCH_GEMMA_MAX_TOKENS": "2048",
-                "RESEARCH_GEMMA_MAX_CONTEXT_CHARS": "16000",
-                "RESEARCH_QWEN_MAX_TOKENS": "8192",
-                "RESEARCH_QWEN_MAX_CONTEXT_CHARS": "80000",
+                "RESEARCH_GEMMA_MAX_CONTEXT_CHARS": "24000",
                 "RESEARCH_READER_CHUNK_CHARS": "8000",
                 "SHUSHUNYA_SEARCH_MAX_WEB_BYTES": "200000",
                 "SHUSHUNYA_SEARCH_BRAVE_API_KEY": "",
@@ -725,11 +815,13 @@ class WiringTests(unittest.TestCase):
                 "SHUSHUNYA_SEARCH_WEB_USER_AGENT": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
                 "SHUSHUNYA_SEARCH_WEB_ACCEPT_LANGUAGE": "ru,en;q=0.9",
                 "RESEARCH_WARBAND_LLM_BASE_URL": "http://127.0.0.1:8079/v1",
-                "RESEARCH_WARBAND_VERIFIER_BASE_URL": "http://127.0.0.1:8079/v1",
                 "RESEARCH_WARBAND_LLM_MODEL": "gemma-4-12b-it-UD-Q5_K_XL.gguf",
-                "RESEARCH_WARBAND_VERIFIER_MODEL": "Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf",
-                "RESEARCH_WARBAND_TRUSTED_REVIEWER_IDS": "reviewer-qwen",
-                "RESEARCH_WARBAND_REVIEWER_AUTHORITY_ID": "reviewer-qwen",
+                "RESEARCH_WARBAND_TRUSTED_REVIEWER_IDS": (
+                    "gemma-semantic-review-pass-v1"
+                ),
+                "RESEARCH_WARBAND_REVIEWER_AUTHORITY_ID": (
+                    "gemma-semantic-review-pass-v1"
+                ),
                 "RESEARCH_WARBAND_NORMALIZER_ID": "research-warband-pinned-fetch-v2",
                 "RESEARCH_WARBAND_MISSION_ROOT": str(root / "prod-missions"),
                 "RESEARCH_WARBAND_SNAPSHOT_ROOT": str(root / "prod-cas"),
@@ -756,6 +848,26 @@ class WiringTests(unittest.TestCase):
                 )
                 self.assertEqual(report["port"], 7201)
                 self.assertEqual(report["trusted_source_file_count"], 1)
+                self.assertEqual("gemma", report["review_pass"]["route"])
+                self.assertEqual(1280, report["review_pass"]["semantic_max_tokens"])
+                self.assertFalse(report["review_pass"]["separate_physical_model"])
+                self.assertFalse(
+                    report["review_pass"]["epistemic_independence_claimed"]
+                )
+                self.assertFalse(
+                    any(
+                        name.startswith("RESEARCH_QWEN")
+                        for name in deployment_guard.BOUND_ENVIRONMENT
+                    )
+                )
+                self.assertNotIn(
+                    "RESEARCH_WARBAND_VERIFIER_MODEL",
+                    deployment_guard.BOUND_ENVIRONMENT,
+                )
+                self.assertNotIn(
+                    "RESEARCH_WARBAND_VERIFIER_BASE_URL",
+                    deployment_guard.BOUND_ENVIRONMENT,
+                )
                 os.environ["RESEARCH_WARBAND_TRUSTED_CONTRACT_FILES"] = str(
                     native_contract
                 )
@@ -786,20 +898,16 @@ class WiringTests(unittest.TestCase):
                 with self.assertRaisesRegex(DeploymentProfileError, "search providers"):
                     validate_deployment_profile(production_runner.PRODUCTION_PROFILE)
 
-    def test_runtime_attestation_binds_static_physical_models_only(self) -> None:
+    def test_runtime_attestation_binds_only_gemma_and_ignores_qwen_health(self) -> None:
         contract = json.loads(
             (
                 BUILD_ROOT
                 / "deploy"
-                / "research-warband-model-runtime.31b-v1.json"
+                / "research-warband-model-runtime.31b-v2.json"
             ).read_text(encoding="utf-8")
         )
-        contract["qwen"]["chat_template_sha256"] = __import__("hashlib").sha256(
-            b"stable"
-        ).hexdigest()
         active = {"value": 0}
         forged_root = {"value": False}
-        forged_template = {"value": False}
         forged_gemma_tokens = {"value": False}
         forged_qwen_timeout = {"value": False}
 
@@ -884,31 +992,7 @@ class WiringTests(unittest.TestCase):
                     ],
                 }
             if client.base_url.endswith(":8081"):
-                self.assertEqual(method, "GET")
-                if path == "/v1/models":
-                    return {
-                        "object": "list",
-                        "data": [
-                            {
-                                "id": "Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf",
-                                "owned_by": "llamacpp",
-                                "meta": {"n_ctx": 32768},
-                            }
-                        ],
-                    }
-                if path == "/props":
-                    template = "forged" if forged_template["value"] else "stable"
-                    return {
-                        "default_generation_settings": {
-                            "params": {"chat_format": "Content-only"},
-                            "n_ctx": 32768,
-                        },
-                        "model_alias": "Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf",
-                        "model_path": "CoreOfMadness/models/Qwen3-Coder-Next-Q6_K/Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf",
-                        "chat_template": template,
-                        "build_info": "b9524-59917d392",
-                    }
-                raise AssertionError(path)
+                raise AssertionError("Iskandar runtime attestation must not probe Qwen")
             raise AssertionError(client.base_url)
 
         with mock.patch.object(
@@ -923,6 +1007,13 @@ class WiringTests(unittest.TestCase):
             self.assertEqual(
                 first["attestation_sha256"], second["attestation_sha256"]
             )
+            self.assertEqual({"gemma"}, set(first["dispatcher"]["routes"]))
+            self.assertNotIn("qwen", first)
+            self.assertEqual(
+                "same_model_context_isolated",
+                first["review_pass"]["assurance_mode"],
+            )
+            self.assertEqual(1280, first["review_pass"]["semantic_max_tokens"])
             changed_operator = json.loads(json.dumps(contract))
             changed_operator["operator_profile"]["research_max_active"] = 4
             third = runtime_dependencies.validate_runtime_dependencies(changed_operator)
@@ -930,10 +1021,10 @@ class WiringTests(unittest.TestCase):
                 first["attestation_sha256"], third["attestation_sha256"]
             )
             forged_qwen_timeout["value"] = True
-            with self.assertRaisesRegex(
-                runtime_dependencies.RuntimeDependencyError, "qwen route changed"
-            ):
-                runtime_dependencies.validate_runtime_dependencies(contract)
+            qwen_changed = runtime_dependencies.validate_runtime_dependencies(contract)
+            self.assertEqual(
+                first["attestation_sha256"], qwen_changed["attestation_sha256"]
+            )
             forged_qwen_timeout["value"] = False
             forged_root["value"] = True
             with self.assertRaisesRegex(
@@ -941,36 +1032,29 @@ class WiringTests(unittest.TestCase):
             ):
                 runtime_dependencies.validate_runtime_dependencies(contract)
             forged_root["value"] = False
-            forged_template["value"] = True
-            with self.assertRaisesRegex(
-                runtime_dependencies.RuntimeDependencyError, "template/build facts"
-            ):
-                runtime_dependencies.validate_runtime_dependencies(contract)
-            forged_template["value"] = False
             forged_gemma_tokens["value"] = True
             with self.assertRaisesRegex(
                 runtime_dependencies.RuntimeDependencyError, "tokenizer/template canary"
             ):
                 runtime_dependencies.validate_runtime_dependencies(contract)
 
-    def test_runtime_contract_keeps_qwen_runner_deadline_inside_dispatcher(self) -> None:
-        contract = json.loads(
-            (
-                BUILD_ROOT
-                / "deploy"
-                / "research-warband-model-runtime.31b-v1.json"
-            ).read_text(encoding="utf-8")
-        )
-        contract["operator_profile"]["qwen_timeout_sec"] = contract["dispatcher"][
-            "routes"
-        ]["qwen"]["upstream_timeout_sec"]
+    def test_legacy_or_crafted_runtime_contract_is_rejected_before_any_probe(self) -> None:
+        contract = {"version": 1}
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "runtime.json"
             path.write_text(json.dumps(contract), encoding="utf-8")
             with self.assertRaisesRegex(
-                runtime_dependencies.RuntimeDependencyError, "strictly below"
+                runtime_dependencies.RuntimeDependencyError, "missing or unknown"
             ):
                 runtime_dependencies.load_runtime_contract(path)
+        with mock.patch.object(
+            runtime_dependencies.LoopbackJSONClient,
+            "request_json",
+            side_effect=AssertionError("malformed contracts must not reach the network"),
+        ), self.assertRaisesRegex(
+            runtime_dependencies.RuntimeDependencyError, "Gemma-only v2"
+        ):
+            runtime_dependencies.validate_runtime_dependencies(contract)
 
     def test_model_guard_checks_same_runtime_before_and_after_operation(self) -> None:
         class Inner:
@@ -990,7 +1074,10 @@ class WiringTests(unittest.TestCase):
         expected = "d" * 64
         inner = Inner()
         guard = production_runner.RuntimeGuardedModelClient(
-            inner, expected_attestation_sha256=expected
+            inner,
+            expected_attestation_sha256=expected,
+            context_pass_id=production_runner.AUTHOR_CONTEXT_PASS_ID,
+            allowed_roles=production_runner.AUTHOR_MODEL_ROLES,
         )
         with mock.patch.object(
             production_runner,
@@ -1014,6 +1101,13 @@ class WiringTests(unittest.TestCase):
                 production_runner.ModelClientError, "runtime changed"
             ):
                 guard.decide("planner", {})
+        self.assertEqual(inner.calls, 2)
+        self.assertEqual("physical-inner", guard.runtime_model_identity)
+        self.assertEqual("physical-inner", guard.independence_identity)
+        with self.assertRaisesRegex(
+            production_runner.ModelClientError, "not authorized"
+        ):
+            guard.preflight("semantic_verifier", {})
         self.assertEqual(inner.calls, 2)
 
 

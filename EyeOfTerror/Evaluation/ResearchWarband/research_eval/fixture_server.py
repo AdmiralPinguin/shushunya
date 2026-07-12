@@ -103,6 +103,26 @@ class FixtureServer:
                     body = json.dumps({"status": "ok", "bundle_id": outer.fixture.data["bundle_id"]}, separators=(",", ":")).encode()
                     self._send(200, body, "application/json")
                     return
+                if parsed.path == "/catalog":
+                    results = [
+                        {
+                            "source_id": source_id,
+                            "title": (
+                                document.normalized.splitlines()[0]
+                                .decode("utf-8", errors="strict")[:512]
+                            ),
+                            "url": outer.base_url + document.data["route"],
+                            "original_url": document.data["original_url"],
+                        }
+                        for source_id, document in outer.fixture.documents.items()
+                    ]
+                    body = json.dumps(
+                        {"closed_world": True, "results": results},
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    self._send(200, body, "application/json; charset=utf-8")
+                    return
                 if parsed.path == "/search":
                     query = (parse_qs(parsed.query).get("q") or [""])[0].casefold()
                     source_ids: list[str] = []
