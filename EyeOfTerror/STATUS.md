@@ -69,3 +69,27 @@ leadership facade, and the full Skitarii unit/integration suite.
   live repository remains unchanged unless patch application is explicit.
 - Continue expanding held-out behavioural evaluation across representative real
   repositories and languages.
+
+## Deferred Coding-Warband Capability Roadmap
+
+The current Ceraxia/Skitarii autonomous coding lane is considered sufficient
+and is frozen as the production baseline. Further redesign is not active work;
+use the warband on real missions while other Shushunya subsystems are built.
+
+A future capability counts as supported only when it has an authority contract,
+scoped permissions, machine-checkable result proof, crash-safe recovery, and
+truthful user-visible status. Mere access to a command through the Linux shell
+does not satisfy that bar.
+
+When this area becomes a priority again, start with a blind 50-100-task
+comparison against then-current Claude Code and Codex releases. The deferred
+order of work is branch/PR/CI/release and multi-repository workflows;
+browser-based behavioural and visual acceptance; deploy, infrastructure, and
+database workflows with rollback proof; then dynamic external integrations,
+dependency-aware parallel worktrees, cross-warband handoffs, durable
+clarification/approval, skills, and technical memory. Generic email, calendar,
+office-document, and personal-assistant features remain out of scope unless a
+specific engineering mission requires them.
+
+The detailed backlog and invariants are in
+[`Mechanicum/ROADMAP.md`](Mechanicum/ROADMAP.md).
