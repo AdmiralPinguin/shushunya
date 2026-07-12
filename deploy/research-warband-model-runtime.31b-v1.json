@@ -26,10 +26,10 @@
     "canonical_model_id": "google/gemma-4-31B-it-qat-w4a16-ct",
     "root": "CoreOfMadness/models/google-gemma-4-31B-it-qat-w4a16-ct",
     "owned_by": "vllm",
-    "max_model_len": 7936,
+    "max_model_len": 6144,
     "tokenizer_canary_version": 1,
     "tokenizer_canary_count": 38,
-    "tokenizer_canary_max_model_len": 7936,
+    "tokenizer_canary_max_model_len": 6144,
     "tokenizer_canary_token_ids_sha256": "3fa78bb2d2211c01dce24204a116fe71ba9ae90fe1a27ecd401b4d202b82a2f6"
   },
   "qwen": {
@@ -43,9 +43,9 @@
     "chat_format": "Content-only"
   },
   "operator_profile": {
-    "gemma_max_num_seqs": 2,
+    "gemma_max_num_seqs": 1,
     "research_max_active": 1,
-    "gemma_max_tokens": 3072,
+    "gemma_max_tokens": 2048,
     "gemma_max_context_chars": 16000,
     "qwen_max_tokens": 8192,
     "qwen_max_context_chars": 80000,

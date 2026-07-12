@@ -57,6 +57,72 @@ def _bounded_utf8(value: Any, context: str, maximum: int) -> str:
     return selected
 
 
+def _bounded_exact_utf8(value: Any, context: str, maximum: int) -> str:
+    """Validate exact evidence text without normalizing or trimming it."""
+
+    if type(value) is not str or not value.strip():
+        raise ReaderProtocolError(f"{context} must be a non-empty string")
+    if len(value.encode("utf-8")) > maximum:
+        raise ReaderProtocolError(f"{context} exceeds {maximum} UTF-8 bytes")
+    return value
+
+
+def _reader_chunk_id(
+    snapshot: SourceSnapshot,
+    chunk_start: int,
+    chunk_end: int,
+) -> str:
+    """Return a content-and-bounds identity shared by both Reader routes."""
+
+    if not isinstance(snapshot, SourceSnapshot):
+        raise TypeError("snapshot must be a SourceSnapshot")
+    if (
+        type(chunk_start) is not int
+        or type(chunk_end) is not int
+        or chunk_start < 0
+        or chunk_end <= chunk_start
+    ):
+        raise ValueError("reader chunk bounds are invalid")
+    return "reader-chunk-" + canonical_json_sha256(
+        {
+            "schema": "research-reader-chunk-v1",
+            "snapshot_id": snapshot.id,
+            "normalized_sha256": snapshot.normalized_sha256,
+            "chunk_start": chunk_start,
+            "chunk_end": chunk_end,
+        },
+        "reader chunk identity",
+    )
+
+
+def _resolve_unique_excerpt(
+    *,
+    normalized_text: str,
+    chunk_start: int,
+    chunk_end: int,
+    excerpt: str,
+    context: str,
+) -> tuple[int, int]:
+    """Resolve one exact excerpt inside its labeled chunk or fail closed."""
+
+    if type(normalized_text) is not str or not normalized_text:
+        raise TypeError("normalized_text must be a non-empty string")
+    if not 0 <= chunk_start < chunk_end <= len(normalized_text):
+        raise ValueError("reader chunk is outside normalized source")
+    chunk_text = normalized_text[chunk_start:chunk_end]
+    local_start = chunk_text.find(excerpt)
+    if local_start < 0:
+        raise ReaderProtocolError(
+            f"{context} excerpt does not occur exactly in its labeled chunk"
+        )
+    if chunk_text.find(excerpt, local_start + 1) >= 0:
+        raise ReaderProtocolError(
+            f"{context} excerpt is ambiguous within its labeled chunk"
+        )
+    start = chunk_start + local_start
+    return start, start + len(excerpt)
+
+
 def reader_chunk_ranges(
     text_length: int,
     chunk_chars: int,
@@ -151,7 +217,7 @@ class ReaderCandidate:
             or self.end_char <= self.start_char
         ):
             raise ReaderProtocolError("ReaderCandidate offsets are invalid")
-        _bounded_utf8(
+        _bounded_exact_utf8(
             self.excerpt, "ReaderCandidate.excerpt", READER_MAX_EXCERPT_BYTES
         )
         if self.relevance not in RELEVANCE_LEVELS:
@@ -207,6 +273,7 @@ def build_reader_payload(
     if type(cache_key) is not str or not cache_key.startswith("reader-cache-"):
         raise ValueError("reader cache key is invalid")
     spec = parse_json_object(dict(spec_payload))
+    chunk_id = _reader_chunk_id(snapshot, chunk_start, chunk_end)
     return {
         "task_id": task_id,
         "immutable_research_spec": spec,
@@ -214,6 +281,7 @@ def build_reader_payload(
         "source_snapshot": snapshot.to_dict(),
         "untrusted_source_chunk": {
             "kind": "untrusted_source_chunk",
+            "chunk_id": chunk_id,
             "snapshot_id": snapshot.id,
             "chunk_index": chunk_index,
             "chunk_count": chunk_count,
@@ -225,7 +293,9 @@ def build_reader_payload(
         },
         "reader_policy": {
             "only_exact_candidate_extracts": True,
-            "absolute_source_offsets_required": True,
+            "chunk_id_echo_required": True,
+            "engine_resolves_unique_absolute_offsets": True,
+            "ambiguous_excerpt_forbidden": True,
             "claims_decisions_queries_and_tool_calls_forbidden": True,
             "maximum_candidates": READER_MAX_CANDIDATES_PER_CHUNK,
             "maximum_excerpt_utf8_bytes": READER_MAX_EXCERPT_BYTES,
@@ -233,8 +303,7 @@ def build_reader_payload(
         "output_contract": {
             "candidates": [
                 {
-                    "start_char": "absolute integer",
-                    "end_char": "absolute integer",
+                    "chunk_id": "copy exact untrusted_source_chunk.chunk_id",
                     "excerpt": "exact normalized source slice",
                     "relevance": "high|medium|low",
                     "reason": "bounded relevance explanation",
@@ -255,7 +324,7 @@ def parse_reader_response(
     cache_key: str,
     model_identity: str,
 ) -> tuple[ReaderCandidate, ...]:
-    """Validate exact Reader spans; fabricated or cross-chunk excerpts fail closed."""
+    """Resolve exact Reader excerpts; fabricated or ambiguous excerpts fail closed."""
 
     if not isinstance(snapshot, SourceSnapshot):
         raise TypeError("snapshot must be a SourceSnapshot")
@@ -267,10 +336,10 @@ def parse_reader_response(
         raise ReaderProtocolError("reader returned too many candidates for one chunk")
     result: list[ReaderCandidate] = []
     seen: set[tuple[int, int]] = set()
+    expected_chunk_id = _reader_chunk_id(snapshot, chunk_start, chunk_end)
     for index, raw_item in enumerate(items, 1):
         if not isinstance(raw_item, Mapping) or set(raw_item) != {
-            "start_char",
-            "end_char",
+            "chunk_id",
             "excerpt",
             "relevance",
             "reason",
@@ -278,23 +347,25 @@ def parse_reader_response(
             raise ReaderProtocolError(
                 f"reader candidate[{index}] fields do not match the exact contract"
             )
-        start = raw_item["start_char"]
-        end = raw_item["end_char"]
-        if type(start) is not int or type(end) is not int or not (
-            chunk_start <= start < end <= chunk_end
+        if (
+            type(raw_item["chunk_id"]) is not str
+            or raw_item["chunk_id"] != expected_chunk_id
         ):
             raise ReaderProtocolError(
-                f"reader candidate[{index}] offsets are outside its exact chunk"
+                f"reader candidate[{index}] chunk_id does not match its labeled chunk"
             )
-        excerpt = _bounded_utf8(
+        excerpt = _bounded_exact_utf8(
             raw_item["excerpt"],
             f"reader candidate[{index}].excerpt",
             READER_MAX_EXCERPT_BYTES,
         )
-        if normalized_text[start:end] != excerpt:
-            raise ReaderProtocolError(
-                f"reader candidate[{index}] excerpt does not exactly match source offsets"
-            )
+        start, end = _resolve_unique_excerpt(
+            normalized_text=normalized_text,
+            chunk_start=chunk_start,
+            chunk_end=chunk_end,
+            excerpt=excerpt,
+            context=f"reader candidate[{index}]",
+        )
         bounds = (start, end)
         if bounds in seen:
             raise ReaderProtocolError("reader duplicated a candidate within one chunk")
@@ -354,8 +425,7 @@ def build_independent_reader_payload(**kwargs: Any) -> dict[str, Any]:
     payload["output_contract"] = {
         "candidates": [
             {
-                "start_char": "absolute integer",
-                "end_char": "absolute integer",
+                "chunk_id": "copy exact untrusted_source_chunk.chunk_id",
                 "excerpt": "exact normalized source slice",
                 "relevance": "high|medium|low",
                 "reason": "bounded relevance explanation",
@@ -390,8 +460,7 @@ def parse_independent_reader_response(
     roles: list[str] = []
     for index, raw_item in enumerate(data["candidates"], 1):
         if not isinstance(raw_item, Mapping) or set(raw_item) != {
-            "start_char",
-            "end_char",
+            "chunk_id",
             "excerpt",
             "relevance",
             "reason",
@@ -411,8 +480,7 @@ def parse_independent_reader_response(
             {
                 key: raw_item[key]
                 for key in (
-                    "start_char",
-                    "end_char",
+                    "chunk_id",
                     "excerpt",
                     "relevance",
                     "reason",

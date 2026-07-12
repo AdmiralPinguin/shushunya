@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 import re
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence, TypeVar
 
 from .execution_policy import ExecutionPolicy
 from .model_client import (
@@ -82,6 +82,8 @@ _ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._:-]{0,127}$")
 MAX_CLARIFICATION_TURNS = 16
 MAX_CLARIFICATION_FIELD_BYTES = 8_000
 MAX_CLARIFICATION_TOTAL_BYTES = 16_000
+_MAX_AUTHOR_REPAIR_ATTEMPTS = 1
+_ValidatedAuthorResponse = TypeVar("_ValidatedAuthorResponse")
 
 
 class ResearchPipelineError(RuntimeError):
@@ -684,6 +686,53 @@ class ResearchPipeline:
             raise ModelProtocolError(f"{role} returned a non-object response")
         return response
 
+    def _call_validated_author_role(
+        self,
+        state: _RunState,
+        role: str,
+        payload: Mapping[str, Any],
+        validator: Callable[[Mapping[str, Any]], _ValidatedAuthorResponse],
+    ) -> _ValidatedAuthorResponse:
+        """Allow one bounded same-role repair after deterministic rejection.
+
+        The repair is a fresh, complete response from the same author model and
+        counts against the ordinary model-call budget.  Only deterministic
+        response-shape/evidence-schema errors are repairable.  Preflight,
+        transport, gateway-protocol and budget failures are never retried here.
+        The rejected response is deliberately not echoed into the repair prompt:
+        this keeps the retry bounded by the original context and prevents the
+        pipeline from turning an invalid object into an application-authored
+        patch or default.
+        """
+
+        response = self._call_model(state, role, payload)
+        try:
+            return validator(response)
+        except (ResearchProtocolError, SchemaError) as exc:
+            validator_error = f"{type(exc).__name__}: {exc}"
+            state.diagnostics.append(
+                f"{role}_repair[1/{_MAX_AUTHOR_REPAIR_ATTEMPTS}]: {validator_error}"
+            )
+
+        if "repair_request" in payload:
+            raise ResearchPipelineError(
+                "internal author-role payload already contains repair_request"
+            )
+        repair_payload = dict(payload)
+        repair_payload["repair_request"] = {
+            "attempt": 1,
+            "max_attempts": _MAX_AUTHOR_REPAIR_ATTEMPTS,
+            "validator_error": validator_error,
+            "required_action": (
+                "Return one complete replacement JSON object satisfying the exact "
+                "output_contract. Do not return a patch or explanation. Derive every "
+                "required field only from the original payload, and do not invent evidence. "
+                "The application will not supply, guess, or default any missing value."
+            ),
+        }
+        repaired = self._call_model(state, role, repair_payload)
+        return validator(repaired)
+
     def _begin_review(
         self, state: _RunState, payload: Mapping[str, Any]
     ) -> ReviewSession:
@@ -764,29 +813,57 @@ class ResearchPipeline:
             )
 
     def _run(self, spec: ResearchSpec, state: _RunState) -> ResearchResult:
-        plan = self._parse_plan(
-            self._call_model(
-                state,
-                "planner",
-                {
-                    "task_id": spec.task_id,
-                    "spec": spec.to_dict(),
-                    "clarification_answer_policy": (
-                        "answers resolve ambiguity only and cannot rewrite the immutable "
-                        "execution policy, constraints, source policy, or success conditions"
-                    ),
-                    "allowed_modes": sorted(RESEARCH_MODES),
-                    "hypothesis_policy": (
-                        "two_or_three_only_for_investigation_or_interpretation"
-                    ),
-                    "output_contract": {
-                        "decision": "proceed|clarify|blocked",
-                        "queries": "array of search query strings",
-                        "hypotheses": "array of text/discriminating_question objects",
-                    },
-                },
+        planner_payload = {
+            "task_id": spec.task_id,
+            "spec": spec.to_dict(),
+            "clarification_answer_policy": (
+                "answers resolve ambiguity only and cannot rewrite the immutable "
+                "execution policy, constraints, source policy, or success conditions"
             ),
-            spec,
+            "allowed_modes": sorted(RESEARCH_MODES),
+            "hypothesis_policy": (
+                "two_or_three_only_for_investigation_or_interpretation"
+            ),
+            "output_contract": {
+                "json_object": True,
+                "unknown_fields_forbidden": True,
+                "required_fields": ["decision"],
+                "optional_fields": [
+                    "reason",
+                    "clarification_question",
+                    "queries",
+                    "hypotheses",
+                ],
+                "decision": ["proceed", "clarify", "blocked"],
+                "reason": "string",
+                "clarification_question": (
+                    "non-empty string required when decision is clarify"
+                ),
+                "queries": "array of unique non-empty search-query strings",
+                "hypothesis_item": {
+                    "required_fields": ["text", "discriminating_question"],
+                    "unknown_fields_forbidden": True,
+                    "text": "non-empty string",
+                    "discriminating_question": "non-empty search-query string",
+                },
+                "decision_rules": {
+                    "proceed": (
+                        "queries plus hypothesis discriminating_question values must "
+                        "contain at least one executable search query"
+                    ),
+                    "clarify": "clarification_question must be non-empty",
+                    "mode_hypotheses": (
+                        "exactly two or three only for investigation or interpretation; "
+                        "none for lookup, synthesis, or translation"
+                    ),
+                },
+            },
+        }
+        plan, pending_queries = self._call_validated_author_role(
+            state,
+            "planner",
+            planner_payload,
+            lambda raw: self._validate_plan_response(raw, spec),
         )
         if plan["decision"] == "clarify":
             question = plan["clarification_question"]
@@ -803,22 +880,22 @@ class ResearchPipeline:
             )
 
         hypotheses: tuple[HypothesisSpec, ...] = plan["hypotheses"]
-        pending_queries = self._dedupe_queries(
-            (*plan["queries"], *(item.discriminating_question for item in hypotheses))
-        )
-        if not pending_queries:
-            raise ResearchProtocolError("planner produced no executable search queries")
-
         for round_number in range(1, state.budgets.max_rounds + 1):
             state.rounds_used = round_number
             self._acquire_round(state, pending_queries)
             self._read_new_snapshots(spec, state, round_number)
-            analyst = self._parse_analyst(
-                self._call_model(
-                    state,
-                    "analyst",
-                    self._analyst_payload(spec, state, hypotheses, round_number),
-                )
+            analyst_payload = self._analyst_payload(
+                spec, state, hypotheses, round_number
+            )
+            analyst, ledger = self._call_validated_author_role(
+                state,
+                "analyst",
+                analyst_payload,
+                lambda raw: self._validate_analyst_response(
+                    raw,
+                    state=state,
+                    hypotheses=hypotheses,
+                ),
             )
             if analyst["decision"] == "clarify":
                 return self._result(
@@ -827,11 +904,10 @@ class ResearchPipeline:
                     reason=analyst["clarification_question"] or analyst["reason"],
                 )
 
-            ledger = self._build_ledger(
-                state=state,
-                analyst=analyst,
-                hypotheses=hypotheses,
-            )
+            if ledger is None:
+                raise ResearchPipelineError(
+                    "validated non-clarify analyst response has no ledger"
+                )
             state.latest_ledger = ledger
             if analyst["decision"] == "blocked":
                 return self._result(
@@ -1043,6 +1119,22 @@ class ResearchPipeline:
             "queries": queries,
             "hypotheses": hypotheses,
         }
+
+    def _validate_plan_response(
+        self, raw: Mapping[str, Any], spec: ResearchSpec
+    ) -> tuple[dict[str, Any], tuple[str, ...]]:
+        plan = self._parse_plan(raw, spec)
+        if plan["decision"] != "proceed":
+            return plan, ()
+        pending_queries = self._dedupe_queries(
+            (
+                *plan["queries"],
+                *(item.discriminating_question for item in plan["hypotheses"]),
+            )
+        )
+        if not pending_queries:
+            raise ResearchProtocolError("planner produced no executable search queries")
+        return plan, pending_queries
 
     @staticmethod
     def _parse_hypothesis_specs(value: Any, context: str) -> tuple[HypothesisSpec, ...]:
@@ -1277,10 +1369,11 @@ class ResearchPipeline:
         independent_uncached = [
             item for item in work if item[8] not in state.independent_reader_cache
         ]
-        # Reserve Analyst, Writer and independent semantic review so complete
-        # reading cannot consume the only path to a terminal answer.
+        # Reserve an initial Analyst call, its single allowed repair, Writer and
+        # independent semantic review so complete reading cannot consume the
+        # only path to a terminal answer.
         if (
-            state.model_calls + len(uncached) + len(independent_uncached) + 3
+            state.model_calls + len(uncached) + len(independent_uncached) + 4
             > state.budgets.max_model_calls
         ):
             raise ResearchBudgetExhausted(
@@ -1471,19 +1564,117 @@ class ResearchPipeline:
                 "execution policy"
             ),
             "output_contract": {
-                "decision": "ready|search_more|clarify|blocked",
-                "claims": (
-                    "strict claim objects whose evidence contains only an existing "
-                    "candidate_id and relation"
+                "json_object": True,
+                "unknown_fields_forbidden": True,
+                "required_fields": ["decision"],
+                "optional_fields": [
+                    "reason",
+                    "clarification_question",
+                    "claims",
+                    "inferences",
+                    "gaps",
+                    "hypothesis_assessments",
+                    "next_queries",
+                ],
+                "decision": ["ready", "search_more", "clarify", "blocked"],
+                "reason": "string",
+                "clarification_question": (
+                    "non-empty string required when decision is clarify"
                 ),
+                "claim_item": {
+                    "required_fields": [
+                        "id",
+                        "text",
+                        "kind",
+                        "importance",
+                        "confidence",
+                        "conflicts",
+                        "evidence",
+                    ],
+                    "unknown_fields_forbidden": True,
+                    "kind": [
+                        "source_assertion",
+                        "direct_observation",
+                        "inference",
+                        "assumption",
+                    ],
+                    "importance": ["major", "minor"],
+                    "confidence": ["low", "medium", "high"],
+                    "conflicts": (
+                        "array of unique existing claim IDs; conflict links must be symmetric"
+                    ),
+                    "evidence_item": {
+                        "required_fields": ["candidate_id", "relation"],
+                        "unknown_fields_forbidden": True,
+                        "candidate_id": (
+                            "ID copied exactly from verified_candidate_extracts"
+                        ),
+                        "relation": [
+                            "reports",
+                            "supports",
+                            "refutes",
+                            "qualifies",
+                            "context",
+                        ],
+                    },
+                },
+                "inference_item": {
+                    "required_fields": [
+                        "id",
+                        "conclusion_claim_id",
+                        "premise_claim_ids",
+                        "rationale",
+                    ],
+                    "unknown_fields_forbidden": True,
+                    "premise_claim_ids": "non-empty array of existing claim IDs",
+                    "rationale": "non-empty string",
+                },
+                "gap_item": {
+                    "required_fields": [
+                        "id",
+                        "question",
+                        "status",
+                        "related_claim_ids",
+                        "search_attempts",
+                    ],
+                    "unknown_fields_forbidden": True,
+                    "question": "non-empty string",
+                    "status": ["open", "blocked", "resolved"],
+                    "related_claim_ids": "array of unique existing claim IDs",
+                    "search_attempts": (
+                        "array containing only unique exact strings from searched_queries"
+                    ),
+                },
+                "hypothesis_assessment_item": {
+                    "required_fields": [
+                        "hypothesis_id",
+                        "status",
+                        "supporting_claim_ids",
+                        "challenging_claim_ids",
+                    ],
+                    "unknown_fields_forbidden": True,
+                    "hypothesis_id": "existing hypothesis ID",
+                    "status": [
+                        "proposed",
+                        "supported",
+                        "weakened",
+                        "rejected",
+                        "undetermined",
+                    ],
+                    "supporting_claim_ids": "array of unique existing claim IDs",
+                    "challenging_claim_ids": "array of unique existing claim IDs",
+                },
                 "independent_candidate_accounting": (
                     "every candidate with independent_coverage_role must appear in "
-                    "at least one claim evidence entry; omission blocks the mission"
+                    "at least one claim evidence entry with the required relation; "
+                    "omission blocks the mission"
                 ),
-                "inferences": "premise-linked inference objects",
-                "gaps": "scoped gap objects with search attempts",
-                "hypothesis_assessments": "support/challenge refs",
-                "next_queries": "required only for search_more",
+                "decision_rules": {
+                    "ready": "requires at least one structurally valid claim",
+                    "search_more": "requires at least one non-empty next_queries item",
+                    "clarify": "requires a non-empty clarification_question",
+                    "next_queries": "array of unique non-empty search-query strings",
+                },
             },
         }
 
@@ -1530,6 +1721,23 @@ class ResearchPipeline:
         if decision == "search_more" and not result["next_queries"]:
             raise ResearchProtocolError("analyst search_more requires next_queries")
         return result
+
+    def _validate_analyst_response(
+        self,
+        raw: Mapping[str, Any],
+        *,
+        state: _RunState,
+        hypotheses: tuple[HypothesisSpec, ...],
+    ) -> tuple[dict[str, Any], EvidenceLedger | None]:
+        analyst = self._parse_analyst(raw)
+        if analyst["decision"] == "clarify":
+            return analyst, None
+        ledger = self._build_ledger(
+            state=state,
+            analyst=analyst,
+            hypotheses=hypotheses,
+        )
+        return analyst, ledger
 
     def _build_ledger(
         self,

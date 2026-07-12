@@ -59,9 +59,10 @@ and FIFO Qwen deployment.
 
 The current attested author is the temporary TP1, text-only Gemma 31B runtime:
 the dispatcher still advertises four legacy slots, while the physical upstream
-has `max_num_seqs=2`, `max_model_len=7936`, and needs headroom for interactive
-chat. ResearchWarband therefore uses `max_active=1`, `max_tokens=3072`, a
-conservative 16,000-character request bound, and 8,000-character reader chunks.
+has `max_num_seqs=1`, `max_num_batched_tokens=1024`, `max_model_len=6144`, and
+`gpu_memory_utilization=0.94` to preserve activation headroom. ResearchWarband
+therefore uses `max_active=1`, `max_tokens=2048`, a conservative 16,000-character
+request bound, and 8,000-character reader chunks.
 Vision is intentionally not required or advertised by this profile. After the
 second 3090 is installed, TP2/32k/vision and `max_active=4` require a new
 versioned runtime contract and a clean service restart; do not edit this profile

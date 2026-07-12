@@ -1,8 +1,9 @@
 #!/bin/bash
 # Gemma-4-31B QAT-W4A16 on vLLM, port 8080 — the smarter head.
-# SINGLE-3090 profile (tight: 22GB weights on a 24GB card): ctx 8192, eager mode,
-# no CUDA graphs. When the second 3090 arrives, switch to TP2: TENSOR_PARALLEL=2,
-# MAX_MODEL_LEN=32768, drop --enforce-eager (see comments below).
+# SINGLE-3090 profile (tight: 22GB weights on a 24GB card): ctx 6144, eager mode,
+# one sequence, 1024-token prefill chunks, and no CUDA graphs. When the second
+# 3090 arrives, switch to TP2: TENSOR_PARALLEL=2, MAX_MODEL_LEN=32768, and drop
+# --enforce-eager (see comments below).
 # The old gguf model name is served as an alias so the dispatcher (8079) and every
 # client keep working with zero changes. 12B fallback: start-gemma-vllm.sh.
 cd /media/shushunya/SHUSHUNYA/shushunya || exit 1
@@ -35,12 +36,14 @@ if [ "$TP" -gt 1 ]; then
   # TP2 (second 3090): graphs on, vision back, real concurrency and context.
   TIGHT_FLAGS=""
   DEFAULT_CTX=32768
+  DEFAULT_GPU_MEMORY_UTILIZATION=0.98
 else
   # single 3090: 22GB weights on a 24GB card — no CUDA graphs, no vision tower,
-  # 2 seqs max (sampler warmup with the default 256 OOMs), ctx 7936 (8192 misses
-  # the KV budget by 96 tokens). Proven working profile 2026-07-12: 18.4 tok/s.
-  TIGHT_FLAGS="--enforce-eager --language-model-only --max-num-seqs 2"
-  DEFAULT_CTX=7936
+  # one sequence and 1024-token prefill chunks. The 0.94/6144 envelope leaves
+  # activation headroom that the old 0.98/7936 profile did not have.
+  TIGHT_FLAGS="--enforce-eager --language-model-only --max-num-seqs 1 --max-num-batched-tokens 1024"
+  DEFAULT_CTX=6144
+  DEFAULT_GPU_MEMORY_UTILIZATION=0.94
   export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 fi
 
@@ -55,7 +58,7 @@ setsid nohup CoreOfMadness/vllm-host/venv/bin/vllm serve "$MODEL" \
   --host 127.0.0.1 --port 8080 \
   --tensor-parallel-size "$TP" \
   --max-model-len "${MAX_MODEL_LEN:-$DEFAULT_CTX}" \
-  --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.98}" \
+  --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-$DEFAULT_GPU_MEMORY_UTILIZATION}" \
   --dtype auto --trust-remote-code $TIGHT_FLAGS ${EXTRA_ARGS:-} \
   >> "$LOG" 2>&1 </dev/null &
 echo "$!" > "$PID_FILE"

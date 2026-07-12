@@ -590,10 +590,10 @@ class WiringTests(unittest.TestCase):
                 "canonical_model_id": "gemma-31b",
                 "root": "models/gemma-31b",
                 "owned_by": "vllm",
-                "max_model_len": 7936,
+                "max_model_len": 6144,
                 "tokenizer_canary_version": 1,
                 "tokenizer_canary_count": 40,
-                "tokenizer_canary_max_model_len": 7936,
+                "tokenizer_canary_max_model_len": 6144,
                 "tokenizer_canary_token_ids_sha256": "c" * 64,
             },
             "qwen": {
@@ -607,9 +607,9 @@ class WiringTests(unittest.TestCase):
                 "chat_format": "Content-only",
             },
             "operator_profile": {
-                "gemma_max_num_seqs": 2,
+                "gemma_max_num_seqs": 1,
                 "research_max_active": 1,
-                "gemma_max_tokens": 3072,
+                "gemma_max_tokens": 2048,
                 "gemma_max_context_chars": 16000,
                 "qwen_max_tokens": 8192,
                 "qwen_max_context_chars": 80000,
@@ -631,7 +631,7 @@ class WiringTests(unittest.TestCase):
                 "RESEARCH_WARBAND_VERIFIER_MODEL": "qwen.gguf",
                 "RESEARCH_GEMMA_TIMEOUT_SEC": "7200",
                 "RESEARCH_QWEN_TIMEOUT_SEC": "86400",
-                "RESEARCH_GEMMA_MAX_TOKENS": "3072",
+                "RESEARCH_GEMMA_MAX_TOKENS": "2048",
                 "RESEARCH_GEMMA_MAX_CONTEXT_CHARS": "16000",
                 "RESEARCH_QWEN_MAX_TOKENS": "8192",
                 "RESEARCH_QWEN_MAX_CONTEXT_CHARS": "80000",
@@ -713,7 +713,7 @@ class WiringTests(unittest.TestCase):
                 "RESEARCH_WARBAND_ATTEMPT_TIMEOUT_SECONDS": "604800",
                 "RESEARCH_GEMMA_TIMEOUT_SEC": "7200",
                 "RESEARCH_QWEN_TIMEOUT_SEC": "86400",
-                "RESEARCH_GEMMA_MAX_TOKENS": "3072",
+                "RESEARCH_GEMMA_MAX_TOKENS": "2048",
                 "RESEARCH_GEMMA_MAX_CONTEXT_CHARS": "16000",
                 "RESEARCH_QWEN_MAX_TOKENS": "8192",
                 "RESEARCH_QWEN_MAX_CONTEXT_CHARS": "80000",
@@ -859,7 +859,7 @@ class WiringTests(unittest.TestCase):
                         tokens[-1] += 1
                     return {
                         "count": len(tokens),
-                        "max_model_len": 7936,
+                        "max_model_len": 6144,
                         "tokens": tokens,
                         "token_strs": None,
                     }
@@ -874,7 +874,7 @@ class WiringTests(unittest.TestCase):
                     "object": "model",
                     "owned_by": "vllm",
                     "root": root,
-                    "max_model_len": 7936,
+                    "max_model_len": 6144,
                 }
                 return {
                     "object": "list",

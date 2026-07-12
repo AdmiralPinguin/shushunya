@@ -801,7 +801,7 @@ def _build_pipeline(
     if reviewer_model_name != runtime_contract["dispatcher"]["routes"]["qwen"]["model"]:
         raise ProductionRunnerError("Qwen alias does not match the attested dispatcher route")
     gemma_max_tokens = _env_int(
-        "RESEARCH_GEMMA_MAX_TOKENS", 3072, minimum=256, maximum=32768
+        "RESEARCH_GEMMA_MAX_TOKENS", 2048, minimum=256, maximum=32768
     )
     gemma_context_chars = _env_int(
         "RESEARCH_GEMMA_MAX_CONTEXT_CHARS", 16000, minimum=1000, maximum=1_000_000

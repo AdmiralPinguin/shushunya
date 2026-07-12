@@ -70,8 +70,7 @@ class FakeModel:
             return {
                 "candidates": [
                     {
-                        "start_char": chunk["start_char"],
-                        "end_char": chunk["end_char"],
+                        "chunk_id": chunk["chunk_id"],
                         "excerpt": text,
                         "relevance": "high",
                         "reason": "test fixture exposes the complete short source",
@@ -258,15 +257,12 @@ def semantic_accept(
 def reader_find(excerpt: str) -> Callable[[Mapping[str, Any]], Mapping[str, Any]]:
     def respond(payload: Mapping[str, Any]) -> Mapping[str, Any]:
         chunk = payload["untrusted_source_chunk"]
-        local = chunk["normalized_text"].find(excerpt)
-        if local < 0:
+        if chunk["normalized_text"].find(excerpt) < 0:
             return {"candidates": []}
-        start = chunk["start_char"] + local
         return {
             "candidates": [
                 {
-                    "start_char": start,
-                    "end_char": start + len(excerpt),
+                    "chunk_id": chunk["chunk_id"],
                     "excerpt": excerpt,
                     "relevance": "high",
                     "reason": "exact text is relevant to the test question",
@@ -282,15 +278,12 @@ def independent_reader_find(
 ) -> Callable[[Mapping[str, Any]], Mapping[str, Any]]:
     def respond(payload: Mapping[str, Any]) -> Mapping[str, Any]:
         chunk = payload["untrusted_source_chunk"]
-        local = chunk["normalized_text"].find(excerpt)
-        if local < 0:
+        if chunk["normalized_text"].find(excerpt) < 0:
             return {"candidates": []}
-        start = chunk["start_char"] + local
         return {
             "candidates": [
                 {
-                    "start_char": start,
-                    "end_char": start + len(excerpt),
+                    "chunk_id": chunk["chunk_id"],
                     "excerpt": excerpt,
                     "relevance": "high",
                     "reason": "independent scan found material correction or qualification",
@@ -487,6 +480,9 @@ class ResearchPipelineTests(unittest.TestCase):
             "the earlier statement was false."
         )
         source = support + " " + correction
+        invalid_analysis = analyst_ready(
+            [claim_item(text=support, excerpt=support)]
+        )
         model = FakeModel(
             {
                 "planner": [planner()],
@@ -495,9 +491,8 @@ class ResearchPipelineTests(unittest.TestCase):
                     independent_reader_find(correction, "counterevidence")
                 ],
                 "analyst": [
-                    analyst_ready(
-                        [claim_item(text=support, excerpt=support)]
-                    )
+                    invalid_analysis,
+                    copy.deepcopy(invalid_analysis),
                 ],
                 "writer": [writer_claim(text=support)],
                 "semantic_verifier": [semantic_accept()],
@@ -511,6 +506,7 @@ class ResearchPipelineTests(unittest.TestCase):
 
         self.assertEqual("blocked", result.outcome)
         self.assertIn("omitted independently selected material", result.reason)
+        self.assertEqual(2, sum(role == "analyst" for role, _ in model.calls))
         self.assertNotIn("writer", [role for role, _ in model.calls])
         coverage_calls = [
             payload
@@ -631,6 +627,26 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertNotIn("reader", [role for role, _ in model.calls])
         self.assertNotIn("analyst", [role for role, _ in model.calls])
 
+    def test_reader_reserves_analyst_repair_writer_and_review_budget(self) -> None:
+        url = "https://example.test/repair-headroom"
+        model = FakeModel({"planner": [planner()]})
+        result = self.pipeline(
+            model,
+            FakeSearch({"primary query": [SearchHit("Repair headroom", url)]}),
+            FakeFetch({url: fetched(url, "A short source with one exact fact.")}),
+            budgets=ResearchBudgets(
+                max_rounds=1,
+                max_search_queries=1,
+                max_sources=1,
+                max_results_per_query=1,
+                max_model_calls=6,
+            ),
+        ).run(self.spec())
+
+        self.assertEqual("blocked", result.outcome)
+        self.assertIn("finish analysis/review", result.reason)
+        self.assertEqual(["planner"], [role for role, _ in model.calls])
+
     def test_reader_candidate_overflow_blocks_without_silent_drop(self) -> None:
         url = "https://example.test/candidate-overflow"
         source = "Alpha Beta"
@@ -638,18 +654,16 @@ class ResearchPipelineTests(unittest.TestCase):
             {
                 "planner": [planner()],
                 "reader": [
-                    {
+                    lambda payload: {
                         "candidates": [
                             {
-                                "start_char": 0,
-                                "end_char": 5,
+                                "chunk_id": payload["untrusted_source_chunk"]["chunk_id"],
                                 "excerpt": "Alpha",
                                 "relevance": "high",
                                 "reason": "first candidate",
                             },
                             {
-                                "start_char": 6,
-                                "end_char": 10,
+                                "chunk_id": payload["untrusted_source_chunk"]["chunk_id"],
                                 "excerpt": "Beta",
                                 "relevance": "high",
                                 "reason": "second candidate",
@@ -1207,14 +1221,11 @@ class ResearchPipelineTests(unittest.TestCase):
             )
             self.assertIn("exfiltrate-secrets", source_view["normalized_text"])
             excerpt = "The launch date was 2020."
-            start = source_view["start_char"] + source_view["normalized_text"].index(
-                excerpt
-            )
+            self.assertIn(excerpt, source_view["normalized_text"])
             return {
                 "candidates": [
                     {
-                        "start_char": start,
-                        "end_char": start + len(excerpt),
+                        "chunk_id": source_view["chunk_id"],
                         "excerpt": excerpt,
                         "relevance": "high",
                         "reason": "the exact sentence answers the research question",
@@ -1265,22 +1276,20 @@ class ResearchPipelineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.spec(mode="lookup", hypotheses=hypothesis_pair)
 
+        invalid_plan = {
+            "decision": "proceed",
+            "queries": ["query"],
+            "hypotheses": [item.to_dict() for item in hypothesis_pair],
+        }
         model = FakeModel(
-            {
-                "planner": [
-                    {
-                        "decision": "proceed",
-                        "queries": ["query"],
-                        "hypotheses": [item.to_dict() for item in hypothesis_pair],
-                    }
-                ]
-            }
+            {"planner": [invalid_plan, copy.deepcopy(invalid_plan)]}
         )
         search = FakeSearch({})
         result = self.pipeline(model, search, FakeFetch({})).run(self.spec())
         self.assertEqual("blocked", result.outcome)
         self.assertIn("must not create hypotheses", result.reason)
         self.assertEqual([], search.calls)
+        self.assertEqual(2, sum(role == "planner" for role, _ in model.calls))
 
     def test_investigation_searches_each_discriminating_question(self) -> None:
         hypotheses = (
@@ -1334,22 +1343,23 @@ class ResearchPipelineTests(unittest.TestCase):
 
     def test_reader_fabricated_excerpt_is_rejected_before_analyst(self) -> None:
         url = "https://example.test/exact"
+
+        def fabricated_reader(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+            return {
+                "candidates": [
+                    {
+                        "chunk_id": payload["untrusted_source_chunk"]["chunk_id"],
+                        "excerpt": "This",
+                        "relevance": "high",
+                        "reason": "fabricated test excerpt",
+                    }
+                ]
+            }
+
         model = FakeModel(
             {
                 "planner": [planner()],
-                "reader": [
-                    {
-                        "candidates": [
-                            {
-                                "start_char": 0,
-                                "end_char": 4,
-                                "excerpt": "This",
-                                "relevance": "high",
-                                "reason": "fabricated test excerpt",
-                            }
-                        ]
-                    }
-                ],
+                "reader": [fabricated_reader],
             }
         )
         result = self.pipeline(
@@ -1359,28 +1369,31 @@ class ResearchPipelineTests(unittest.TestCase):
         ).run(self.spec())
 
         self.assertEqual("blocked", result.outcome)
-        self.assertIn("does not exactly match source offsets", result.reason)
+        self.assertIn("does not occur exactly in its labeled chunk", result.reason)
         self.assertNotIn("analyst", [role for role, _ in model.calls])
 
     def test_independent_reader_fabricated_excerpt_is_rejected_before_analyst(self) -> None:
         url = "https://example.test/independent-exact"
+
+        def fabricated_independent_reader(
+            payload: Mapping[str, Any],
+        ) -> Mapping[str, Any]:
+            return {
+                "candidates": [
+                    {
+                        "chunk_id": payload["untrusted_source_chunk"]["chunk_id"],
+                        "excerpt": "Omega",
+                        "relevance": "high",
+                        "reason": "fabricated independent excerpt",
+                        "coverage_role": "counterevidence",
+                    }
+                ]
+            }
+
         model = FakeModel(
             {
                 "planner": [planner()],
-                "reader_coverage": [
-                    {
-                        "candidates": [
-                            {
-                                "start_char": 0,
-                                "end_char": 5,
-                                "excerpt": "Omega",
-                                "relevance": "high",
-                                "reason": "fabricated independent excerpt",
-                                "coverage_role": "counterevidence",
-                            }
-                        ]
-                    }
-                ],
+                "reader_coverage": [fabricated_independent_reader],
                 "analyst": [analyst_ready([claim_item()])],
             }
         )
@@ -1391,7 +1404,7 @@ class ResearchPipelineTests(unittest.TestCase):
         ).run(self.spec())
 
         self.assertEqual("blocked", result.outcome)
-        self.assertIn("does not exactly match source offsets", result.reason)
+        self.assertIn("does not occur exactly in its labeled chunk", result.reason)
         self.assertNotIn("analyst", [role for role, _ in model.calls])
         self.assertNotIn("writer", [role for role, _ in model.calls])
 
