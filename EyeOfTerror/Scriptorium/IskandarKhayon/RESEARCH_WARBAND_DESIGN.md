@@ -1,150 +1,279 @@
-# Research Warband — объединённый дизайн
+# Research Warband — исполнимый дизайн v2
 
-Статус: **черновик к строительству** (2026-07-11).
-Сводит воедино: `REWRITE_DECISION.md` (Codex — решение и cutover-гейты), план GPT
-(структура, порядок работ) и эпистемологию/дожимы Claude. Не конфликтует с
-REWRITE_DECISION — конкретизирует его.
+Статус: **контракт к строительству, legacy остаётся production до cutover**
+(2026-07-12).
 
-## Решение (зафиксировано, не переобсуждаем)
+Этот документ конкретизирует `REWRITE_DECISION.md`. Он сохраняет сильную часть
+первого проекта — evidence-first исследование — и исправляет три смешанных уровня:
 
-Старый 10-воркерный Iskandar замораживается как `LegacyIskandar` — источник
-инструментов, провальных примеров и требований, НЕ фундамент. Новый
-`IskandarWarband` строится с нуля по образцу Skitarii/Ceraxia. Совместимость
-сохраняется только по контракту Warmaster: имя губернатора, порт 7101, формат
-final response, формат progress events. Маршрутизация переключается только после
-прохождения eval. Потом legacy удаляется.
+1. целостность и воспроизводимость провенанса;
+2. семантическую поддержку claim источником;
+3. истинность claim.
 
-Латать нельзя: архитектура вокруг фиксированных бумажных воркеров, качество
-меряется числом артефактов/символов, критик проверяет структуру JSON а не истину,
-модель — «советчик» при детерминированных шаблонах. Ремонт = вторая старая Ceraxia.
+Система может гарантировать первое, независимо проверять второе и обязана честно
+выражать неопределённость третьего. Хэш или дословная цитата сами по себе не
+превращают утверждение в истину.
 
-## Архитектура
+## Неподвижная граница полномочий
 
-Один сервис (не десять), роли с собственными контекстами и настоящими инструментами:
-
-```
-goal → ResearchSpec → Scout ⇄ Reader → EvidenceLedger → Analyst → Writer → Verifier
-                                                            ↑______coverage loop______|
-итог: accepted / search_more / clarify / blocked
+```text
+Abaddon
+  -> IskandarKhayon (governor, public port 7101)
+       -> ResearchWarband (native execution backend, shadow port 7201)
 ```
 
-EvidenceLedger — это ДАННЫЕ (главный контракт), а не роль.
+- **Abaddon** принимает приказ, выбирает губернатора и ведёт внешний lifecycle.
+- **Iskandar** принимает лидерское решение: цель исследования, приоритеты,
+  область, допустимые источники и языки, стандарт уверенности, условия успеха,
+  компромиссы и причины эскалации.
+- **ResearchWarband** сама строит подробный ResearchSpec, поисковые запросы,
+  порядок чтения, гипотезы, evidence graph, текст и циклы проверки/доработки.
 
-```
-Scriptorium/IskandarWarband/
-  service.py  mission_store.py  spec.py
-  scout.py  reader.py  analyst.py  writer.py  verifier.py
-  evidence.py  tools.py  eval_suite.py
-```
+Искандар не является Scout, Reader, подробным планировщиком или Writer. Варбанда
+не регистрируется фиктивным Mechanicum worker. Для неё нужен native backend route,
+как у Ceraxia/Skitarii, но без копирования code-specific контрактов.
 
-Из legacy выносится библиотека `research_tools` (за адаптерами): HTTP-fetch с
-ретраями, Playwright-рендер, парсеры HTML/PDF/EPUB/FB2, локальный Corpus,
-безопасные пути, интеграция Warmaster, progress events, проверенные тест-документы.
+Legacy Iskandar продолжает слушать `7101` до прохождения eval. Во время shadow
+публичный facade может направлять явно помеченные native-миссии на `7201`, а
+обычные production-миссии — в старый pipeline. Cutover переключает backend за
+facade, а не переносит личность Искандара в worker-service.
 
-## EvidenceLedger — источник истины
+## Iskandar Research Directive
 
-Ключевой принцип: **у ресёрча нет компилятора, его заменяет провенанс.**
-Утверждение без дословного якоря в заархивированном источнике НЕ СУЩЕСТВУЕТ.
+Единственный лидерский handoff имеет строгую схему и caller bindings:
 
 ```json
 {
-  "sources": [
-    {"id": "source-3", "url": "...", "fetched_at": "...",
-     "snapshot_sha256": "…",          // источник архивируется в Corpus и пришпилен хэшем:
-     "corpus_path": "...",            // веб мутирует и умирает — цитируем СНАПШОТ, не URL
-     "lang": "en"}
-  ],
-  "claims": [
-    {"id": "claim-1",
-     "text": "...",
-     "kind": "fact | inference | assumption",   // обязательное поле: вывод, поданный
-     "importance": "major | minor",              // как факт — главный способ красиво врать
-     "evidence": [
-       {"source_id": "source-3",
-        "excerpt": "дословная цитата",
-        "locator": {"page": 12, "offset": 3410}, // дословный якорь = номер строки в коде
-        "supports": true}
-     ],
-     "confidence": "high | medium | low",
-     "conflicts_with": ["claim-7"]}              // конфликты — первоклассные граждане
-  ]
+  "kind": "iskandar_research_directive",
+  "version": 1,
+  "task_id": "...",
+  "mission_id": "...",
+  "leader": "IskandarKhayon",
+  "decision": "delegate | needs_clarification | escalate | reject",
+  "delegated_to": "ResearchWarband",
+  "research_objective": "...",
+  "depth": "brief | standard | deep | exhaustive",
+  "source_policy": "primary_required | authoritative_preferred | balanced | open_discovery",
+  "error_tolerance": "strict | balanced | exploratory",
+  "answer_mode": "direct_answer | research_brief | investigation | comparative_review | source_map | translation_analysis",
+  "priorities": ["..."],
+  "allowed_source_classes": ["primary_source | official_documentation | standards_specification | legal_or_regulatory | peer_reviewed_research | scholarly_secondary | reputable_journalism | archival_catalog | user_provided_corpus | community_source | anonymous_or_unverified_web | machine_generated_summary"],
+  "prohibited_source_classes": ["same strict source-class enum"],
+  "constraints": ["..."],
+  "success_conditions": ["..."],
+  "output_requirements": ["..."],
+  "escalation_conditions": ["..."],
+  "clarification_question": "one exact question only for needs_clarification; otherwise empty"
 }
 ```
 
-## Verifier — механика сначала, LLM совещательно
+Схема запрещает подробные планы, роли, шаги, URL, поисковые запросы, выбор
+конкретных источников, имена файлов, команды и tool calls — в том числе когда
+они спрятаны внутрь строковых значений разрешённых полей. Source-class поля
+принимают только перечисленные enum-значения, а не URL, домены или запросы.
+Явные ограничения, success conditions и причины эскалации из
+`commander_order` не могут быть отброшены моделью.
 
-Урок Skitarii (Ревьюер резал зелёные проверки): **LLM-мнение не может ветировать
-механически подтверждённое.**
+Native run package хранит точный bounded `commander_order.json`. Receipt
+содержит отдельный `commander_order_sha256`; `prepare_request_sha256` также
+вычисляется из полной канонической команды, цели, task/mission identity. Поэтому
+директива проверяется не только по собственной схеме, но и повторно против
+сохранённого caller authority. Исходный `user_request` остаётся отдельным
+acceptance source и не подменяется лидерской директивой.
 
-Железные проверки (бинарные, исполняемые):
-1. excerpt дословно находится в снапшоте источника (string match) — цитата не выдумана;
-2. ссылка резолвится и snapshot_sha256 совпадает;
-3. числа/даты/имена согласованы по графу claims (противоречие ловится механически);
-4. каждый major-claim имеет ≥1 supports-evidence; kind=fact требует evidence,
-   kind=inference требует ссылки на исходные claims;
-5. переводная цитата сверена с оригиналом (обратный перевод, порог схожести).
+## Один backend, логические роли
 
-LLM-слой (совещательный, не вето): полнота покрытия вопроса, качество аргументации,
-пропущенные контраргументы → review_warning, не reject.
+```text
+directive
+  -> ResearchSpec + visible coverage tree
+  -> Scout <-> Reader
+  -> immutable SourceSnapshots + EvidenceLedger
+  -> Analyst (gap loop; hypotheses only when justified by research mode)
+  -> Writer (draft units carry claim refs)
+  -> deterministic verifier
+  -> independent semantic verifier
+  -> accepted | accepted_with_uncertainty | search_more | clarify | blocked
+```
 
-Финальный текст принимается только если каждый major-claim прошёл железные проверки.
-Текст Writer'а не может содержать утверждений вне леджера (проверяется выравниванием
-предложений на claims; непривязанное существенное предложение = research-false-accept).
+Scout, Reader, Analyst, Writer и Verifier — изолированные контексты и политики
+одного stateful backend, а не десять процессов и не обязательные фиксированные
+шаги каждой миссии.
 
-## Слой «гения» (не реферативщик, а следователь)
+ResearchSpec выбирает режим:
 
-1. **Гипотеза-и-опровержение**: Analyst обязан выдвинуть 2–3 конкурирующие
-   интерпретации; Scout получает задание искать РАЗЛИЧАЮЩИЕ улики (подтверждает
-   одну — убивает другую). Ответ = гипотеза, пережившая попытки убийства.
-2. **Held-out под-вопросы**: приватный верификатор (паттерн spec.build_held_out_plan
-   из Skitarii) генерит критерии «компетентный ответ обязан затронуть Y» — Writer их
-   не видит, подогнать текст нельзя.
-3. **Оригиналы языков**: если источник переводной — Reader тянет оригинал и сверяет
-   (терминология, потери смысла). Фича, которой нет у ширпотребных агентов.
-4. **Кумулятивная эрудиция**: после accepted-миссии леджер вливается в Corpus/граф
-   знаний — варбанда умнеет от работы, замечает противоречия с прошлыми миссиями.
-5. **Честные исходы**: «источники противоречат» и «не нашёл» — полноценные
-   результаты. Уверенный сконфабулированный синтез хуже краша.
+- `lookup` — поиск конкретного ответа и gap-driven проверка;
+- `synthesis` — объединение независимых источников;
+- `investigation` — конкурирующие гипотезы и различающие улики;
+- `interpretation` — аргументы, контраргументы и область применимости;
+- `translation` — выравнивание оригинала и перевода, терминология и варианты.
 
-## Метрики (headline)
+Обязательные 2–3 гипотезы допустимы только в `investigation`/`interpretation`.
+Для lookup они создают выдуманные альтернативы и лишний расход.
 
-- **unsupported-major-claim rate = 0%** — доля существенных утверждений, поданных
-  как обоснованные, но не подтверждённых леджером (аналог false-accept=0 кодовой).
-- coverage question-tree (все под-вопросы закрыты или честно blocked);
-- clarified_when_ambiguous (размытые → вопрос, не молотьба);
-- blocked_when_unanswerable (ловушки на фабрикацию → blocked, не выдумка);
-- quote-accuracy = 100% (дословность цитат — механическая).
+## Источник истины: не один JSON, а связанный ledger
 
-## Eval
+Минимальное ядро данных:
 
-30 задач, 6 категорий × 5 — см. `RESEARCH_WARBAND_EVAL.md`. Обязательно включить
-провальный RISC-V отчёт старого Искандара как регрессионный кейс. Раннер верифицирует
-НЕЗАВИСИМО (перепроверяет цитаты по снапшотам сам), метрики считаются, не зашиваются
-(урок eval'а Skitarii: false_accepted_pct=0.0 «by construction» — пиздёж).
+```text
+SourceSnapshot
+  id, original_uri, final_uri, retrieved_at,
+  raw_sha256, normalized_sha256, media_type, language,
+  parser_name/version, archive_ref, fetch/redirect metadata
 
-## Порядок работ
+SourceSpan
+  id, snapshot_id, typed_locator, normalized_start/end,
+  excerpt, excerpt_sha256, extraction_method
 
-1. research eval (30 задач + RISC-V регрессия) — ДО кода, как контракт;
-2. research_tools: вынести fetch/render/parsers/Corpus за адаптеры;
-3. Reader + реальная проверка источников (снапшоты, хэши, локаторы);
-4. EvidenceLedger (evidence.py) + механический Verifier поверх;
-5. Scout с итеративным поиском (различающие улики);
-6. Analyst: гипотезы, coverage loop;
-7. Writer, ограниченный леджером (выравнивание предложений на claims);
-8. независимый Verifier целиком (механика + LLM-совещательно + held-out);
-9. async lifecycle как у кодовой варбанды (mission_store переиспользовать);
-10. прогнать eval, чинить до прохождения гейтов;
-11. cutover 7101 → новая реализация (гейты из REWRITE_DECISION);
-12. удалить legacy.
+Claim
+  id, proposition, epistemic_role, scope, importance,
+  verification_status, confidence
+
+EvidenceEdge
+  claim_id, span_id,
+  relation: reports | supports | refutes | qualifies | context,
+  entailment_status, reviewer_provenance
+
+Inference
+  conclusion_claim_id, premise_claim_ids, rationale, alternatives
+
+Hypothesis
+  claim_id, discriminating_questions, status
+
+Gap
+  question, search_attempts, searched_scope, remaining_uncertainty
+```
+
+`epistemic_role` не называется самоуверенным `fact`: допустимы
+`source_assertion`, `direct_observation`, `inference`, `assumption`.
+`verification_status` хранится отдельно. Assumption никогда не становится
+verified только из-за уверенного текста модели.
+
+Локатор зависит от носителя:
+
+- HTML: content-addressed snapshot, DOM path и offsets канонического текста;
+- PDF: hash сырых байтов, страница, bbox и mapping нормализованного текста;
+- EPUB: spine item/CFI и canonical span;
+- FB2/XML: element path и canonical span;
+- plain text: byte/character span с явной кодировкой и normalization version.
+
+Raw bytes сохраняются отдельно от нормализованного текста. Live URL после этого
+служит диагностикой свежести, а не acceptance-гейтом исторического снапшота.
+
+## Четыре слоя проверки
+
+### 1. Acquisition/security
+
+Проверяются scheme/redirect/SSRF policy, media type, byte limits, parser result,
+prompt-injection markers и content-addressed archive. Сбой Reader означает
+`source_unavailable`, а не отрицательный факт.
+
+### 2. Детерминированная целостность
+
+Жёстко проверяются:
+
+- raw/normalized hashes и parser provenance;
+- разрешимость typed locator;
+- excerpt и excerpt hash в конкретном snapshot;
+- все cross-references ledger;
+- evidence у major source assertions;
+- premise graph у inference;
+- claim refs каждого существенного draft unit;
+- числовые, временные и entity-конфликты как кандидаты на проверку.
+
+Эти проверки доказывают провенанс и целостность, не истинность.
+
+### 3. Независимый semantic entailment
+
+Отдельный контекст проверяет, действительно ли span поддерживает claim, не
+вырвана ли цитата из отрицания/оговорки, не выдано ли мнение за факт, независимы
+ли источники и корректен ли inference. Семантический провал может блокировать
+acceptance или вернуть `search_more`; он не может переписать механические факты.
+При споре судей система эскалирует неопределённость, а не выбирает удобный ответ.
+
+### 4. Coverage и final alignment
+
+В production Writer видит обязательные требования и coverage tree. Независимый
+reviewer ищет пропуски и новые контраргументы. Настоящие скрытые answer keys и
+rubrics существуют только во внешнем eval, недоступном всей Варбанде.
+
+## Честные исходы
+
+- `accepted` — вопрос закрыт в объявленной области, существенные claims прошли
+  integrity и semantic gates;
+- `accepted_with_uncertainty` — полезный ответ готов, но конфликт или ограничение
+  невозможно снять; оно явно показано;
+- `search_more` — есть конкретный различающий пробел, который можно исследовать;
+- `clarify` — пользовательский выбор меняет область или вид результата;
+- `blocked` — инфраструктура/источники не позволяют компетентный ответ.
+
+«Не найдено» всегда означает «не найдено в перечисленных корпусах, языках,
+запросах и временном бюджете», а не доказательство отсутствия события.
+
+## Кумулятивная память
+
+MVP хранит неизменяемые миссии, CAS-снапшоты и принятые ledger. Он может искать
+по прошлым миссиям, но не вливает их автоматически в глобальную истину.
+
+Постоянный knowledge graph — отдельный этап и отдельный gate. Promotion требует
+версионирования, scope/time validity, source provenance, `supersedes/retracts`,
+повторной валидации и защиты от межпроектного загрязнения. Wiki является
+проекцией для чтения, не каноническим хранилищем claims.
+
+## Что переиспользовать из legacy
+
+Переиспользуются проверенные primitives за новыми адаптерами, а не worker-модули
+и не старый `worker_plan`:
+
+- HTTP/search primitives и retry policy после SSRF/redirect аудита;
+- Playwright rendering после ограничения subresources;
+- HTML, EPUB и FB2 extraction;
+- локальный Corpus, hashing и metadata;
+- commander-order bindings, progress events и run lifecycle;
+- старые failure artifacts и тестовые документы.
+
+Готового PDF parser в legacy нет; его надо реализовать. Старые функции,
+проверяющие только префикс `/work/`, не считаются безопасными без resolve +
+containment + symlink policy.
 
 ## Модели
 
-Голова (планирование/гипотезы) — gemma, как в Skitarii. «Руки» ресёрча — это
-ЧТЕНИЕ и выжимка, не кодинг: Qwen3-Coder не предрешён, нужен отдельный бенч
-читателя (как бенчили кодовую связку). NB: 2026-07-11 в машину ставится RTX 3090
-(24GB) — после установки перебенчить раскладку моделей, возможности вырастут.
+Модель Reader/Analyst выбирается отдельным benchmark, а не наследуется от code
+warband. Разные контексты одной модели дают процессную, но не эпистемическую
+независимость. Для semantic verifier желательно модельное разнообразие или
+эскалация при несогласии. Back-translation — advisory signal, не hard oracle.
 
-## Координация
+## Eval и cutover
 
-Не строить, пока Codex не закончит закалку Skitarii (общий Qwen-слот, VM, 7200).
-Этот док + eval — подготовка, чтобы строительство началось с контракта, а не с нуля.
+30 открытых задач — development smoke. Cutover требует внешнего evaluator,
+замороженных private fixtures, post-freeze metamorphic canaries и shadow traffic.
+Evaluator сам выделяет claims/importance и проверяет citation entailment, чтобы
+Варбанда не могла выиграть метрику, помечая всё `minor` или уходя в `blocked`.
+
+Обязательные независимые метрики:
+
+- provenance/locator/quote integrity;
+- citation entailment precision и claim coverage;
+- factual/known-answer correctness;
+- hidden-facet coverage;
+- contradiction detection;
+- precision/recall для `clarify`, `search_more` и `blocked`;
+- translation meaning errors;
+- latency, model budget и recovery;
+- ноль critical false-accept и ноль corruption persistent knowledge.
+
+Legacy удаляется не сразу после переключения: сначала staged shadow/canary,
+потом rollback window. Полные правила — в `RESEARCH_WARBAND_EVAL.md`.
+
+## Порядок реализации
+
+1. Машинные schema/fixtures и внешний evaluator до production pipeline.
+2. Evidence core: CAS snapshots, typed spans, ledger, deterministic verifier.
+3. Reader + safe acquisition/parsers; затем Scout и iterative gap loop.
+4. Analyst по research modes и semantic entailment verifier.
+5. Writer со structured draft units и claim refs.
+6. Async mission lifecycle и shadow service `7201`.
+7. Iskandar directive + native Abaddon route без удаления legacy.
+8. Visible/private eval, RISC-V false-accept regression, failure injection.
+9. Shadow/canary и только затем cutover.
+
+Ни один этап не объявляется готовым по самоотчёту той же Варбанды.

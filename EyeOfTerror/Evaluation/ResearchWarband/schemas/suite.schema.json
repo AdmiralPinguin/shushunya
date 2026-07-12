@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shushunya.invalid/schemas/research-eval-suite-v1.json",
+  "title": "Research eval suite v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "suite_id", "suite_kind", "visibility", "fixture_manifest", "fixture_sha256", "tasks"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "suite_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "suite_kind": {"enum": ["public_smoke", "private_cutover", "canary"]},
+    "visibility": {"enum": ["public", "private"]},
+    "fixture_manifest": {"type": "string", "minLength": 1},
+    "fixture_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "tasks": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/task"}}
+  },
+  "$defs": {
+    "stringList": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "fact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "claim_contains_all", "final_contains_all", "source_ids", "relations", "span_contains_all"],
+      "properties": {
+        "id": {"type": "string"}, "claim_contains_all": {"$ref": "#/$defs/stringList"},
+        "final_contains_all": {"$ref": "#/$defs/stringList"}, "source_ids": {"$ref": "#/$defs/stringList"},
+        "relations": {"$ref": "#/$defs/stringList"}, "span_contains_all": {"$ref": "#/$defs/stringList"}
+      }
+    },
+    "oracle": {
+      "type": "object", "additionalProperties": false,
+      "required": ["required_facts", "forbidden_claims", "required_conflicts", "required_gap_codes", "max_unsupported_major_claims"],
+      "properties": {
+        "required_facts": {"type": "array", "items": {"$ref": "#/$defs/fact"}},
+        "forbidden_claims": {"type": "array", "items": {"type": "object"}},
+        "required_conflicts": {"type": "array", "items": {"type": "object"}},
+        "required_gap_codes": {"$ref": "#/$defs/stringList"},
+        "clarification": {"type": "object"},
+        "max_unsupported_major_claims": {"type": "integer", "minimum": 0}
+      }
+    },
+    "task": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "category", "request", "limits", "expected_outcomes", "oracle"],
+      "properties": {
+        "id": {"type": "string"}, "category": {"type": "string"},
+        "request": {"type": "object"}, "limits": {"type": "object"},
+        "expected_outcomes": {"type": "array", "items": {"enum": ["accepted", "needs_user", "blocked"]}},
+        "oracle": {"$ref": "#/$defs/oracle"}
+      }
+    }
+  }
+}

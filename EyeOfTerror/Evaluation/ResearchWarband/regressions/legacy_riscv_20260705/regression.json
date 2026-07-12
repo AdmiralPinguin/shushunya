@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "regression_id": "legacy-riscv-current-smoke-20260705",
+  "source_record": "EyeOfTerror/live_runs/scriptorium_research_smoke/iskandar-live-current-smoke-20260705.json",
+  "source_record_sha256": "9b7e41d04dc10c16e5cf8af75357588f53023a44ea7e48e1bce0c88ab661c059",
+  "artifact_oracle": "legacy_artifact_oracle.json",
+  "expected_verdict": "FALSE_ACCEPT",
+  "note": "Only hashes and audited structural counts are retained. Mutable run files and copied web text are deliberately excluded."
+}

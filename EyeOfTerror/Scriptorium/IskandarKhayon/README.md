@@ -5,7 +5,16 @@ Port: `7101`
 Architecture status: the current pipeline is frozen as a legacy compatibility
 service while a clean Research Warband is designed. See
 [`REWRITE_DECISION.md`](REWRITE_DECISION.md) for the accepted replacement scope
-and cutover gates.
+and cutover gates, [`RESEARCH_WARBAND_DESIGN.md`](RESEARCH_WARBAND_DESIGN.md)
+for the executable governor/warband boundary, and
+[`RESEARCH_WARBAND_EVAL.md`](RESEARCH_WARBAND_EVAL.md) for the external
+evaluation contract.
+
+The public Iskandar identity remains the governor on port `7101`. The future
+`ResearchWarband` is a separate native execution backend; it does not replace
+Iskandar's leadership role and is not a synthetic Mechanicum worker. Until the
+external eval and shadow cutover pass, everything below documents the frozen
+legacy implementation.
 
 Iskandar Khayon is the first Inner Circle governor. He owns research, source
 reconstruction, translation, and long-form synthesis tasks. Lore reconstruction

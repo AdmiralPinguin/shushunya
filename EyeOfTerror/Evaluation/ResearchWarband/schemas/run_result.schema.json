@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shushunya.invalid/schemas/research-eval-run-v1.json",
+  "title": "Research eval run result v1",
+  "type": "object",
+  "required": ["schema_version", "runner_version", "suite_id", "suite_sha256", "fixture_manifest_sha256", "run_valid", "run_passed", "metrics", "tasks"],
+  "properties": {
+    "schema_version": {"const": 1}, "runner_version": {"type": "string"},
+    "suite_id": {"type": "string"}, "suite_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "fixture_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "run_valid": {"type": "boolean"}, "run_passed": {"type": "boolean"},
+    "metrics": {"type": "object"}, "tasks": {"type": "array"}
+  }
+}

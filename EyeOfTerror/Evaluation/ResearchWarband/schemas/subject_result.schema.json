@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shushunya.invalid/schemas/research-result-v1.json",
+  "title": "Research subject result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "mission_id", "status", "accepted", "ledger", "search_log"],
+  "properties": {
+    "contract_version": {"const": "research-result/v1"}, "mission_id": {"type": "string"},
+    "status": {"enum": ["accepted", "needs_user", "blocked", "failed"]}, "accepted": {"type": "boolean"},
+    "final_text": {"type": "string"}, "question": {"type": "string"}, "search_log": {"type": "array"},
+    "ledger": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sources", "spans", "claims", "evidence_edges", "derivations", "conflicts", "gaps", "final_claim_refs"],
+      "properties": {
+        "sources": {"type": "array"}, "spans": {"type": "array"}, "claims": {"type": "array"},
+        "evidence_edges": {"type": "array"}, "derivations": {"type": "array"},
+        "conflicts": {"type": "array"}, "gaps": {"type": "array"}, "final_claim_refs": {"type": "array"}
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "regression_id": "legacy-riscv-current-smoke-20260705",
+  "claimed_accepted": true,
+  "claimed_source_count": 15,
+  "claimed_claim_count": 23,
+  "claimed_evidence_coverage_percent": 100,
+  "low_confidence_claim_count": 23,
+  "immutable_snapshot_hash_count": 0,
+  "evidence_locator_count": 0,
+  "required_history_fact_count": 0,
+  "artifact_hashes": {
+    "reconstruction_ru.md": "2f3162c2ac834824a60915822004c466dd6c7726d1d7089dbc23b3e391b5f58f",
+    "research_corpus.json": "1a92687cdcb69cd7f1b5d0b35328e1039acbdf8e029a58b86a21770c40aa2406",
+    "source_snapshots.json": "ca54bc188068b43fa4b096193ee63197bc7eb0f192a71320046864bc432e0545",
+    "source_map.json": "024e8195a3b984780a72573bbcb75b182608ded2ca3b18f7842b0ff55f79fc9e",
+    "critic_report.json": "2d4b309ae06f97cf2865185ad0d6cd0f8913716664b1e53cb578693d5e19d053",
+    "final_manifest.json": "75a914b81e5b2d1085d615b5989ebb1f510fc1331d7f2c78b25e9181cdbf07a2"
+  }
+}

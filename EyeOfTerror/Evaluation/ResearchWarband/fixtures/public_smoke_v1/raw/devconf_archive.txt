@@ -1,0 +1,3 @@
+Synthetic closed-world conference archive
+
+The archive contains programmes for DevConf Minsk 2002 and DevConf Minsk 2004. It contains no programme, transcript, or event record for DevConf Minsk 2003.

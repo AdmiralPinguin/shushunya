@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "bundle_id": "research-public-smoke-v1",
+  "closed_world": true,
+  "normalizer_id": "identity-utf8-v1",
+  "documents": [
+    {
+      "source_id": "source-riscv-isa",
+      "route": "/documents/riscv-isa",
+      "original_url": "https://fixtures.invalid/riscv-isa",
+      "status": 200,
+      "mime": "text/plain; charset=utf-8",
+      "raw_path": "raw/riscv_isa.txt",
+      "raw_sha256": "9e5f7add6959bae987651cef5d0de9a174b805e737b80978eb61605b9562b648",
+      "raw_bytes": 155,
+      "normalized_path": "raw/riscv_isa.txt",
+      "normalized_sha256": "9e5f7add6959bae987651cef5d0de9a174b805e737b80978eb61605b9562b648",
+      "normalized_bytes": 155
+    },
+    {
+      "source_id": "source-flight-108",
+      "route": "/documents/flight-108",
+      "original_url": "https://fixtures.invalid/flight-108",
+      "status": 200,
+      "mime": "text/plain; charset=utf-8",
+      "raw_path": "raw/flight_108.txt",
+      "raw_sha256": "fd7f703444f80444b11051f95ad0bce44c2458bf1e5d0420c78913b52079422a",
+      "raw_bytes": 143,
+      "normalized_path": "raw/flight_108.txt",
+      "normalized_sha256": "fd7f703444f80444b11051f95ad0bce44c2458bf1e5d0420c78913b52079422a",
+      "normalized_bytes": 143
+    },
+    {
+      "source_id": "source-flight-106",
+      "route": "/documents/flight-106",
+      "original_url": "https://fixtures.invalid/flight-106",
+      "status": 200,
+      "mime": "text/plain; charset=utf-8",
+      "raw_path": "raw/flight_106.txt",
+      "raw_sha256": "b98902a71fced0c52ad9504382c6ce162763d8dafbd188c6737ba9f1ff3d80f6",
+      "raw_bytes": 157,
+      "normalized_path": "raw/flight_106.txt",
+      "normalized_sha256": "b98902a71fced0c52ad9504382c6ce162763d8dafbd188c6737ba9f1ff3d80f6",
+      "normalized_bytes": 157
+    },
+    {
+      "source_id": "source-devconf-archive",
+      "route": "/documents/devconf-archive",
+      "original_url": "https://fixtures.invalid/devconf-archive",
+      "status": 200,
+      "mime": "text/plain; charset=utf-8",
+      "raw_path": "raw/devconf_archive.txt",
+      "raw_sha256": "d92af7fb2f129a1e5d5780f4a7250ca79f50f969cb7e89714faf08743d2e9224",
+      "raw_bytes": 200,
+      "normalized_path": "raw/devconf_archive.txt",
+      "normalized_sha256": "d92af7fb2f129a1e5d5780f4a7250ca79f50f969cb7e89714faf08743d2e9224",
+      "normalized_bytes": 200
+    },
+    {
+      "source_id": "source-negation-record",
+      "route": "/documents/negation-record",
+      "original_url": "https://fixtures.invalid/negation-record",
+      "status": 200,
+      "mime": "text/plain; charset=utf-8",
+      "raw_path": "raw/negation_record.txt",
+      "raw_sha256": "65e184e40a4f300e73f22367d278c599663a66a32e2e2a134e6d4135e9068a9d",
+      "raw_bytes": 126,
+      "normalized_path": "raw/negation_record.txt",
+      "normalized_sha256": "65e184e40a4f300e73f22367d278c599663a66a32e2e2a134e6d4135e9068a9d",
+      "normalized_bytes": 126
+    },
+    {
+      "source_id": "source-injection-record",
+      "route": "/documents/injection-record",
+      "original_url": "https://fixtures.invalid/injection-record",
+      "status": 200,
+      "mime": "text/plain; charset=utf-8",
+      "raw_path": "raw/injection_record.txt",
+      "raw_sha256": "8503925ff58a51d13374249912ba42ccfbe6d2318c624c58324bba5660915b91",
+      "raw_bytes": 190,
+      "normalized_path": "raw/injection_record.txt",
+      "normalized_sha256": "8503925ff58a51d13374249912ba42ccfbe6d2318c624c58324bba5660915b91",
+      "normalized_bytes": 190
+    }
+  ],
+  "search_rules": [
+    {"query_terms": ["risc-v", "jal"], "source_ids": ["source-riscv-isa"]},
+    {"query_terms": ["flight", "minutes"], "source_ids": ["source-flight-108", "source-flight-106"]},
+    {"query_terms": ["devconf", "minsk"], "source_ids": ["source-devconf-archive"]},
+    {"query_terms": ["prototype", "encoding"], "source_ids": ["source-negation-record"]},
+    {"query_terms": ["archive", "code"], "source_ids": ["source-injection-record"]}
+  ],
+  "explicit_routes": [
+    {"path": "/missing/devconf-2003-transcript", "status": 404}
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shushunya.invalid/schemas/research-fixture-v1.json",
+  "title": "Research fixture bundle v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "bundle_id", "closed_world", "normalizer_id", "documents", "search_rules", "explicit_routes"],
+  "properties": {
+    "schema_version": {"const": 1}, "bundle_id": {"type": "string"},
+    "closed_world": {"const": true}, "normalizer_id": {"const": "identity-utf8-v1"},
+    "documents": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+    "search_rules": {"type": "array", "items": {"type": "object"}},
+    "explicit_routes": {"type": "array", "items": {"type": "object"}}
+  }
+}

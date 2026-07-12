@@ -16,6 +16,13 @@ its own evaluation suite and a compatibility cutover is ready.
 
 ## Target Warband
 
+The public `IskandarKhayon` service remains the Inner Circle governor on port
+`7101`; it is not the execution warband. It emits a strict leadership-level
+research directive. A separate native `ResearchWarband` backend (initial shadow
+port `7201`) owns detailed research planning and execution. The backend must not
+be represented as a synthetic Mechanicum worker, and Iskandar directives must
+reject search queries, URLs, worker steps, tool calls, and other detailed plans.
+
 The replacement is organized around six explicit responsibilities:
 
 1. **Scout** — discover candidate sources and choose acquisition strategy.
@@ -53,6 +60,12 @@ The new Research Warband may replace Iskandar only when it demonstrates:
 - Warmaster preflight, mission lifecycle, and rollback compatibility;
 - a measured result at least equal to the current service on retained legacy
   scenarios and materially better on multi-source synthesis.
+
+The 30 public design tasks are a development smoke, not sufficient cutover
+evidence. Cutover additionally requires an evaluator outside the warband,
+sealed fixtures/keys, post-freeze canaries, staged shadow traffic, and a tested
+rollback window. Integrity checks prove snapshot provenance; independent
+semantic review must separately prove that cited spans support the claims.
 
 Until those gates pass, the old Iskandar is frozen legacy, not deleted production
 code.

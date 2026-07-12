@@ -1,0 +1,3 @@
+Synthetic mission archive B
+
+Archive B reports that the flight lasted 106 minutes. Its timing convention excludes the launch and landing boundary intervals.

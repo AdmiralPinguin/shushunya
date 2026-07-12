@@ -1,0 +1,3 @@
+Synthetic evaluator source: RV32I control transfer
+
+The JAL instruction uses the J-type encoding. A plain unconditional jump is encoded as JAL with rd=x0.
