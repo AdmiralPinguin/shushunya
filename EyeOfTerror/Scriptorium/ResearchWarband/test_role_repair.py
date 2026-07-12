@@ -9,7 +9,7 @@ from typing import Any, Mapping
 from ResearchWarband import pipeline as pipeline_module
 from ResearchWarband.execution_policy import ExecutionPolicy
 from ResearchWarband.model_client import ModelClientError, TrustedReviewBoundary
-from ResearchWarband.pipeline import ResearchPipeline, ResearchSpec
+from ResearchWarband.pipeline import ResearchBudgets, ResearchPipeline, ResearchSpec
 from ResearchWarband.snapshot_store import SnapshotStore
 
 
@@ -88,12 +88,14 @@ class RoleRepairTests(unittest.TestCase):
         self.store = SnapshotStore(Path(self.tempdir.name) / "snapshots")
 
     @staticmethod
-    def spec(question: str = "Find the exact answer.") -> ResearchSpec:
+    def spec(
+        question: str = "Find the exact answer.", *, depth: str = "brief"
+    ) -> ResearchSpec:
         policy = ExecutionPolicy(
             task_id="repair-task",
             mission_id="repair-mission",
             research_objective=question,
-            depth="brief",
+            depth=depth,
             source_policy="balanced",
             error_tolerance="strict",
             answer_mode="direct_answer",
@@ -118,7 +120,10 @@ class RoleRepairTests(unittest.TestCase):
         )
 
     def pipeline(
-        self, author: QueueModel, search: NoHitsSearch | None = None
+        self,
+        author: QueueModel,
+        search: NoHitsSearch | None = None,
+        budgets: ResearchBudgets | None = None,
     ) -> tuple[ResearchPipeline, NoHitsSearch]:
         selected_search = search or NoHitsSearch()
         reviewer = QueueModel({}, stable_identity="repair-review-model")
@@ -132,6 +137,7 @@ class RoleRepairTests(unittest.TestCase):
                 search=selected_search,
                 fetch=NoFetch(),
                 snapshot_store=self.store,
+                budgets=budgets or ResearchBudgets.for_depth("brief"),
             ),
             selected_search,
         )
@@ -180,6 +186,37 @@ class RoleRepairTests(unittest.TestCase):
         contract = first_payload["output_contract"]
         self.assertIn("clarification_question", contract["optional_fields"])
         self.assertIn("clarification_question", contract["decision_rules"]["clarify"])
+
+    def test_planner_repairs_clarification_into_objective_language(self) -> None:
+        objective = "Разбери историю вопроса."
+        author = QueueModel(
+            {
+                "planner": [
+                    {
+                        "decision": "clarify",
+                        "clarification_question": "Which exact topic should be analyzed?",
+                    },
+                    {
+                        "decision": "clarify",
+                        "clarification_question": "Какой вопрос или какую тему нужно разобрать?",
+                    },
+                ]
+            },
+            stable_identity="repair-author-model",
+        )
+        pipeline, search = self.pipeline(author)
+
+        result = pipeline.run(self.spec(objective))
+
+        self.assertEqual("clarify", result.outcome)
+        self.assertIn("Какой вопрос", result.reason)
+        planner_calls = [payload for role, payload in author.calls if role == "planner"]
+        self.assertEqual(2, len(planner_calls))
+        self.assertIn(
+            "objective language",
+            planner_calls[1]["repair_request"]["validator_error"],
+        )
+        self.assertEqual([], search.calls)
 
     def test_planner_empty_queries_are_repaired_before_any_search(self) -> None:
         author = QueueModel(
@@ -313,10 +350,12 @@ class RoleRepairTests(unittest.TestCase):
             "hypothesis_assessments": [],
             "next_queries": [],
         }
+        repaired_gap = blocked_analyst("exact query")
+        repaired_gap["gaps"][0]["search_attempts"] = ["forged unexecuted query"]
         author = QueueModel(
             {
                 "planner": [{"decision": "proceed", "queries": ["exact query"]}],
-                "analyst": [malformed, blocked_analyst("exact query")],
+                "analyst": [malformed, repaired_gap],
             },
             stable_identity="repair-author-model",
         )
@@ -327,6 +366,7 @@ class RoleRepairTests(unittest.TestCase):
         self.assertEqual("blocked", result.outcome)
         self.assertEqual(3, result.model_calls)
         self.assertEqual("gap-unanswered-source", result.ledger.gaps[0].id)
+        self.assertEqual(("exact query",), result.ledger.gaps[0].search_attempts)
         analyst_calls = [payload for role, payload in author.calls if role == "analyst"]
         self.assertEqual(2, len(analyst_calls))
         first_payload, repair_payload = analyst_calls
@@ -346,10 +386,90 @@ class RoleRepairTests(unittest.TestCase):
                 "question",
                 "status",
                 "related_claim_ids",
-                "search_attempts",
             },
             set(first_payload["output_contract"]["gap_item"]["required_fields"]),
         )
+        self.assertEqual(
+            ["search_attempts"],
+            first_payload["output_contract"]["gap_item"]["optional_fields"],
+        )
+
+    def test_analyst_repairs_early_zero_source_block_into_novel_search(self) -> None:
+        search_more = {
+            "decision": "search_more",
+            "reason": "broaden the failed lookup",
+            "claims": [],
+            "inferences": [],
+            "gaps": [],
+            "hypothesis_assessments": [],
+            "next_queries": ["archive record code"],
+        }
+        author = QueueModel(
+            {
+                "planner": [{"decision": "proceed", "queries": ["archival code"]}],
+                "analyst": [
+                    blocked_analyst("archival code"),
+                    search_more,
+                    blocked_analyst("archive record code"),
+                ],
+            },
+            stable_identity="repair-author-model",
+        )
+        budgets = ResearchBudgets(max_rounds=2, max_search_queries=2)
+        pipeline, search = self.pipeline(author, budgets=budgets)
+
+        result = pipeline.run(self.spec(depth="standard"))
+
+        self.assertEqual("blocked", result.outcome)
+        self.assertEqual(
+            ["archival code", "archive record code"],
+            [query for query, _limit in search.calls],
+        )
+        analyst_calls = [payload for role, payload in author.calls if role == "analyst"]
+        self.assertEqual(3, len(analyst_calls))
+        self.assertIn(
+            "zero-source acquisition",
+            analyst_calls[1]["repair_request"]["validator_error"],
+        )
+        self.assertEqual(4, result.model_calls)
+
+    def test_analyst_repairs_repeated_search_more_query(self) -> None:
+        repeated = {
+            "decision": "search_more",
+            "claims": [],
+            "inferences": [],
+            "gaps": [],
+            "hypothesis_assessments": [],
+            "next_queries": ["archival code"],
+        }
+        novel = {**repeated, "next_queries": ["archive record code"]}
+        author = QueueModel(
+            {
+                "planner": [{"decision": "proceed", "queries": ["archival code"]}],
+                "analyst": [
+                    repeated,
+                    novel,
+                    blocked_analyst("archive record code"),
+                ],
+            },
+            stable_identity="repair-author-model",
+        )
+        budgets = ResearchBudgets(max_rounds=2, max_search_queries=2)
+        pipeline, search = self.pipeline(author, budgets=budgets)
+
+        result = pipeline.run(self.spec(depth="standard"))
+
+        self.assertEqual("blocked", result.outcome)
+        self.assertEqual(
+            ["archival code", "archive record code"],
+            [query for query, _limit in search.calls],
+        )
+        analyst_calls = [payload for role, payload in author.calls if role == "analyst"]
+        self.assertIn(
+            "must be novel",
+            analyst_calls[1]["repair_request"]["validator_error"],
+        )
+        self.assertEqual(4, result.model_calls)
 
     def test_second_invalid_response_fails_closed_without_third_call(self) -> None:
         invalid = {"decision": "clarify"}

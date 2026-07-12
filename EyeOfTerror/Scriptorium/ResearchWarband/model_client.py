@@ -200,7 +200,11 @@ _ROLE_INSTRUCTIONS = {
         "direct_observation must have at least one candidate with relation=supports; "
         "reports alone is not deterministic provenance support. For negative facts, "
         "state the negative proposition as the claim and support it with the exact "
-        "negative excerpt."
+        "negative excerpt. Never construct gap.search_attempts: executed searches are "
+        "application-owned facts. Every search_more next_query must be novel relative "
+        "to searched_queries and broaden retrieval with concrete synonyms, likely "
+        "units, named entities, or source vocabulary rather than paraphrasing a failed "
+        "query. Preserve bilingual coverage for non-English objectives."
     ),
     "writer": (
         "Return one JSON object with structured draft units. Every unit must have "

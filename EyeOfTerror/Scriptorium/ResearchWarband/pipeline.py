@@ -921,7 +921,8 @@ class ResearchPipeline:
                 "decision": ["proceed", "clarify", "blocked"],
                 "reason": "string",
                 "clarification_question": (
-                    "non-empty string required when decision is clarify"
+                    "non-empty direct question required when decision is clarify; "
+                    "use the objective language unless language_policy requests otherwise"
                 ),
                 "queries": "array of unique non-empty search-query strings",
                 "hypothesis_item": {
@@ -1002,30 +1003,37 @@ class ResearchPipeline:
                     ledger=ledger,
                 )
             if analyst["decision"] == "search_more":
-                pending_queries = self._dedupe_queries(analyst["next_queries"])
-                if not pending_queries:
-                    raise ResearchProtocolError(
-                        "analyst requested search_more without a concrete query"
-                    )
+                pending_queries = self._require_novel_queries(
+                    state,
+                    analyst["next_queries"],
+                    "analyst search_more",
+                )
                 continue
 
-            units = self._parse_writer(
-                self._call_model(
-                    state,
-                    "writer",
-                    {
-                        "task_id": spec.task_id,
-                        "spec": spec.to_dict(),
-                        "ledger": ledger.to_dict(),
-                        "writer_policy": {
-                            "all_units_structured": True,
-                            "all_factual_units_require_claim_refs": True,
-                            "not_found_requires_gap_refs_and_searched_scope": True,
-                            "new_factual_units_forbidden": True,
-                        },
-                    },
+            writer_payload = {
+                "task_id": spec.task_id,
+                "spec": spec.to_dict(),
+                "ledger": ledger.to_dict(),
+                "writer_policy": {
+                    "all_units_structured": True,
+                    "all_factual_units_require_claim_refs": True,
+                    "not_found_requires_gap_refs_and_searched_scope": True,
+                    "new_factual_units_forbidden": True,
+                },
+                "output_contract": {
+                    "required_fields": ["units"],
+                    "unknown_fields_forbidden": True,
+                    "units": "array of strict structured draft-unit objects",
+                },
+            }
+            units = self._call_validated_author_role(
+                state,
+                "writer",
+                writer_payload,
+                lambda raw: self._parse_writer(
+                    raw,
+                    ledger,
                 ),
-                ledger,
             )
             state.latest_units = units
             unit_payloads = tuple(unit.to_dict() for unit in units)
@@ -1074,11 +1082,11 @@ class ResearchPipeline:
             state.latest_ledger = reviewed_ledger
 
             if review.decision == "search_more":
-                pending_queries = self._dedupe_queries(review.next_queries)
-                if not pending_queries:
-                    raise ResearchProtocolError(
-                        "semantic verifier requested search_more without a query"
-                    )
+                pending_queries = self._require_novel_queries(
+                    state,
+                    review.next_queries,
+                    "semantic verifier search_more",
+                )
                 continue
             if review.decision == "blocked":
                 return self._result(
@@ -1209,6 +1217,21 @@ class ResearchPipeline:
         self, raw: Mapping[str, Any], spec: ResearchSpec
     ) -> tuple[dict[str, Any], tuple[str, ...]]:
         plan = self._parse_plan(raw, spec)
+        if plan["decision"] == "clarify":
+            objective_script = _dominant_non_latin_script(spec.question)
+            clarification = plan["clarification_question"]
+            if objective_script is not None and not any(
+                _letter_script(character) == objective_script
+                for character in clarification
+            ):
+                raise ResearchProtocolError(
+                    "planner clarification_question must use the objective language"
+                )
+            if "?" not in clarification or len(clarification) < 20:
+                raise ResearchProtocolError(
+                    "planner clarification_question must be a specific direct question"
+                )
+            return plan, ()
         if plan["decision"] != "proceed":
             return plan, ()
         pending_queries = self._dedupe_queries(
@@ -1287,8 +1310,31 @@ class ResearchPipeline:
                 result.append(query)
         return tuple(result)
 
+    def _require_novel_queries(
+        self,
+        state: _RunState,
+        values: Sequence[str],
+        context: str,
+    ) -> tuple[str, ...]:
+        queries = self._dedupe_queries(values)
+        if not queries:
+            raise ResearchProtocolError(f"{context} requires a concrete query")
+        searched = {query.casefold() for query in state.searched_queries}
+        if any(query.casefold() in searched for query in queries):
+            raise ResearchProtocolError(
+                f"{context} queries must be novel relative to searched_queries; "
+                "expand concrete synonyms, units, named entities, or source vocabulary"
+            )
+        return queries
+
     def _acquire_round(self, state: _RunState, queries: Sequence[str]) -> None:
         for query in queries:
+            if query.casefold() in {
+                searched.casefold() for searched in state.searched_queries
+            }:
+                raise ResearchPipelineError(
+                    "internal scheduler attempted to repeat an executed search query"
+                )
             if len(state.searched_queries) >= state.budgets.max_search_queries:
                 state.diagnostics.append("search_query_budget_exhausted")
                 return
@@ -1486,13 +1532,13 @@ class ResearchPipeline:
         ]
         # Reserve both the initial and one repair call for every uncached author
         # Reader chunk, plus the independent Reader pass, initial Analyst and its
-        # repair, Writer, and independent semantic review. Complete reading may
+        # repair, Writer and its repair, and independent semantic review. Complete reading may
         # never consume the only path to a terminal answer.
         if (
             state.model_calls
             + (2 * len(uncached))
             + len(independent_uncached)
-            + 4
+            + 5
             > state.budgets.max_model_calls
         ):
             raise ResearchBudgetExhausted(
@@ -1765,14 +1811,20 @@ class ResearchPipeline:
                         "question",
                         "status",
                         "related_claim_ids",
-                        "search_attempts",
                     ],
+                    "optional_fields": ["search_attempts"],
                     "unknown_fields_forbidden": True,
+                    "id": (
+                        "stable semantic identifier; use not_found_closed_world when a "
+                        "bounded corpus was completely searched and exact evidence states "
+                        "the requested record is absent"
+                    ),
                     "question": "non-empty string",
                     "status": ["open", "blocked", "resolved"],
                     "related_claim_ids": "array of unique existing claim IDs",
                     "search_attempts": (
-                        "array containing only unique exact strings from searched_queries"
+                        "application-owned execution fact; omit this field. If supplied, "
+                        "its value is ignored and the exact searched_queries log is used"
                     ),
                 },
                 "hypothesis_assessment_item": {
@@ -1807,6 +1859,12 @@ class ResearchPipeline:
                     "ready": "requires at least one structurally valid claim",
                     "search_more": "requires at least one non-empty next_queries item",
                     "clarify": "requires a non-empty clarification_question",
+                    "blocked": (
+                        "if no source was acquired while search rounds and query budget "
+                        "remain, blocked is forbidden: use search_more with novel "
+                        "morphological base forms, synonyms, likely units, named entities, "
+                        "or source vocabulary"
+                    ),
                     "next_queries": "array of unique non-empty search-query strings",
                 },
             },
@@ -1866,6 +1924,26 @@ class ResearchPipeline:
         analyst = self._parse_analyst(raw)
         if analyst["decision"] == "clarify":
             return analyst, None
+        if (
+            analyst["decision"] == "blocked"
+            and not state.snapshots
+            and state.rounds_used < state.budgets.max_rounds
+            and len(state.searched_queries) < state.budgets.max_search_queries
+        ):
+            raise ResearchProtocolError(
+                "analyst cannot block after zero-source acquisition while bounded search "
+                "capacity remains; return search_more with novel morphological base "
+                "forms, synonyms, likely units, named entities, or source vocabulary"
+            )
+        if analyst["decision"] == "search_more":
+            analyst = {
+                **analyst,
+                "next_queries": self._require_novel_queries(
+                    state,
+                    analyst["next_queries"],
+                    "analyst search_more",
+                ),
+            }
         ledger = self._build_ledger(
             state=state,
             analyst=analyst,
@@ -2056,19 +2134,10 @@ class ResearchPipeline:
                 raw_gap,
                 f"analyst gap[{index}]",
                 required=frozenset(
-                    {"id", "question", "status", "related_claim_ids", "search_attempts"}
+                    {"id", "question", "status", "related_claim_ids"}
                 ),
+                optional=frozenset({"search_attempts"}),
             )
-            search_attempts = _strings(
-                data["search_attempts"], "gap.search_attempts"
-            )
-            unknown_attempts = {
-                item.casefold() for item in search_attempts
-            } - {item.casefold() for item in state.searched_queries}
-            if unknown_attempts:
-                raise ResearchProtocolError(
-                    "gap.search_attempts may contain only queries actually executed"
-                )
             gaps.append(
                 Gap(
                     id=_identifier(data["id"], f"gap[{index}].id"),
@@ -2079,7 +2148,7 @@ class ResearchPipeline:
                     related_claim_ids=_ids(
                         data["related_claim_ids"], "gap.related_claim_ids"
                     ),
-                    search_attempts=search_attempts,
+                    search_attempts=tuple(state.searched_queries),
                 )
             )
 

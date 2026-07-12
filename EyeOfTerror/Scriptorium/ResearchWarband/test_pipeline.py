@@ -643,7 +643,7 @@ class ResearchPipelineTests(unittest.TestCase):
                 max_search_queries=1,
                 max_sources=1,
                 max_results_per_query=1,
-                max_model_calls=7,
+                max_model_calls=8,
             ),
         ).run(self.spec())
 
@@ -686,7 +686,7 @@ class ResearchPipelineTests(unittest.TestCase):
                 max_search_queries=1,
                 max_sources=1,
                 max_results_per_query=1,
-                max_model_calls=8,
+                max_model_calls=9,
                 max_reader_candidates_per_source=1,
                 max_reader_candidates_per_round=1,
             ),
@@ -1202,7 +1202,12 @@ class ResearchPipelineTests(unittest.TestCase):
                 ],
             }
         )
-        result = self.pipeline(model, FakeSearch({}), FakeFetch({})).run(self.spec())
+        result = self.pipeline(
+            model,
+            FakeSearch({}),
+            FakeFetch({}),
+            budgets=ResearchBudgets(max_rounds=1, max_search_queries=1),
+        ).run(self.spec())
 
         self.assertEqual("blocked", result.outcome)
         self.assertEqual("blocked", result.ledger.gaps[0].status)
@@ -1317,7 +1322,12 @@ class ResearchPipelineTests(unittest.TestCase):
             }
         )
         search = FakeSearch({})
-        result = self.pipeline(model, search, FakeFetch({})).run(
+        result = self.pipeline(
+            model,
+            search,
+            FakeFetch({}),
+            budgets=ResearchBudgets(max_rounds=1, max_search_queries=3),
+        ).run(
             self.spec(mode="investigation", hypotheses=hypotheses)
         )
 
@@ -1337,13 +1347,32 @@ class ResearchPipelineTests(unittest.TestCase):
 
     def test_writer_cannot_emit_an_ungrounded_factual_unit(self) -> None:
         model, search, fetcher = self.accepted_fixture()
-        model.responses["writer"] = [writer_claim(claim_refs=[])]
+        invalid = writer_claim(claim_refs=[])
+        model.responses["writer"] = [invalid, invalid]
         model.responses["semantic_verifier"] = []
         result = self.pipeline(model, search, fetcher).run(self.spec())
 
         self.assertEqual("blocked", result.outcome)
         self.assertIn("lacks source/direct claim refs", result.reason)
+        self.assertEqual(2, len([role for role, _ in model.calls if role == "writer"]))
         self.assertNotIn("semantic_verifier", [role for role, _ in model.calls])
+
+    def test_writer_repairs_missing_units_once(self) -> None:
+        model, search, fetcher = self.accepted_fixture()
+        model.responses["writer"] = [
+            {"reason": "PREVIOUS-WRITER-OUTPUT-MARKER"},
+            writer_claim(text="The answer is Alpha."),
+        ]
+
+        result = self.pipeline(model, search, fetcher).run(self.spec())
+
+        self.assertEqual("accepted", result.outcome)
+        writer_calls = [payload for role, payload in model.calls if role == "writer"]
+        self.assertEqual(2, len(writer_calls))
+        repair = writer_calls[1]["repair_request"]
+        self.assertIn("missing fields: units", repair["validator_error"])
+        self.assertNotIn("PREVIOUS-WRITER-OUTPUT-MARKER", str(writer_calls[1]))
+        self.assertEqual(["units"], writer_calls[0]["output_contract"]["required_fields"])
 
     def test_reader_fabricated_excerpt_is_rejected_before_analyst(self) -> None:
         url = "https://example.test/exact"
@@ -1400,7 +1429,7 @@ class ResearchPipelineTests(unittest.TestCase):
             model,
             FakeSearch({"primary query": [SearchHit("Reader repair", url)]}),
             FakeFetch({url: fetched(url, source)}),
-            budgets=ResearchBudgets(max_model_calls=8),
+            budgets=ResearchBudgets(max_model_calls=9),
         ).run(self.spec())
 
         self.assertEqual("accepted", result.outcome)
