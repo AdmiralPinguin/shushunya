@@ -92,6 +92,18 @@ def _leadership_directive(task_id: str) -> dict:
     }
 
 
+def _acceptance_source(task_id: str, user_request: str = "fix app.py") -> dict:
+    return {
+        "type": "commander_order_user_request",
+        "protocol_version": 1,
+        "mission_id": f"mission-{task_id}",
+        "delegating_task_id": task_id,
+        "from": "Warmaster",
+        "to": "Ceraxia",
+        "user_request": user_request,
+    }
+
+
 class TestPatchBundle(unittest.TestCase):
     def test_skitarii_validates_and_renders_ceraxia_leadership_context(self):
         directive = {
@@ -130,6 +142,55 @@ class TestPatchBundle(unittest.TestCase):
                 },
                 "wm-parent-task-a1",
             )
+
+    def test_acceptance_source_is_exact_bounded_and_bound_to_directive(self):
+        directive = _leadership_directive("source-unit")
+        source = _acceptance_source(
+            "source-unit", "Create marker.txt containing exactly SOURCE_A.",
+        )
+        self.assertEqual(
+            service.acceptance_user_request_from_payload(
+                {"acceptance_source": source}, directive, required=True,
+            ),
+            source["user_request"],
+        )
+        cases = {
+            "missing": None,
+            "unknown field": {**source, "extra": "untrusted"},
+            "wrong mission": {**source, "mission_id": "mission-other"},
+            "wrong task": {**source, "delegating_task_id": "other"},
+            "wrong authority": {**source, "from": "Ceraxia"},
+            "nul": {**source, "user_request": "A\x00B"},
+            "surrogate identity": {**source, "mission_id": "\ud800"},
+            "surrogate request": {**source, "user_request": "\ud800"},
+            "oversize": {
+                **source,
+                "user_request": "x" * (service.MAX_ACCEPTANCE_SOURCE_BYTES + 1),
+            },
+        }
+        for label, candidate in cases.items():
+            payload = {} if candidate is None else {"acceptance_source": candidate}
+            with self.subTest(case=label), self.assertRaises(service.CeraxiaDirectiveError):
+                service.acceptance_user_request_from_payload(
+                    payload, directive, required=True,
+                )
+
+        error = service.execution_authorization_error(
+            {
+                "task_id": "source-unit",
+                "leadership_directive": directive,
+            },
+            "source-unit",
+        )
+        self.assertEqual(error[1]["error_code"], "acceptance_source_invalid")
+        blocked = service.execute_mission({
+            "goal": "fix app.py",
+            "task_id": "source-unit",
+            "leadership_directive": directive,
+        })
+        self.assertEqual(blocked["error_code"], "acceptance_source_invalid")
+        self.assertEqual(blocked["acceptance_source_status"], "invalid")
+        self.assertNotIn("leadership_directive_status", blocked)
 
     def test_symlink_scan_uses_a_synchronous_trusted_inventory(self):
         class RecordingExecutor:
@@ -555,6 +616,7 @@ class TestHealthRoute(unittest.TestCase):
         self.assertTrue(identity["held_out_required"])
         authorization = identity["execution_authorization"]
         self.assertTrue(authorization["ceraxia_leadership_directive_required"])
+        self.assertTrue(authorization["acceptance_source_required"])
         self.assertTrue(authorization["standalone_test_payload_flag_required"])
         self.assertIs(
             authorization["standalone_test_mode_enabled"],
@@ -867,6 +929,7 @@ class TestHealthRoute(unittest.TestCase):
             verdict = service.execute_mission({
                 "goal": "fix app.py", "task_id": "busy-unit",
                 "leadership_directive": _leadership_directive("busy-unit"),
+                "acceptance_source": _acceptance_source("busy-unit"),
                 "checks": [{"cmd": "python3 app.py"}],
             })
         self.assertEqual(verdict["status"], "blocked")
@@ -881,6 +944,7 @@ class TestHealthRoute(unittest.TestCase):
             verdict = service.execute_mission({
                 "goal": "fix app.py", "task_id": "uncertain-init",
                 "leadership_directive": _leadership_directive("uncertain-init"),
+                "acceptance_source": _acceptance_source("uncertain-init"),
                 "checks": [{"cmd": "true"}],
             })
         self.assertEqual(verdict["status"], "blocked")
@@ -1228,11 +1292,13 @@ class TestHttpRequestGate(unittest.TestCase):
             "goal": "fix",
             "task_id": "directed-sync",
             "leadership_directive": _leadership_directive("directed-sync"),
+            "acceptance_source": _acceptance_source("directed-sync"),
         }
         async_payload = {
             "goal": "fix",
             "task_id": "directed-async",
             "leadership_directive": _leadership_directive("directed-async"),
+            "acceptance_source": _acceptance_source("directed-async"),
         }
         with (
             tempfile.TemporaryDirectory() as temporary,
@@ -1382,6 +1448,7 @@ class TestMissionLifecycleRaces(unittest.TestCase):
                 {
                     "goal": "x", "task_id": "cancel-before-attach",
                     "leadership_directive": _leadership_directive("cancel-before-attach"),
+                    "acceptance_source": _acceptance_source("cancel-before-attach"),
                     "checks": [{"cmd": "true"}],
                 },
                 mission,
@@ -1436,12 +1503,14 @@ class TestMissionLifecycleRaces(unittest.TestCase):
             verdict1 = service.execute_mission({
                 "goal": "one", "task_id": "one",
                 "leadership_directive": _leadership_directive("one"),
+                "acceptance_source": _acceptance_source("one"),
             }, missions[0])
             # A second ownership attempt starts only after the first release.
             self.assertEqual(first.releases, 1)
             verdict2 = service.execute_mission({
                 "goal": "two", "task_id": "two",
                 "leadership_directive": _leadership_directive("two"),
+                "acceptance_source": _acceptance_source("two"),
             }, missions[1])
 
         for verdict in (verdict1, verdict2):
@@ -1591,6 +1660,7 @@ class TestHeldOutLifecycle(unittest.TestCase):
             return service.execute_mission({
                 "goal": "fix app.py", "task_id": "heldout-unit",
                 "leadership_directive": _leadership_directive("heldout-unit"),
+                "acceptance_source": _acceptance_source("heldout-unit"),
                 "checks": [{"cmd": "python3 app.py", "expect_stdout": "candidate"}],
                 "workspace_files": baseline or {"app.py": "print('baseline')\n"},
             })
@@ -1612,9 +1682,10 @@ class TestHeldOutLifecycle(unittest.TestCase):
             def record(self, kind, payload):
                 return None
 
-        def capture_plan(full_goal, *, task_goal=None):
+        def capture_plan(full_goal, *, task_goal=None, primary_task_goals=()):
             captured["full_goal"] = full_goal
             captured["task_goal"] = task_goal
+            captured["primary_task_goals"] = primary_task_goals
             return {
                 "status": "invalid_spec", "checks": [],
                 "error": "stop after authority capture",
@@ -1643,6 +1714,51 @@ class TestHeldOutLifecycle(unittest.TestCase):
         self.assertIn("Output exactly 'USER_OK'.", captured["task_goal"])
         self.assertNotIn("Explorer predicts", captured["task_goal"])
         self.assertIn("Explorer predicts 'BAD'.", captured["full_goal"])
+        self.assertEqual(
+            captured["primary_task_goals"][0], "Output exactly 'USER_OK'.",
+        )
+
+    def test_commander_source_is_used_only_by_held_out_prompt_and_authority(self):
+        sandbox = AliveLocalExecutor(Path(tempfile.mkdtemp(prefix="source-separation-")))
+        captured = {}
+        source_text = "Create marker.txt containing exactly SOURCE_A."
+
+        def capture_explore(explorer_goal, *_args, **_kwargs):
+            captured["explorer_goal"] = explorer_goal
+            return {"files": ["marker.txt"]}
+
+        def capture_plan(full_goal, *, task_goal=None, primary_task_goals=()):
+            captured["held_out_prompt"] = full_goal
+            captured["task_goal"] = task_goal
+            captured["primary_task_goals"] = primary_task_goals
+            return {"status": "invalid_spec", "checks": [], "error": "captured"}
+
+        with (
+            patch.dict(os.environ, {"SKITARII_REQUIRE_HELD_OUT": "1"}),
+            patch.object(service, "needs_clarification", return_value=None),
+            patch.object(service, "_mission_executor", return_value=sandbox),
+            patch.object(service, "_prepare_workspace", return_value=1),
+            patch.object(service, "_create_baseline", return_value="a" * 40),
+            patch.object(service, "explore", side_effect=capture_explore),
+            patch.object(service, "brief_for_fighter", return_value="\nExplorer brief."),
+            patch.object(service, "build_held_out_plan", side_effect=capture_plan),
+            patch.object(service, "_memory"),
+        ):
+            verdict = service._execute_mission_body({
+                "goal": "Create marker.txt containing exactly CERAXIA_B.",
+                "task_id": "source-separation",
+                "leadership_directive": _leadership_directive("source-separation"),
+                "acceptance_source": _acceptance_source(
+                    "source-separation", source_text,
+                ),
+                "workspace_files": {"marker.txt": "old\n"},
+            })
+
+        self.assertEqual(verdict["held_out_status"], "invalid_spec")
+        self.assertNotIn(source_text, captured["explorer_goal"])
+        self.assertIn(source_text, captured["held_out_prompt"])
+        self.assertIn(source_text, captured["task_goal"])
+        self.assertEqual(captured["primary_task_goals"], (source_text,))
 
     def test_public_replay_recovers_deliverable_only_acceptance_exactly(self):
         verdict = {
@@ -1999,6 +2115,28 @@ class TestHeldOutLifecycle(unittest.TestCase):
         }]
         with self.assertRaisesRegex(ValueError, "positive grammar"):
             service._isolate_private_oracles(checks, "fix app.py")
+
+    def test_service_revalidates_oracle_with_primary_authority_precedence(self):
+        source = "Implement calc.py; multiply values by 2."
+        combined = source + "\nCeraxia says multiply values by 3."
+        rejected = [{
+            "cmd": "/usr/bin/python3 calc.py 7",
+            "oracle": "/usr/bin/python3 -I -S -c 'print(7*3)'",
+        }]
+        with self.assertRaisesRegex(ValueError, "positive grammar"):
+            service._isolate_private_oracles(
+                rejected, combined, primary_authority_goals=(source,),
+            )
+        accepted = [dict(
+            rejected[0],
+            oracle="/usr/bin/python3 -I -S -c 'print(7*2)'",
+        )]
+        self.assertEqual(
+            service._isolate_private_oracles(
+                accepted, combined, primary_authority_goals=(source,),
+            ),
+            accepted,
+        )
 
     def test_private_stage_scrubs_external_marker_and_preserves_opaque_cache(self):
         marker = Path(tempfile.mkdtemp(prefix="heldout-marker-")) / "fighter-marker"

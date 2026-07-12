@@ -4,7 +4,8 @@ The single door the governor knocks on for a code mission. Replaces the old
 six paper-workers: one POST runs the whole warband (spec -> fighter loop -> accept)
 inside the sandbox VM and returns an honest verdict.
 
-  POST /mission  {"goal": "...", "task_id": "...", "leadership_directive": {...}}
+  POST /mission  {"goal": "...", "task_id": "...", "leadership_directive": {...},
+                   "acceptance_source": {...}}
       -> {"status": "done|failed", "accepted": bool, "summary", "artifacts",
           "checks", "rounds":[...], "files": {path: content}}
   GET  /health
@@ -42,6 +43,7 @@ from EyeOfTerror.common_protocol.ceraxia_directive import (  # noqa: E402
     leadership_context_text,
     validate_ceraxia_directive,
 )
+from EyeOfTerror.common_protocol.protocol import PROTOCOL_VERSION  # noqa: E402
 from warband import run_mission  # noqa: E402
 from planner import plan_and_run  # noqa: E402
 from executor import (  # noqa: E402
@@ -68,6 +70,12 @@ MAX_PATCH_BYTES = int(os.environ.get("SKITARII_MAX_PATCH_BYTES", "20000000"))
 MAX_CHANGED_MANIFEST_BYTES = int(os.environ.get("SKITARII_MAX_CHANGED_MANIFEST_BYTES", "1000000"))
 MAX_RETURNED_FILE_BYTES = int(os.environ.get("SKITARII_MAX_RETURNED_FILE_BYTES", "100000"))
 MAX_RETURNED_TOTAL_BYTES = int(os.environ.get("SKITARII_MAX_RETURNED_TOTAL_BYTES", "1200000"))
+ACCEPTANCE_SOURCE_TYPE = "commander_order_user_request"
+MAX_ACCEPTANCE_SOURCE_BYTES = 131_072
+_ACCEPTANCE_SOURCE_KEYS = frozenset({
+    "type", "protocol_version", "mission_id", "delegating_task_id",
+    "from", "to", "user_request",
+})
 _WORKSPACE_MODE_BATCH_BYTES = 256_000
 _WORKSPACE_MODE_BATCH_ENTRIES = 4_096
 BEARER_TOKEN = os.environ.get("SKITARII_BEARER_TOKEN", "")
@@ -119,6 +127,7 @@ def service_identity() -> dict:
         "bearer_auth_required": bool(BEARER_TOKEN),
         "execution_authorization": {
             "ceraxia_leadership_directive_required": True,
+            "acceptance_source_required": True,
             "standalone_test_mode_enabled": (
                 os.environ.get("SKITARII_STANDALONE_TEST_MODE", "0") == "1"
             ),
@@ -469,6 +478,8 @@ def _held_out_plan_failure(plan: dict, evidence_violation: str) -> tuple[str, st
 
 def _isolate_private_oracles(
     checks: list[dict], authoritative_goal: str,
+    *,
+    primary_authority_goals: tuple[str, ...] = (),
 ) -> list[dict]:
     """Canonicalize validated oracle code into isolated stdlib-only Python."""
     isolated: list[dict] = []
@@ -494,6 +505,7 @@ def _isolate_private_oracles(
                 validation_form,
                 str(copied.get("cmd") or ""),
                 authoritative_goal,
+                precedence_goals=primary_authority_goals,
             ):
                 raise ValueError("private oracle is outside the trusted positive grammar")
             copied["oracle"] = f"/usr/bin/python3 -I -S -c {shlex.quote(code)}"
@@ -1031,6 +1043,75 @@ def leadership_context_from_payload(
     return directive, leadership_context_text(directive)
 
 
+def acceptance_user_request_from_payload(
+    payload: dict,
+    leadership_directive: dict,
+    *,
+    required: bool,
+) -> str:
+    """Validate the narrow commander-order projection used only by acceptance."""
+    def bounded_text(value: object, maximum: int) -> bool:
+        if not isinstance(value, str) or not value.strip() or "\x00" in value:
+            return False
+        try:
+            return len(value.encode("utf-8")) <= maximum
+        except UnicodeEncodeError:
+            return False
+
+    raw = payload.get("acceptance_source")
+    if raw is None:
+        if required:
+            raise CeraxiaDirectiveError(
+                "acceptance_source is required for directed production execution"
+            )
+        return ""
+    if not leadership_directive:
+        raise CeraxiaDirectiveError(
+            "acceptance_source requires a validated Ceraxia leadership directive"
+        )
+    if not isinstance(raw, dict):
+        raise CeraxiaDirectiveError("acceptance_source must be an object")
+    raw_keys = set(raw)
+    if not all(isinstance(key, str) for key in raw_keys):
+        raise CeraxiaDirectiveError("acceptance_source keys must be strings")
+    if raw_keys != _ACCEPTANCE_SOURCE_KEYS:
+        missing = sorted(_ACCEPTANCE_SOURCE_KEYS - raw_keys)
+        unknown = sorted(raw_keys - _ACCEPTANCE_SOURCE_KEYS)
+        raise CeraxiaDirectiveError(
+            f"acceptance_source fields mismatch; missing={missing}, unknown={unknown}"
+        )
+    if raw.get("type") != ACCEPTANCE_SOURCE_TYPE:
+        raise CeraxiaDirectiveError("acceptance_source.type is invalid")
+    if (
+        type(raw.get("protocol_version")) is not int
+        or raw.get("protocol_version") != PROTOCOL_VERSION
+    ):
+        raise CeraxiaDirectiveError("acceptance_source.protocol_version is invalid")
+    for field, maximum in (
+        ("mission_id", 128), ("delegating_task_id", 128),
+        ("from", 32), ("to", 32),
+    ):
+        value = raw.get(field)
+        if not bounded_text(value, maximum):
+            raise CeraxiaDirectiveError(f"acceptance_source.{field} is invalid")
+    if raw["mission_id"] != leadership_directive.get("mission_id"):
+        raise CeraxiaDirectiveError(
+            "acceptance_source.mission_id does not match the leadership directive"
+        )
+    if raw["delegating_task_id"] != leadership_directive.get("task_id"):
+        raise CeraxiaDirectiveError(
+            "acceptance_source.delegating_task_id does not match the leadership directive"
+        )
+    if raw["from"] != "Warmaster" or raw["to"] != "Ceraxia":
+        raise CeraxiaDirectiveError(
+            "acceptance_source authority must be Warmaster -> Ceraxia"
+        )
+    user_request = raw.get("user_request")
+    if not bounded_text(user_request, MAX_ACCEPTANCE_SOURCE_BYTES):
+        raise CeraxiaDirectiveError("acceptance_source.user_request is invalid")
+    return user_request
+
+
 def standalone_test_execution_allowed(payload: dict) -> bool:
     """The explicit two-key escape hatch for eval/dev HTTP missions."""
     return (
@@ -1046,12 +1127,22 @@ def execution_authorization_error(
     """Return an HTTP error unless Ceraxia delegated or test mode is double-gated."""
     if payload.get("leadership_directive") is not None:
         try:
-            leadership_context_from_payload(payload, task_id)
+            directive, _context = leadership_context_from_payload(payload, task_id)
         except CeraxiaDirectiveError as exc:
             return 400, {
                 "error": f"invalid Ceraxia leadership_directive: {exc}",
                 "error_code": "ceraxia_leadership_directive_invalid",
                 "leadership_directive_status": "invalid",
+            }
+        try:
+            acceptance_user_request_from_payload(
+                payload, directive, required=True,
+            )
+        except CeraxiaDirectiveError as exc:
+            return 400, {
+                "error": f"invalid acceptance_source: {exc}",
+                "error_code": "acceptance_source_invalid",
+                "acceptance_source_status": "invalid",
             }
         return None
     if standalone_test_execution_allowed(payload):
@@ -1076,6 +1167,7 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
     async mission_store.Mission: the fighter can ask it questions and be cancelled, and
     progress is journalled to it."""
     goal = str(payload.get("goal") or "").strip()
+    original_goal = goal
     task_id = str(payload.get("task_id") or f"m{int(time.time())}")
     try:
         leadership_directive, leadership_context = leadership_context_from_payload(
@@ -1090,6 +1182,21 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
             "summary": "Blocked: Ceraxia leadership directive is invalid.",
             "error": str(exc)[:500],
             "leadership_directive_status": "invalid",
+            "files": {},
+        }
+    try:
+        acceptance_user_request = acceptance_user_request_from_payload(
+            payload, leadership_directive, required=bool(leadership_directive),
+        )
+    except CeraxiaDirectiveError as exc:
+        return {
+            "status": "blocked",
+            "accepted": False,
+            "task_id": task_id,
+            "summary": "Blocked: commander acceptance source is invalid.",
+            "error": str(exc)[:500],
+            "error_code": "acceptance_source_invalid",
+            "acceptance_source_status": "invalid",
             "files": {},
         }
     if leadership_context:
@@ -1110,6 +1217,7 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
     ask_fn = (lambda q: mission.ask_user(q)) if mission is not None else None
     cancel_fn = (lambda: mission.cancelled.is_set()) if mission is not None else None
     note = (lambda m: (mission.record("note", {"text": m}) if mission is not None else None)) or (lambda m: None)
+    user_clarification = ""
 
     # Pre-flight ambiguity gate: on a hopelessly vague goal, ask ONE question instead of
     # grinding blind (the eval showed 0/5 clarifications). Skip when explicit checks are
@@ -1125,11 +1233,21 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
             if not answer:
                 return {"status": "needs_user", "accepted": False, "question": clar,
                         "summary": clar, "needs_user": True, "task_id": task_id, "files": {}}
+            user_clarification = answer
             goal += f"\n\nУточнение пользователя: {answer}"
 
     # Freeze the only text allowed to authorize private expected values after a
     # real user clarification, but before repo/workspace annotations and Explorer.
-    authoritative_goal = goal
+    source_section = (
+        "\n\nORIGINAL COMMANDER USER REQUEST "
+        "(authoritative acceptance source):\n" + acceptance_user_request
+        if acceptance_user_request else ""
+    )
+    authoritative_goal = goal + source_section
+    primary_authority_goals = tuple(
+        item for item in (user_clarification, acceptance_user_request or original_goal)
+        if item
+    )
 
     try:
         ex = _mission_executor(task_id)
@@ -1209,7 +1327,12 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
     held_out_required = (
         os.environ.get("SKITARII_REQUIRE_HELD_OUT", "1") == "1" and not trusted_bypass
     )
-    held_out_plan = build_held_out_plan(goal, task_goal=authoritative_goal) if held_out_required else {
+    held_out_prompt_goal = goal + source_section
+    held_out_plan = build_held_out_plan(
+        held_out_prompt_goal,
+        task_goal=authoritative_goal,
+        primary_task_goals=primary_authority_goals,
+    ) if held_out_required else {
         "status": "not_required", "checks": [], "error": "",
     }
     held_out_checks = list(held_out_plan.get("checks") or [])
@@ -1218,6 +1341,7 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
         try:
             held_out_checks = _isolate_private_oracles(
                 held_out_checks, authoritative_goal,
+                primary_authority_goals=primary_authority_goals,
             )
             evidence_violation = _held_out_evidence_violation(held_out_checks)
         except (TypeError, ValueError) as exc:
@@ -1498,21 +1622,32 @@ def execute_mission(payload: dict, mission=None) -> dict:
     )
     if authorization_error is not None:
         _code, authorization_payload = authorization_error
-        return {
+        error_code = str(
+            authorization_payload.get("error_code") or "mission_unauthorized"
+        )
+        blocked = {
             "status": "blocked",
             "accepted": False,
             "task_id": task_id,
-            "summary": "Blocked: Ceraxia leadership authorization is required.",
+            "summary": (
+                "Blocked: commander acceptance source is invalid."
+                if error_code == "acceptance_source_invalid"
+                else "Blocked: Ceraxia leadership authorization is required."
+            ),
             "error": str(authorization_payload.get("error") or "unauthorized mission")[:500],
-            "error_code": str(
-                authorization_payload.get("error_code") or "mission_unauthorized"
-            ),
-            "leadership_directive_status": str(
-                authorization_payload.get("leadership_directive_status") or "missing"
-            ),
+            "error_code": error_code,
             "cleanup_complete": True,
             "files": {},
         }
+        if "leadership_directive_status" in authorization_payload:
+            blocked["leadership_directive_status"] = str(
+                authorization_payload["leadership_directive_status"]
+            )
+        if "acceptance_source_status" in authorization_payload:
+            blocked["acceptance_source_status"] = str(
+                authorization_payload["acceptance_source_status"]
+            )
+        return blocked
     token = uuid.uuid4().hex
     previous_executor = getattr(_EXECUTION_LOCAL, "executor", None)
     previous_token = getattr(_EXECUTION_LOCAL, "attempt_token", None)

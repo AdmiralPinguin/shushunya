@@ -356,6 +356,11 @@ def main() -> int:
             mock.patch.object(skitarii_bridge, "SKITARII_URL", skitarii_base),
             mock.patch.object(skitarii_bridge, "SKITARII_POLL_INTERVAL_SEC", 0.01),
             mock.patch.object(
+                skitarii_bridge,
+                "WARMMASTER_MISSIONS_ROOT",
+                mission_warmaster_root / "missions",
+            ),
+            mock.patch.object(
                 ceraxia_service,
                 "request_model_decision",
                 return_value=ceraxia_model_answer(),

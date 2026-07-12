@@ -205,6 +205,600 @@ class TestSpecFallback(unittest.TestCase):
             "error": "",
         })
 
+    def test_private_verifier_accepts_live_unquoted_russian_file_bytes_with_lf(self):
+        import spec
+
+        goal = (
+            "Создать файл ceraxia-live-smoke-f13b4ba6.txt с текстом "
+            "CERAXIA_NATIVE_SMOKE_f13b4ba6 и символом переноса строки LF.\n\n"
+            "Constraints:\n"
+            "- Exact byte match: CERAXIA_NATIVE_SMOKE_f13b4ba6 + LF\n"
+            "Success conditions:\n"
+            "- Content matches CERAXIA_NATIVE_SMOKE_f13b4ba6 followed by exactly one LF"
+        )
+        generated = {"checks": [{
+            "kind": "file_bytes",
+            "path": "ceraxia-live-smoke-f13b4ba6.txt",
+            "expect_bytes": "CERAXIA_NATIVE_SMOKE_f13b4ba6\n",
+        }]}
+        with patch.object(spec, "_held_out_chat_json", return_value=generated):
+            plan = spec.build_held_out_plan(goal, task_goal=goal)
+        self.assertEqual(plan, {
+            "status": "ok", "checks": generated["checks"], "error": "",
+        })
+        policies = spec._authoritative_literal_policies(goal)
+        self.assertNotIn("match:", policies["file_bytes"]["unbound"])
+
+    def test_unquoted_file_bytes_grammar_binds_target_lf_and_negative_lf(self):
+        import spec
+
+        cases = (
+            (
+                "Создать marker.txt с текстом TOKEN и символом переноса строки LF.",
+                "TOKEN\n",
+            ),
+            (
+                "Create marker.txt containing exactly TOKEN followed by exactly one LF.",
+                "TOKEN\n",
+            ),
+            (
+                "Создать marker.txt с текстом TOKEN без символа переноса строки LF.",
+                "TOKEN",
+            ),
+        )
+        for goal, expected in cases:
+            candidate = {
+                "kind": "file_bytes", "path": "marker.txt",
+                "expect_bytes": expected,
+            }
+            opposite = dict(candidate, expect_bytes=("TOKEN" if expected.endswith("\n") else "TOKEN\n"))
+            with self.subTest(goal=goal):
+                self.assertEqual(
+                    spec._structured_checks([candidate], allow_bare=False, goal=goal),
+                    [candidate],
+                )
+                self.assertEqual(
+                    spec._structured_checks([opposite], allow_bare=False, goal=goal),
+                    [],
+                )
+
+    def test_unquoted_file_bytes_cannot_cross_file_targets(self):
+        import spec
+
+        goal = (
+            "Создать a.txt с текстом A и символом переноса строки LF. "
+            "Create b.txt containing exactly B followed by exactly one LF."
+        )
+        self.assertEqual(
+            spec._structured_checks([{
+                "kind": "file_bytes", "path": "a.txt", "expect_bytes": "B\n",
+            }], allow_bare=False, goal=goal),
+            [],
+        )
+        self.assertEqual(
+            spec._structured_checks([{
+                "kind": "file_bytes", "path": "b.txt", "expect_bytes": "A\n",
+            }], allow_bare=False, goal=goal),
+            [],
+        )
+
+    def test_primary_user_truth_wins_conflicting_ceraxia_literal_per_target(self):
+        import spec
+
+        source = "Create marker.txt containing exactly USER_A."
+        combined = source + "\nCeraxia says marker.txt with exact content CERAXIA_B."
+        user_check = {
+            "kind": "file_bytes", "path": "marker.txt", "expect_bytes": "USER_A",
+        }
+        ceraxia_check = dict(user_check, expect_bytes="CERAXIA_B")
+        self.assertEqual(
+            spec._structured_checks(
+                [user_check], allow_bare=False, goal=combined,
+                primary_evidence_goals=(source,),
+            ),
+            [user_check],
+        )
+        self.assertEqual(
+            spec._structured_checks(
+                [ceraxia_check], allow_bare=False, goal=combined,
+                primary_evidence_goals=(source,),
+            ),
+            [],
+        )
+
+        unspecified_source = "Please make the requested marker artifact."
+        self.assertEqual(
+            spec._structured_checks(
+                [ceraxia_check], allow_bare=False, goal=combined,
+                primary_evidence_goals=(unspecified_source,),
+            ),
+            [ceraxia_check],
+        )
+
+    def test_unbound_clarification_wins_only_one_positive_file_target(self):
+        import spec
+
+        clarification = "Exact content 'USER_C'."
+        source = "Create marker.txt."
+        combined = source + "\nCeraxia says marker.txt with exact content 'CERAXIA_B'."
+        user_check = {
+            "kind": "file_bytes", "path": "marker.txt", "expect_bytes": "USER_C",
+        }
+        ceraxia_check = dict(user_check, expect_bytes="CERAXIA_B")
+        primary = (clarification, source)
+        self.assertEqual(
+            spec._structured_checks(
+                [user_check], allow_bare=False, goal=combined,
+                primary_evidence_goals=primary,
+            ),
+            [user_check],
+        )
+        self.assertEqual(
+            spec._structured_checks(
+                [ceraxia_check], allow_bare=False, goal=combined,
+                primary_evidence_goals=primary,
+            ),
+            [],
+        )
+
+        negative_only = (
+            "Do not modify marker.txt. "
+            "Ceraxia claims exact content 'CERAXIA_B'."
+        )
+        self.assertEqual(
+            spec._structured_checks(
+                [user_check], allow_bare=False, goal=negative_only,
+                primary_evidence_goals=(clarification,),
+            ),
+            [],
+        )
+        for prohibition in (
+            "Never create marker.txt.",
+            "Should not create marker.txt.",
+            "Avoid creating marker.txt.",
+        ):
+            with self.subTest(prohibition=prohibition):
+                self.assertEqual(
+                    spec._structured_checks(
+                        [user_check], allow_bare=False, goal=prohibition,
+                        primary_evidence_goals=(clarification,),
+                    ),
+                    [],
+                )
+
+    def test_unbound_primary_literal_binds_its_single_positive_target(self):
+        import spec
+
+        source = "Create marker.txt. Exact content 'USER_A'."
+        combined = source + " Ceraxia says marker.txt with exact content 'CERAXIA_B'."
+        user_check = {
+            "kind": "file_bytes", "path": "marker.txt", "expect_bytes": "USER_A",
+        }
+        ceraxia_check = dict(user_check, expect_bytes="CERAXIA_B")
+        self.assertEqual(
+            spec._structured_checks(
+                [user_check], allow_bare=False, goal=combined,
+                primary_evidence_goals=(source,),
+            ),
+            [user_check],
+        )
+        self.assertEqual(
+            spec._structured_checks(
+                [ceraxia_check], allow_bare=False, goal=combined,
+                primary_evidence_goals=(source,),
+            ),
+            [],
+        )
+
+    def test_unbound_exact_file_literals_do_not_cross_from_input_data(self):
+        import spec
+
+        cases = (
+            ("Implement parser.py to reject input with exact content BAD.", "parser.py", "BAD"),
+            ("Create app.py that compares payload with exact bytes MAGIC.", "app.py", "MAGIC"),
+            ("Fix validator.py for records whose content matches TOKEN.", "validator.py", "TOKEN"),
+            ("Implement app.py to reject exact file content BAD.", "app.py", "BAD"),
+        )
+        for goal, path, value in cases:
+            with self.subTest(goal=goal):
+                self.assertEqual(
+                    spec._structured_checks([{
+                        "kind": "file_bytes", "path": path,
+                        "expect_bytes": value,
+                    }], allow_bare=False, goal=goal),
+                    [],
+                )
+
+    def test_stdout_literals_require_direct_program_ownership(self):
+        import spec
+
+        for goal, path, value in (
+            ("Implement app.py to reject scripts that print 'BAD'.", "app.py", "BAD"),
+            ("Fix parser.py for inputs that output 'TOKEN'.", "parser.py", "TOKEN"),
+            (
+                "Implement app.py to compare payload whose exact output is 'MAGIC'.",
+                "app.py", "MAGIC",
+            ),
+        ):
+            with self.subTest(goal=goal):
+                self.assertEqual(
+                    spec._structured_checks([{
+                        "cmd": f"python3 {path}", "expect_stdout": value,
+                    }], allow_bare=False, goal=goal),
+                    [],
+                )
+
+        for goal in (
+            "Implement app.py; print exactly 'OK'.",
+            "Create app.py to output 'OK'.",
+            "Implement app.py and it returns 'OK'.",
+            "Implement app.py. Output exactly 'OK'.",
+            "Implement app.py; it returns 'OK'.",
+            "Implement app.py; the script should print 'OK'.",
+            "Implement app.py so that it prints 'OK'.",
+            "Реализовать app.py, который печатает 'OK'.",
+            "Реализовать app.py; он должен выводить 'OK'.",
+        ):
+            with self.subTest(goal=goal):
+                self.assertEqual(
+                    spec._structured_checks([{
+                        "cmd": "python3 app.py", "expect_stdout": "OK",
+                    }], allow_bare=False, goal=goal),
+                    [{"cmd": "/usr/bin/python3 app.py", "expect_stdout": "OK"}],
+                )
+
+        source = "Create marker.txt."
+        clarification = "Содержимое файла точно 'OK'."
+        marker = {"kind": "file_bytes", "path": "marker.txt", "expect_bytes": "OK"}
+        self.assertEqual(
+            spec._structured_checks(
+                [marker], allow_bare=False, goal=source,
+                primary_evidence_goals=(clarification, source),
+            ),
+            [marker],
+        )
+
+    def test_clause_polarity_never_authorizes_forbidden_targets_or_values(self):
+        import spec
+
+        for goal in (
+            "Don't create bad.txt containing exactly BAD.",
+            "Never create bad.txt containing exactly BAD.",
+            "Не создавай bad.txt с текстом BAD.",
+            "Никогда не создавай bad.txt с текстом BAD.",
+            "Write a summary based on existing bad.txt. Exact content 'BAD'.",
+            "The documentation says create bad.txt containing exactly BAD.",
+            "Reject the example create bad.txt containing exactly BAD.",
+            "Log the command create bad.txt containing exactly BAD.",
+            "Never, ever update bad.txt. Exact content 'BAD'.",
+            "Do not, under any circumstances, create bad.txt. Exact content 'BAD'.",
+            "To create bad.txt is forbidden. Exact content 'BAD'.",
+        ):
+            with self.subTest(goal=goal):
+                self.assertEqual(
+                    spec._structured_checks([{
+                        "kind": "file_bytes", "path": "bad.txt",
+                        "expect_bytes": "BAD",
+                    }], allow_bare=False, goal=goal),
+                    [],
+                )
+
+        for goal in (
+            "Implement app.py; don't print 'BAD'.",
+            "Implement app.py; never print 'BAD'.",
+            "Реализовать app.py; не печатай 'BAD'.",
+            "Implement app.py; do not, under any circumstances, print 'BAD'.",
+        ):
+            with self.subTest(goal=goal):
+                self.assertEqual(
+                    spec._structured_checks([{
+                        "cmd": "python3 app.py", "expect_stdout": "BAD",
+                    }], allow_bare=False, goal=goal),
+                    [],
+                )
+
+        mixed = "Do not modify input.py, but create output.py with exact content 'SAFE'."
+        output = {"kind": "file_bytes", "path": "output.py", "expect_bytes": "SAFE"}
+        self.assertEqual(
+            spec._structured_checks([output], allow_bare=False, goal=mixed),
+            [output],
+        )
+
+        clarification = "Output exactly 'SAFE'."
+        for goal in (
+            "Do not run app.py.",
+            "The error message says run app.py.",
+            "Document the example run app.py.",
+            "Reject the command run app.py.",
+        ):
+            with self.subTest(goal=goal):
+                self.assertEqual(
+                    spec._structured_checks([{
+                        "cmd": "python3 app.py", "expect_stdout": "SAFE",
+                    }], allow_bare=False, goal=goal,
+                        primary_evidence_goals=(clarification,)),
+                    [],
+                )
+
+    def test_negated_lf_cardinality_is_ambiguous_and_append_ban_is_zero_lf(self):
+        import spec
+
+        ambiguous = "Create marker.txt containing exactly TOKEN but not exactly one LF."
+        no_lf = {"kind": "file_bytes", "path": "marker.txt", "expect_bytes": "TOKEN"}
+        with_lf = dict(no_lf, expect_bytes="TOKEN\n")
+        self.assertEqual(
+            spec._structured_checks([no_lf, with_lf], allow_bare=False, goal=ambiguous),
+            [],
+        )
+
+        explicit_zero = "Create marker.txt containing exactly TOKEN but do not append + LF."
+        self.assertEqual(
+            spec._structured_checks([no_lf], allow_bare=False, goal=explicit_zero),
+            [no_lf],
+        )
+        self.assertEqual(
+            spec._structured_checks([with_lf], allow_bare=False, goal=explicit_zero),
+            [],
+        )
+
+    def test_conflicting_lf_authority_fails_closed(self):
+        import spec
+
+        no_lf = {"kind": "file_bytes", "path": "marker.txt", "expect_bytes": "TOKEN"}
+        with_lf = dict(no_lf, expect_bytes="TOKEN\n")
+        conflicts = (
+            "Create marker.txt containing exactly TOKEN followed by exactly one LF and without LF.",
+            (
+                "Create marker.txt containing exactly TOKEN followed by exactly one LF. "
+                "Create marker.txt containing exactly TOKEN without LF."
+            ),
+            (
+                "Создать marker.txt с точным текстом TOKEN и символом переноса строки LF. "
+                "Создать marker.txt с точным текстом TOKEN без LF."
+            ),
+        )
+        for goal in conflicts:
+            with self.subTest(goal=goal):
+                self.assertEqual(
+                    spec._structured_checks([no_lf, with_lf], allow_bare=False, goal=goal),
+                    [],
+                )
+
+        for goal in (
+            "Create marker.txt containing exactly TOKEN not followed by exactly one LF.",
+            (
+                "Create marker.txt containing exactly TOKEN not, under any circumstances, "
+                "followed by exactly one LF."
+            ),
+        ):
+            with self.subTest(goal=goal):
+                self.assertEqual(
+                    spec._structured_checks([no_lf, with_lf], allow_bare=False, goal=goal),
+                    [],
+                )
+
+    def test_oracle_scalars_are_bound_to_their_target_and_clarification(self):
+        import spec
+
+        source = (
+            "Implement a.py; multiply by 2. "
+            "Implement b.py; multiply by 3."
+        )
+        a_correct = {
+            "cmd": "python3 a.py 7", "oracle": "python3 -c 'print(7*2)'",
+        }
+        a_wrong = dict(a_correct, oracle="python3 -c 'print(7*3)'")
+        self.assertEqual(
+            spec._structured_checks(
+                [a_correct], allow_bare=False, goal=source,
+                primary_evidence_goals=(source,),
+            ),
+            [{
+                "cmd": "/usr/bin/python3 a.py 7",
+                "oracle": "/usr/bin/python3 -I -S -c 'print(7*2)'",
+            }],
+        )
+        self.assertEqual(
+            spec._structured_checks(
+                [a_wrong], allow_bare=False, goal=source,
+                primary_evidence_goals=(source,),
+            ),
+            [],
+        )
+
+        clarification = "For b.py, multiply by 4."
+        primary = (clarification, source)
+        self.assertEqual(
+            spec._structured_checks(
+                [a_correct], allow_bare=False, goal=source,
+                primary_evidence_goals=primary,
+            ),
+            [{
+                "cmd": "/usr/bin/python3 a.py 7",
+                "oracle": "/usr/bin/python3 -I -S -c 'print(7*2)'",
+            }],
+        )
+        self.assertEqual(
+            spec._structured_checks([{
+                "cmd": "python3 b.py 7", "oracle": "python3 -c 'print(7*4)'",
+            }], allow_bare=False, goal=source, primary_evidence_goals=primary),
+            [{
+                "cmd": "/usr/bin/python3 b.py 7",
+                "oracle": "/usr/bin/python3 -I -S -c 'print(7*4)'",
+            }],
+        )
+        self.assertEqual(
+            spec._structured_checks([{
+                "cmd": "python3 b.py 7", "oracle": "python3 -c 'print(7*3)'",
+            }], allow_bare=False, goal=source, primary_evidence_goals=primary),
+            [],
+        )
+
+    def test_oracle_scalars_stop_at_unrelated_or_negative_context(self):
+        import spec
+
+        correct = {"cmd": "python3 a.py 4", "oracle": "python3 -c 'print(4*2)'"}
+        wrong = dict(correct, oracle="python3 -c 'print(4*3)'")
+        goals = (
+            "Implement a.py; multiply values by 2. Global retry limit is 3.",
+            "Implement a.py; multiply values by 2. Create config.json with threshold 3.",
+            "Implement a.py; multiply values by 2. Documentation example uses 3.",
+            "Implement a.py; multiply by 2. Never run a.py with multiplier 3.",
+            "Implement a.py; multiply by 2. Implement b.py using a.py; multiply by 3.",
+        )
+        canonical = {
+            "cmd": "/usr/bin/python3 a.py 4",
+            "oracle": "/usr/bin/python3 -I -S -c 'print(4*2)'",
+        }
+        for goal in goals:
+            with self.subTest(goal=goal):
+                self.assertEqual(
+                    spec._structured_checks([correct], allow_bare=False, goal=goal),
+                    [canonical],
+                )
+                self.assertEqual(
+                    spec._structured_checks([wrong], allow_bare=False, goal=goal),
+                    [],
+                )
+
+    def test_oracle_target_roles_preserve_inputs_and_fail_closed_on_multi_owner(self):
+        import spec
+
+        input_goal = "Implement b.py using a.py; multiply by 3."
+        b_check = {"cmd": "python3 b.py 4", "oracle": "python3 -c 'print(4*3)'"}
+        self.assertEqual(
+            spec._structured_checks([b_check], allow_bare=False, goal=input_goal),
+            [{
+                "cmd": "/usr/bin/python3 b.py 4",
+                "oracle": "/usr/bin/python3 -I -S -c 'print(4*3)'",
+            }],
+        )
+        self.assertEqual(
+            spec._structured_checks([{
+                "cmd": "python3 a.py 4", "oracle": "python3 -c 'print(4*3)'",
+            }], allow_bare=False, goal=input_goal),
+            [],
+        )
+
+        multi = "Implement a.py and b.py; multiply by 2."
+        for path in ("a.py", "b.py"):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    spec._structured_checks([{
+                        "cmd": f"python3 {path} 4",
+                        "oracle": "python3 -c 'print(4*2)'",
+                    }], allow_bare=False, goal=multi),
+                    [],
+                )
+
+        hard_boundary = "Implement a.py. Multiply by 2."
+        self.assertEqual(
+            spec._structured_checks([{
+                "cmd": "python3 a.py 4", "oracle": "python3 -c 'print(4*2)'",
+            }], allow_bare=False, goal=hard_boundary),
+            [],
+        )
+
+        contrast = "Do not modify input.py, but implement output.py; multiply by 2."
+        output_check = {
+            "cmd": "python3 output.py 4", "oracle": "python3 -c 'print(4*2)'",
+        }
+        self.assertEqual(
+            spec._structured_checks([output_check], allow_bare=False, goal=contrast),
+            [{
+                "cmd": "/usr/bin/python3 output.py 4",
+                "oracle": "/usr/bin/python3 -I -S -c 'print(4*2)'",
+            }],
+        )
+
+        for goal in (
+            "Using a.py, implement b.py; multiply values by 3.",
+            "Based on a.py, implement b.py; multiply values by 3.",
+        ):
+            with self.subTest(goal=goal):
+                self.assertEqual(
+                    spec._structured_checks([b_check], allow_bare=False, goal=goal),
+                    [{
+                        "cmd": "/usr/bin/python3 b.py 4",
+                        "oracle": "/usr/bin/python3 -I -S -c 'print(4*3)'",
+                    }],
+                )
+
+        for goal in (
+            "Implement a.py using b.py and c.py; multiply values by 2.",
+            "Implement a.py using b.py, c.py; multiply values by 2.",
+        ):
+            with self.subTest(goal=goal):
+                a_check = {
+                    "cmd": "python3 a.py 4", "oracle": "python3 -c 'print(4*2)'",
+                }
+                self.assertEqual(
+                    spec._structured_checks([a_check], allow_bare=False, goal=goal),
+                    [{
+                        "cmd": "/usr/bin/python3 a.py 4",
+                        "oracle": "/usr/bin/python3 -I -S -c 'print(4*2)'",
+                    }],
+                )
+
+        for goal in (
+            (
+                "Implement a.py and b.py; a.py multiplies values by 2; "
+                "b.py multiplies values by 3."
+            ),
+            (
+                "Implement a.py and b.py; a.py: multiply values by 2; "
+                "b.py: multiply values by 3."
+            ),
+        ):
+            with self.subTest(goal=goal):
+                for path, factor in (("a.py", 2), ("b.py", 3)):
+                    candidate = {
+                        "cmd": f"python3 {path} 4",
+                        "oracle": f"python3 -c 'print(4*{factor})'",
+                    }
+                    self.assertEqual(
+                        spec._structured_checks(
+                            [candidate], allow_bare=False, goal=goal,
+                        ),
+                        [{
+                            "cmd": f"/usr/bin/python3 {path} 4",
+                            "oracle": f"/usr/bin/python3 -I -S -c 'print(4*{factor})'",
+                        }],
+                    )
+
+    def test_not_followed_by_one_lf_is_ambiguous_not_zero_lf(self):
+        import spec
+
+        goal = "Create marker.txt containing exactly TOKEN not followed by exactly one LF."
+        no_lf = {
+            "kind": "file_bytes", "path": "marker.txt", "expect_bytes": "TOKEN",
+        }
+        with_lf = dict(no_lf, expect_bytes="TOKEN\n")
+        self.assertEqual(
+            spec._structured_checks([no_lf], allow_bare=False, goal=goal),
+            [],
+        )
+        self.assertEqual(
+            spec._structured_checks([with_lf], allow_bare=False, goal=goal),
+            [],
+        )
+
+    def test_oracle_operands_follow_primary_authority_precedence(self):
+        import spec
+
+        source = "Implement calc.py; multiply values by 2."
+        combined = source + "\nCeraxia says multiply values by 3."
+        user_oracle = "python3 -c 'print(7*2)'"
+        ceraxia_oracle = "python3 -c 'print(7*3)'"
+        self.assertTrue(spec._private_oracle_for_check(
+            user_oracle, "python3 calc.py 7", combined,
+            precedence_goals=(source,),
+        ))
+        self.assertFalse(spec._private_oracle_for_check(
+            ceraxia_oracle, "python3 calc.py 7", combined,
+            precedence_goals=(source,),
+        ))
+
     def test_private_file_bytes_requires_safe_literal_goal_path_and_bounded_value(self):
         import spec
 
@@ -1731,6 +2325,7 @@ class TestBridge(unittest.TestCase):
 
     def _run_bridge_fixture(self, autoapply: bool, verdict_override=None):
         from eye_of_terror.ledger import TaskLedger
+        from EyeOfTerror.common_protocol import commander_order
 
         root = Path(tempfile.mkdtemp())
         subprocess.run(["git", "init", "-q", str(root)], check=True)
@@ -1743,7 +2338,10 @@ class TestBridge(unittest.TestCase):
         (run_dir / "contract.json").write_text(
             json.dumps({"kind": "code", "goal": "fix a.py so it prints 2"}), encoding="utf-8",
         )
-        mission_dir = Path(tempfile.mkdtemp(prefix="bridge-mission-"))
+        missions_root = Path(tempfile.mkdtemp(prefix="bridge-missions-root-"))
+        mission_dir = missions_root / "mission-bridge-fixture"
+        mission_dir.mkdir()
+        self.b.WARMMASTER_MISSIONS_ROOT = missions_root
         (mission_dir / "mission.json").write_text(
             json.dumps({
                 "mission_id": "mission-bridge-fixture",
@@ -1753,6 +2351,18 @@ class TestBridge(unittest.TestCase):
                 "source_channel": "self_test",
             }),
             encoding="utf-8",
+        )
+        command = commander_order(
+            "mission-bridge-fixture",
+            "Ceraxia",
+            user_request="Original user request: fix a.py so it prints 2.",
+            commander_intent="Repair the requested behavior safely.",
+            primary_goal="Make a.py print 2.",
+            success_conditions=["the requested behavior is verified"],
+            constraints=["preserve unrelated behavior"],
+        )
+        (mission_dir / "commander_order.json").write_text(
+            json.dumps(command), encoding="utf-8",
         )
         (run_dir / "mission_ref.json").write_text(
             json.dumps({
@@ -1832,6 +2442,15 @@ class TestBridge(unittest.TestCase):
             "Ceraxia",
         )
         self.assertEqual(self.last_bridge_request["delegating_task_id"], "bridge-fixture")
+        self.assertEqual(self.last_bridge_request["acceptance_source"], {
+            "type": "commander_order_user_request",
+            "protocol_version": 1,
+            "mission_id": "mission-bridge-fixture",
+            "delegating_task_id": "bridge-fixture",
+            "from": "Warmaster",
+            "to": "Ceraxia",
+            "user_request": "Original user request: fix a.py so it prints 2.",
+        })
         self.assertFalse(result["ok"])
         self.assertEqual(result["phase"], "ready_to_apply")
         self.assertEqual(result["status"], "ready_to_apply")
@@ -1882,6 +2501,7 @@ class TestBridge(unittest.TestCase):
         mission_dir = root / "missions" / "mission-legacy-directive"
         run_dir.mkdir(parents=True)
         mission_dir.mkdir(parents=True)
+        self.b.WARMMASTER_MISSIONS_ROOT = root / "missions"
         (run_dir / "contract.json").write_text(
             json.dumps({"kind": "code", "goal": "fix a.py"}),
             encoding="utf-8",
@@ -2024,6 +2644,187 @@ class TestBridge(unittest.TestCase):
                 self.assertEqual(result["phase"], "ceraxia_directive_invalid")
                 collect.assert_not_called()
                 http.assert_not_called()
+
+    def test_bridge_requires_exact_textual_governor_plan_mission_id(self):
+        run_dir = Path(tempfile.mkdtemp(prefix="strict-governor-id-"))
+        directive = {
+            "kind": "ceraxia_leadership_directive",
+            "version": 1,
+            "task_id": "strict-id",
+            "mission_id": "123",
+            "leader": "Ceraxia",
+            "decision": "delegate",
+            "delegated_to": "SkitariiWarband",
+            "mission_intent": "Deliver a verified repair",
+            "priorities": ["correctness"],
+            "constraints": [],
+            "success_conditions": ["behavior is verified"],
+            "tradeoffs": [],
+            "escalation_conditions": [],
+        }
+        (run_dir / "ceraxia_directive.json").write_text(
+            json.dumps(directive), encoding="utf-8",
+        )
+        governor_path = run_dir / "governor_plan.json"
+        governor_path.write_text(json.dumps({"mission_id": "123"}), encoding="utf-8")
+        self.assertEqual(
+            self.b._load_ceraxia_directive(run_dir, "strict-id")["mission_id"],
+            "123",
+        )
+        for invalid in (123, True, ["123"], "", " 123 ", "123\x00", "\ud800"):
+            with self.subTest(mission_id=repr(invalid)):
+                governor_path.write_text(
+                    json.dumps({"mission_id": invalid}), encoding="utf-8",
+                )
+                with self.assertRaises(self.b.CeraxiaDirectiveError):
+                    self.b._load_ceraxia_directive(run_dir, "strict-id")
+
+    def test_bridge_reports_commander_source_failure_separately_from_directive(self):
+        from eye_of_terror.ledger import TaskLedger
+        from EyeOfTerror.common_protocol import commander_order
+
+        run_dir = Path(tempfile.mkdtemp(prefix="acceptance-source-run-"))
+        task_id = "acceptance-source-unit"
+        mission_id = "mission-acceptance-source-unit"
+        missions_root = Path(tempfile.mkdtemp(prefix="acceptance-source-root-"))
+        mission_dir = missions_root / mission_id
+        mission_dir.mkdir()
+        self.b.WARMMASTER_MISSIONS_ROOT = missions_root
+        (run_dir / "contract.json").write_text(
+            json.dumps({"kind": "code", "goal": "fix a.py"}), encoding="utf-8",
+        )
+        (run_dir / "mission_ref.json").write_text(json.dumps({
+            "mission_id": mission_id,
+            "mission_dir": str(mission_dir),
+            "assigned_governor": "Ceraxia",
+        }), encoding="utf-8")
+        (run_dir / "governor_plan.json").write_text(
+            json.dumps({"mission_id": mission_id}), encoding="utf-8",
+        )
+        directive = {
+            "kind": "ceraxia_leadership_directive",
+            "version": 1,
+            "task_id": task_id,
+            "mission_id": mission_id,
+            "leader": "Ceraxia",
+            "decision": "delegate",
+            "delegated_to": "SkitariiWarband",
+            "mission_intent": "Repair safely",
+            "priorities": ["correctness"],
+            "constraints": [],
+            "success_conditions": ["behavior is verified"],
+            "tradeoffs": [],
+            "escalation_conditions": [],
+        }
+        (run_dir / "ceraxia_directive.json").write_text(
+            json.dumps(directive), encoding="utf-8",
+        )
+        # The mission identity is deliberately stale even though the directive
+        # itself is valid. This is an acceptance-provenance failure, not a
+        # leadership-directive failure.
+        (mission_dir / "mission.json").write_text(json.dumps({
+            "mission_id": mission_id,
+            "task_id": "different-task",
+            "assigned_governor": "Ceraxia",
+            "status": "planning",
+        }), encoding="utf-8")
+        (mission_dir / "commander_order.json").write_text(json.dumps(
+            commander_order(
+                mission_id,
+                "Ceraxia",
+                user_request="Fix a.py.",
+                commander_intent="Repair safely.",
+                primary_goal="Fix a.py.",
+                success_conditions=["behavior is verified"],
+            )
+        ), encoding="utf-8")
+        TaskLedger.create(run_dir / "task_ledger.json", task_id, "fix", "Ceraxia")
+
+        with (
+            patch.object(self.b, "_collect_workspace") as collect,
+            patch.object(self.b, "_await_async_skitarii_mission") as dispatch,
+        ):
+            result = self.b.run_via_skitarii(run_dir, task_id, timeout_sec=30)
+
+        self.assertEqual(result["phase"], "acceptance_source_invalid")
+        self.assertEqual(result["error_code"], "acceptance_source_invalid")
+        self.assertEqual(result["acceptance_source_status"], "invalid")
+        collect.assert_not_called()
+        dispatch.assert_not_called()
+        ledger = json.loads((run_dir / "task_ledger.json").read_text(encoding="utf-8"))
+        event_types = [event.get("type") for event in ledger.get("events", [])]
+        self.assertIn("acceptance_source_blocked", event_types)
+        self.assertNotIn("ceraxia_directive_blocked", event_types)
+        self.assertIn("commander-order acceptance provenance", result["next_action"]["reason"])
+        self.assertNotIn("historical run", result["next_action"]["reason"])
+
+    def test_bridge_source_rejects_coerced_ids_and_unencodable_request(self):
+        from EyeOfTerror.common_protocol import commander_order
+
+        run_dir = Path(tempfile.mkdtemp(prefix="acceptance-source-types-run-"))
+        mission_id = "123"
+        task_id = "456"
+        missions_root = Path(tempfile.mkdtemp(prefix="acceptance-source-types-root-"))
+        mission_dir = missions_root / mission_id
+        mission_dir.mkdir()
+        self.b.WARMMASTER_MISSIONS_ROOT = missions_root
+        directive = {
+            "kind": "ceraxia_leadership_directive",
+            "version": 1,
+            "task_id": task_id,
+            "mission_id": mission_id,
+            "leader": "Ceraxia",
+            "decision": "delegate",
+            "delegated_to": "SkitariiWarband",
+            "mission_intent": "Repair safely",
+            "priorities": ["correctness"],
+            "constraints": [],
+            "success_conditions": ["behavior is verified"],
+            "tradeoffs": [],
+            "escalation_conditions": [],
+        }
+
+        def write_payloads(*, ref_id=mission_id, stored_mission_id=mission_id,
+                           stored_task_id=task_id, request="Fix a.py."):
+            (run_dir / "mission_ref.json").write_text(json.dumps({
+                "mission_id": ref_id,
+                "mission_dir": str(mission_dir),
+                "assigned_governor": "Ceraxia",
+            }), encoding="utf-8")
+            (mission_dir / "mission.json").write_text(json.dumps({
+                "mission_id": stored_mission_id,
+                "task_id": stored_task_id,
+                "assigned_governor": "Ceraxia",
+                "status": "planning",
+            }), encoding="utf-8")
+            command = commander_order(
+                mission_id,
+                "Ceraxia",
+                user_request=request,
+                commander_intent="Repair safely.",
+                primary_goal="Fix a.py.",
+                success_conditions=["behavior is verified"],
+            )
+            (mission_dir / "commander_order.json").write_text(
+                json.dumps(command), encoding="utf-8",
+            )
+
+        cases = (
+            {"ref_id": 123},
+            {"stored_mission_id": 123},
+            {"stored_task_id": 456},
+            {"request": "\ud800"},
+        )
+        for mutation in cases:
+            with self.subTest(mutation=mutation):
+                write_payloads(**mutation)
+                with self.assertRaises(self.b.CeraxiaDirectiveError):
+                    self.b._load_commander_order_acceptance_source(
+                        run_dir, directive,
+                    )
+        outside = Path(tempfile.mkdtemp(prefix="acceptance-source-outside-"))
+        with self.assertRaises(self.b.CeraxiaDirectiveError):
+            self.b._bound_mission_directory(str(outside), mission_id)
 
     def test_bridge_rejects_malformed_or_contradictory_verdicts(self):
         for malformed, expected in (
@@ -2337,6 +3138,7 @@ class TestBridge(unittest.TestCase):
         root, run_dir, _result = self._run_bridge_fixture(autoapply=False)
         mission_dir = Path(tempfile.mkdtemp()) / "mission-bridge-fixture"
         mission_dir.mkdir()
+        self.b.WARMMASTER_MISSIONS_ROOT = mission_dir.parent
         (mission_dir / "mission.json").write_text(
             json.dumps({
                 "mission_id": "mission-bridge-fixture", "task_id": "bridge-fixture",
@@ -2357,7 +3159,10 @@ class TestBridge(unittest.TestCase):
         for name, payload in protocol_files.items():
             (mission_dir / name).write_text(json.dumps(payload), encoding="utf-8")
         (run_dir / "mission_ref.json").write_text(
-            json.dumps({"mission_dir": str(mission_dir)}), encoding="utf-8",
+            json.dumps({
+                "mission_id": "mission-bridge-fixture",
+                "mission_dir": str(mission_dir),
+            }), encoding="utf-8",
         )
         ledger = TaskLedger.load(run_dir / "task_ledger.json")
         stage = ledger.to_dict()["result"]["patch_stage"]
@@ -2393,6 +3198,7 @@ class TestBridge(unittest.TestCase):
         root, run_dir, _result = self._run_bridge_fixture(autoapply=False)
         mission_dir = Path(tempfile.mkdtemp()) / "mission-reconcile-fixture"
         mission_dir.mkdir()
+        self.b.WARMMASTER_MISSIONS_ROOT = mission_dir.parent
         (mission_dir / "mission.json").write_text(
             json.dumps({
                 "mission_id": "mission-reconcile-fixture", "task_id": "bridge-fixture",
@@ -2412,7 +3218,10 @@ class TestBridge(unittest.TestCase):
         }.items():
             (mission_dir / name).write_text(json.dumps(payload), encoding="utf-8")
         (run_dir / "mission_ref.json").write_text(
-            json.dumps({"mission_dir": str(mission_dir)}), encoding="utf-8",
+            json.dumps({
+                "mission_id": "mission-reconcile-fixture",
+                "mission_dir": str(mission_dir),
+            }), encoding="utf-8",
         )
         staged = TaskLedger.load(run_dir / "task_ledger.json").to_dict()["result"]["patch_stage"]
         original_root = self.b.REPO_ROOT

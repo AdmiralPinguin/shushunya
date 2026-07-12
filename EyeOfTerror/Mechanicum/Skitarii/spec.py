@@ -129,7 +129,7 @@ def _is_real_test_runner(command: str) -> bool:
 
 def _goal_module_hints(goal: str) -> set[str]:
     hints: set[str] = set()
-    for raw_path in _goal_candidate_paths(goal):
+    for raw_path in _positive_code_targets(goal):
         path = PurePosixPath(raw_path)
         if path.suffix.casefold() != ".py":
             continue
@@ -172,16 +172,31 @@ _DANGEROUS_INLINE_MODULES = {
 _MAX_PRIVATE_EXPECT_BYTES = 16_384
 _ONE_TRAILING_LF_MARKERS = (
     "one newline", "single newline", "one trailing newline",
-    "one newline character", "один символ новой строки",
-    "одним символом новой строки", "одной новой строкой",
+    "one newline character", "exactly one lf", "followed by one lf",
+    "followed by exactly one lf", "+ lf",
+    "один символ новой строки", "одним символом новой строки",
+    "одной новой строкой", "один символ lf в конце",
+    "символом переноса строки lf",
 )
 _NO_TRAILING_LF_MARKERS = (
     "do not add one newline", "do not append one newline", "do not add a newline",
     "do not append a newline", "without a newline", "without newline",
     "no trailing newline", "must not end with a newline", "must not end with newline",
+    "without lf", "no trailing lf", "must not end with lf",
+    "do not append + lf", "do not add + lf", "don't append + lf",
     "не добавлять один символ новой строки", "не добавлять новую строку",
-    "без символа новой строки", "без новой строки",
+    "не добавлять lf", "без символа новой строки", "без новой строки",
+    "без символа переноса строки", "без lf",
 )
+_AMBIGUOUS_TRAILING_LF_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:not|isn't|is\s+not)\s+exactly\s+one\s+lf"
+    r"(?![A-Za-z0-9_])|"
+    r"(?<![A-Za-z0-9_])not(?:\s*,[^,\r\n]{0,80},)?\s+followed\s+by\s+"
+    r"(?:exactly\s+)?one\s+lf(?![A-Za-z0-9_])|"
+    r"(?<![А-Яа-яЁё0-9_])не\s+ровно\s+один\s+lf(?![А-Яа-яЁё0-9_])",
+    re.I,
+)
+_LF_UNSPECIFIED = "unspecified"
 _NEGATIVE_LITERAL_MARKERS = (
     "do not use", "don't use", "must not use", "never use", "avoid using",
     "do not output", "must not output", "never output", "forbidden value",
@@ -196,8 +211,12 @@ _FILE_LITERAL_CONTEXT_RE = re.compile(
     r"(?:file|artifact)(?:\s+[\w./-]+)?\s+(?:content|text|bytes?)\s+"
     r"(?:is|must\s+be|should\s+be|equals?)(?:\s+exact(?:ly)?)?|"
     r"with\s+(?:the\s+)?(?:exact\s+)?(?:content|text|bytes?)|"
+    r"containing\s+exactly|"
     r"write\s+(?:the\s+)?(?:exact\s+)?(?:content|text|bytes?)|"
+    r"(?:file\s+)?content\s+matches?|"
+    r"exact\s+byte\s+match|"
     r"с\s+(?:точным[и]?\s+)?(?:текстом|содержимым|байтами)|"
+    r"содержимое(?:\s+файла)?\s+совпадает\s+с|"
     r"содержимое(?:\s+файла)?\s+(?:точно|ровно|соответствует\s+(?:строке|тексту))|"
     r"точн(?:ое|ый|ые)\s+(?:содержимое|текст|байты)"
     r")\s*(?::|=)?\s*$",
@@ -218,6 +237,7 @@ _STDOUT_LITERAL_CONTEXT_RE = re.compile(
 _PATH_FILE_RELATION_RE = re.compile(
     r"^\s*,?\s*(?:"
     r"with\s+(?:the\s+)?(?:exact\s+)?(?:content|text|bytes?)|"
+    r"containing\s+exactly|"
     r"(?:content|text|bytes?)\s+(?:is|must\s+be|should\s+be|equals?)"
     r"(?:\s+exact(?:ly)?)?|"
     r"(?:has|contains?)\s+(?:the\s+)?(?:exact\s+)?(?:content|text|bytes?)|"
@@ -227,13 +247,84 @@ _PATH_FILE_RELATION_RE = re.compile(
     r")\s*(?::|=)?\s*$",
     re.I,
 )
+_EN_STDOUT_PREDICATE_SRC = (
+    r"(?:"
+    r"(?:print|prints|printed|output|outputs|return|returns|yield|yields)"
+    r"(?:\s+(?:the\s+)?(?:(?:exact|exactly)\s+)?"
+    r"(?:output|stdout|value|text))?(?:\s+exact(?:ly)?)?|"
+    r"(?:exact(?:ly)?\s+)?(?:output|stdout|return\s+value)"
+    r"(?:\s+(?:is|must\s+be|should\s+be|equals?))?"
+    r"(?:\s+exact(?:ly)?)?"
+    r")"
+)
+_RU_STDOUT_PREDICATE_SRC = (
+    r"(?:печат\w*|вывод\w*|возвращ\w*|выда\w*)"
+    r"(?:\s+(?:ровно|точно))?"
+)
+_PATH_STDOUT_RELATION_RE = re.compile(
+    r"^\s*(?:[.,;:]\s*)?(?:"
+    r"(?:(?:and(?:\s+then)?|then|to|so\s+that)\s+)?"
+    r"(?:(?:it|its|the\s+(?:program|script|application)|"
+    r"program|script|application)\s+)?"
+    r"(?:(?:must|should|shall|will)\s+)?"
+    + _EN_STDOUT_PREDICATE_SRC
+    + r"|(?:that|which)\s+(?:(?:must|should|shall|will)\s+)?"
+    + _EN_STDOUT_PREDICATE_SRC
+    + r"|whose\s+(?:exact\s+)?(?:output|stdout|return\s+value)\s+"
+    r"(?:is|must\s+be|should\s+be|equals?)(?:\s+exact(?:ly)?)?|"
+    r"(?:(?:и(?:\s+затем)?|затем|чтобы)\s+)?"
+    r"(?:(?:он|она|оно|программ\w*|скрипт)\s+)?"
+    r"(?:(?:долж\w*|буд(?:ет|ут))\s+)?"
+    + _RU_STDOUT_PREDICATE_SRC
+    + r"|котор(?:ый|ая|ое|ые)\s+"
+    r"(?:(?:долж\w*|буд(?:ет|ут))\s+)?"
+    + _RU_STDOUT_PREDICATE_SRC
+    + r")\s*(?::|=)?\s*$",
+    re.I,
+)
+_STANDALONE_FILE_LITERAL_CONTEXT_RE = re.compile(
+    r"^\s*(?:"
+    r"exact(?:ly)?\s+(?:(?:file|artifact)\s+)?(?:content|text|bytes?)|"
+    r"(?:(?:file|artifact)\s+)?(?:content|text|bytes?)\s+"
+    r"(?:is|must\s+be|should\s+be|equals?|matches?)(?:\s+exact(?:ly)?)?|"
+    r"exact\s+byte\s+match|"
+    r"точн\w*\s+(?:содержим\w*|текст\w*|байт\w*)|"
+    r"(?:содержим\w*(?:\s+файла)?|текст\w*|байт\w*)\s+"
+    r"(?:точно|ровно|совпада\w*(?:\s+с)?|"
+    r"соответств\w*(?:\s+(?:строк\w*|текст\w*))?)"
+    r")\s*(?::|=)?\s*$",
+    re.I,
+)
+_POSTFIX_TARGET_NEGATION_RE = re.compile(
+    r"^\s*(?:is|remains?)\s+(?:forbidden|prohibited)\b|"
+    r"^\s*(?:must|should)\s+not\s+(?:be\s+)?"
+    r"(?:created|written|modified|updated|run)\b|"
+    r"^\s*(?:запрещ\w*|нельзя)\b",
+    re.I,
+)
+_PATH_SCALAR_PREDICATE_RE = re.compile(
+    r"^\s*(?::\s*)?(?:(?:must|should|shall|will)\s+)?"
+    r"(?:add|adds|subtract|subtracts|multiply|multiplies|divide|divides|"
+    r"clamp|clamps|round|rounds|format|formats|convert|converts|calculate|"
+    r"calculates|compute|computes|emit|emits|output|outputs|print|prints|"
+    r"return|returns|yield|yields|parse|parses|validate|validates|"
+    r"добав\w*|вычита\w*|умнож\w*|дел\w*|округл\w*|формат\w*|"
+    r"преобраз\w*|вычисл\w*|вывод\w*|печат\w*|возвращ\w*|провер\w*)\b",
+    re.I,
+)
 _UNQUOTED_FILE_LITERAL_RE = re.compile(
     r"(?<!\w)(?:with\s+(?:the\s+)?(?:exact\s+)?(?:content|text|bytes?)|"
+    r"containing\s+exactly|"
+    r"(?:file\s+)?content\s+matches?|"
+    r"exact\s+byte\s+match|"
     r"exact(?:\s+(?:file|artifact))?\s+(?:content|text|bytes?)|"
     r"(?:file|artifact)(?:\s+[\w./-]+)?\s+(?:content|text|bytes?)\s+"
     r"(?:is\s+)?exact(?:ly)?|"
+    r"с\s+(?:точным[и]?\s+)?(?:текстом|содержимым|байтами)|"
+    r"содержимое(?:\s+файла)?\s+совпадает\s+с|"
     r"(?:точн(?:ое|ые|ый)|ровно)\s+(?:содержимое|текст|байты))"
-    r"\s*(?::|=|is|must\s+be|долж(?:но|ен)\s+быть)?\s*"
+    r"\s*(?::|=|is|must\s+be|matches?\s*(?::|=)?|"
+    r"долж(?:но|ен)\s+быть|совпадает\s+с)?\s*"
     r"(?P<value>[^\s,;.!?]+)",
     re.I,
 )
@@ -258,8 +349,55 @@ _TARGET_NEGATIVE_MARKERS = (
     "do not modify", "must not modify", "do not change", "must not change",
     "do not run", "must not run", "do not create", "must not create",
     "do not write", "must not write", "do not add", "must not add",
+    "never modify", "never change", "never run", "never create",
+    "never write", "never add", "should not modify", "should not change",
+    "should not run", "should not create", "should not write", "should not add",
+    "avoid modifying", "avoid changing", "avoid creating", "avoid writing",
     "preserve", "не изменять", "не менять", "не запускать", "не создавать",
     "не записывать", "не добавлять", "запрещено изменять", "сохранить без изменений",
+)
+_CLAUSE_NEGATOR_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:not|never|cannot|can\s+not|can't|don't|doesn't|"
+    r"didn't|won't|wouldn't|shouldn't|mustn't|avoid(?:ing)?|without|"
+    r"forbidden|prohibited)(?![A-Za-z0-9_])|"
+    r"(?<![А-Яа-яЁё0-9_])(?:не|нельзя|никогда|без|избега\w*|запрещ\w*)"
+    r"(?![А-Яа-яЁё0-9_])",
+    re.I,
+)
+_ADVERSATIVE_RE = re.compile(
+    r"(?<!\w)(?:but|however|instead|yet|но|однако|зато)(?!\w)",
+    re.I,
+)
+_POSITIVE_TARGET_PREFIX_RE = re.compile(
+    r"^(?:"
+    r"\s*(?:[-*]\s*)?(?:(?:please|kindly|can\s+you|could\s+you|would\s+you)\s+)?"
+    r"(?:(?:using|based\s+on)\s+"
+    r"(?:[\w./-]+\.[A-Za-z][A-Za-z0-9_-]{0,15})"
+    r"(?:\s*(?:,|and)\s*[\w./-]+\.[A-Za-z][A-Za-z0-9_-]{0,15})*"
+    r"\s*,\s*)?"
+    r"(?:create|write|generate|produce|make|add|implement|"
+    r"fix|update|modify|build|develop|repair|run)\s+"
+    r"(?:(?:(?:one|a|an|the|new|single|requested|target|output|"
+    r"repository[- ]root|root(?:[- ]level)?|plain[- ]text|text|marker|file|"
+    r"artifact|script|module|program|code|bug|issue|support|feature|behavior|"
+    r"behaviour|in|at|named|called|and)\s+)|"
+    r"(?:[\w./-]+\.[A-Za-z][A-Za-z0-9_-]{0,15}\s+))*"
+    r"|\s*(?:[-*]\s*)?(?:(?:пожалуйста|можешь|можете)\s+)?"
+    r"(?:(?:используя|на\s+основе)\s+"
+    r"(?:[\w./-]+\.[A-Za-z][A-Za-z0-9_-]{0,15})"
+    r"(?:\s*(?:,|и)\s*[\w./-]+\.[A-Za-z][A-Za-z0-9_-]{0,15})*"
+    r"\s*,\s*)?"
+    r"(?:созда\w*|напиш\w*|напис\w*|запис\w*|"
+    r"сгенерир\w*|добав\w*|реализ\w*|исправ\w*|обнов\w*|измен\w*|"
+    r"разработ\w*|запуст\w*)\s+"
+    r"(?:(?:(?:один|одну|новый|новую|новое|единственный|запрошенный|"
+    r"целевой|выходной|корневой|текстовый|маркер|файл|артефакт|скрипт|"
+    r"модуль|программу|код|ошибку|поддержку|функцию|в|с|именем|названием|и)"
+    r"\s+)|(?:[\w./-]+\.[A-Za-z][A-Za-z0-9_-]{0,15}\s+))*"
+    r"|\s*explorer\s+(?:found|identified|located)\s+"
+    r"(?:(?:the\s+)?(?:implementation|target|code|module)\s+)?(?:in|at)\s+"
+    r")$",
+    re.I,
 )
 
 
@@ -300,9 +438,25 @@ def _goal_mentions_path(path: str, goal: str) -> bool:
     ))
 
 
+def _masked_clause_text(text: str) -> str:
+    """Hide non-structural dots so sentence boundaries cannot split paths/numbers."""
+    masked = list(text)
+    for _path, start, end in _goal_path_occurrences(text, code_only=False):
+        for index in range(start, end):
+            if masked[index] == ".":
+                masked[index] = "_"
+    for match in re.finditer(r"(?<=\d)\.(?=\d)", text):
+        masked[match.start()] = "_"
+    return "".join(masked)
+
+
 def _literal_clause_before(text: str, start: int, *, fenced: bool = False) -> str:
     window = text[max(0, start - 240):start]
-    boundary = max(window.rfind("."), window.rfind(";"))
+    masked = _masked_clause_text(window)
+    boundary = max(
+        masked.rfind("."), masked.rfind("?"), masked.rfind("!"),
+        masked.rfind(";"),
+    )
     window = window[boundary + 1:]
     if not fenced and "\n" in window:
         window = window.rsplit("\n", 1)[-1]
@@ -324,9 +478,17 @@ def _context_contains_marker(context: str, marker: str) -> bool:
     return bool(re.search(rf"(?<![A-Za-z0-9_]){words}(?![A-Za-z0-9_])", context))
 
 
+def _predicate_scope(context: str) -> str:
+    return _ADVERSATIVE_RE.split(context)[-1]
+
+
 def _negative_literal_context(context: str) -> bool:
-    return any(
-        _context_contains_marker(context, marker)
+    # A comma may only introduce a parenthetical ("do not, under any
+    # circumstances, ..."); it is never a safe polarity boundary.  An explicit
+    # contrast may start a new predicate and therefore a new scope.
+    scoped = _predicate_scope(context)
+    return bool(_CLAUSE_NEGATOR_RE.search(scoped)) or any(
+        _context_contains_marker(scoped, marker)
         for marker in _NEGATIVE_LITERAL_MARKERS
     )
 
@@ -341,17 +503,60 @@ def _relational_literal_channel(context: str) -> str:
     return "file_bytes" if file_match else "stdout"
 
 
-def _requires_one_trailing_lf(suffix: str) -> bool:
+def _strong_unbound_file_literal_context(context: str) -> bool:
+    """Bind only a path-free standalone exact-file authority clause."""
     return (
-        any(
-            _context_contains_marker(suffix, marker)
-            for marker in _ONE_TRAILING_LF_MARKERS
-        )
-        and not any(
-            _context_contains_marker(suffix, marker)
-            for marker in _NO_TRAILING_LF_MARKERS
-        )
+        not _goal_path_occurrences(context, code_only=False)
+        and bool(_STANDALONE_FILE_LITERAL_CONTEXT_RE.fullmatch(context))
     )
+
+
+def _lf_marker_is_negated(suffix: str, marker_start: int) -> bool:
+    prefix = suffix[max(0, marker_start - 96):marker_start]
+    # Commas commonly wrap emphatic negation.  Only an explicit predicate
+    # boundary resets it; otherwise fail closed.
+    scope = re.split(
+        r";|(?<!\w)(?:but|however|then|но|однако|затем)(?!\w)",
+        prefix,
+        flags=re.I,
+    )[-1]
+    return bool(_CLAUSE_NEGATOR_RE.search(scope))
+
+
+def _trailing_lf_policy(suffix: str) -> bool | str | None:
+    """Return ONE, ZERO, BASE_RAW, or conflict for the bounded literal suffix."""
+    if _AMBIGUOUS_TRAILING_LF_RE.search(suffix):
+        return None
+    zero_lf = any(
+        _context_contains_marker(suffix, marker)
+        for marker in _NO_TRAILING_LF_MARKERS
+    )
+    one_lf = False
+    negated_one_lf = False
+    for marker in _ONE_TRAILING_LF_MARKERS:
+        words = r"\s+".join(re.escape(part) for part in marker.split())
+        for match in re.finditer(
+            rf"(?<![A-Za-z0-9_]){words}(?![A-Za-z0-9_])",
+            suffix,
+            re.I,
+        ):
+            if _lf_marker_is_negated(suffix, match.start()):
+                negated_one_lf = True
+            else:
+                one_lf = True
+    if one_lf and zero_lf:
+        return None
+    if one_lf:
+        return True
+    if zero_lf:
+        return False
+    if negated_one_lf:
+        return None
+    return _LF_UNSPECIFIED
+
+
+def _requires_one_trailing_lf(suffix: str) -> bool:
+    return _trailing_lf_policy(suffix) is True
 
 
 def _goal_path_occurrences(text: str, *, code_only: bool) -> list[tuple[str, int, int]]:
@@ -380,6 +585,157 @@ def _target_prefix(text: str, path_start: int) -> str:
     return prefix[boundary + 1:].casefold()
 
 
+def _target_suffix(text: str, path_end: int) -> str:
+    suffix = text[path_end:path_end + 180]
+    masked = _masked_clause_text(suffix)
+    boundaries = [
+        index for marker in (".", "?", "!", ";", "\n")
+        if (index := masked.find(marker)) >= 0
+    ]
+    if boundaries:
+        suffix = suffix[:min(boundaries)]
+    return suffix.casefold()
+
+
+def _positive_target_occurrence(text: str, path_start: int, path_end: int) -> bool:
+    scope = _predicate_scope(_target_prefix(text, path_start))
+    if _CLAUSE_NEGATOR_RE.search(scope):
+        return False
+    if not _POSITIVE_TARGET_PREFIX_RE.search(scope):
+        return False
+    return not _POSTFIX_TARGET_NEGATION_RE.search(_target_suffix(text, path_end))
+
+
+def _explicit_scalar_target_occurrence(
+    text: str,
+    path_start: int,
+    path_end: int,
+) -> bool:
+    if _positive_target_occurrence(text, path_start, path_end):
+        return True
+    scope = _predicate_scope(_target_prefix(text, path_start))
+    suffix = _target_suffix(text, path_end)
+    if _CLAUSE_NEGATOR_RE.search(scope) or _POSTFIX_TARGET_NEGATION_RE.search(suffix):
+        return False
+    return bool(re.search(r"(?<!\w)(?:for|для)\s+$", scope, re.I)) or bool(
+        _PATH_SCALAR_PREDICATE_RE.search(suffix)
+    )
+
+
+def _ambiguous_scalar_co_targets(text: str, path_start: int, path_end: int) -> bool:
+    """Unlabelled scalar evidence cannot be shared by coordinated output paths."""
+    masked = _masked_clause_text(text)
+    left = max(
+        masked.rfind(".", 0, path_start), masked.rfind("?", 0, path_start),
+        masked.rfind("!", 0, path_start), masked.rfind(";", 0, path_start),
+        masked.rfind("\n", 0, path_start),
+    ) + 1
+    right = len(text)
+    for marker in (".", "?", "!", ";", "\n"):
+        boundary = masked.find(marker, path_end)
+        if boundary >= 0:
+            right = min(right, boundary)
+    for match in _ADVERSATIVE_RE.finditer(text, left, path_start):
+        left = match.end()
+    following_contrast = _ADVERSATIVE_RE.search(text, path_end, right)
+    if following_contrast:
+        right = following_contrast.start()
+    occurrences = _goal_path_occurrences(text[left:right], code_only=True)
+    if len(occurrences) <= 1:
+        return False
+    owners = sum(
+        _explicit_scalar_target_occurrence(text, left + start, left + end)
+        for _path, start, end in occurrences
+    )
+    return owners != 1
+
+
+def _negative_target_occurrence(text: str, path_start: int, path_end: int) -> bool:
+    scope = _predicate_scope(_target_prefix(text, path_start))
+    suffix = _target_suffix(text, path_end)
+    return bool(_CLAUSE_NEGATOR_RE.search(scope)) or bool(
+        _POSTFIX_TARGET_NEGATION_RE.search(suffix)
+    )
+
+
+def _scalar_target_occurrence(text: str, path_start: int, path_end: int) -> bool:
+    if _ambiguous_scalar_co_targets(text, path_start, path_end):
+        return False
+    return _explicit_scalar_target_occurrence(text, path_start, path_end)
+
+
+def _positive_target_paths(text: str, *, code_only: bool) -> set[str]:
+    """Return paths relationally governed by a positive action, never mere inputs."""
+    targets: set[str] = set()
+    for path, path_start, path_end in _goal_path_occurrences(text, code_only=code_only):
+        if _positive_target_occurrence(text, path_start, path_end):
+            targets.add(path)
+    return targets
+
+
+def _positive_file_targets(text: str) -> set[str]:
+    return _positive_target_paths(text, code_only=False)
+
+
+def _positive_code_targets(text: str) -> set[str]:
+    return _positive_target_paths(text, code_only=True)
+
+
+def _scalar_labeled_code_targets(text: str) -> set[str]:
+    targets: set[str] = set()
+    for path, path_start, path_end in _goal_path_occurrences(text, code_only=True):
+        if _scalar_target_occurrence(text, path_start, path_end):
+            targets.add(path)
+    return targets
+
+
+def _target_evidence_segments(text: str, target: str) -> list[str]:
+    occurrences = _goal_path_occurrences(text, code_only=True)
+    all_paths = _goal_path_occurrences(text, code_only=False)
+    segments: list[str] = []
+    masked_text = _masked_clause_text(text)
+    for path, path_start, path_end in occurrences:
+        if path != target or not _scalar_target_occurrence(text, path_start, path_end):
+            continue
+        boundaries = (
+            masked_text.rfind(".", 0, path_start),
+            masked_text.rfind("?", 0, path_start),
+            masked_text.rfind("!", 0, path_start),
+            masked_text.rfind(";", 0, path_start),
+            masked_text.rfind("\n", 0, path_start),
+        )
+        segment_start = max(boundaries) + 1
+        for contrast in _ADVERSATIVE_RE.finditer(text, segment_start, path_start):
+            segment_start = contrast.end()
+        segment_end = len(text)
+        for marker in (".", "?", "!", "\n"):
+            boundary = masked_text.find(marker, path_end)
+            if boundary >= 0:
+                segment_end = min(segment_end, boundary)
+        for _next_path, next_start, next_end in all_paths:
+            if next_start > path_start:
+                if (
+                    _scalar_target_occurrence(text, next_start, next_end)
+                    or _negative_target_occurrence(text, next_start, next_end)
+                    or _ambiguous_scalar_co_targets(text, next_start, next_end)
+                ):
+                    segment_end = min(segment_end, next_start)
+                    break
+        # A later explicitly negative continuation cannot lend its scalars to
+        # the positive target clause, even before the sentence ends.
+        cursor = path_end
+        while (separator := masked_text.find(";", cursor, segment_end)) >= 0:
+            next_separator = masked_text.find(";", separator + 1, segment_end)
+            clause_end = segment_end if next_separator < 0 else next_separator
+            continuation = text[separator + 1:clause_end]
+            if _CLAUSE_NEGATOR_RE.search(continuation[:120]):
+                segment_end = separator
+                break
+            cursor = separator + 1
+        segments.append(text[segment_start:segment_end])
+    return segments
+
+
 def _literal_target(text: str, literal_start: int, channel: str) -> str:
     occurrences = [
         item for item in _goal_path_occurrences(text, code_only=channel == "stdout")
@@ -391,30 +747,43 @@ def _literal_target(text: str, literal_start: int, channel: str) -> str:
     prefix = _target_prefix(text, path_start)
     relation = text[path_end:literal_start].casefold()
     target_context = prefix + " " + relation
-    if any(
-        _context_contains_marker(target_context, marker)
-        for marker in _TARGET_NEGATIVE_MARKERS
-    ):
+    if _negative_literal_context(target_context):
         return ""
     if channel == "file_bytes":
-        return path if _PATH_FILE_RELATION_RE.fullmatch(relation) else ""
-    direct_subject = bool(re.match(
-        r"\s+(?:print|prints|output|outputs|return|returns|yield|yields)\b",
-        relation,
-    ))
-    positive_verb = any(
-        _context_contains_marker(prefix, marker) for marker in _CODE_TARGET_VERBS
-    )
-    return path if direct_subject or positive_verb else ""
+        return path if (
+            _PATH_FILE_RELATION_RE.fullmatch(relation)
+            and path in _positive_file_targets(text)
+        ) else ""
+    return path if (
+        path in _positive_code_targets(text)
+        and _PATH_STDOUT_RELATION_RE.fullmatch(relation)
+    ) else ""
 
 
 def _authoritative_literal_policies(goal: str) -> dict[str, dict[str, Any]]:
     """Extract whole task-authored values; never authorize by substring presence."""
     text = str(goal)
     policies: dict[str, dict[str, Any]] = {
-        "file_bytes": {"targets": {}, "unbound": {}},
-        "stdout": {"targets": {}, "unbound": {}},
+        "file_bytes": {"targets": {}, "unbound": {}, "unbound_exact": {}},
+        "stdout": {"targets": {}, "unbound": {}, "unbound_exact": {}},
     }
+
+    def merged_policy(old: Any, new: Any) -> Any:
+        if old is None or new is None:
+            return None
+        if old == new:
+            return old
+        if old == _LF_UNSPECIFIED:
+            return new
+        if new == _LF_UNSPECIFIED:
+            return old
+        return None
+
+    def store_policy(table: dict[str, Any], value: str, policy: Any) -> None:
+        if value not in table:
+            table[value] = policy
+        else:
+            table[value] = merged_policy(table[value], policy)
 
     def record(value: str, start: int, end: int, *, fenced: bool = False) -> None:
         context = _literal_clause_before(text, start, fenced=fenced)
@@ -426,14 +795,17 @@ def _authoritative_literal_policies(goal: str) -> dict[str, dict[str, Any]]:
         ):
             return
         suffix = _literal_clause_after(text, end)
-        one_lf = _requires_one_trailing_lf(suffix)
+        one_lf = _trailing_lf_policy(suffix)
         target = _literal_target(text, start, channel)
         if target:
             target_values = policies[channel]["targets"].setdefault(target, {})
-            target_values[value] = bool(target_values.get(value) or one_lf)
+            store_policy(target_values, value, one_lf)
         else:
             unbound = policies[channel]["unbound"]
-            unbound[value] = bool(unbound.get(value) or one_lf)
+            store_policy(unbound, value, one_lf)
+            if channel == "file_bytes" and _strong_unbound_file_literal_context(context):
+                exact_unbound = policies[channel]["unbound_exact"]
+                store_policy(exact_unbound, value, one_lf)
 
     # Fenced blocks are data only when introduced by an explicit content/output
     # clause.  The line breaks surrounding the fence are Markdown framing.
@@ -471,14 +843,20 @@ def _authoritative_literal_policies(goal: str) -> dict[str, dict[str, Any]]:
                 and not _negative_literal_context(context)
             ):
                 suffix = _literal_clause_after(text, match.end())
-                one_lf = _requires_one_trailing_lf(suffix)
+                one_lf = _trailing_lf_policy(suffix)
                 target = _literal_target(text, match.start("value"), channel)
                 if target:
                     target_values = policies[channel]["targets"].setdefault(target, {})
-                    target_values[value] = bool(target_values.get(value) or one_lf)
+                    store_policy(target_values, value, one_lf)
                 else:
                     unbound = policies[channel]["unbound"]
-                    unbound[value] = bool(unbound.get(value) or one_lf)
+                    store_policy(unbound, value, one_lf)
+                    if (
+                        channel == "file_bytes"
+                        and _strong_unbound_file_literal_context(context)
+                    ):
+                        exact_unbound = policies[channel]["unbound_exact"]
+                        store_policy(exact_unbound, value, one_lf)
 
     # A later generic directive may strengthen newline semantics for a pair that
     # was already bound by an authoritative target relation.  It cannot create a
@@ -487,7 +865,7 @@ def _authoritative_literal_policies(goal: str) -> dict[str, dict[str, Any]]:
         unbound = policies[channel]["unbound"]
         for values in policies[channel]["targets"].values():
             for literal in set(values) & set(unbound):
-                values[literal] = bool(values[literal] or unbound[literal])
+                values[literal] = merged_policy(values[literal], unbound[literal])
     return policies
 
 
@@ -498,32 +876,76 @@ def _authoritative_expected_value(
     exact_bytes: bool,
     target: str,
     target_goal: str,
+    precedence_goals: tuple[str, ...] = (),
 ) -> bool:
     if not isinstance(expected, str):
         return False
-    policies = _authoritative_literal_policies(goal)
     channel = "file_bytes" if exact_bytes else "stdout"
-    values = dict(policies[channel]["targets"].get(target) or {})
-    if channel == "stdout" and not values and target:
-        authoritative_targets = {
-            path for path, _start, _end in _goal_path_occurrences(goal, code_only=True)
-        }
-        enriched_targets = {
-            path for path, _start, _end in _goal_path_occurrences(target_goal, code_only=True)
-        }
-        if not authoritative_targets and enriched_targets == {target}:
-            values = dict(policies[channel]["unbound"])
+
+    def target_values(evidence_goal: str) -> dict[str, bool]:
+        policies = _authoritative_literal_policies(evidence_goal)
+        values = dict(policies[channel]["targets"].get(target) or {})
+        if not values and target:
+            authoritative_targets = {
+                path for path, _start, _end in _goal_path_occurrences(
+                    evidence_goal, code_only=channel == "stdout",
+                )
+            }
+            if channel == "stdout":
+                fallback_targets = _positive_code_targets(target_goal)
+                can_bind_unbound = (
+                    not authoritative_targets and fallback_targets == {target}
+                )
+            else:
+                local_positive_targets = _positive_file_targets(evidence_goal)
+                fallback_targets = _positive_file_targets(target_goal)
+                can_bind_unbound = (
+                    local_positive_targets == {target}
+                    or (
+                        not authoritative_targets
+                        and fallback_targets == {target}
+                    )
+                )
+            if can_bind_unbound:
+                values = dict(
+                    policies[channel][
+                        "unbound" if channel == "stdout" else "unbound_exact"
+                    ]
+                )
+        return values
+
+    # Authority is tiered, never unioned.  A real clarification wins the raw
+    # commander request for a target/channel it specifies; that request wins a
+    # Ceraxia paraphrase.  Lower tiers remain usable only for unspecified targets.
+    values: dict[str, bool] = {}
+    for precedence_goal in precedence_goals:
+        values = target_values(precedence_goal)
+        if values:
+            break
+    if not values:
+        values = target_values(goal)
     for literal, one_lf in values.items():
+        if one_lf is None:
+            continue
         if exact_bytes:
-            authorized = literal + "\n" if one_lf and not literal.endswith("\n") else literal
+            authorized = (
+                literal + "\n"
+                if one_lf is True and not literal.endswith("\n")
+                else literal
+            )
             if expected == authorized:
                 return True
-        elif expected == literal or (one_lf and expected == literal + "\n"):
+        elif expected == literal or (one_lf is True and expected == literal + "\n"):
             return True
     return False
 
 
-def _private_file_bytes_check(candidate: Any, goal: str) -> dict[str, Any] | None:
+def _private_file_bytes_check(
+    candidate: Any,
+    goal: str,
+    *,
+    precedence_goals: tuple[str, ...] = (),
+) -> dict[str, Any] | None:
     """Validate an inert exact-file assertion from authoritative task literals."""
     if not isinstance(candidate, dict) or candidate.get("kind") != "file_bytes":
         return None
@@ -535,6 +957,7 @@ def _private_file_bytes_check(candidate: Any, goal: str) -> dict[str, Any] | Non
         or not isinstance(expected, str)
         or not _authoritative_expected_value(
             expected, goal, exact_bytes=True, target=path, target_goal=goal,
+            precedence_goals=precedence_goals,
         )
         or len(expected.encode("utf-8")) > _MAX_PRIVATE_EXPECT_BYTES
     ):
@@ -766,7 +1189,7 @@ def _private_candidate_probe(command: str, goal: str) -> bool:
     return (
         bool(script)
         and path.suffix.casefold() in expected_suffixes
-        and path.as_posix() in _goal_candidate_paths(goal)
+        and path.as_posix() in _positive_code_targets(goal)
     )
 
 
@@ -781,7 +1204,7 @@ def _private_candidate_target(command: str, goal: str) -> str:
         return ""
     if tokens[1] != "-c":
         path = _normalized_script_path(tokens[1])
-        return path if path in _goal_candidate_paths(goal) else ""
+        return path if path in _positive_code_targets(goal) else ""
     if tokens[0] not in {"python3", "/usr/bin/python3"} or len(tokens) != 3:
         return ""
     try:
@@ -795,7 +1218,7 @@ def _private_candidate_target(command: str, goal: str) -> str:
         elif isinstance(statement, ast.ImportFrom) and statement.module and not statement.level:
             imported.add(statement.module)
     matches: list[str] = []
-    for path in _goal_candidate_paths(goal):
+    for path in _positive_code_targets(goal):
         pure = PurePosixPath(path)
         if pure.suffix.casefold() != ".py":
             continue
@@ -868,23 +1291,82 @@ def _candidate_test_operands(command: str) -> set[str]:
     return operands
 
 
-def _task_scalar_operands(goal: str) -> set[str]:
-    operands: set[str] = set()
-    policies = _authoritative_literal_policies(goal)
-    for channel in ("file_bytes", "stdout"):
-        for values in policies[channel]["targets"].values():
-            operands.update(values)
-        operands.update(policies[channel]["unbound"])
-    operands.update(re.findall(r"(?<![\w.])-?\d+(?:\.\d+)?(?![\w.])", str(goal)))
-    lowered = str(goal).casefold()
-    formatting_operands = (
+def _task_scalar_operands(
+    goal: str,
+    *,
+    precedence_goals: tuple[str, ...] = (),
+    target: str = "",
+    target_goal: str = "",
+) -> set[str]:
+    def target_scoped_text(evidence_goal: str) -> str:
+        if not target:
+            return evidence_goal
+        labeled_targets = _scalar_labeled_code_targets(evidence_goal)
+        if target in labeled_targets:
+            return "\n".join(_target_evidence_segments(evidence_goal, target))
+        mentioned_targets = {
+            path for path, _start, _end in _goal_path_occurrences(
+                evidence_goal, code_only=True,
+            )
+        }
+        if (
+            not mentioned_targets
+            and _positive_code_targets(target_goal) == {target}
+        ):
+            return evidence_goal
+        return ""
+
+    def literal_operands(evidence_goal: str) -> set[str]:
+        found: set[str] = set()
+        policies = _authoritative_literal_policies(evidence_goal)
+        scoped = target_scoped_text(evidence_goal)
+        scoped_policies = (
+            _authoritative_literal_policies(scoped) if scoped else None
+        )
+        for channel in ("file_bytes", "stdout"):
+            if target:
+                found.update(policies[channel]["targets"].get(target) or {})
+            else:
+                for values in policies[channel]["targets"].values():
+                    found.update(values)
+            if not target:
+                found.update(policies[channel]["unbound"])
+            elif scoped_policies is not None:
+                found.update(scoped_policies[channel]["unbound"])
+        return found
+
+    def numeric_operands(evidence_goal: str) -> set[str]:
+        scoped = target_scoped_text(evidence_goal)
+        if not scoped:
+            return set()
+        return set(re.findall(
+            r"(?<![\w.])-?\d+(?:\.\d+)?(?!\w|\.\d)", scoped,
+        ))
+
+    def format_separators(evidence_goal: str) -> set[str]:
+        found: set[str] = set()
+        scoped = target_scoped_text(evidence_goal)
+        if not scoped:
+            return found
+        lowered = scoped.casefold()
+        for scalar, markers in formatting_markers:
+            if any(marker in lowered for marker in markers):
+                found.add(scalar)
+        return found
+
+    formatting_markers = (
         (" ", ("space-separated", "separated by spaces", "separated by a space", "разделены пробелом")),
         (",", ("comma-separated", "separated by commas", "separated by a comma", "разделены запятыми")),
         ("\n", ("newline-separated", "separated by newlines", "one per line", "каждый с новой строки")),
     )
-    for scalar, markers in formatting_operands:
-        if any(marker in lowered for marker in markers):
-            operands.add(scalar)
+    operands: set[str] = set()
+    for extractor in (literal_operands, numeric_operands, format_separators):
+        selected: set[str] = set()
+        for precedence_goal in precedence_goals:
+            selected = extractor(precedence_goal)
+            if selected:
+                break
+        operands.update(selected or extractor(goal))
     return operands
 
 
@@ -898,6 +1380,8 @@ def _private_oracle_for_check(
     command: str,
     candidate_command: str,
     authoritative_goal: str,
+    *,
+    precedence_goals: tuple[str, ...] = (),
 ) -> bool:
     """Require an independent computation tied to authoritative/test operands."""
     if not _private_oracle(command):
@@ -908,8 +1392,12 @@ def _private_oracle_for_check(
     except (IndexError, UnicodeError, ValueError, SyntaxError, TypeError):
         return False
     output = tree.body[-1].value.args[0]  # shape is pinned by _private_oracle
+    candidate_target = _private_candidate_target(candidate_command, authoritative_goal)
     operands = _candidate_test_operands(candidate_command) | _task_scalar_operands(
         authoritative_goal,
+        precedence_goals=precedence_goals,
+        target=candidate_target,
+        target_goal=authoritative_goal,
     )
     authorized_leaf_ids: set[int] = set()
     for node in ast.walk(output):
@@ -979,6 +1467,7 @@ def _canonical_private_candidate(command: str) -> str:
 def _structured_checks(
     raw_checks: Any, *, allow_bare: bool, goal: str = "",
     file_evidence_goal: str | None = None,
+    primary_evidence_goals: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     for candidate in raw_checks if isinstance(raw_checks, list) else []:
@@ -987,6 +1476,7 @@ def _structured_checks(
             _private_file_bytes_check(
                 candidate,
                 authoritative_goal,
+                precedence_goals=primary_evidence_goals,
             )
             if not allow_bare else None
         )
@@ -1005,6 +1495,7 @@ def _structured_checks(
                 and _authoritative_expected_value(
                     check["expect_stdout"], authoritative_goal, exact_bytes=False,
                     target=candidate_target, target_goal=goal,
+                    precedence_goals=primary_evidence_goals,
                 )
             )
             if not allow_bare and "expect_stdout" in check and not literal_authorized:
@@ -1025,6 +1516,7 @@ def _structured_checks(
                     not oracle_command
                     or _private_oracle_for_check(
                         oracle_command, str(check["cmd"]), authoritative_goal,
+                        precedence_goals=primary_evidence_goals,
                     )
                 )
             ):
@@ -1038,7 +1530,12 @@ def _structured_checks(
     return checks
 
 
-def build_held_out_plan(goal: str, *, task_goal: str | None = None) -> dict[str, Any]:
+def build_held_out_plan(
+    goal: str,
+    *,
+    task_goal: str | None = None,
+    primary_task_goals: tuple[str, ...] = (),
+) -> dict[str, Any]:
     """Generate private edge checks and preserve verifier-infrastructure provenance."""
     evidence_goal = str(task_goal) if task_goal is not None else goal
     prompt = (
@@ -1076,6 +1573,7 @@ def build_held_out_plan(goal: str, *, task_goal: str | None = None) -> dict[str,
         checks = _structured_checks(
             payload.get("checks"), allow_bare=False, goal=goal,
             file_evidence_goal=evidence_goal,
+            primary_evidence_goals=primary_task_goals,
         )[:3]
         if checks:
             return {"status": "ok", "checks": checks, "error": ""}

@@ -31,13 +31,19 @@ from typing import Any
 
 from EyeOfTerror.common_protocol.ceraxia_directive import (
     CeraxiaDirectiveError,
+    validate_directive_for_commander,
     validate_ceraxia_directive,
 )
+from EyeOfTerror.common_protocol.validation import validate_protocol_payload
 
 SKITARII_URL = os.environ.get(
     "SKITARII_URL", os.environ.get("SKITARII_WARBAND_URL", "http://127.0.0.1:7200"),
 )
 REPO_ROOT = Path(os.environ.get("SHUSHUNYA_REPO_ROOT", "/media/shushunya/SHUSHUNYA/shushunya"))
+WARMMASTER_MISSIONS_ROOT = Path(os.environ.get(
+    "WARMMASTER_MISSIONS_ROOT",
+    str(Path(__file__).resolve().parents[1] / "missions"),
+))
 MAX_VERIFY_CHECKS = 10
 MAX_VERIFY_COMMAND_BYTES = 4096
 MAX_VERIFY_OUTPUT_BYTES = 131_072
@@ -52,6 +58,9 @@ MAX_EXTERNAL_ASSET_BYTES = 500_000_000
 MAX_EXTERNAL_ASSET_TOTAL_BYTES = 1_000_000_000
 MAX_EXTERNAL_ASSETS = 100
 MAX_SKITARII_RESPONSE_BYTES = 32_000_000
+ACCEPTANCE_SOURCE_TYPE = "commander_order_user_request"
+MAX_ACCEPTANCE_SOURCE_BYTES = 131_072
+MAX_ACCEPTANCE_METADATA_BYTES = 1_048_576
 SKITARII_POLL_INTERVAL_SEC = 0.5
 _MISSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 
@@ -991,8 +1000,11 @@ def _load_ceraxia_directive(run_dir: Path, task_id: str) -> dict[str, Any]:
         raise CeraxiaDirectiveError(f"governor_plan.json is unreadable: {exc}") from exc
     if not isinstance(governor_plan, dict):
         raise CeraxiaDirectiveError("governor_plan.json must contain an object")
-    expected_mission_id = str(governor_plan.get("mission_id") or "").strip()
-    if not expected_mission_id:
+    expected_mission_id = governor_plan.get("mission_id")
+    if (
+        type(expected_mission_id) is not str
+        or not _MISSION_ID_RE.fullmatch(expected_mission_id)
+    ):
         raise CeraxiaDirectiveError("governor_plan.json does not bind a mission_id")
     return validate_ceraxia_directive(
         payload,
@@ -1000,6 +1012,143 @@ def _load_ceraxia_directive(run_dir: Path, task_id: str) -> dict[str, Any]:
         expected_mission_id=expected_mission_id,
         require_delegation=True,
     )
+
+
+def _bound_mission_directory(raw: str, mission_id: str) -> Path:
+    """Resolve one canonical mission directory under the configured authority root."""
+    if not isinstance(raw, str) or not isinstance(mission_id, str):
+        raise CeraxiaDirectiveError("linked mission identity must be textual")
+    if not _MISSION_ID_RE.fullmatch(mission_id):
+        raise CeraxiaDirectiveError("linked mission_id is invalid")
+    candidate = Path(raw)
+    try:
+        root = WARMMASTER_MISSIONS_ROOT.resolve(strict=True)
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise CeraxiaDirectiveError(f"linked mission directory is unavailable: {exc}") from exc
+    if (
+        not candidate.is_absolute()
+        or candidate.is_symlink()
+        or resolved != candidate
+        or not resolved.is_dir()
+        or resolved.parent != root
+        or resolved.name != mission_id
+    ):
+        raise CeraxiaDirectiveError(
+            "linked mission directory is outside the configured mission authority root"
+        )
+    return resolved
+
+
+def _load_commander_order_acceptance_source(
+    run_dir: Path,
+    leadership_directive: dict[str, Any],
+) -> dict[str, Any]:
+    """Load the linked original request and bind it to this exact delegation.
+
+    The fighter goal is Ceraxia's operational handoff.  Acceptance may also use
+    the user's original literal requirements, but only when they come from the
+    canonical commander_order for the same linked mission and the directive has
+    preserved that order's command boundaries.
+    """
+
+    def bounded_text(value: object, maximum: int) -> bool:
+        if not isinstance(value, str) or not value.strip() or "\x00" in value:
+            return False
+        try:
+            return len(value.encode("utf-8")) <= maximum
+        except UnicodeEncodeError:
+            return False
+
+    def strict_object(path: Path, label: str) -> dict[str, Any]:
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = -1
+        try:
+            descriptor = os.open(path, flags)
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_size > MAX_ACCEPTANCE_METADATA_BYTES
+            ):
+                raise CeraxiaDirectiveError(
+                    f"{label} is not a bounded regular file"
+                )
+            with os.fdopen(descriptor, "rb") as handle:
+                descriptor = -1
+                raw = handle.read(MAX_ACCEPTANCE_METADATA_BYTES + 1)
+            if len(raw) > MAX_ACCEPTANCE_METADATA_BYTES:
+                raise CeraxiaDirectiveError(f"{label} exceeds the metadata bound")
+            value = json.loads(raw.decode("utf-8"))
+        except CeraxiaDirectiveError:
+            raise
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise CeraxiaDirectiveError(f"{label} is unreadable: {exc}") from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+        if not isinstance(value, dict):
+            raise CeraxiaDirectiveError(f"{label} must contain an object")
+        return value
+
+    mission_ref = strict_object(run_dir / "mission_ref.json", "mission_ref.json")
+    expected_mission_id = str(leadership_directive.get("mission_id") or "")
+    if mission_ref.get("mission_id") != expected_mission_id:
+        raise CeraxiaDirectiveError(
+            "mission_ref.json mission_id does not match the Ceraxia directive"
+        )
+    mission_dir_text = mission_ref.get("mission_dir")
+    if not bounded_text(mission_dir_text, 4_096):
+        raise CeraxiaDirectiveError("mission_ref.json does not bind a mission directory")
+    mission_dir = _bound_mission_directory(mission_dir_text, expected_mission_id)
+    mission = strict_object(mission_dir / "mission.json", "linked mission.json")
+    if mission.get("mission_id") != expected_mission_id:
+        raise CeraxiaDirectiveError(
+            "linked mission.json mission_id does not match the Ceraxia directive"
+        )
+    if mission.get("task_id") != leadership_directive.get("task_id"):
+        raise CeraxiaDirectiveError(
+            "linked mission.json task_id does not match the Ceraxia directive"
+        )
+    command = strict_object(
+        mission_dir / "commander_order.json", "linked commander_order.json",
+    )
+    try:
+        validate_protocol_payload(command, expected_type="commander_order")
+    except ValueError as exc:
+        raise CeraxiaDirectiveError(f"linked commander_order.json is invalid: {exc}") from exc
+    if type(command.get("protocol_version")) is not int:
+        raise CeraxiaDirectiveError(
+            "linked commander_order.protocol_version must be an integer"
+        )
+    if command.get("mission_id") != expected_mission_id:
+        raise CeraxiaDirectiveError(
+            "commander_order mission_id does not match the Ceraxia directive"
+        )
+    if command.get("from") != "Warmaster" or command.get("to") != "Ceraxia":
+        raise CeraxiaDirectiveError(
+            "commander_order authority must be Warmaster -> Ceraxia"
+        )
+    validate_directive_for_commander(
+        leadership_directive,
+        command,
+        expected_task_id=str(leadership_directive.get("task_id") or ""),
+        expected_mission_id=expected_mission_id,
+        require_delegation=True,
+    )
+    user_request = command.get("user_request")
+    if not bounded_text(user_request, MAX_ACCEPTANCE_SOURCE_BYTES):
+        raise CeraxiaDirectiveError(
+            "commander_order.user_request is empty, contains NUL, or exceeds the acceptance bound"
+        )
+    return {
+        "type": ACCEPTANCE_SOURCE_TYPE,
+        "protocol_version": command["protocol_version"],
+        "mission_id": expected_mission_id,
+        "delegating_task_id": str(leadership_directive.get("task_id") or ""),
+        "from": "Warmaster",
+        "to": "Ceraxia",
+        "user_request": user_request,
+    }
 
 
 _TARGET_REPO_MARKER = re.compile(r"(?mi)^\s*CERAXIA_TARGET_REPO:\s*(.+?)\s*$")
@@ -1858,8 +2007,14 @@ def should_handle(run_dir: Path) -> bool:
 
 def _mission_dir(run_dir: Path) -> Path | None:
     ref = _read_json(run_dir / "mission_ref.json")
-    md = str(ref.get("mission_dir") or "")
-    return Path(md) if md else None
+    mission_id = ref.get("mission_id")
+    mission_dir = ref.get("mission_dir")
+    if not isinstance(mission_id, str) or not isinstance(mission_dir, str):
+        return None
+    try:
+        return _bound_mission_directory(mission_dir, mission_id)
+    except CeraxiaDirectiveError:
+        return None
 
 
 def _finalize_linked_completion(run_dir: Path, ledger: Any, result: dict[str, Any]) -> None:
@@ -2034,6 +2189,16 @@ def _ceraxia_reprepare_action(message: str = "") -> dict[str, Any]:
             "fresh mission instead of mutating execution evidence"
         ),
     }
+
+
+def _acceptance_source_reprepare_action(message: str = "") -> dict[str, Any]:
+    """Recover a current run whose commander provenance is missing or inconsistent."""
+    action = _ceraxia_reprepare_action(message)
+    action["reason"] = (
+        "the linked commander-order acceptance provenance is missing, corrupt, or "
+        "does not match this mission; create a fresh mission through Abaddon"
+    )
+    return action
 
 
 def _skitarii_json_request(
@@ -2684,6 +2849,39 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
             ledger.record_event("skitarii_finalize_error", {"error": str(finalize_exc)[:300]})
         return failure
     try:
+        acceptance_source = _load_commander_order_acceptance_source(
+            run_dir, leadership_directive,
+        )
+    except CeraxiaDirectiveError as exc:
+        msg = f"Skitarii blocked: commander acceptance source is invalid ({exc})."
+        reprepare_action = _acceptance_source_reprepare_action(goal)
+        ledger.record_event("acceptance_source_blocked", {"error": str(exc)[:300]})
+        failure = _bridge_failure(
+            run_dir,
+            task_id,
+            msg,
+            phase="acceptance_source_invalid",
+            error=str(exc),
+        )
+        failure.update({
+            "error_code": "acceptance_source_invalid",
+            "acceptance_source_status": "invalid",
+            "next_action": reprepare_action,
+        })
+        ledger.set_result(failure)
+        ledger.force_status("blocked", reason="commander acceptance source is invalid")
+        try:
+            _finalize_linked_blocked(
+                run_dir,
+                ledger,
+                msg,
+                phase="acceptance_source_invalid",
+                next_action=reprepare_action,
+            )
+        except Exception as finalize_exc:  # noqa: BLE001
+            ledger.record_event("skitarii_finalize_error", {"error": str(finalize_exc)[:300]})
+        return failure
+    try:
         goal = _normalize_goal_repo_scope(goal)
         workspace, is_patch = _collect_workspace(goal)
         # A Warmaster code mission targets the configured repository even when it
@@ -2740,6 +2938,7 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
     body = json.dumps({"goal": goal, "task_id": task_id,
                        "delegating_task_id": task_id, "max_wall_sec": timeout_sec,
                        "leadership_directive": leadership_directive,
+                       "acceptance_source": acceptance_source,
                        "mode": mode, "workspace_files": workspace,
                        "workspace_blobs": getattr(workspace, "blobs", {}),
                        "workspace_external_assets": getattr(workspace, "external_assets", {}),
