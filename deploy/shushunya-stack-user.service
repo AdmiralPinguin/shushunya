@@ -1,0 +1,14 @@
+[Unit]
+Description=Shushunya full stack boot (idempotent boot-stack.sh)
+After=network-online.target shushunya-embedder.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# ждём, пока данные смонтируются (fstab), максимум 3 минуты
+ExecStartPre=/bin/sh -c 'for i in $(seq 90); do [ -d /media/shushunya/SHUSHUNYA/shushunya ] && exit 0; sleep 2; done; exit 1'
+ExecStart=/bin/bash /media/shushunya/SHUSHUNYA/shushunya/boot-stack.sh
+TimeoutStartSec=600
+
+[Install]
+WantedBy=default.target

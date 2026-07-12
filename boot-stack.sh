@@ -5,7 +5,7 @@
 ROOT=/media/shushunya/SHUSHUNYA/shushunya
 cd "$ROOT" || { echo "disk not mounted at $ROOT"; exit 1; }
 
-echo "[boot] gemma vLLM (3090, 8080)…"; bash CoreOfMadness/llm-host/start-gemma-vllm.sh
+echo "[boot] gemma-31B vLLM (3090, 8080)…"; bash CoreOfMadness/llm-host/start-gemma31-vllm.sh
 echo "[boot] qwen (CPU 8081)…";         bash CoreOfMadness/llm-host/start-qwen.sh
 echo "[boot] dispatcher+archive+Vox…";  bash ArchiveOfHeresy/start-main.sh || true
 echo "[boot] governors+gateway…";       bash EyeOfTerror/Warmaster/start-governors.sh
