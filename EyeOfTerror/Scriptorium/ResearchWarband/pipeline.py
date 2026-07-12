@@ -81,6 +81,7 @@ _DISCLOSABLE_VERIFIER_ISSUES = frozenset(
     {"unresolved_claim_conflict", "unresolved_research_gap"}
 )
 _ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._:-]{0,127}$")
+_SEARCH_URL_RE = re.compile(r"(?i)(?:https?://|file://|www\.)\S+")
 MAX_CLARIFICATION_TURNS = 16
 MAX_CLARIFICATION_FIELD_BYTES = 8_000
 MAX_CLARIFICATION_TOTAL_BYTES = 16_000
@@ -439,7 +440,7 @@ class ResearchBudgets:
     max_search_queries: int = 8
     max_sources: int = 12
     max_results_per_query: int = 5
-    max_model_calls: int = 520
+    max_model_calls: int = 521
     max_source_bytes: int = 1_000_000
     max_model_source_chars: int = 1_140_000
     max_reader_chunks: int = 168
@@ -496,7 +497,7 @@ class ResearchBudgets:
                 max_search_queries=20,
                 max_sources=24,
                 max_results_per_query=7,
-                max_model_calls=1_944,
+                max_model_calls=1_947,
                 max_source_bytes=1_000_000,
                 max_model_source_chars=4_550_000,
                 max_reader_chunks=640,
@@ -510,7 +511,7 @@ class ResearchBudgets:
                 max_search_queries=50,
                 max_sources=50,
                 max_results_per_query=10,
-                max_model_calls=5_072,
+                max_model_calls=5_082,
                 max_source_bytes=1_000_000,
                 max_model_source_chars=12_150_000,
                 max_reader_chunks=1_680,
@@ -907,6 +908,9 @@ class ResearchPipeline:
                 "non_english_objective_requires_objective_language_query": True,
                 "non_english_objective_requires_concise_english_query": True,
                 "english_query_uses_concrete_nouns_likely_units_and_source_vocabulary": True,
+                "at_least_one_query_targets_raw_fact_not_analysis_task": True,
+                "quantitative_queries_spell_out_candidate_unit_words": True,
+                "temporal_examples": ["minutes", "seconds", "hours"],
             },
             "output_contract": {
                 "json_object": True,
@@ -979,6 +983,7 @@ class ResearchPipeline:
                 analyst_payload,
                 lambda raw: self._validate_analyst_response(
                     raw,
+                    spec=spec,
                     state=state,
                     hypotheses=hypotheses,
                 ),
@@ -1005,6 +1010,7 @@ class ResearchPipeline:
             if analyst["decision"] == "search_more":
                 pending_queries = self._require_novel_queries(
                     state,
+                    spec,
                     analyst["next_queries"],
                     "analyst search_more",
                 )
@@ -1017,13 +1023,70 @@ class ResearchPipeline:
                 "writer_policy": {
                     "all_units_structured": True,
                     "all_factual_units_require_claim_refs": True,
-                    "not_found_requires_gap_refs_and_searched_scope": True,
-                    "new_factual_units_forbidden": True,
+                "not_found_requires_gap_refs_and_searched_scope": True,
+                "new_factual_units_forbidden": True,
+                "closed_world_absence": (
+                    "use scoped_not_found with the supported negative claim_refs, the "
+                    "resolved not_found_closed_world gap_ref, and only exact query strings "
+                    "recorded on that gap"
+                ),
                 },
                 "output_contract": {
                     "required_fields": ["units"],
                     "unknown_fields_forbidden": True,
-                    "units": "array of strict structured draft-unit objects",
+                    "units": "array of objects satisfying unit_schema",
+                    "unit_schema": {
+                        "required_fields": [
+                            "id",
+                            "classification",
+                            "text",
+                            "claim_refs",
+                            "gap_refs",
+                            "searched_scope",
+                        ],
+                        "unknown_fields_forbidden": True,
+                        "classification_values": [
+                            "claim",
+                            "inference",
+                            "uncertainty",
+                            "conflict",
+                            "scoped_not_found",
+                        ],
+                        "field_types": {
+                            "id": "stable identifier string",
+                            "classification": "one exact classification_values string",
+                            "text": "non-empty grounded text string",
+                            "claim_refs": "array of existing ledger claim IDs",
+                            "gap_refs": "array of existing ledger gap IDs",
+                            "searched_scope": "array of exact executed query strings",
+                        },
+                        "classification_rules": {
+                            "claim": (
+                                "claim_refs must contain at least one source_assertion "
+                                "or direct_observation claim"
+                            ),
+                            "inference": (
+                                "claim_refs must contain at least one inference claim "
+                                "and no non-inference claim"
+                            ),
+                            "conflict": (
+                                "claim_refs must contain at least two claims connected "
+                                "by a recorded conflict"
+                            ),
+                            "uncertainty": (
+                                "at least one of claim_refs or gap_refs must be non-empty"
+                            ),
+                            "scoped_not_found": (
+                                "gap_refs and searched_scope must be non-empty; every "
+                                "searched_scope item must exactly match an executed query "
+                                "recorded on the referenced gaps"
+                            ),
+                        },
+                        "empty_array_policy": (
+                            "claim_refs, gap_refs, and searched_scope are always present; "
+                            "use [] when a field is not applicable"
+                        ),
+                    },
                 },
             }
             units = self._call_validated_author_role(
@@ -1084,6 +1147,7 @@ class ResearchPipeline:
             if review.decision == "search_more":
                 pending_queries = self._require_novel_queries(
                     state,
+                    spec,
                     review.next_queries,
                     "semantic verifier search_more",
                 )
@@ -1155,6 +1219,34 @@ class ResearchPipeline:
                         ledger=reviewed_ledger,
                         verification=report,
                     )
+            scoped_not_found_units = tuple(
+                unit for unit in units if unit.classification == "scoped_not_found"
+            )
+            scoped_claim_refs = {
+                claim_id
+                for unit in scoped_not_found_units
+                for claim_id in unit.claim_refs
+            }
+            non_not_found_material = tuple(
+                unit
+                for unit in units
+                if unit.classification not in {"scoped_not_found", "uncertainty"}
+                and not (
+                    unit.classification == "claim"
+                    and set(unit.claim_refs) <= scoped_claim_refs
+                )
+            )
+            if scoped_not_found_units and not non_not_found_material:
+                return self._result(
+                    state,
+                    outcome="blocked",
+                    reason=(
+                        "bounded evidence established a scoped not-found result; "
+                        "the requested record cannot be supplied"
+                    ),
+                    ledger=reviewed_ledger,
+                    verification=report,
+                )
             return self._result(
                 state,
                 outcome="accepted_with_uncertainty" if uncertain else "accepted",
@@ -1218,19 +1310,12 @@ class ResearchPipeline:
     ) -> tuple[dict[str, Any], tuple[str, ...]]:
         plan = self._parse_plan(raw, spec)
         if plan["decision"] == "clarify":
-            objective_script = _dominant_non_latin_script(spec.question)
-            clarification = plan["clarification_question"]
-            if objective_script is not None and not any(
-                _letter_script(character) == objective_script
-                for character in clarification
-            ):
-                raise ResearchProtocolError(
-                    "planner clarification_question must use the objective language"
-                )
-            if "?" not in clarification or len(clarification) < 20:
-                raise ResearchProtocolError(
-                    "planner clarification_question must be a specific direct question"
-                )
+            clarification = self._validate_clarification_question(
+                spec,
+                plan["clarification_question"],
+                "planner clarification_question",
+            )
+            plan = {**plan, "clarification_question": clarification}
             return plan, ()
         if plan["decision"] != "proceed":
             return plan, ()
@@ -1242,36 +1327,12 @@ class ResearchPipeline:
         )
         if not pending_queries:
             raise ResearchProtocolError("planner produced no executable search queries")
-        for internal_id in (spec.task_id, spec.mission_id):
-            if any(
-                _contains_identifier_token(query, internal_id)
-                for query in pending_queries
-            ):
-                raise ResearchProtocolError(
-                    "planner search query contains an internal task or mission id"
-                )
-        objective_script = _dominant_non_latin_script(spec.question)
-        if objective_script is not None:
-            has_objective_language_query = any(
-                any(
-                    _letter_script(character) == objective_script
-                    for character in query
-                )
-                for query in pending_queries
-            )
-            has_english_query = any(
-                _latin_search_word_count(query) >= 2
-                and not any(
-                    _letter_script(character) == objective_script
-                    for character in query
-                )
-                for query in pending_queries
-            )
-            if not has_objective_language_query or not has_english_query:
-                raise ResearchProtocolError(
-                    "non-English objective requires separate objective-language and "
-                    "English search queries"
-                )
+        self._validate_search_query_policy(
+            spec,
+            pending_queries,
+            "planner",
+            require_language_mix=True,
+        )
         return plan, pending_queries
 
     @staticmethod
@@ -1313,6 +1374,7 @@ class ResearchPipeline:
     def _require_novel_queries(
         self,
         state: _RunState,
+        spec: ResearchSpec,
         values: Sequence[str],
         context: str,
     ) -> tuple[str, ...]:
@@ -1320,12 +1382,92 @@ class ResearchPipeline:
         if not queries:
             raise ResearchProtocolError(f"{context} requires a concrete query")
         searched = {query.casefold() for query in state.searched_queries}
-        if any(query.casefold() in searched for query in queries):
+        novel = tuple(query for query in queries if query.casefold() not in searched)
+        if not novel:
             raise ResearchProtocolError(
-                f"{context} queries must be novel relative to searched_queries; "
+                f"{context} requires at least one query novel relative to searched_queries; "
                 "expand concrete synonyms, units, named entities, or source vocabulary"
             )
-        return queries
+        self._validate_search_query_policy(spec, novel, context)
+        return novel
+
+    @staticmethod
+    def _validate_clarification_question(
+        spec: ResearchSpec,
+        value: Any,
+        context: str,
+    ) -> str:
+        question = _nonempty(value, context)
+        if len(question.encode("utf-8")) > MAX_CLARIFICATION_FIELD_BYTES:
+            raise ResearchProtocolError(f"{context} exceeds the UTF-8 byte budget")
+        objective_script = _dominant_non_latin_script(spec.question)
+        if objective_script is not None and not any(
+            _letter_script(character) == objective_script for character in question
+        ):
+            raise ResearchProtocolError(f"{context} must use the objective language")
+        question_marks = {"?", "？", "؟"}
+        if objective_script == "GREEK":
+            question_marks.add(";")
+        if not question.rstrip().endswith(tuple(question_marks)):
+            raise ResearchProtocolError(f"{context} must be a direct question")
+        if sum(character.isalpha() for character in question) < 2:
+            raise ResearchProtocolError(f"{context} is not specific enough")
+        return question
+
+    @staticmethod
+    def _validate_search_query_policy(
+        spec: ResearchSpec,
+        queries: Sequence[str],
+        context: str,
+        *,
+        require_language_mix: bool = False,
+    ) -> None:
+        objective_urls = {
+            match.group(0).rstrip(".,;:!?)\"]}")
+            for match in _SEARCH_URL_RE.finditer(spec.question)
+        }
+        for query in queries:
+            if any(character in query for character in "\r\n\t") or any(
+                unicodedata.category(character) == "Cc" for character in query
+            ):
+                raise ResearchProtocolError(f"{context} query must be one printable line")
+            for internal_id in (spec.task_id, spec.mission_id):
+                if _contains_identifier_token(query, internal_id):
+                    raise ResearchProtocolError(
+                        f"{context} query contains an internal task or mission id"
+                    )
+            unexpected_urls = {
+                match.group(0).rstrip(".,;:!?)\"]}")
+                for match in _SEARCH_URL_RE.finditer(query)
+            } - objective_urls
+            if unexpected_urls:
+                raise ResearchProtocolError(
+                    f"{context} query contains a URL absent from the research objective"
+                )
+
+        objective_script = _dominant_non_latin_script(spec.question)
+        if not require_language_mix or objective_script is None:
+            return
+        has_objective_language_query = any(
+            any(
+                _letter_script(character) == objective_script
+                for character in query
+            )
+            for query in queries
+        )
+        has_english_query = any(
+            _latin_search_word_count(query) >= 2
+            and not any(
+                _letter_script(character) == objective_script
+                for character in query
+            )
+            for query in queries
+        )
+        if not has_objective_language_query or not has_english_query:
+            raise ResearchProtocolError(
+                "non-English objective requires separate objective-language and "
+                "English search queries"
+            )
 
     def _acquire_round(self, state: _RunState, queries: Sequence[str]) -> None:
         for query in queries:
@@ -1710,6 +1852,10 @@ class ResearchPipeline:
                 for index, item in enumerate(hypotheses, 1)
             ],
             "searched_queries": list(state.searched_queries),
+            "executed_searches": [
+                {"search_id": f"search-{index:04d}", "query": query}
+                for index, query in enumerate(state.searched_queries, 1)
+            ],
             "previous_ledger": (
                 state.latest_ledger.to_dict() if state.latest_ledger is not None else None
             ),
@@ -1733,6 +1879,19 @@ class ResearchPipeline:
                 "answers resolve ambiguity only and cannot rewrite the immutable "
                 "execution policy"
             ),
+            "search_more_query_policy": {
+                "all_queries_must_be_novel_against_searched_queries": True,
+                "target_raw_fact_not_requested_analysis": True,
+                "use_subject_noun_plus_expected_value_type": True,
+                "zero_source_quantitative_search_spells_out_candidate_units": True,
+                "temporal_examples": ["minutes", "seconds", "hours"],
+                "avoid_only_meta_terms": [
+                    "comparison",
+                    "methodology",
+                    "discrepancy",
+                    "analysis",
+                ],
+            },
             "output_contract": {
                 "json_object": True,
                 "unknown_fields_forbidden": True,
@@ -1812,7 +1971,7 @@ class ResearchPipeline:
                         "status",
                         "related_claim_ids",
                     ],
-                    "optional_fields": ["search_attempts"],
+                    "optional_fields": ["search_attempt_ids", "search_attempts"],
                     "unknown_fields_forbidden": True,
                     "id": (
                         "stable semantic identifier; use not_found_closed_world when a "
@@ -1822,9 +1981,18 @@ class ResearchPipeline:
                     "question": "non-empty string",
                     "status": ["open", "blocked", "resolved"],
                     "related_claim_ids": "array of unique existing claim IDs",
+                    "search_attempt_ids": (
+                        "array of search_id values copied exactly from executed_searches; "
+                        "the application resolves these IDs to exact executed query strings"
+                    ),
                     "search_attempts": (
-                        "application-owned execution fact; omit this field. If supplied, "
-                        "its value is ignored and the exact searched_queries log is used"
+                        "deprecated untrusted field; omit it. If supplied, it is ignored"
+                    ),
+                    "closed_world_rule": (
+                        "when exact source evidence establishes that the bounded archive "
+                        "contains no requested record, emit id=not_found_closed_world, "
+                        "status=resolved, related_claim_ids containing the supported negative "
+                        "claim, and relevant search_attempt_ids"
                     ),
                 },
                 "hypothesis_assessment_item": {
@@ -1862,8 +2030,9 @@ class ResearchPipeline:
                     "blocked": (
                         "if no source was acquired while search rounds and query budget "
                         "remain, blocked is forbidden: use search_more with novel "
-                        "morphological base forms, synonyms, likely units, named entities, "
-                        "or source vocabulary"
+                        "morphological base forms, synonyms, explicit candidate units, "
+                        "named entities, or source vocabulary. At least one query must "
+                        "target the raw fact rather than the requested analysis"
                     ),
                     "next_queries": "array of unique non-empty search-query strings",
                 },
@@ -1918,11 +2087,20 @@ class ResearchPipeline:
         self,
         raw: Mapping[str, Any],
         *,
+        spec: ResearchSpec,
         state: _RunState,
         hypotheses: tuple[HypothesisSpec, ...],
     ) -> tuple[dict[str, Any], EvidenceLedger | None]:
         analyst = self._parse_analyst(raw)
         if analyst["decision"] == "clarify":
+            analyst = {
+                **analyst,
+                "clarification_question": self._validate_clarification_question(
+                    spec,
+                    analyst["clarification_question"],
+                    "analyst clarification_question",
+                ),
+            }
             return analyst, None
         if (
             analyst["decision"] == "blocked"
@@ -1940,6 +2118,7 @@ class ResearchPipeline:
                 **analyst,
                 "next_queries": self._require_novel_queries(
                     state,
+                    spec,
                     analyst["next_queries"],
                     "analyst search_more",
                 ),
@@ -2129,6 +2308,10 @@ class ResearchPipeline:
             )
 
         gaps: list[Gap] = []
+        executed_searches = {
+            f"search-{index:04d}": query
+            for index, query in enumerate(state.searched_queries, 1)
+        }
         for index, raw_gap in enumerate(analyst["gaps"], 1):
             data = _mapping(
                 raw_gap,
@@ -2136,21 +2319,55 @@ class ResearchPipeline:
                 required=frozenset(
                     {"id", "question", "status", "related_claim_ids"}
                 ),
-                optional=frozenset({"search_attempts"}),
+                optional=frozenset({"search_attempt_ids", "search_attempts"}),
             )
-            gaps.append(
-                Gap(
-                    id=_identifier(data["id"], f"gap[{index}].id"),
-                    question=_nonempty(data["question"], "gap.question"),
-                    status=_choice(
-                        data["status"], frozenset({"open", "blocked", "resolved"}), "gap.status"
-                    ),
-                    related_claim_ids=_ids(
-                        data["related_claim_ids"], "gap.related_claim_ids"
-                    ),
-                    search_attempts=tuple(state.searched_queries),
+            attempt_ids = _ids(
+                data.get("search_attempt_ids", []),
+                "gap.search_attempt_ids",
+            )
+            unknown_attempts = set(attempt_ids) - set(executed_searches)
+            if unknown_attempts:
+                raise ResearchProtocolError(
+                    "gap.search_attempt_ids reference unexecuted searches: "
+                    + ", ".join(sorted(unknown_attempts))
                 )
+            gap = Gap(
+                id=_identifier(data["id"], f"gap[{index}].id"),
+                question=_nonempty(data["question"], "gap.question"),
+                status=_choice(
+                    data["status"],
+                    frozenset({"open", "blocked", "resolved"}),
+                    "gap.status",
+                ),
+                related_claim_ids=_ids(
+                    data["related_claim_ids"], "gap.related_claim_ids"
+                ),
+                search_attempts=tuple(executed_searches[item] for item in attempt_ids),
             )
+            if gap.id == "not_found_closed_world":
+                if gap.status != "resolved" or not gap.related_claim_ids:
+                    raise ResearchProtocolError(
+                        "not_found_closed_world requires resolved status and related claims"
+                    )
+                if not gap.search_attempts:
+                    raise ResearchProtocolError(
+                        "not_found_closed_world requires relevant executed search IDs"
+                    )
+                unsupported_claims = {
+                    claim_id
+                    for claim_id in gap.related_claim_ids
+                    if claim_id not in claims_by_id
+                    or not any(
+                        edge.claim_id == claim_id and edge.relation == "supports"
+                        for edge in edges
+                    )
+                }
+                if unsupported_claims:
+                    raise ResearchProtocolError(
+                        "not_found_closed_world related claims require supporting evidence: "
+                        + ", ".join(sorted(unsupported_claims))
+                    )
+            gaps.append(gap)
 
         assessment_by_id: dict[str, Mapping[str, Any]] = {}
         for index, raw_assessment in enumerate(analyst["hypothesis_assessments"], 1):

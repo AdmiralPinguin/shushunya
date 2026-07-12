@@ -301,14 +301,31 @@ def build_reader_payload(
             "maximum_excerpt_utf8_bytes": READER_MAX_EXCERPT_BYTES,
         },
         "output_contract": {
+            "required_fields": ["candidates"],
+            "unknown_fields_forbidden": True,
+            "candidate_required_fields": [
+                "chunk_id",
+                "excerpt",
+                "relevance",
+                "reason",
+            ],
+            "candidate_unknown_fields_forbidden": True,
             "candidates": [
                 {
                     "chunk_id": "copy exact untrusted_source_chunk.chunk_id",
-                    "excerpt": "exact normalized source slice",
+                    "excerpt": (
+                        "exact copied normalized source slice occurring exactly once "
+                        "inside this labeled chunk"
+                    ),
                     "relevance": "high|medium|low",
                     "reason": "bounded relevance explanation",
                 }
-            ]
+            ],
+            "ambiguous_excerpt_rule": (
+                "if a useful excerpt occurs more than once, extend it with exact adjacent "
+                "source text until it occurs exactly once; omit it if no bounded unique "
+                "excerpt can be copied"
+            ),
         },
     }
 
@@ -423,17 +440,35 @@ def build_independent_reader_payload(**kwargs: Any) -> dict[str, Any]:
         "corrections_negation_conflicts_and_qualifications_required": True,
     }
     payload["output_contract"] = {
+        "required_fields": ["candidates"],
+        "unknown_fields_forbidden": True,
+        "candidate_required_fields": [
+            "chunk_id",
+            "excerpt",
+            "relevance",
+            "reason",
+            "coverage_role",
+        ],
+        "candidate_unknown_fields_forbidden": True,
         "candidates": [
             {
                 "chunk_id": "copy exact untrusted_source_chunk.chunk_id",
-                "excerpt": "exact normalized source slice",
+                "excerpt": (
+                    "exact copied normalized source slice occurring exactly once "
+                    "inside this labeled chunk"
+                ),
                 "relevance": "high|medium|low",
                 "reason": "bounded relevance explanation",
                 "coverage_role": (
                     "supporting_evidence|counterevidence|qualification"
                 ),
             }
-        ]
+        ],
+        "ambiguous_excerpt_rule": (
+            "if a useful excerpt occurs more than once, extend it with exact adjacent "
+            "source text until it occurs exactly once; omit it if no bounded unique "
+            "excerpt can be copied"
+        ),
     }
     return payload
 

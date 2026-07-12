@@ -65,6 +65,15 @@ def _candidate(chunk_id: str, excerpt: str) -> dict[str, object]:
 
 
 class ReaderLocatorTests(unittest.TestCase):
+    def test_payload_contract_requires_unique_exact_excerpts(self) -> None:
+        _snapshot_value, payload = _payload("Repeated fact. Repeated fact.")
+        contract = payload["output_contract"]
+
+        self.assertEqual(["candidates"], contract["required_fields"])
+        self.assertTrue(contract["unknown_fields_forbidden"])
+        self.assertIn("exactly once", contract["candidates"][0]["excerpt"])
+        self.assertIn("extend", contract["ambiguous_excerpt_rule"])
+
     def test_engine_resolves_unique_excerpt_to_absolute_offsets_without_trimming(self) -> None:
         prefix = "outside::"
         excerpt = "  Alpha evidence.  "

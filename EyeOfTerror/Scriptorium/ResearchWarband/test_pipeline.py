@@ -1017,6 +1017,64 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertTrue(
             any("gap gap-cause is not disclosed" in item for item in result.diagnostics)
         )
+        self.assertEqual((), result.ledger.gaps[0].search_attempts)
+
+    def test_closed_world_absence_uses_validated_search_ids_and_stays_blocked(self) -> None:
+        url = "https://example.test/closed-world"
+        source = "The archive contains no record for Event 2003."
+        analysis = analyst_ready(
+            [
+                claim_item(
+                    text=source,
+                    excerpt=source,
+                )
+            ]
+        )
+        analysis["gaps"] = [
+            {
+                "id": "not_found_closed_world",
+                "question": "Does the archive contain Event 2003?",
+                "status": "resolved",
+                "related_claim_ids": ["claim-1"],
+                "search_attempt_ids": ["search-0001"],
+            }
+        ]
+        writer = {
+            "units": [
+                {
+                    "id": "unit-1",
+                    "classification": "scoped_not_found",
+                    "text": source,
+                    "claim_refs": ["claim-1"],
+                    "gap_refs": ["not_found_closed_world"],
+                    "searched_scope": ["primary query"],
+                }
+            ]
+        }
+        model = FakeModel(
+            {
+                "planner": [planner()],
+                "analyst": [analysis],
+                "writer": [writer],
+                "semantic_verifier": [semantic_accept()],
+            }
+        )
+
+        result = self.pipeline(
+            model,
+            FakeSearch({"primary query": [SearchHit("Archive", url)]}),
+            FakeFetch({url: fetched(url, source)}),
+        ).run(self.spec())
+
+        self.assertEqual("blocked", result.outcome)
+        self.assertIn("scoped not-found", result.reason)
+        self.assertTrue(result.verification_report.accepted)
+        self.assertEqual(
+            ("primary query",),
+            result.ledger.gaps[0].search_attempts,
+        )
+        self.assertEqual("scoped_not_found", result.draft_units[0].classification)
+        self.assertEqual(source, result.draft_units[0].text)
 
     def test_inference_is_premise_linked_and_content_attested(self) -> None:
         url = "https://example.test/premise"
@@ -1193,7 +1251,7 @@ class ResearchPipelineTests(unittest.TestCase):
                                 "question": "Which accessible source states the answer?",
                                 "status": "blocked",
                                 "related_claim_ids": [],
-                                "search_attempts": ["primary query"],
+                                "search_attempt_ids": ["search-0001"],
                             }
                         ],
                         "hypothesis_assessments": [],
@@ -1373,6 +1431,28 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertIn("missing fields: units", repair["validator_error"])
         self.assertNotIn("PREVIOUS-WRITER-OUTPUT-MARKER", str(writer_calls[1]))
         self.assertEqual(["units"], writer_calls[0]["output_contract"]["required_fields"])
+        unit_schema = writer_calls[0]["output_contract"]["unit_schema"]
+        self.assertEqual(
+            {
+                "id",
+                "classification",
+                "text",
+                "claim_refs",
+                "gap_refs",
+                "searched_scope",
+            },
+            set(unit_schema["required_fields"]),
+        )
+        self.assertEqual(
+            {
+                "claim",
+                "inference",
+                "uncertainty",
+                "conflict",
+                "scoped_not_found",
+            },
+            set(unit_schema["classification_values"]),
+        )
 
     def test_reader_fabricated_excerpt_is_rejected_before_analyst(self) -> None:
         url = "https://example.test/exact"
@@ -1597,9 +1677,9 @@ class ResearchPipelineTests(unittest.TestCase):
     def test_depth_call_budgets_cover_one_reader_repair_per_chunk(self) -> None:
         expected = {
             "brief": (32, 104),
-            "standard": (168, 520),
-            "deep": (640, 1_944),
-            "exhaustive": (1_680, 5_072),
+            "standard": (168, 521),
+            "deep": (640, 1_947),
+            "exhaustive": (1_680, 5_082),
         }
         for depth, (chunks, calls) in expected.items():
             with self.subTest(depth=depth):
@@ -1607,6 +1687,10 @@ class ResearchPipelineTests(unittest.TestCase):
                 self.assertEqual(chunks, budget.max_reader_chunks)
                 self.assertEqual(calls, budget.max_model_calls)
                 allowance = calls - (3 * chunks)
+                self.assertGreaterEqual(
+                    allowance,
+                    2 + (5 * budget.max_rounds),
+                )
                 adjusted = budget.with_reader_chunk_chars(16_000)
                 self.assertEqual(
                     allowance,
