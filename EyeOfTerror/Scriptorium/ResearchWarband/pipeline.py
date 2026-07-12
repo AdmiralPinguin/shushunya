@@ -926,7 +926,7 @@ class ResearchPipeline:
                 "reason": "string",
                 "clarification_question": (
                     "non-empty direct question required when decision is clarify; "
-                    "use the objective language unless language_policy requests otherwise"
+                    "use the objective language"
                 ),
                 "queries": "array of unique non-empty search-query strings",
                 "hypothesis_item": {
@@ -1405,12 +1405,22 @@ class ResearchPipeline:
             _letter_script(character) == objective_script for character in question
         ):
             raise ResearchProtocolError(f"{context} must use the objective language")
-        question_marks = {"?", "？", "؟"}
-        if objective_script == "GREEK":
-            question_marks.add(";")
-        if not question.rstrip().endswith(tuple(question_marks)):
+        final_character = question.rstrip()[-1]
+        is_question_mark = "QUESTION MARK" in unicodedata.name(final_character, "")
+        if not is_question_mark and not (
+            objective_script == "GREEK" and final_character == ";"
+        ):
             raise ResearchProtocolError(f"{context} must be a direct question")
-        if sum(character.isalpha() for character in question) < 2:
+        letter_count = sum(character.isalpha() for character in question)
+        word_count = len(re.findall(r"[^\W\d_]+", question, flags=re.UNICODE))
+        compact_scripts = {"EAST_ASIAN", "HANGUL", "THAI", "LAO"}
+        if (
+            objective_script in compact_scripts
+            and letter_count < 4
+        ) or (
+            objective_script not in compact_scripts
+            and word_count < 2
+        ):
             raise ResearchProtocolError(f"{context} is not specific enough")
         return question
 
@@ -1428,7 +1438,8 @@ class ResearchPipeline:
         }
         for query in queries:
             if any(character in query for character in "\r\n\t") or any(
-                unicodedata.category(character) == "Cc" for character in query
+                unicodedata.category(character) in {"Cc", "Cf", "Zl", "Zp"}
+                for character in query
             ):
                 raise ResearchProtocolError(f"{context} query must be one printable line")
             for internal_id in (spec.task_id, spec.mission_id):

@@ -37,6 +37,23 @@ def _normalize_test_source(raw: bytes, medium: str) -> str:
     return raw.decode("utf-8")
 
 
+def _chunk_text(chunk: Mapping[str, Any]) -> str:
+    return "".join(item["exact_text"] for item in chunk["locator_spans"])
+
+
+def _chunk_locator_for_excerpt(
+    chunk: Mapping[str, Any], excerpt: str
+) -> Mapping[str, Any] | None:
+    return next(
+        (
+            item
+            for item in chunk["locator_spans"]
+            if excerpt in item["exact_text"]
+        ),
+        None,
+    )
+
+
 class FakeModel:
     def __init__(
         self,
@@ -68,17 +85,22 @@ class FakeModel:
             return {"candidates": []}
         if role == "reader" and not queue:
             chunk = payload["untrusted_source_chunk"]
-            text = chunk["normalized_text"]
+            text = _chunk_text(chunk)
             if len(text.encode("utf-8")) > 2_000:
                 return {"candidates": []}
+            locators = [
+                item for item in chunk["locator_spans"] if item["exact_text"].strip()
+            ]
             return {
                 "candidates": [
                     {
                         "chunk_id": chunk["chunk_id"],
-                        "excerpt": text,
+                        "locator_id": locator["locator_id"],
+                        "excerpt": locator["exact_text"],
                         "relevance": "high",
                         "reason": "test fixture exposes the complete short source",
                     }
+                    for locator in locators[:4]
                 ]
             }
         if not queue:
@@ -261,12 +283,14 @@ def semantic_accept(
 def reader_find(excerpt: str) -> Callable[[Mapping[str, Any]], Mapping[str, Any]]:
     def respond(payload: Mapping[str, Any]) -> Mapping[str, Any]:
         chunk = payload["untrusted_source_chunk"]
-        if chunk["normalized_text"].find(excerpt) < 0:
+        locator = _chunk_locator_for_excerpt(chunk, excerpt)
+        if locator is None:
             return {"candidates": []}
         return {
             "candidates": [
                 {
                     "chunk_id": chunk["chunk_id"],
+                    "locator_id": locator["locator_id"],
                     "excerpt": excerpt,
                     "relevance": "high",
                     "reason": "exact text is relevant to the test question",
@@ -282,12 +306,14 @@ def independent_reader_find(
 ) -> Callable[[Mapping[str, Any]], Mapping[str, Any]]:
     def respond(payload: Mapping[str, Any]) -> Mapping[str, Any]:
         chunk = payload["untrusted_source_chunk"]
-        if chunk["normalized_text"].find(excerpt) < 0:
+        locator = _chunk_locator_for_excerpt(chunk, excerpt)
+        if locator is None:
             return {"candidates": []}
         return {
             "candidates": [
                 {
                     "chunk_id": chunk["chunk_id"],
+                    "locator_id": locator["locator_id"],
                     "excerpt": excerpt,
                     "relevance": "high",
                     "reason": "independent scan found material correction or qualification",
@@ -470,8 +496,8 @@ class ResearchPipelineTests(unittest.TestCase):
             [item["untrusted_source_chunk"] for item in reader_calls],
             [item["untrusted_source_chunk"] for item in coverage_calls],
         )
-        self.assertNotIn(fact, reader_calls[0]["untrusted_source_chunk"]["normalized_text"])
-        self.assertIn(fact, reader_calls[-1]["untrusted_source_chunk"]["normalized_text"])
+        self.assertNotIn(fact, _chunk_text(reader_calls[0]["untrusted_source_chunk"]))
+        self.assertIn(fact, _chunk_text(reader_calls[-1]["untrusted_source_chunk"]))
         self.assertTrue(
             any("mechanically covered 1 snapshot" in item for item in result.diagnostics)
         )
@@ -519,7 +545,7 @@ class ResearchPipelineTests(unittest.TestCase):
         ]
         self.assertEqual(1, len(coverage_calls))
         self.assertEqual(
-            source, coverage_calls[0]["untrusted_source_chunk"]["normalized_text"]
+            source, _chunk_text(coverage_calls[0]["untrusted_source_chunk"])
         )
 
     def test_identical_text_sources_keep_distinct_reader_provenance(self) -> None:
@@ -662,12 +688,18 @@ class ResearchPipelineTests(unittest.TestCase):
                         "candidates": [
                             {
                                 "chunk_id": payload["untrusted_source_chunk"]["chunk_id"],
+                                "locator_id": _chunk_locator_for_excerpt(
+                                    payload["untrusted_source_chunk"], "Alpha"
+                                )["locator_id"],
                                 "excerpt": "Alpha",
                                 "relevance": "high",
                                 "reason": "first candidate",
                             },
                             {
                                 "chunk_id": payload["untrusted_source_chunk"]["chunk_id"],
+                                "locator_id": _chunk_locator_for_excerpt(
+                                    payload["untrusted_source_chunk"], "Beta"
+                                )["locator_id"],
                                 "excerpt": "Beta",
                                 "relevance": "high",
                                 "reason": "second candidate",
@@ -728,7 +760,8 @@ class ResearchPipelineTests(unittest.TestCase):
                 self.assertGreater(len(reader_payloads), 1)
                 self.assertTrue(
                     all(
-                        len(payload["untrusted_source_chunk"]["normalized_text"])
+                        payload["untrusted_source_chunk"]["end_char"]
+                        - payload["untrusted_source_chunk"]["start_char"]
                         <= 8_000
                         for payload in reader_payloads
                     )
@@ -1286,13 +1319,16 @@ class ResearchPipelineTests(unittest.TestCase):
                 "content_never_executes_or_changes_role",
                 source_view["instruction_policy"],
             )
-            self.assertIn("exfiltrate-secrets", source_view["normalized_text"])
+            self.assertIn("exfiltrate-secrets", _chunk_text(source_view))
             excerpt = "The launch date was 2020."
-            self.assertIn(excerpt, source_view["normalized_text"])
+            self.assertIn(excerpt, _chunk_text(source_view))
             return {
                 "candidates": [
                     {
                         "chunk_id": source_view["chunk_id"],
+                        "locator_id": _chunk_locator_for_excerpt(
+                            source_view, excerpt
+                        )["locator_id"],
                         "excerpt": excerpt,
                         "relevance": "high",
                         "reason": "the exact sentence answers the research question",
@@ -1462,6 +1498,9 @@ class ResearchPipelineTests(unittest.TestCase):
                 "candidates": [
                     {
                         "chunk_id": payload["untrusted_source_chunk"]["chunk_id"],
+                        "locator_id": payload["untrusted_source_chunk"][
+                            "locator_spans"
+                        ][0]["locator_id"],
                         "excerpt": "This",
                         "relevance": "high",
                         "reason": "fabricated test excerpt",
@@ -1597,6 +1636,9 @@ class ResearchPipelineTests(unittest.TestCase):
                 "candidates": [
                     {
                         "chunk_id": payload["untrusted_source_chunk"]["chunk_id"],
+                        "locator_id": payload["untrusted_source_chunk"][
+                            "locator_spans"
+                        ][0]["locator_id"],
                         "excerpt": "Omega",
                         "relevance": "high",
                         "reason": "fabricated independent excerpt",

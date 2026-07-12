@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import unittest
 
 from ResearchWarband.reader import (
@@ -55,9 +56,23 @@ def _payload(
     )
 
 
-def _candidate(chunk_id: str, excerpt: str) -> dict[str, object]:
+def _locator_id(payload: dict[str, object], excerpt: str | None = None) -> str:
+    chunk = payload["untrusted_source_chunk"]
+    locators = chunk["locator_spans"]
+    matches = [
+        item
+        for item in locators
+        if excerpt is None or excerpt in item["exact_text"]
+    ]
+    if not matches:
+        raise AssertionError("test excerpt is not present in any locator")
+    return matches[0]["locator_id"]
+
+
+def _candidate(chunk_id: str, locator_id: str, excerpt: str) -> dict[str, object]:
     return {
         "chunk_id": chunk_id,
+        "locator_id": locator_id,
         "excerpt": excerpt,
         "relevance": "high",
         "reason": "the exact excerpt is material to the research question",
@@ -71,8 +86,49 @@ class ReaderLocatorTests(unittest.TestCase):
 
         self.assertEqual(["candidates"], contract["required_fields"])
         self.assertTrue(contract["unknown_fields_forbidden"])
+        self.assertIn("locator_id", contract["candidate_required_fields"])
         self.assertIn("exactly once", contract["candidates"][0]["excerpt"])
-        self.assertIn("extend", contract["ambiguous_excerpt_rule"])
+        self.assertIn("locator", contract["ambiguous_excerpt_rule"])
+
+    def test_repeated_excerpt_is_resolved_inside_selected_application_locator(self) -> None:
+        first_line = ("A" * 140) + " Same fact.\n"
+        second_line = ("B" * 140) + " Same fact.\n"
+        text = first_line + second_line
+        snapshot, payload = _payload(text)
+        chunk = payload["untrusted_source_chunk"]
+        second_locator = chunk["locator_spans"][1]
+
+        candidates = parse_reader_response(
+            {
+                "candidates": [
+                    _candidate(
+                        chunk["chunk_id"],
+                        second_locator["locator_id"],
+                        "Same fact.",
+                    )
+                ]
+            },
+            snapshot=snapshot,
+            normalized_text=text,
+            chunk_start=0,
+            chunk_end=len(text),
+            chunk_index=1,
+            cache_key="reader-cache-author-test",
+            model_identity="reader-author-test",
+        )
+
+        self.assertEqual(text.rindex("Same fact."), candidates[0].start_char)
+
+    def test_many_short_lines_have_bounded_locator_payload_expansion(self) -> None:
+        text = "a\n" * 4_000
+        _snapshot_value, payload = _payload(text)
+        locators = payload["untrusted_source_chunk"]["locator_spans"]
+
+        self.assertLessEqual(len(locators), 32)
+        self.assertLess(
+            len(json.dumps(payload, ensure_ascii=False)),
+            30_000,
+        )
 
     def test_engine_resolves_unique_excerpt_to_absolute_offsets_without_trimming(self) -> None:
         prefix = "outside::"
@@ -87,7 +143,11 @@ class ReaderLocatorTests(unittest.TestCase):
         chunk = payload["untrusted_source_chunk"]
 
         candidates = parse_reader_response(
-            {"candidates": [_candidate(chunk["chunk_id"], excerpt)]},
+            {
+                "candidates": [
+                    _candidate(chunk["chunk_id"], _locator_id(payload, excerpt), excerpt)
+                ]
+            },
             snapshot=snapshot,
             normalized_text=text,
             chunk_start=len(prefix),
@@ -110,7 +170,11 @@ class ReaderLocatorTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ReaderProtocolError, "ambiguous within its labeled chunk"):
             parse_reader_response(
-                {"candidates": [_candidate(chunk["chunk_id"], "aa")]},
+                {
+                    "candidates": [
+                        _candidate(chunk["chunk_id"], _locator_id(payload, "aa"), "aa")
+                    ]
+                },
                 snapshot=snapshot,
                 normalized_text=text,
                 chunk_start=0,
@@ -127,7 +191,15 @@ class ReaderLocatorTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ReaderProtocolError, "does not occur exactly"):
             parse_reader_response(
-                {"candidates": [_candidate(chunk["chunk_id"], "Omega evidence.")]},
+                {
+                    "candidates": [
+                        _candidate(
+                            chunk["chunk_id"],
+                            _locator_id(payload),
+                            "Omega evidence.",
+                        )
+                    ]
+                },
                 snapshot=snapshot,
                 normalized_text=text,
                 chunk_start=0,
@@ -143,7 +215,40 @@ class ReaderLocatorTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ReaderProtocolError, "chunk_id does not match"):
             parse_reader_response(
-                {"candidates": [_candidate("reader-chunk-wrong", text)]},
+                {
+                    "candidates": [
+                        _candidate(
+                            "reader-chunk-wrong",
+                            _locator_id(_payload_value, text),
+                            text,
+                        )
+                    ]
+                },
+                snapshot=snapshot,
+                normalized_text=text,
+                chunk_start=0,
+                chunk_end=len(text),
+                chunk_index=1,
+                cache_key="reader-cache-author-test",
+                model_identity="reader-author-test",
+            )
+
+    def test_candidate_cannot_target_an_unknown_locator(self) -> None:
+        text = "Alpha evidence."
+        snapshot, payload = _payload(text)
+        chunk = payload["untrusted_source_chunk"]
+
+        with self.assertRaisesRegex(ReaderProtocolError, "locator_id is not in"):
+            parse_reader_response(
+                {
+                    "candidates": [
+                        _candidate(
+                            chunk["chunk_id"],
+                            "L9999-deadbeef0000",
+                            text,
+                        )
+                    ]
+                },
                 snapshot=snapshot,
                 normalized_text=text,
                 chunk_start=0,
@@ -158,7 +263,7 @@ class ReaderLocatorTests(unittest.TestCase):
         snapshot, payload = _payload(text)
         chunk = payload["untrusted_source_chunk"]
         legacy = {
-            **_candidate(chunk["chunk_id"], text),
+            **_candidate(chunk["chunk_id"], _locator_id(payload, text), text),
             "start_char": 0,
             "end_char": len(text),
         }
@@ -194,7 +299,11 @@ class ReaderLocatorTests(unittest.TestCase):
         independent_chunk = independent_payload["untrusted_source_chunk"]
         self.assertEqual(author_chunk["chunk_id"], independent_chunk["chunk_id"])
 
-        response = _candidate(independent_chunk["chunk_id"], excerpt)
+        response = _candidate(
+            independent_chunk["chunk_id"],
+            _locator_id(independent_payload, excerpt),
+            excerpt,
+        )
         response["coverage_role"] = "counterevidence"
         selected = parse_independent_reader_response(
             {"candidates": [response]},
@@ -221,7 +330,11 @@ class ReaderLocatorTests(unittest.TestCase):
         chunk = payload["untrusted_source_chunk"]
 
         candidates = parse_reader_response(
-            {"candidates": [_candidate(chunk["chunk_id"], excerpt)]},
+            {
+                "candidates": [
+                    _candidate(chunk["chunk_id"], _locator_id(payload, excerpt), excerpt)
+                ]
+            },
             snapshot=snapshot,
             normalized_text=text,
             chunk_start=0,

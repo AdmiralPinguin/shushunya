@@ -239,6 +239,59 @@ class RoleRepairTests(unittest.TestCase):
         self.assertEqual(1, result.model_calls)
         self.assertEqual([], search.calls)
 
+    def test_planner_repairs_one_word_generic_clarification(self) -> None:
+        author = QueueModel(
+            {
+                "planner": [
+                    {
+                        "decision": "clarify",
+                        "clarification_question": "What?",
+                    },
+                    {
+                        "decision": "clarify",
+                        "clarification_question": "Which version?",
+                    },
+                ]
+            },
+            stable_identity="repair-author-model",
+        )
+        pipeline, search = self.pipeline(author)
+
+        result = pipeline.run(self.spec())
+
+        self.assertEqual("clarify", result.outcome)
+        self.assertEqual("Which version?", result.reason)
+        repair_payload = [
+            payload for role, payload in author.calls if role == "planner"
+        ][1]
+        self.assertIn(
+            "not specific enough",
+            repair_payload["repair_request"]["validator_error"],
+        )
+        self.assertEqual([], search.calls)
+
+    def test_planner_accepts_unicode_named_question_mark(self) -> None:
+        objective = "Նշիր հետազոտության թեման։"
+        clarification = "Ո՞ր թեման պետք է ուսումնասիրել՞"
+        author = QueueModel(
+            {
+                "planner": [
+                    {
+                        "decision": "clarify",
+                        "clarification_question": clarification,
+                    }
+                ]
+            },
+            stable_identity="repair-author-model",
+        )
+        pipeline, search = self.pipeline(author)
+
+        result = pipeline.run(self.spec(objective))
+
+        self.assertEqual("clarify", result.outcome)
+        self.assertEqual(clarification, result.reason)
+        self.assertEqual([], search.calls)
+
     def test_analyst_clarification_uses_same_objective_language_gate(self) -> None:
         question = "Уточни область исследования."
         invalid = {
@@ -621,6 +674,47 @@ class RoleRepairTests(unittest.TestCase):
         ][1]
         self.assertIn(
             "internal task or mission id",
+            repair_payload["repair_request"]["validator_error"],
+        )
+
+    def test_later_role_query_with_unicode_format_control_is_repaired(self) -> None:
+        invalid = {
+            "decision": "search_more",
+            "claims": [],
+            "inferences": [],
+            "gaps": [],
+            "hypothesis_assessments": [],
+            "next_queries": ["repair-\u200btask archive code"],
+        }
+        repaired = {**invalid, "next_queries": ["archive record code"]}
+        author = QueueModel(
+            {
+                "planner": [{"decision": "proceed", "queries": ["archival code"]}],
+                "analyst": [
+                    invalid,
+                    repaired,
+                    blocked_analyst("archive record code"),
+                ],
+            },
+            stable_identity="repair-author-model",
+        )
+        pipeline, search = self.pipeline(
+            author,
+            budgets=ResearchBudgets(max_rounds=2, max_search_queries=2),
+        )
+
+        result = pipeline.run(self.spec(depth="standard"))
+
+        self.assertEqual("blocked", result.outcome)
+        self.assertEqual(
+            ["archival code", "archive record code"],
+            [query for query, _limit in search.calls],
+        )
+        repair_payload = [
+            payload for role, payload in author.calls if role == "analyst"
+        ][1]
+        self.assertIn(
+            "one printable line",
             repair_payload["repair_request"]["validator_error"],
         )
 
