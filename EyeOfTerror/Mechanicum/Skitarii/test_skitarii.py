@@ -1489,6 +1489,7 @@ class TestBridge(unittest.TestCase):
         self.assertEqual(
             self.b._git_visible_content_fingerprint(
                 destination, allowed_large=snapshot.external_assets,
+                project_missing_approved=True,
             ),
             self.b._snapshot_content_fingerprint(snapshot),
         )
@@ -2124,6 +2125,47 @@ class TestBridge(unittest.TestCase):
             self.b.REPO_ROOT = original
         self.assertNotEqual(before, after)
 
+    def test_scoped_fingerprint_tracks_only_target_state_and_explicit_absence(self):
+        root = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
+        (root / "a.py").write_text("print(1)\n", encoding="utf-8")
+        (root / "notes.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        original = self.b.REPO_ROOT
+        self.b.REPO_ROOT = root
+        try:
+            snapshot = self.b._full_repo_snapshot()
+            target = self.b._snapshot_content_fingerprint(snapshot, paths=["a.py"])
+            self.assertEqual(
+                target,
+                self.b._git_visible_content_fingerprint(root, paths=["a.py"]),
+            )
+            missing = self.b._snapshot_content_fingerprint(snapshot, paths=["new.txt"])
+            self.assertEqual(
+                missing,
+                self.b._git_visible_content_fingerprint(root, paths=["new.txt"]),
+            )
+            (root / "notes.txt").write_text("owner wip\n", encoding="utf-8")
+            self.assertEqual(
+                target,
+                self.b._git_visible_content_fingerprint(root, paths=["a.py"]),
+            )
+            (root / "a.py").write_text("print(9)\n", encoding="utf-8")
+            self.assertNotEqual(
+                target,
+                self.b._git_visible_content_fingerprint(root, paths=["a.py"]),
+            )
+            (root / "new.txt").write_text("owner node\n", encoding="utf-8")
+            self.assertNotEqual(
+                missing,
+                self.b._git_visible_content_fingerprint(root, paths=["new.txt"]),
+            )
+        finally:
+            self.b.REPO_ROOT = original
+
     def test_stale_baseline_blocks_autoapply(self):
         root = Path(tempfile.mkdtemp())
         subprocess.run(["git", "init", "-q", str(root)], check=True)
@@ -2158,6 +2200,570 @@ class TestBridge(unittest.TestCase):
         self.assertFalse(result["applies_to_live"])
         self.assertIn("stale_baseline", result["reason"])
         self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(9)\n")
+
+    def test_unrelated_worktree_mutation_is_preserved_during_autoapply(self):
+        root = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
+        (root / "a.py").write_text("print(1)\n", encoding="utf-8")
+        (root / "notes.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        original = self.b.REPO_ROOT
+        self.b.REPO_ROOT = root
+        try:
+            snapshot = self.b._full_repo_snapshot()
+            (root / "notes.txt").write_text("owner wip\n", encoding="utf-8")
+            verdict = {
+                "patch_bundle": {"unified_diff": """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1 +1 @@
+-print(1)
++print(2)
+"""},
+                "checks": [{"cmd": "python3 a.py", "expect_stdout": "2"}],
+            }
+            ledger = type("Ledger", (), {"record_event": lambda *_args: None})()
+            with patch.dict(os.environ, {"SKITARII_AUTOAPPLY": "1"}):
+                result = self.b._verify_and_stage_patch(
+                    verdict, Path(tempfile.mkdtemp()), ledger, snapshot,
+                )
+        finally:
+            self.b.REPO_ROOT = original
+        self.assertTrue(result["applies_to_live"])
+        self.assertTrue(result["applied_to_live"])
+        self.assertTrue(result["post_apply_tests_passed"])
+        self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(2)\n")
+        self.assertEqual((root / "notes.txt").read_text(encoding="utf-8"), "owner wip\n")
+
+    def test_unrelated_mutation_during_postcheck_does_not_fail_or_get_rolled_back(self):
+        root = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
+        (root / "a.py").write_text("print(1)\n", encoding="utf-8")
+        (root / "notes.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        original = self.b.REPO_ROOT
+        self.b.REPO_ROOT = root
+        calls = 0
+
+        def checks_with_unrelated_owner_write(*_args):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                (root / "notes.txt").write_text("owner during postcheck\n", encoding="utf-8")
+            return True, [], ""
+
+        try:
+            snapshot = self.b._full_repo_snapshot()
+            verdict = {
+                "patch_bundle": {"unified_diff": """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1 +1 @@
+-print(1)
++print(2)
+"""},
+                "checks": [{"cmd": "python3 a.py", "expect_stdout": "2"}],
+            }
+            ledger = type("Ledger", (), {"record_event": lambda *_args: None})()
+            with (
+                patch.dict(os.environ, {"SKITARII_AUTOAPPLY": "1"}),
+                patch.object(self.b, "_run_check_set", side_effect=checks_with_unrelated_owner_write),
+            ):
+                result = self.b._verify_and_stage_patch(
+                    verdict, Path(tempfile.mkdtemp()), ledger, snapshot,
+                )
+        finally:
+            self.b.REPO_ROOT = original
+        self.assertEqual(calls, 2)
+        self.assertTrue(result["applied_to_live"])
+        self.assertTrue(result["post_apply_tests_passed"])
+        self.assertFalse(result["rolled_back"])
+        self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(2)\n")
+        self.assertEqual(
+            (root / "notes.txt").read_text(encoding="utf-8"),
+            "owner during postcheck\n",
+        )
+
+    def test_target_mutation_outside_patch_hunk_blocks_autoapply(self):
+        root = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
+        baseline = (
+            "print(1)\nLINE_2 = 2\nLINE_3 = 3\nLINE_4 = 4\n"
+            "LINE_5 = 5\nLINE_6 = 6\nLINE_7 = 7\nKEEP = 'base'\n"
+        )
+        owner = baseline.replace("KEEP = 'base'", "KEEP = 'owner'")
+        (root / "a.py").write_text(baseline, encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "a.py"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        original = self.b.REPO_ROOT
+        self.b.REPO_ROOT = root
+        try:
+            snapshot = self.b._full_repo_snapshot()
+            (root / "a.py").write_text(owner, encoding="utf-8")
+            verdict = {
+                "patch_bundle": {"unified_diff": """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1,4 +1,4 @@
+-print(1)
++print(2)
+ LINE_2 = 2
+ LINE_3 = 3
+ LINE_4 = 4
+"""},
+                "checks": [{"cmd": "python3 a.py", "expect_stdout": "2"}],
+            }
+            ledger = type("Ledger", (), {"record_event": lambda *_args: None})()
+            with patch.dict(os.environ, {"SKITARII_AUTOAPPLY": "1"}):
+                result = self.b._verify_and_stage_patch(
+                    verdict, Path(tempfile.mkdtemp()), ledger, snapshot,
+                )
+        finally:
+            self.b.REPO_ROOT = original
+        self.assertFalse(result["applies_to_live"])
+        self.assertIn("patch target changed", result["reason"])
+        self.assertEqual(
+            (root / "a.py").read_text(encoding="utf-8"),
+            owner,
+        )
+
+    def test_new_patch_target_cannot_traverse_owner_symlink_ancestor(self):
+        root = Path(tempfile.mkdtemp())
+        outside = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
+        (root / "base.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "base.txt"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        original = self.b.REPO_ROOT
+        self.b.REPO_ROOT = root
+        try:
+            snapshot = self.b._full_repo_snapshot()
+            (root / "pkg").symlink_to(outside, target_is_directory=True)
+            verdict = {
+                "patch_bundle": {"unified_diff": """diff --git a/pkg/new.py b/pkg/new.py
+new file mode 100644
+--- /dev/null
++++ b/pkg/new.py
+@@ -0,0 +1 @@
++print(2)
+"""},
+                "checks": [{"cmd": "python3 pkg/new.py", "expect_stdout": "2"}],
+            }
+            ledger = type("Ledger", (), {"record_event": lambda *_args: None})()
+            result = self.b._verify_and_stage_patch(
+                verdict, Path(tempfile.mkdtemp()), ledger, snapshot,
+            )
+        finally:
+            self.b.REPO_ROOT = original
+        self.assertFalse(result["applies_to_live"])
+        self.assertIn("parent is a symlink", result["reason"])
+        self.assertTrue((root / "pkg").is_symlink())
+        self.assertFalse((outside / "new.py").exists())
+
+    def test_index_head_or_symbolic_head_drift_blocks_autoapply(self):
+        for drift in ("index", "head", "branch"):
+            with self.subTest(drift=drift):
+                root = Path(tempfile.mkdtemp())
+                subprocess.run(["git", "init", "-q", str(root)], check=True)
+                subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+                subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
+                (root / "a.py").write_text("print(1)\n", encoding="utf-8")
+                (root / "notes.txt").write_text("base\n", encoding="utf-8")
+                subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+                subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+                original = self.b.REPO_ROOT
+                self.b.REPO_ROOT = root
+                try:
+                    snapshot = self.b._full_repo_snapshot()
+                    if drift == "index":
+                        (root / "notes.txt").write_text("staged\n", encoding="utf-8")
+                        subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
+                    elif drift == "head":
+                        subprocess.run([
+                            "git", "-C", str(root), "commit", "--allow-empty", "-qm", "drift",
+                        ], check=True)
+                    else:
+                        subprocess.run(["git", "-C", str(root), "switch", "-qc", "other"], check=True)
+                    verdict = {
+                        "patch_bundle": {"unified_diff": """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1 +1 @@
+-print(1)
++print(2)
+"""},
+                        "checks": [{"cmd": "python3 a.py", "expect_stdout": "2"}],
+                    }
+                    ledger = type("Ledger", (), {"record_event": lambda *_args: None})()
+                    result = self.b._verify_and_stage_patch(
+                        verdict, Path(tempfile.mkdtemp()), ledger, snapshot,
+                    )
+                finally:
+                    self.b.REPO_ROOT = original
+                self.assertFalse(result["applies_to_live"])
+                self.assertIn("HEAD or index changed", result["reason"])
+                self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(1)\n")
+
+    def test_git_metadata_fingerprint_binds_hidden_index_and_merge_state(self):
+        with self.subTest(state="intent_to_add"):
+            root = Path(tempfile.mkdtemp())
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
+            (root / "base.txt").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "base.txt"], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+            (root / "intent.txt").write_text("", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "-N", "intent.txt"], check=True)
+            intent_to_add = self.b._git_metadata_fingerprint(root)
+            subprocess.run(["git", "-C", str(root), "add", "intent.txt"], check=True)
+            fully_staged = self.b._git_metadata_fingerprint(root)
+            self.assertNotEqual(intent_to_add, fully_staged)
+
+        with self.subTest(state="resolved_merge"):
+            root = Path(tempfile.mkdtemp())
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
+            (root / "conflict.txt").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "conflict.txt"], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+            main_branch = subprocess.run(
+                ["git", "-C", str(root), "branch", "--show-current"],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+            subprocess.run(["git", "-C", str(root), "switch", "-qc", "other"], check=True)
+            (root / "conflict.txt").write_text("other\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "commit", "-qam", "other"], check=True)
+            subprocess.run(["git", "-C", str(root), "switch", "-q", main_branch], check=True)
+            (root / "conflict.txt").write_text("ours\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "commit", "-qam", "ours"], check=True)
+            merge = subprocess.run(
+                ["git", "-C", str(root), "merge", "other"], capture_output=True, text=True,
+            )
+            self.assertNotEqual(merge.returncode, 0)
+            (root / "conflict.txt").write_text("ours\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "conflict.txt"], check=True)
+            resolved_merge = self.b._git_metadata_fingerprint(root)
+            subprocess.run(["git", "-C", str(root), "reset", "--hard", "-q", "HEAD"], check=True)
+            ordinary_index = self.b._git_metadata_fingerprint(root)
+            self.assertNotEqual(resolved_merge, ordinary_index)
+
+        with self.subTest(state="volatile_fsmonitor_flag"):
+            prefix = (
+                b"tracked.txt\0  ctime: 1:2\n  mtime: 1:2\n"
+                b"  dev: 1\tino: 2\n  uid: 1\tgid: 1\n  size: 3\tflags: "
+            )
+            with patch.object(self.b, "_bounded_command_stdout", return_value=prefix + b"0\n"):
+                ordinary = self.b._git_index_flag_records(Path("/unused"))
+            with patch.object(self.b, "_bounded_command_stdout", return_value=prefix + b"200000\n"):
+                fsmonitor_refreshed = self.b._git_index_flag_records(Path("/unused"))
+            self.assertEqual(ordinary, fsmonitor_refreshed)
+
+    def test_git_metadata_rejects_malformed_operation_and_head_state(self):
+        for state in ("pseudoref", "detached_head", "symbolic_target"):
+            with self.subTest(state=state):
+                root = Path(tempfile.mkdtemp())
+                subprocess.run(["git", "init", "-q", str(root)], check=True)
+                subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+                subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
+                (root / "base.txt").write_text("base\n", encoding="utf-8")
+                subprocess.run(["git", "-C", str(root), "add", "base.txt"], check=True)
+                subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+                git_dir = Path(subprocess.run(
+                    ["git", "-C", str(root), "rev-parse", "--absolute-git-dir"],
+                    check=True, capture_output=True, text=True,
+                ).stdout.strip())
+                if state == "pseudoref":
+                    (git_dir / "MERGE_HEAD").write_text("not-an-object-id\n", encoding="ascii")
+                elif state == "detached_head":
+                    (git_dir / "HEAD").write_text("not-an-object-id\n", encoding="ascii")
+                else:
+                    branch = subprocess.run(
+                        ["git", "-C", str(root), "symbolic-ref", "HEAD"],
+                        check=True, capture_output=True, text=True,
+                    ).stdout.strip()
+                    target = git_dir / branch
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text("not-an-object-id\n", encoding="ascii")
+                with self.assertRaises(self.b.SnapshotError):
+                    self.b._git_metadata_fingerprint(root)
+
+    def test_scoped_content_hash_detects_atomic_target_replacement_while_reading(self):
+        root = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        (root / "a.txt").write_text("baseline\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "a.txt"], check=True)
+        replacement = root / "replacement.tmp"
+        replacement.write_text("owner replacement\n", encoding="utf-8")
+        real_read = os.read
+        swapped = False
+
+        def racing_read(descriptor, amount):
+            nonlocal swapped
+            data = real_read(descriptor, amount)
+            try:
+                opened_path = os.readlink(f"/proc/self/fd/{descriptor}")
+            except OSError:
+                opened_path = ""
+            if data and not swapped and opened_path == str(root / "a.txt"):
+                swapped = True
+                os.replace(replacement, root / "a.txt")
+            return data
+
+        with patch.object(self.b.os, "read", side_effect=racing_read):
+            with self.assertRaises(self.b.SnapshotError):
+                self.b._git_visible_content_fingerprint(root, paths=["a.txt"])
+        self.assertTrue(swapped)
+        self.assertEqual((root / "a.txt").read_text(encoding="utf-8"), "owner replacement\n")
+
+    def test_composite_cas_rereads_target_after_git_metadata(self):
+        root = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
+        (root / "a.txt").write_text("baseline\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "a.txt"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        real_metadata = self.b._git_metadata_fingerprint
+        calls = 0
+
+        def metadata_then_mutate(path):
+            nonlocal calls
+            calls += 1
+            value = real_metadata(path)
+            if calls == 2:
+                (root / "a.txt").write_text("baseline\nowner mutation\n", encoding="utf-8")
+            return value
+
+        with patch.object(self.b, "_git_metadata_fingerprint", side_effect=metadata_then_mutate):
+            with self.assertRaises(self.b.SnapshotError):
+                self.b._stable_scoped_live_state(root, ["a.txt"])
+        self.assertEqual(calls, 3)
+        self.assertEqual(
+            (root / "a.txt").read_text(encoding="utf-8"),
+            "baseline\nowner mutation\n",
+        )
+
+    def test_composite_cas_rereads_git_metadata_after_target_hash(self):
+        root = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
+        (root / "a.txt").write_text("baseline\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "a.txt"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        (root / "notes.txt").write_text("owner notes\n", encoding="utf-8")
+        real_targets = self.b._git_visible_content_fingerprint
+        calls = 0
+
+        def targets_then_stage(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            value = real_targets(*args, **kwargs)
+            if calls == 2:
+                subprocess.run(
+                    ["git", "-C", str(root), "add", "notes.txt"], check=True,
+                )
+            return value
+
+        with patch.object(
+            self.b, "_git_visible_content_fingerprint", side_effect=targets_then_stage,
+        ):
+            with self.assertRaises(self.b.SnapshotError):
+                self.b._stable_scoped_live_state(root, ["a.txt"])
+        self.assertEqual(calls, 2)
+        staged = subprocess.run(
+            ["git", "-C", str(root), "diff", "--cached", "--name-only"],
+            check=True, capture_output=True, text=True,
+        ).stdout.splitlines()
+        self.assertEqual(staged, ["notes.txt"])
+
+    def test_repo_mutation_guard_blocks_git_index_and_ref_writers(self):
+        root = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
+        (root / "a.txt").write_text("baseline\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "a.txt"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "--allow-empty", "-qm", "second"], check=True)
+        branch = subprocess.run(
+            ["git", "-C", str(root), "symbolic-ref", "HEAD"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        head = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        (root / "notes.txt").write_text("owner notes\n", encoding="utf-8")
+        real_generation = self.b._scoped_path_generation
+        generation_calls = 0
+        add_result = None
+
+        def generation_then_try_git_add(*args, **kwargs):
+            nonlocal generation_calls, add_result
+            generation_calls += 1
+            value = real_generation(*args, **kwargs)
+            if generation_calls == 5:
+                add_result = subprocess.run(
+                    ["git", "-C", str(root), "add", "notes.txt"],
+                    capture_output=True, text=True,
+                )
+            return value
+
+        with self.b._repo_lock(root):
+            update_ref = subprocess.run(
+                ["git", "-C", str(root), "update-ref", branch, "HEAD~1"],
+                capture_output=True, text=True,
+            )
+            with patch.object(
+                self.b, "_scoped_path_generation", side_effect=generation_then_try_git_add,
+            ):
+                metadata, targets = self.b._stable_scoped_live_state(root, ["a.txt"])
+                self.assertRegex(metadata, r"^[0-9a-f]{64}$")
+                self.assertRegex(targets, r"^[0-9a-f]{64}$")
+        self.assertEqual(generation_calls, 5)
+        self.assertIsNotNone(add_result)
+        self.assertNotEqual(add_result.returncode, 0)
+        self.assertNotEqual(update_ref.returncode, 0)
+        self.assertEqual(
+            subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip(),
+            head,
+        )
+        self.assertEqual(
+            subprocess.run(
+                ["git", "-C", str(root), "diff", "--cached", "--name-only"],
+                check=True, capture_output=True, text=True,
+            ).stdout,
+            "",
+        )
+
+    def test_repo_mutation_guard_ownership_is_thread_local(self):
+        root = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        (root / "a.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "a.txt"], check=True)
+        entered = threading.Event()
+        release = threading.Event()
+        errors = []
+
+        def owner_thread():
+            try:
+                with self.b._repo_lock(root):
+                    entered.set()
+                    release.wait(timeout=10)
+            except Exception as exc:  # pragma: no cover - assertion below reports it
+                errors.append(exc)
+
+        thread = threading.Thread(target=owner_thread)
+        thread.start()
+        self.assertTrue(entered.wait(timeout=10))
+        try:
+            with self.assertRaises(self.b.SnapshotError):
+                self.b._git_metadata_fingerprint(root)
+        finally:
+            release.set()
+            thread.join(timeout=10)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertNotIn(str(root.resolve()), self.b._OWNED_GIT_GUARDS)
+        self.assertEqual(self.b._OWNED_GIT_LOCKS, {})
+
+    def test_repo_mutation_guard_cleans_partial_lock_on_io_failure(self):
+        root = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        (root / "a.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "a.txt"], check=True)
+        lock_paths = self.b._git_mutation_lock_paths(root)
+        with patch.object(self.b.os, "fsync", side_effect=OSError("injected fsync failure")):
+            with self.assertRaises(OSError):
+                with self.b._repo_lock(root):
+                    self.fail("guard must not be entered after lock I/O failure")
+        self.assertTrue(all(not os.path.lexists(path) for path in lock_paths))
+        self.assertEqual(self.b._OWNED_GIT_LOCKS, {})
+        subprocess.run(["git", "-C", str(root), "add", "a.txt"], check=True)
+
+    def test_repo_mutation_guard_cleans_new_lock_when_fstat_fails(self):
+        root = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        (root / "a.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "a.txt"], check=True)
+        lock_paths = self.b._git_mutation_lock_paths(root)
+        with patch.object(self.b.os, "fstat", side_effect=OSError("injected fstat failure")):
+            with self.assertRaises(OSError):
+                with self.b._repo_lock(root):
+                    self.fail("guard must not be entered after lock fstat failure")
+        self.assertTrue(all(not os.path.lexists(path) for path in lock_paths))
+        self.assertEqual(self.b._OWNED_GIT_LOCKS, {})
+        subprocess.run(["git", "-C", str(root), "add", "a.txt"], check=True)
+
+    def test_repo_mutation_guard_rejects_active_git_operation(self):
+        root = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
+        (root / "a.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "a.txt"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        git_dir = Path(subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--absolute-git-dir"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip())
+        head = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            check=True, capture_output=True, text=True,
+        ).stdout
+        (git_dir / "MERGE_HEAD").write_text(head, encoding="ascii")
+        lock_paths = self.b._git_mutation_lock_paths(root)
+        with self.assertRaisesRegex(self.b.SnapshotError, "active Git operation: MERGE_HEAD"):
+            with self.b._repo_lock(root):
+                self.fail("active merge must block repository apply")
+        self.assertTrue(all(not os.path.lexists(path) for path in lock_paths))
+        self.assertEqual(self.b._OWNED_GIT_LOCKS, {})
+        self.assertEqual(self.b._OWNED_GIT_GUARDS, {})
+
+    def test_reftable_guard_uses_table_transaction_lock(self):
+        root = Path(tempfile.mkdtemp())
+        git_dir = root / ".git"
+        (git_dir / "refs").mkdir(parents=True)
+        (git_dir / "refs" / "heads").write_text("this repository uses reftables\n", encoding="ascii")
+        (git_dir / "reftable").mkdir()
+        (git_dir / "reftable" / "tables.list").write_text("0x000000000001-0x000000000001-abc.ref\n", encoding="ascii")
+
+        def git_path_output(args, _root, **_kwargs):
+            if args[-1] == "--git-common-dir":
+                return b".git\n"
+            return f".git/{args[-1]}\n".encode("utf-8")
+
+        def git_run(args, **_kwargs):
+            if args[1:3] == ["config", "--get"]:
+                return subprocess.CompletedProcess(args, 0, stdout=b"reftable\n", stderr=b"")
+            if "--show-ref-format" in args:
+                return subprocess.CompletedProcess(args, 0, stdout=b"reftable\n", stderr=b"")
+            return subprocess.CompletedProcess(
+                args, 0, stdout=b"refs/heads/main\n", stderr=b"",
+            )
+        with (
+            patch.object(self.b, "_bounded_command_stdout", side_effect=git_path_output),
+            patch.object(self.b.subprocess, "run", side_effect=git_run),
+        ):
+            paths = self.b._git_mutation_lock_paths(root)
+        self.assertIn((git_dir / "reftable" / "tables.list.lock").absolute(), paths)
+        self.assertNotIn((git_dir / "refs" / "heads" / "main.lock").absolute(), paths)
 
     def test_failed_post_apply_verification_rolls_back_exact_baseline(self):
         root = Path(tempfile.mkdtemp())
@@ -2200,6 +2806,69 @@ class TestBridge(unittest.TestCase):
         self.assertFalse(result["post_apply_tests_passed"])
         self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(1)\n")
 
+    def test_rollback_rechecks_target_after_reverse_check(self):
+        root = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
+        (root / "a.py").write_text("print(1)\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "a.py"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        original_root = self.b.REPO_ROOT
+        real_run = subprocess.run
+        injected = False
+
+        def run_then_inject(*args, **kwargs):
+            nonlocal injected
+            completed = real_run(*args, **kwargs)
+            command = args[0] if args else kwargs.get("args", [])
+            if (
+                not injected
+                and command[:4] == ["git", "apply", "--reverse", "--check"]
+                and Path(kwargs.get("cwd") or ".").resolve() == root.resolve()
+            ):
+                injected = True
+                (root / "a.py").write_text(
+                    "print(2)\n# owner changed target during rollback check\n",
+                    encoding="utf-8",
+                )
+            return completed
+
+        self.b.REPO_ROOT = root
+        try:
+            snapshot = self.b._full_repo_snapshot()
+            verdict = {
+                "patch_bundle": {"unified_diff": """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1 +1 @@
+-print(1)
++print(2)
+"""},
+                "checks": [{"cmd": "python3 a.py", "expect_stdout": "2"}],
+            }
+            ledger = type("Ledger", (), {"record_event": lambda *_args: None})()
+            with (
+                patch.dict(os.environ, {"SKITARII_AUTOAPPLY": "1"}),
+                patch.object(
+                    self.b, "_run_check_set",
+                    side_effect=[(True, [], ""), (False, [], "forced post failure")],
+                ),
+                patch.object(self.b.subprocess, "run", side_effect=run_then_inject),
+            ):
+                result = self.b._verify_and_stage_patch(
+                    verdict, Path(tempfile.mkdtemp()), ledger, snapshot,
+                )
+        finally:
+            self.b.REPO_ROOT = original_root
+        self.assertTrue(injected)
+        self.assertTrue(result["rollback_blocked_external_target_change"])
+        self.assertFalse(result["rolled_back"])
+        self.assertEqual(
+            (root / "a.py").read_text(encoding="utf-8"),
+            "print(2)\n# owner changed target during rollback check\n",
+        )
+
     def test_post_snapshot_exception_also_rolls_back(self):
         root = Path(tempfile.mkdtemp())
         subprocess.run(["git", "init", "-q", str(root)], check=True)
@@ -2217,7 +2886,7 @@ class TestBridge(unittest.TestCase):
 
             def fail_every_post_snapshot(*args, **kwargs):
                 calls["count"] += 1
-                if calls["count"] >= 2:
+                if calls["count"] >= 1:
                     raise self.b.SnapshotError("persistent post snapshot failure")
                 return real_snapshot(*args, **kwargs)
 
@@ -2243,6 +2912,7 @@ class TestBridge(unittest.TestCase):
                 )
         finally:
             self.b.REPO_ROOT = original
+        self.assertTrue(result["rollback_guard_reacquired"])
         self.assertTrue(result["rolled_back"])
         self.assertFalse(result["applied_to_live"])
         self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(1)\n")
@@ -3107,6 +3777,106 @@ class TestBridge(unittest.TestCase):
         self.assertEqual(applied["status"], "completed")
         self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(2)\n")
 
+    def test_controlled_apply_preserves_unrelated_post_stage_worktree_change(self):
+        from eye_of_terror.ledger import TaskLedger
+
+        root, run_dir, _result = self._run_bridge_fixture(autoapply=False)
+        (root / "owner-notes.txt").write_text("owner wip\n", encoding="utf-8")
+        ledger = TaskLedger.load(run_dir / "task_ledger.json")
+        stage = ledger.to_dict()["result"]["patch_stage"]
+        original = self.b.REPO_ROOT
+        self.b.REPO_ROOT = root
+        try:
+            applied = self.b.apply_staged_patch(
+                run_dir,
+                ledger,
+                stage["baseline_fingerprint"],
+                expected_patch_sha256=stage["patch_sha256"],
+                expected_checks_sha256=stage["checks_sha256"],
+            )
+        finally:
+            self.b.REPO_ROOT = original
+        self.assertTrue(applied["ok"])
+        self.assertEqual(applied["status"], "completed")
+        self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(2)\n")
+        self.assertEqual(
+            (root / "owner-notes.txt").read_text(encoding="utf-8"),
+            "owner wip\n",
+        )
+
+    def test_controlled_apply_rejects_target_or_global_metadata_drift(self):
+        from eye_of_terror.ledger import TaskLedger
+
+        for drift in ("target", "index", "head"):
+            with self.subTest(drift=drift):
+                root, run_dir, _result = self._run_bridge_fixture(autoapply=False)
+                if drift == "target":
+                    (root / "a.py").write_text("print(9)\n", encoding="utf-8")
+                elif drift == "index":
+                    (root / "owner-notes.txt").write_text("staged\n", encoding="utf-8")
+                    subprocess.run(
+                        ["git", "-C", str(root), "add", "owner-notes.txt"], check=True,
+                    )
+                else:
+                    subprocess.run([
+                        "git", "-C", str(root), "commit", "--allow-empty", "-qm", "drift",
+                    ], check=True)
+                ledger = TaskLedger.load(run_dir / "task_ledger.json")
+                stage = ledger.to_dict()["result"]["patch_stage"]
+                original = self.b.REPO_ROOT
+                self.b.REPO_ROOT = root
+                try:
+                    applied = self.b.apply_staged_patch(
+                        run_dir,
+                        ledger,
+                        stage["baseline_fingerprint"],
+                        expected_patch_sha256=stage["patch_sha256"],
+                        expected_checks_sha256=stage["checks_sha256"],
+                    )
+                finally:
+                    self.b.REPO_ROOT = original
+                self.assertFalse(applied["ok"])
+                self.assertEqual(applied["status"], "stale_baseline")
+                self.assertEqual(
+                    (root / "a.py").read_text(encoding="utf-8"),
+                    "print(9)\n" if drift == "target" else "print(1)\n",
+                )
+
+    def test_controlled_apply_rejects_tampered_scoped_conflict_proof(self):
+        from eye_of_terror.ledger import TaskLedger
+
+        root, run_dir, _result = self._run_bridge_fixture(autoapply=False)
+        ledger_path = run_dir / "task_ledger.json"
+        durable = json.loads(ledger_path.read_text(encoding="utf-8"))
+        stage = durable["result"]["patch_stage"]
+        confirmed_fingerprint = stage["baseline_fingerprint"]
+        confirmed_patch = stage["patch_sha256"]
+        confirmed_checks = stage["checks_sha256"]
+        (root / "a.py").write_text("print(1)\n# owner change outside the hunk\n", encoding="utf-8")
+        stage["baseline_target_fingerprint"] = self.b._git_visible_content_fingerprint(
+            root, paths=stage["resource_bounds"]["changed_paths"],
+        )
+        ledger_path.write_text(json.dumps(durable), encoding="utf-8")
+        original = self.b.REPO_ROOT
+        self.b.REPO_ROOT = root
+        try:
+            applied = self.b.apply_staged_patch(
+                run_dir,
+                TaskLedger.load(ledger_path),
+                confirmed_fingerprint,
+                expected_patch_sha256=confirmed_patch,
+                expected_checks_sha256=confirmed_checks,
+            )
+        finally:
+            self.b.REPO_ROOT = original
+        self.assertFalse(applied["ok"])
+        self.assertEqual(applied["status"], "blocked")
+        self.assertIn("conflict proof", applied["error"])
+        self.assertEqual(
+            (root / "a.py").read_text(encoding="utf-8"),
+            "print(1)\n# owner change outside the hunk\n",
+        )
+
     def test_controlled_apply_rejects_tampered_patch_artifact(self):
         from eye_of_terror.ledger import TaskLedger
 
@@ -3129,6 +3899,114 @@ class TestBridge(unittest.TestCase):
         self.assertFalse(applied["ok"])
         self.assertIn("changed after verification", applied["error"])
         self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(1)\n")
+
+    def test_controlled_reverify_never_rewrites_a_swapped_artifact_symlink(self):
+        from eye_of_terror.ledger import TaskLedger
+
+        root, run_dir, _result = self._run_bridge_fixture(autoapply=False)
+        ledger = TaskLedger.load(run_dir / "task_ledger.json")
+        stage = ledger.to_dict()["result"]["patch_stage"]
+        patch_path = run_dir / "work" / "skitarii.patch"
+        outside = Path(tempfile.mkdtemp()) / "owner.txt"
+        outside.write_text("owner sentinel\n", encoding="utf-8")
+        real_snapshot = self.b._full_repo_snapshot
+        swapped = False
+
+        def snapshot_then_swap(*args, **kwargs):
+            nonlocal swapped
+            captured = real_snapshot(*args, **kwargs)
+            if not swapped:
+                swapped = True
+                patch_path.unlink()
+                patch_path.symlink_to(outside)
+            return captured
+
+        original = self.b.REPO_ROOT
+        self.b.REPO_ROOT = root
+        try:
+            with patch.object(self.b, "_full_repo_snapshot", side_effect=snapshot_then_swap):
+                applied = self.b.apply_staged_patch(
+                    run_dir,
+                    ledger,
+                    stage["baseline_fingerprint"],
+                    expected_patch_sha256=stage["patch_sha256"],
+                    expected_checks_sha256=stage["checks_sha256"],
+                )
+        finally:
+            self.b.REPO_ROOT = original
+        self.assertTrue(swapped)
+        self.assertTrue(applied["ok"], applied)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "owner sentinel\n")
+        self.assertTrue(patch_path.is_symlink())
+        self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(2)\n")
+
+    def test_reverify_checks_confirmed_manifest_before_live_apply(self):
+        from eye_of_terror.ledger import TaskLedger
+
+        root, run_dir, _result = self._run_bridge_fixture(autoapply=False)
+        patch_text = (run_dir / "work" / "skitarii.patch").read_text(encoding="utf-8")
+        checks = json.loads(
+            (run_dir / "work" / ".skitarii-verification-checks.json").read_text(encoding="utf-8"),
+        )
+        ledger = TaskLedger.load(run_dir / "task_ledger.json")
+        original = self.b.REPO_ROOT
+        self.b.REPO_ROOT = root
+        try:
+            snapshot = self.b._full_repo_snapshot()
+            result = self.b._verify_and_stage_patch(
+                {"patch_bundle": {"unified_diff": patch_text}, "checks": checks},
+                run_dir,
+                ledger,
+                snapshot,
+                autoapply=True,
+                persist_artifacts=False,
+                expected_conflict_fingerprint="0" * 64,
+            )
+        finally:
+            self.b.REPO_ROOT = original
+        self.assertFalse(result["applied_to_live"])
+        self.assertFalse(result["tests_pass_in_worktree"])
+        self.assertIn("conflict proof changed before live apply", result["reason"])
+        self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(1)\n")
+
+    def test_git_apply_whitespace_policy_is_deterministic(self):
+        root = Path(tempfile.mkdtemp())
+        run_dir = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "test"], check=True)
+        (root / "a.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "a.txt"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "apply.whitespace", "fix"], check=True)
+        original = self.b.REPO_ROOT
+        self.b.REPO_ROOT = root
+        try:
+            snapshot = self.b._full_repo_snapshot()
+            ledger = type("Ledger", (), {"record_event": lambda *_args: None})()
+            result = self.b._verify_and_stage_patch(
+                {
+                    "patch_bundle": {"unified_diff": (
+                        "diff --git a/a.txt b/a.txt\n"
+                        "--- a/a.txt\n"
+                        "+++ b/a.txt\n"
+                        "@@ -1 +1,2 @@\n"
+                        " base\n"
+                        "+trail" + "   \n"
+                    )},
+                    "checks": [{
+                        "cmd": "python3 -c \"assert open('a.txt','rb').read() == b'base\\ntrail   \\n'\"",
+                    }],
+                },
+                run_dir,
+                ledger,
+                snapshot,
+                autoapply=True,
+            )
+        finally:
+            self.b.REPO_ROOT = original
+        self.assertTrue(self.b._patch_stage_passed(result, require_applied=True), result)
+        self.assertEqual((root / "a.txt").read_bytes(), b"base\ntrail   \n")
 
     def test_controlled_apply_completes_linked_durable_mission_state(self):
         from eye_of_terror.ledger import TaskLedger
@@ -3270,6 +4148,37 @@ class TestBridge(unittest.TestCase):
         self.assertEqual((root / "a.py").read_text(encoding="utf-8"), "print(2)\n")
         audit = mission_control.mission_protocol_audit(mission_dir)
         self.assertTrue(audit["ok"], audit["errors"])
+
+    def test_protocol_reconciliation_rejects_unproved_applied_stage(self):
+        run_dir = Path(tempfile.mkdtemp())
+        fake_stage = {
+            "baseline_fingerprint": "f",
+            "patch_sha256": "p",
+            "checks_sha256": "c",
+        }
+
+        class Ledger:
+            def to_dict(self):
+                return {
+                    "task_id": "fake-reconcile",
+                    "status": "blocked",
+                    "result": {
+                        "final_step": "skitarii",
+                        "protocol_finalize_pending": True,
+                        "patch_stage": fake_stage,
+                    },
+                }
+
+        result = self.b._apply_staged_patch_locked(
+            run_dir,
+            Ledger(),
+            "f",
+            expected_patch_sha256="p",
+            expected_checks_sha256="c",
+        )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("reconciliation confirmation mismatch", result["error"])
 
     def test_gateway_apply_patch_endpoint_executes_ready_action(self):
         from eye_of_terror.ledger import TaskLedger

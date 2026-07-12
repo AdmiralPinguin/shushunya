@@ -14,11 +14,14 @@ import json
 import os
 import posixpath
 import re
+import secrets
 import selectors
 import signal
 import stat
 import shutil
 import subprocess
+import sys
+import threading
 import time
 import tomllib
 import urllib.error
@@ -27,7 +30,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Iterable
 
 from EyeOfTerror.common_protocol.ceraxia_directive import (
     CeraxiaDirectiveError,
@@ -63,6 +66,8 @@ MAX_ACCEPTANCE_SOURCE_BYTES = 131_072
 MAX_ACCEPTANCE_METADATA_BYTES = 1_048_576
 SKITARII_POLL_INTERVAL_SEC = 0.5
 _MISSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
+_OWNED_GIT_LOCKS: dict[str, tuple[int, int, int]] = {}
+_OWNED_GIT_GUARDS: dict[str, tuple[int, tuple[str, ...]]] = {}
 
 
 @dataclass
@@ -140,6 +145,7 @@ class WorkspaceSnapshot(dict):
         blobs: dict[str, str] | None = None,
         external_assets: dict[str, dict[str, Any]] | None = None,
         fingerprint: str = "",
+        metadata_fingerprint: str = "",
     ) -> None:
         super().__init__(files or {})
         self.deleted_paths = deleted_paths or []
@@ -148,6 +154,7 @@ class WorkspaceSnapshot(dict):
         self.blobs = blobs or {}
         self.external_assets = external_assets or {}
         self.fingerprint = fingerprint
+        self.metadata_fingerprint = metadata_fingerprint
 
     @property
     def inventory(self) -> list[str]:
@@ -200,14 +207,22 @@ def _workspace_fingerprint(
     return digest.hexdigest()
 
 
-def _snapshot_content_fingerprint(snapshot: WorkspaceSnapshot) -> str:
+def _snapshot_content_fingerprint(
+    snapshot: WorkspaceSnapshot,
+    *,
+    paths: Iterable[str] | None = None,
+) -> str:
     """Hash only the current Git-visible filesystem state, independent of Git metadata."""
     digest = hashlib.sha256(b"skitarii-content-v1\0")
-    for path in sorted(snapshot.inventory):
+    selected = (
+        sorted({_safe_relative_path(path) for path in paths})
+        if paths is not None else sorted(snapshot.inventory)
+    )
+    for path in selected:
         mode = str(
             snapshot.modes.get(path)
             or (snapshot.external_assets.get(path) or {}).get("mode")
-            or "100644"
+            or ("" if path not in snapshot.inventory else "100644")
         )
         if path in snapshot.symlinks:
             kind = "link"
@@ -220,9 +235,13 @@ def _snapshot_content_fingerprint(snapshot: WorkspaceSnapshot) -> str:
             content_sha = hashlib.sha256(
                 base64.b64decode(str(snapshot.blobs[path]), validate=True),
             ).hexdigest()
-        else:
+        elif path in snapshot.external_assets:
             kind = "file"
             content_sha = str(snapshot.external_assets[path].get("sha256") or "")
+        else:
+            kind = "missing"
+            mode = ""
+            content_sha = ""
         digest.update(
             f"{kind}\0{path}\0{mode}\0{content_sha}\0".encode("utf-8", errors="strict"),
         )
@@ -357,15 +376,158 @@ def _validate_patch_resource_bounds(diff: str) -> dict[str, Any]:
     }
 
 
+def _stable_stat_signature(metadata: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_size,
+        metadata.st_mtime_ns, metadata.st_ctime_ns,
+    )
+
+
+def _stable_regular_file_digest(path: Path, maximum: int) -> tuple[os.stat_result, str]:
+    """Hash one pathname through O_NOFOLLOW and prove it still names that inode."""
+    try:
+        before = path.lstat()
+        flags = (
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        )
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise SnapshotError(f"patched repository file cannot be opened safely: {path}") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise SnapshotError(f"unsupported patched repository node: {path}")
+        if _stable_stat_signature(before) != _stable_stat_signature(opened):
+            raise SnapshotError(f"patched repository file changed while opening: {path}")
+        if opened.st_size > maximum:
+            raise SnapshotError(f"patched file exceeds {maximum} bytes: {path}")
+        digest = hashlib.sha256()
+        read_bytes = 0
+        while True:
+            chunk = os.read(descriptor, min(1024 * 1024, maximum + 1 - read_bytes))
+            if not chunk:
+                break
+            digest.update(chunk)
+            read_bytes += len(chunk)
+            if read_bytes > maximum:
+                raise SnapshotError(f"patched file exceeds {maximum} bytes: {path}")
+        after_fd = os.fstat(descriptor)
+        after_path = path.lstat()
+        signature = _stable_stat_signature(opened)
+        if (
+            read_bytes != opened.st_size
+            or _stable_stat_signature(after_fd) != signature
+            or _stable_stat_signature(after_path) != signature
+        ):
+            raise SnapshotError(f"patched repository file changed while hashing: {path}")
+        return opened, digest.hexdigest()
+    except OSError as exc:
+        raise SnapshotError(f"patched repository file changed while hashing: {path}") from exc
+    finally:
+        os.close(descriptor)
+
+
+def _stable_symlink_target(path: Path) -> tuple[os.stat_result, str]:
+    try:
+        before = path.lstat()
+        if not stat.S_ISLNK(before.st_mode):
+            raise SnapshotError(f"patched repository link changed before reading: {path}")
+        target = os.readlink(path)
+        after = path.lstat()
+    except OSError as exc:
+        raise SnapshotError(f"patched repository link changed while reading: {path}") from exc
+    if _stable_stat_signature(before) != _stable_stat_signature(after):
+        raise SnapshotError(f"patched repository link changed while reading: {path}")
+    return before, target
+
+
+def _stable_small_regular_file_bytes(path: Path, maximum: int, label: str) -> bytes:
+    try:
+        before = path.lstat()
+        flags = (
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        )
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise SnapshotError(f"{label} cannot be opened safely") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or _stable_stat_signature(before) != _stable_stat_signature(opened)
+            or opened.st_size > maximum
+        ):
+            raise SnapshotError(f"{label} is not a stable bounded regular file")
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(4096, maximum + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > maximum:
+                raise SnapshotError(f"{label} is oversized")
+        after_fd = os.fstat(descriptor)
+        after_path = path.lstat()
+        signature = _stable_stat_signature(opened)
+        if (
+            total != opened.st_size
+            or _stable_stat_signature(after_fd) != signature
+            or _stable_stat_signature(after_path) != signature
+        ):
+            raise SnapshotError(f"{label} changed while reading")
+        return b"".join(chunks)
+    except OSError as exc:
+        raise SnapshotError(f"{label} changed while reading") from exc
+    finally:
+        os.close(descriptor)
+
+
+def _scoped_path_generation(root: Path, paths: Iterable[str]) -> str:
+    """Cheap no-content generation guard for a previously hashed target set."""
+    root = root.resolve()
+    digest = hashlib.sha256(b"skitarii-path-generation-v1\0")
+    for rel in sorted({_safe_relative_path(path) for path in paths}):
+        path = _materialize_path(root, rel)
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            digest.update(f"missing\0{rel}\0".encode("utf-8", errors="strict"))
+            continue
+        except OSError as exc:
+            raise SnapshotError(f"patch target generation is unreadable: {rel}") from exc
+        if stat.S_ISLNK(metadata.st_mode):
+            metadata, target = _stable_symlink_target(path)
+            extra = target.encode("utf-8", errors="strict")
+            kind = b"link"
+        elif stat.S_ISREG(metadata.st_mode):
+            extra = b""
+            kind = b"file"
+        else:
+            extra = b""
+            kind = b"other"
+        signature = _stable_stat_signature(metadata)
+        digest.update(kind + b"\0" + rel.encode("utf-8", errors="strict") + b"\0")
+        digest.update(json.dumps(signature, separators=(",", ":")).encode("ascii"))
+        digest.update(b"\0" + extra + b"\0")
+    return digest.hexdigest()
+
+
 def _git_visible_content_fingerprint(
     root: Path,
     *,
+    paths: Iterable[str] | None = None,
     allowed_large: dict[str, dict[str, Any]] | None = None,
     max_files: int = MAX_CANDIDATE_FILES,
     max_total_bytes: int = MAX_CANDIDATE_TOTAL_BYTES,
     max_file_bytes: int = MAX_PATCH_FILE_BYTES,
     reject_ignored_nodes: bool = False,
-) -> str:
+    project_missing_approved: bool = False,
+    return_generation: bool = False,
+) -> str | tuple[str, str]:
     """Hash and validate a post-patch tree without relying on snapshot inline limits."""
     root = root.resolve()
     approved = allowed_large or {}
@@ -395,7 +557,11 @@ def _git_visible_content_fingerprint(
         _safe_relative_path(raw_path.decode("utf-8", errors="strict"))
         for raw_path in raw_paths
     }
-    fingerprint_paths = visible_paths | set(approved)
+    scoped = paths is not None
+    fingerprint_paths = (
+        {_safe_relative_path(path) for path in paths or ()}
+        if scoped else visible_paths | set(approved)
+    )
     if len(fingerprint_paths) > max_files:
         raise SnapshotError(f"patched repository exceeds {max_files} files")
     if reject_ignored_nodes:
@@ -429,48 +595,69 @@ def _git_visible_content_fingerprint(
             raise SnapshotError(
                 f"patch created Git-ignored content: {ignored_created[0]}",
             )
+    generation_before = _scoped_path_generation(root, fingerprint_paths)
     total = 0
     for rel in sorted(fingerprint_paths):
-        if rel not in visible_paths:
-            metadata = approved.get(rel)
-            if not isinstance(metadata, dict):
-                raise SnapshotError(f"patched repository path disappeared: {rel}")
-            mode = str(metadata.get("mode") or "100644")
-            content_sha = str(metadata.get("sha256") or "")
-            if not re.fullmatch(r"[0-9a-f]{64}", content_sha):
-                raise SnapshotError(f"external baseline asset digest is invalid: {rel}")
-            digest.update(
-                f"file\0{rel}\0{mode}\0{content_sha}\0".encode("utf-8", errors="strict"),
-            )
-            continue
         path = _materialize_path(root, rel)
+        current_parent = root
+        for part in PurePosixPath(rel).parts[:-1]:
+            current_parent /= part
+            if current_parent.is_symlink():
+                raise SnapshotError(f"patched repository parent is a symlink: {rel}")
+            if os.path.lexists(current_parent) and not current_parent.is_dir():
+                raise SnapshotError(f"patched repository parent is not a directory: {rel}")
         try:
             resolved_parent = path.parent.resolve()
         except OSError as exc:
             raise SnapshotError(f"patched repository parent cannot be resolved: {rel}") from exc
         if resolved_parent != root and root not in resolved_parent.parents:
             raise SnapshotError(f"patched repository path escapes through a symlink: {rel}")
-        if not path.exists() and not path.is_symlink():
-            continue
-        if path.is_symlink():
+        metadata = approved.get(rel) if isinstance(approved.get(rel), dict) else None
+        try:
+            node = path.lstat()
+        except FileNotFoundError:
+            if metadata is not None:
+                if not project_missing_approved:
+                    raise SnapshotError(f"approved large baseline asset disappeared: {rel}")
+                mode = str(metadata.get("mode") or "100644")
+                content_sha = str(metadata.get("sha256") or "")
+                if (
+                    int(metadata.get("size") or -1) < 0
+                    or not re.fullmatch(r"[0-9a-f]{64}", content_sha)
+                ):
+                    raise SnapshotError(f"external baseline asset manifest is invalid: {rel}")
+                digest.update(
+                    f"file\0{rel}\0{mode}\0{content_sha}\0".encode("utf-8", errors="strict"),
+                )
+                continue
+            if scoped:
+                digest.update(f"missing\0{rel}\0\0\0".encode("utf-8", errors="strict"))
+                continue
+            raise SnapshotError(f"patched repository path disappeared: {rel}")
+        except OSError as exc:
+            raise SnapshotError(f"patched repository path cannot be inspected: {rel}") from exc
+        if stat.S_ISLNK(node.st_mode):
             kind = "link"
             mode = "120000"
-            target = _safe_symlink_target(rel, os.readlink(path))
+            _link_metadata, raw_target = _stable_symlink_target(path)
+            target = _safe_symlink_target(rel, raw_target)
             _validate_resolved_symlink(root, rel, target)
             target_bytes = target.encode("utf-8", errors="strict")
             total += len(target_bytes)
             content_sha = hashlib.sha256(target_bytes).hexdigest()
         else:
-            if not path.is_file():
+            if not stat.S_ISREG(node.st_mode):
                 raise SnapshotError(f"unsupported patched repository node: {rel}")
+            maximum = int(metadata.get("size") or -1) if metadata else max_file_bytes
+            if maximum < 0:
+                raise SnapshotError(f"external baseline asset size is invalid: {rel}")
+            stable, content_sha = _stable_regular_file_digest(path, maximum)
             kind = "file"
             # Git apply changes the worktree, not the index. Hash the actual executable
             # bit so mode-only patches and dirty index/worktree differences are visible.
-            mode = "100755" if path.stat().st_mode & stat.S_IXUSR else "100644"
-            size = path.stat().st_size
-            metadata = approved.get(rel) if isinstance(approved.get(rel), dict) else None
+            mode = "100755" if stable.st_mode & stat.S_IXUSR else "100644"
+            size = stable.st_size
             if metadata:
-                content_sha = _sha256_file(path)
                 expected_mode = str(metadata.get("mode") or mode)
                 if (
                     size != int(metadata.get("size") or -1)
@@ -479,28 +666,299 @@ def _git_visible_content_fingerprint(
                 ):
                     raise SnapshotError(f"approved large baseline asset changed: {rel}")
             else:
-                if size > max_file_bytes:
-                    raise SnapshotError(f"patched file exceeds {max_file_bytes} bytes: {rel}")
                 total += size
-                content_sha = _sha256_file(path)
         if total > max_total_bytes:
             raise SnapshotError(f"patched repository exceeds {max_total_bytes} bytes")
         digest.update(
             f"{kind}\0{rel}\0{mode}\0{content_sha}\0".encode("utf-8", errors="strict"),
         )
-    return digest.hexdigest()
+    generation_after = _scoped_path_generation(root, fingerprint_paths)
+    if generation_before != generation_after:
+        raise SnapshotError("patch targets changed during content fingerprinting")
+    fingerprint = digest.hexdigest()
+    return (fingerprint, generation_after) if return_generation else fingerprint
+
+
+def _git_index_flag_records(root: Path) -> bytes:
+    """Return stable path/flag records without hashing the index stat cache.
+
+    ``git ls-files --stage`` deliberately hides semantic index bits such as
+    CE_INTENT_TO_ADD.  ``--debug`` exposes them, but also emits mutable ctime,
+    mtime and inode data.  Parse only the path and flags so an ordinary index
+    refresh cannot manufacture a conflict while a real semantic flag change
+    cannot pass unnoticed.
+    """
+    raw = _bounded_command_stdout(
+        ["git", "ls-files", "--debug", "-z"], root,
+        timeout=60, max_bytes=40_000_000,
+    )
+    record = re.compile(
+        rb"  ctime: [^\n]*\n"
+        rb"  mtime: [^\n]*\n"
+        rb"  dev: [^\n]*\n"
+        rb"  uid: [^\n]*\n"
+        rb"  size: [^\n]*\tflags: ([0-9a-fA-F]+)\n",
+    )
+    cursor = 0
+    semantic = bytearray()
+    while cursor < len(raw):
+        nul = raw.find(b"\0", cursor)
+        if nul < 0:
+            raise SnapshotError("git returned a malformed index debug record")
+        path = raw[cursor:nul]
+        match = record.match(raw, nul + 1)
+        if match is None:
+            raise SnapshotError("git returned an unsupported index debug record")
+        # Git's debug word also carries volatile in-memory bits such as
+        # CE_FSMONITOR_VALID.  Bind only durable user-visible semantics:
+        # assume-unchanged, intent-to-add and skip-worktree.  Entry mode/OID/
+        # stage are already covered by ``ls-files --stage`` below.
+        durable_flags = int(match.group(1), 16) & 0x60008000
+        flags = f"{durable_flags:08x}".encode("ascii")
+        semantic.extend(len(path).to_bytes(8, "big"))
+        semantic.extend(path)
+        semantic.extend(b"\0" + flags + b"\0")
+        cursor = match.end()
+    return bytes(semantic)
+
+
+def _resolved_git_path(root: Path, name: str) -> Path:
+    raw = _bounded_command_stdout(
+        ["git", "rev-parse", "--git-path", name], root,
+        timeout=30, max_bytes=4096,
+    ).decode("utf-8", errors="strict").strip()
+    path = Path(raw)
+    return path if path.is_absolute() else root / path
+
+
+def _git_mutation_lock_paths(root: Path) -> tuple[Path, ...]:
+    names = [
+        "index.lock", "HEAD.lock", "packed-refs.lock",
+        "MERGE_HEAD.lock", "CHERRY_PICK_HEAD.lock", "REVERT_HEAD.lock",
+        "REBASE_HEAD.lock", "AUTO_MERGE.lock",
+    ]
+    raw_common = _bounded_command_stdout(
+        ["git", "rev-parse", "--git-common-dir"], root,
+        timeout=30, max_bytes=4096,
+    ).decode("utf-8", errors="strict").strip()
+    common = Path(raw_common)
+    if not common.is_absolute():
+        common = root / common
+    common = common.absolute()
+    reftable_dir = common / "reftable"
+    storage = subprocess.run(
+        ["git", "config", "--get", "extensions.refStorage"], cwd=root,
+        capture_output=True, timeout=30,
+    )
+    if storage.returncode not in {0, 1} or len(storage.stdout) > 1024:
+        raise SnapshotError("git ref storage format could not be resolved")
+    configured_storage = (
+        storage.stdout.decode("ascii", errors="strict").strip().lower()
+        if storage.returncode == 0 else ""
+    )
+    if configured_storage not in {"", "files", "reftable"}:
+        raise SnapshotError("git ref storage format is unsupported")
+    reported = subprocess.run(
+        ["git", "rev-parse", "--show-ref-format"], cwd=root,
+        capture_output=True, timeout=30,
+    )
+    reported_storage = (
+        reported.stdout.decode("ascii", errors="strict").strip().lower()
+        if reported.returncode == 0 and len(reported.stdout) <= 1024 else ""
+    )
+    uses_reftable = (
+        configured_storage == "reftable"
+        or reported_storage == "reftable"
+        or (reftable_dir / "tables.list").is_file()
+    )
+    explicit_paths: list[Path] = (
+        [reftable_dir / "tables.list.lock"] if uses_reftable else []
+    )
+    symbolic = subprocess.run(
+        ["git", "symbolic-ref", "-q", "HEAD"], cwd=root,
+        capture_output=True, timeout=30,
+    )
+    if symbolic.returncode == 0:
+        ref = symbolic.stdout.decode("utf-8", errors="strict").strip()
+        if not ref or "\0" in ref or ref.startswith("/") or ".." in PurePosixPath(ref).parts:
+            raise SnapshotError("git symbolic HEAD lock path is invalid")
+        if not uses_reftable:
+            names.append(f"{ref}.lock")
+    elif symbolic.returncode != 1:
+        raise SnapshotError("git could not resolve symbolic HEAD for mutation guard")
+    unique = {
+        *(_resolved_git_path(root, name).absolute() for name in names),
+        *(path.absolute() for path in explicit_paths),
+    }
+    return tuple(sorted(unique, key=lambda value: str(value)))
+
+
+def _assert_git_mutation_guard(root: Path) -> None:
+    guard_key = str(root.resolve())
+    guarded = _OWNED_GIT_GUARDS.get(guard_key)
+    if not guarded:
+        return
+    owner, paths = guarded
+    if owner != threading.get_ident():
+        raise SnapshotError("repository mutation guard is owned by another transaction")
+    for raw_path in paths:
+        expected = _OWNED_GIT_LOCKS.get(raw_path)
+        path = Path(raw_path)
+        try:
+            current = path.lstat()
+        except OSError as exc:
+            raise SnapshotError("Git mutation guard was removed during apply") from exc
+        if (
+            expected is None
+            or expected[0] != owner
+            or (current.st_dev, current.st_ino) != expected[1:]
+        ):
+            raise SnapshotError("Git mutation guard changed during apply")
+
+
+def _git_operation_state_active(root: Path) -> str:
+    for name in (
+        "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "REBASE_HEAD",
+        "AUTO_MERGE", "BISECT_START", "rebase-apply", "rebase-merge", "sequencer",
+    ):
+        path = _resolved_git_path(root, name)
+        if os.path.lexists(path):
+            return name
+    return ""
+
+
+def _git_pseudoref(root: Path, name: str) -> bytes:
+    path = _resolved_git_path(root, name)
+    if not os.path.lexists(path):
+        return b"ABSENT"
+    raw = _stable_small_regular_file_bytes(path, 4096, f"git operation state {name}")
+    object_ids = raw.splitlines()
+    if not object_ids or any(
+        not re.fullmatch(rb"(?:[0-9a-f]{40}|[0-9a-f]{64})", oid)
+        for oid in object_ids
+    ):
+        raise SnapshotError(f"git operation state {name} is malformed")
+    return b"PRESENT\0" + b"\n".join(object_ids)
 
 
 def _git_metadata_fingerprint(root: Path) -> str:
-    head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=root,
-        capture_output=True, timeout=30, check=True,
-    ).stdout.strip()
-    index = subprocess.run(
-        ["git", "ls-files", "-s", "-z"], cwd=root,
-        capture_output=True, timeout=60, check=True,
-    ).stdout
-    return hashlib.sha256(head + b"\0" + index).hexdigest()
+    """Hash branch, operation state and the semantic index, never worktree bytes."""
+    root = root.resolve()
+    symbolic = subprocess.run(
+        ["git", "symbolic-ref", "-q", "HEAD"], cwd=root,
+        capture_output=True, timeout=30,
+    )
+    if symbolic.returncode not in {0, 1} or len(symbolic.stdout) > 4096:
+        raise SnapshotError("git could not resolve symbolic HEAD")
+    symbolic_head = symbolic.stdout.strip() if symbolic.returncode == 0 else b"DETACHED"
+    resolved_head = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"], cwd=root,
+        capture_output=True, timeout=30,
+    )
+    if resolved_head.returncode == 0 and len(resolved_head.stdout) <= 1024:
+        head = resolved_head.stdout.strip()
+    else:
+        repository = subprocess.run(
+            ["git", "rev-parse", "--git-dir"], cwd=root,
+            capture_output=True, timeout=30,
+        )
+        if repository.returncode != 0:
+            raise SnapshotError("git could not resolve repository HEAD")
+        if symbolic.returncode != 0:
+            raise SnapshotError("git detached HEAD is malformed")
+        loose_ref_raw = _bounded_command_stdout(
+            ["git", "rev-parse", "--git-path", symbolic_head.decode("utf-8", errors="strict")],
+            root, timeout=30, max_bytes=4096,
+        ).decode("utf-8", errors="strict").strip()
+        loose_ref = Path(loose_ref_raw)
+        if not loose_ref.is_absolute():
+            loose_ref = root / loose_ref
+        if os.path.lexists(loose_ref):
+            raise SnapshotError("git symbolic HEAD target is malformed")
+        target = subprocess.run(
+            ["git", "show-ref", "--verify", "--quiet", symbolic_head.decode("utf-8", errors="strict")],
+            cwd=root, capture_output=True, timeout=30,
+        )
+        if target.returncode not in {0, 1}:
+            raise SnapshotError("git could not validate symbolic HEAD target")
+        if target.returncode == 0:
+            raise SnapshotError("git symbolic HEAD target could not be resolved")
+        head = b"UNBORN"
+    index = _bounded_command_stdout(
+        ["git", "ls-files", "--stage", "-v", "-z"], root,
+        timeout=60, max_bytes=20_000_000,
+    )
+    index_flags = _git_index_flag_records(root)
+    unmerged = _bounded_command_stdout(
+        ["git", "ls-files", "--unmerged", "-z"], root,
+        timeout=30, max_bytes=20_000_000,
+    )
+    resolve_undo = _bounded_command_stdout(
+        ["git", "ls-files", "--resolve-undo", "-z"], root,
+        timeout=30, max_bytes=20_000_000,
+    )
+    lock_path = _resolved_git_path(root, "index.lock").absolute()
+    if os.path.lexists(lock_path):
+        owned = _OWNED_GIT_LOCKS.get(str(lock_path))
+        current = lock_path.lstat()
+        if (
+            owned is None
+            or owned[0] != threading.get_ident()
+            or (current.st_dev, current.st_ino) != owned[1:]
+        ):
+            raise SnapshotError("git index is locked by another operation")
+    elif str(lock_path) in _OWNED_GIT_LOCKS:
+        raise SnapshotError("owned Git index mutation guard disappeared")
+    digest = hashlib.sha256(b"skitarii-git-metadata-v3\0")
+    for label, value in (
+        (b"head", head), (b"symbolic", symbolic_head),
+        (b"index", index), (b"index_flags", index_flags),
+        (b"unmerged", unmerged), (b"resolve_undo", resolve_undo),
+        (b"merge_head", _git_pseudoref(root, "MERGE_HEAD")),
+        (b"cherry_pick_head", _git_pseudoref(root, "CHERRY_PICK_HEAD")),
+        (b"revert_head", _git_pseudoref(root, "REVERT_HEAD")),
+        (b"rebase_head", _git_pseudoref(root, "REBASE_HEAD")),
+        (b"auto_merge", _git_pseudoref(root, "AUTO_MERGE")),
+    ):
+        digest.update(label + b"\0" + value + b"\0")
+    return digest.hexdigest()
+
+
+def _stable_scoped_live_state(
+    root: Path,
+    paths: Iterable[str],
+    *,
+    allowed_large: dict[str, dict[str, Any]] | None = None,
+) -> tuple[str, str]:
+    """Read the composite Git/target state twice and reject a torn observation.
+
+    Neither Git metadata nor worktree paths share one external lock.  The
+    M/T/M/T sequence closes the long cross-component read windows while leaving
+    only the unavoidable final-instruction race before ``git apply`` itself.
+    """
+    stable_paths = tuple(paths)
+    first_metadata = _git_metadata_fingerprint(root)
+    first_targets, first_generation = _git_visible_content_fingerprint(
+        root, paths=stable_paths, allowed_large=allowed_large,
+        return_generation=True,
+    )
+    second_metadata = _git_metadata_fingerprint(root)
+    second_targets, second_generation = _git_visible_content_fingerprint(
+        root, paths=stable_paths, allowed_large=allowed_large,
+        return_generation=True,
+    )
+    third_metadata = _git_metadata_fingerprint(root)
+    final_generation = _scoped_path_generation(root, stable_paths)
+    _assert_git_mutation_guard(root)
+    if (
+        first_metadata != second_metadata
+        or second_metadata != third_metadata
+        or first_targets != second_targets
+        or first_generation != second_generation
+        or second_generation != final_generation
+    ):
+        raise SnapshotError("live patch targets or Git metadata changed during CAS read")
+    return third_metadata, second_targets
 
 
 def _safe_relative_path(raw: object) -> str:
@@ -942,6 +1400,7 @@ def _full_repo_snapshot(
         external_assets=external_assets,
     )
     snapshot.fingerprint = _workspace_fingerprint(snapshot, root, head=head, index=staged)
+    snapshot.metadata_fingerprint = _git_metadata_fingerprint(root)
     return snapshot
 
 
@@ -1303,9 +1762,95 @@ def _patch_stage_passed(stage: dict[str, Any] | None, *, require_applied: bool =
     return passed
 
 
+def _stage_conflict_manifest(stage: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Build the canonical, caller-confirmed compare-and-set proof."""
+    if not isinstance(stage, dict) or stage.get("conflict_scope_version") != 2:
+        return None
+    resource_bounds = stage.get("resource_bounds")
+    raw_paths = resource_bounds.get("changed_paths") if isinstance(resource_bounds, dict) else None
+    try:
+        paths = [_safe_relative_path(path) for path in raw_paths] if isinstance(raw_paths, list) else []
+    except SnapshotError:
+        return None
+    required_digests = (
+        "baseline_metadata_fingerprint", "baseline_target_fingerprint",
+        "patched_target_fingerprint", "patch_sha256", "checks_sha256",
+    )
+    if (
+        not paths
+        or len(paths) > MAX_PATCH_FILES
+        or paths != sorted(set(paths))
+        or any(
+            not re.fullmatch(r"[0-9a-f]{64}", str(stage.get(name) or ""))
+            for name in required_digests
+        )
+    ):
+        return None
+    return {
+        "version": 2,
+        "changed_paths": paths,
+        **{name: str(stage[name]) for name in required_digests},
+    }
+
+
+def _stage_conflict_fingerprint(stage: dict[str, Any] | None) -> str:
+    manifest = _stage_conflict_manifest(stage)
+    if manifest is None:
+        return ""
+    encoded = json.dumps(
+        manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8", errors="strict")
+    return hashlib.sha256(b"skitarii-conflict-manifest-v2\0" + encoded).hexdigest()
+
+
+def _stage_conflict_paths(stage: dict[str, Any] | None) -> list[str]:
+    manifest = _stage_conflict_manifest(stage)
+    if manifest is None:
+        return []
+    recorded = str((stage or {}).get("baseline_fingerprint") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", recorded):
+        return []
+    if not secrets.compare_digest(recorded, _stage_conflict_fingerprint(stage)):
+        return []
+    return list(manifest["changed_paths"])
+
+
+def _applied_stage_proof_valid(stage: dict[str, Any] | None) -> bool:
+    return bool(
+        _patch_stage_passed(stage, require_applied=True)
+        and _stage_conflict_paths(stage)
+        and stage.get("post_apply_target_fingerprint")
+        == stage.get("patched_target_fingerprint")
+        and stage.get("post_apply_metadata_fingerprint")
+        == stage.get("baseline_metadata_fingerprint")
+    )
+
+
+def _stage_artifacts_match(run_dir: Path, stage: dict[str, Any]) -> bool:
+    root = run_dir.resolve()
+    for relative, digest_key, maximum in (
+        ("work/skitarii.patch", "patch_sha256", MAX_PATCH_INPUT_BYTES),
+        ("work/.skitarii-verification-checks.json", "checks_sha256", 1_000_000),
+    ):
+        raw = run_dir / relative
+        try:
+            resolved = raw.resolve(strict=True)
+            if (
+                raw.is_symlink()
+                or root not in resolved.parents
+                or not resolved.is_file()
+                or resolved.stat().st_size > maximum
+                or _sha256_file(resolved) != str(stage.get(digest_key) or "")
+            ):
+                return False
+        except (OSError, RuntimeError):
+            return False
+    return True
+
+
 @contextmanager
 def _repo_lock(root: Path, timeout: int = 30):
-    """Serialize cooperating Ceraxia apply transactions for one repository."""
+    """Serialize Ceraxia and block native Git metadata writers during apply."""
     import fcntl
 
     runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
@@ -1314,6 +1859,30 @@ def _repo_lock(root: Path, timeout: int = 30):
     lock_path = runtime / f"skitarii-repo-{name}.lock"
     handle = lock_path.open("a+b")
     started = time.monotonic()
+    acquired: list[tuple[Path, int, tuple[int, int]]] = []
+    owner = threading.get_ident()
+
+    def release_git_locks() -> str:
+        errors: list[str] = []
+        for path, descriptor, identity in reversed(acquired):
+            recorded = _OWNED_GIT_LOCKS.get(str(path))
+            if recorded is not None and recorded[0] == owner:
+                _OWNED_GIT_LOCKS.pop(str(path), None)
+            try:
+                current = path.lstat()
+                if (current.st_dev, current.st_ino) == identity:
+                    path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                errors.append(f"{path}: {type(exc).__name__}: {str(exc)[:120]}")
+            try:
+                os.close(descriptor)
+            except OSError as exc:
+                errors.append(f"fd for {path}: {type(exc).__name__}: {str(exc)[:120]}")
+        acquired.clear()
+        return "; ".join(errors)
+
     try:
         while True:
             try:
@@ -1323,12 +1892,99 @@ def _repo_lock(root: Path, timeout: int = 30):
                 if time.monotonic() - started >= timeout:
                     raise TimeoutError("timed out waiting for the repository apply lock")
                 time.sleep(0.1)
+        guard_paths = _git_mutation_lock_paths(root.resolve())
+        token = (uuid.uuid4().hex + "\n").encode("ascii")
+        while True:
+            busy = False
+            for git_lock in guard_paths:
+                try:
+                    git_lock.parent.mkdir(parents=True, exist_ok=True)
+                except FileExistsError as exc:
+                    cleanup_error = release_git_locks()
+                    if cleanup_error:
+                        raise SnapshotError(
+                            f"Git mutation guard cleanup failed: {cleanup_error}",
+                        ) from exc
+                    raise SnapshotError(
+                        f"Git mutation lock parent is not a directory: {git_lock.parent}",
+                    ) from exc
+                try:
+                    flags = (
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                        | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+                    )
+                    descriptor = os.open(git_lock, flags, 0o600)
+                except FileExistsError:
+                    busy = True
+                    break
+                try:
+                    metadata = os.fstat(descriptor)
+                except Exception:
+                    os.close(descriptor)
+                    try:
+                        git_lock.unlink()
+                    except OSError:
+                        pass
+                    release_git_locks()
+                    raise
+                identity = (metadata.st_dev, metadata.st_ino)
+                acquired.append((git_lock, descriptor, identity))
+                try:
+                    if os.write(descriptor, token) != len(token):
+                        raise OSError("short Git mutation-lock write")
+                    os.fsync(descriptor)
+                except Exception:
+                    cleanup_error = release_git_locks()
+                    if cleanup_error:
+                        raise SnapshotError(
+                            f"Git mutation guard cleanup failed: {cleanup_error}",
+                        )
+                    raise
+            if busy:
+                cleanup_error = release_git_locks()
+                if cleanup_error:
+                    raise SnapshotError(
+                        f"Git mutation guard cleanup failed: {cleanup_error}",
+                    )
+                if time.monotonic() - started >= timeout:
+                    raise TimeoutError("timed out waiting for native Git mutation locks")
+                time.sleep(0.1)
+                continue
+            break
+        for git_lock, _descriptor, identity in acquired:
+            _OWNED_GIT_LOCKS[str(git_lock)] = (owner, *identity)
+        guard_key = str(root.resolve())
+        _OWNED_GIT_GUARDS[guard_key] = (
+            owner,
+            tuple(str(path) for path in guard_paths),
+        )
+        active_operation = _git_operation_state_active(root.resolve())
+        if active_operation:
+            raise SnapshotError(
+                f"repository has an active Git operation: {active_operation}",
+            )
         yield round(time.monotonic() - started, 3)
     finally:
+        propagating = sys.exc_info()[0] is not None
+        guard_key = str(root.resolve())
+        recorded_guard = _OWNED_GIT_GUARDS.get(guard_key)
+        if recorded_guard is not None and recorded_guard[0] == owner:
+            _OWNED_GIT_GUARDS.pop(guard_key, None)
+        cleanup_error = release_git_locks()
+        flock_error = ""
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except OSError as exc:
+            flock_error = f"flock unlock: {type(exc).__name__}: {str(exc)[:120]}"
         finally:
-            handle.close()
+            try:
+                handle.close()
+            except OSError as exc:
+                if not flock_error:
+                    flock_error = f"flock close: {type(exc).__name__}: {str(exc)[:120]}"
+        cleanup_error = "; ".join(part for part in (cleanup_error, flock_error) if part)
+        if cleanup_error and not propagating:
+            raise SnapshotError(f"repository mutation guard cleanup failed: {cleanup_error}")
 
 
 def _sha256_file(path: Path) -> str:
@@ -1337,6 +1993,58 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _write_private_artifact(run_dir: Path, path: Path, payload: bytes) -> str:
+    """Atomically replace one run artifact without ever following its pathname."""
+    root = run_dir.resolve(strict=True)
+    if run_dir.is_symlink():
+        raise SnapshotError("run directory must not be a symlink")
+    parent = path.parent
+    if os.path.lexists(parent) and parent.is_symlink():
+        raise SnapshotError("run artifact directory must not be a symlink")
+    parent.mkdir(parents=True, exist_ok=True)
+    resolved_parent = parent.resolve(strict=True)
+    if resolved_parent != root and root not in resolved_parent.parents:
+        raise SnapshotError("run artifact directory escapes the run")
+    before = parent.lstat()
+    directory_flags = (
+        os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    )
+    directory_fd = os.open(parent, directory_flags)
+    temporary = f".{path.name}.{uuid.uuid4().hex}.tmp"
+    try:
+        opened = os.fstat(directory_fd)
+        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            raise SnapshotError("run artifact directory changed during write")
+        flags = (
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        )
+        descriptor = os.open(temporary, flags, 0o600, dir_fd=directory_fd)
+        try:
+            view = memoryview(payload)
+            while view:
+                written = os.write(descriptor, view)
+                if written <= 0:
+                    raise OSError("short artifact write")
+                view = view[written:]
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        os.replace(
+            temporary, path.name,
+            src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+        )
+        os.fsync(directory_fd)
+    finally:
+        try:
+            os.unlink(temporary, dir_fd=directory_fd)
+        except FileNotFoundError:
+            pass
+        os.close(directory_fd)
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _changed_paths_against_head(root: Path) -> list[str]:
@@ -1453,6 +2161,8 @@ def _verify_and_stage_patch(
     workspace: dict[str, str] | None = None,
     *,
     autoapply: bool | None = None,
+    persist_artifacts: bool = True,
+    expected_conflict_fingerprint: str = "",
 ) -> dict[str, Any] | None:
     """Verify a frozen patch, reject stale baselines, and transactionally auto-apply."""
     import tempfile
@@ -1462,7 +2172,6 @@ def _verify_and_stage_patch(
     if not diff.strip():
         return None
     patch_file = run_dir / "work" / "skitarii.patch"
-    patch_file.parent.mkdir(parents=True, exist_ok=True)
 
     def run_git(
         args: list[str], cwd: Path, timeout: int = 120, *, patch_input: bool = False,
@@ -1483,8 +2192,10 @@ def _verify_and_stage_patch(
         "apply_cmd": "",
     }
     expected_fingerprint = ""
-    expected_baseline_content = ""
     expected_post_content = ""
+    expected_baseline_targets = ""
+    expected_post_targets = ""
+    expected_metadata = ""
     pre_apply_metadata = ""
     authoritative_changed: list[str] = []
 
@@ -1495,45 +2206,72 @@ def _verify_and_stage_patch(
         out["reason"] = str(exc)
         ledger.record_event("skitarii_patch_stage", out)
         return out
-    patch_file.write_text(diff, encoding="utf-8")
-    patch_file.chmod(0o600)
+    patch_bytes = diff.encode("utf-8", errors="strict")
     out["patch_file"] = str(patch_file)
-    out["patch_sha256"] = _sha256_file(patch_file)
+    out["patch_sha256"] = (
+        _write_private_artifact(run_dir, patch_file, patch_bytes)
+        if persist_artifacts else hashlib.sha256(patch_bytes).hexdigest()
+    )
 
     def rollback_live_if_safe() -> None:
         if not out.get("applied_to_live") or out.get("rolled_back"):
             return
+        active_guard = _OWNED_GIT_GUARDS.get(str(root.resolve()))
+        if active_guard is None or active_guard[0] != threading.get_ident():
+            try:
+                out["rollback_guard_reacquired"] = True
+                with _repo_lock(root):
+                    rollback_live_if_safe()
+            except Exception as guard_exc:
+                out["rollback_failed"] = True
+                out["rollback_error"] = (
+                    "could not reacquire repository mutation guard: "
+                    f"{type(guard_exc).__name__}: {str(guard_exc)[:180]}"
+                )
+            return
         try:
-            current_content = _git_visible_content_fingerprint(
-                root, allowed_large=snapshot.external_assets,
+            current_metadata, current_targets = _stable_scoped_live_state(
+                root, authoritative_changed,
+                allowed_large=snapshot.external_assets,
             )
-            current_metadata = _git_metadata_fingerprint(root)
             if (
-                not expected_post_content
-                or current_content != expected_post_content
+                not expected_post_targets
+                or current_targets != expected_post_targets
                 or not pre_apply_metadata
                 or current_metadata != pre_apply_metadata
             ):
-                out["rollback_blocked_external_change"] = True
+                out["rollback_blocked_external_target_change"] = True
                 return
             reverse_check = run_git(
-                ["apply", "--reverse", "--check", "--binary", "-"], root, 60,
+                ["apply", "--reverse", "--check", "--binary", "--whitespace=nowarn", "-"], root, 60,
                 patch_input=True,
             )
-            reverse = (
-                run_git(
-                    ["apply", "--reverse", "--binary", "-"], root, 60,
+            if reverse_check.returncode == 0:
+                # The check may itself be slow.  Close that avoidable TOCTOU
+                # window before allowing the reverse patch to touch live bytes.
+                confirmed_metadata, confirmed_targets = _stable_scoped_live_state(
+                    root, authoritative_changed,
+                    allowed_large=snapshot.external_assets,
+                )
+                if (
+                    confirmed_targets != expected_post_targets
+                    or confirmed_metadata != pre_apply_metadata
+                ):
+                    out["rollback_blocked_external_target_change"] = True
+                    return
+                reverse = run_git(
+                    ["apply", "--reverse", "--binary", "--whitespace=nowarn", "-"], root, 60,
                     patch_input=True,
                 )
-                if reverse_check.returncode == 0 else reverse_check
+            else:
+                reverse = reverse_check
+            restored_metadata, restored_targets = _stable_scoped_live_state(
+                root, authoritative_changed,
+                allowed_large=snapshot.external_assets,
             )
-            restored_content = _git_visible_content_fingerprint(
-                root, allowed_large=snapshot.external_assets,
-            )
-            restored_metadata = _git_metadata_fingerprint(root)
             out["rolled_back"] = (
                 reverse.returncode == 0
-                and restored_content == expected_baseline_content
+                and restored_targets == expected_baseline_targets
                 and restored_metadata == pre_apply_metadata
             )
             if out["rolled_back"]:
@@ -1554,8 +2292,15 @@ def _verify_and_stage_patch(
             return out
 
         expected_fingerprint = snapshot.fingerprint or _workspace_fingerprint(snapshot, root)
-        expected_baseline_content = _snapshot_content_fingerprint(snapshot)
-        out["baseline_fingerprint"] = expected_fingerprint
+        expected_metadata = (
+            snapshot.metadata_fingerprint or _git_metadata_fingerprint(root)
+        )
+        # Keep the full snapshot hash for audit only.  The caller-confirmed
+        # baseline_fingerprint is populated below from the scoped CAS manifest,
+        # so unrelated worktree activity is not part of the apply authority.
+        out["baseline_snapshot_fingerprint"] = expected_fingerprint
+        out["baseline_metadata_fingerprint"] = expected_metadata
+        out["conflict_scope_version"] = 2
         checks = [
             check for check in (verdict.get("checks") or [])
             if isinstance(check, dict) and check.get("cmd")
@@ -1566,15 +2311,18 @@ def _verify_and_stage_patch(
             ledger.record_event("skitarii_patch_stage", out)
             return out
         checks_file = run_dir / "work" / ".skitarii-verification-checks.json"
-        checks_file.write_text(json.dumps(checks, ensure_ascii=False), encoding="utf-8")
-        checks_file.chmod(0o600)
-        out["checks_sha256"] = _sha256_file(checks_file)
+        checks_bytes = json.dumps(checks, ensure_ascii=False).encode("utf-8", errors="strict")
+        out["checks_sha256"] = (
+            _write_private_artifact(run_dir, checks_file, checks_bytes)
+            if persist_artifacts else hashlib.sha256(checks_bytes).hexdigest()
+        )
 
         verify_dir = Path(tempfile.mkdtemp(prefix="skitarii-verify-"))
         try:
             _materialize_snapshot(snapshot, verify_dir)
             applied = run_git(
-                ["apply", "--binary", "-"], verify_dir, 120, patch_input=True,
+                ["apply", "--binary", "--whitespace=nowarn", "-"],
+                verify_dir, 120, patch_input=True,
             )
             out["applied_in_worktree"] = applied.returncode == 0
             if applied.returncode != 0:
@@ -1634,8 +2382,31 @@ def _verify_and_stage_patch(
                     verify_dir,
                     allowed_large=snapshot.external_assets,
                     reject_ignored_nodes=True,
+                    project_missing_approved=True,
+                )
+                expected_baseline_targets = _snapshot_content_fingerprint(
+                    snapshot, paths=authoritative_changed,
+                )
+                expected_post_targets = _git_visible_content_fingerprint(
+                    verify_dir, paths=authoritative_changed,
+                    allowed_large=snapshot.external_assets,
                 )
                 out["expected_post_content_fingerprint"] = expected_post_content
+                out["baseline_target_fingerprint"] = expected_baseline_targets
+                out["patched_target_fingerprint"] = expected_post_targets
+                out["baseline_fingerprint"] = _stage_conflict_fingerprint(out)
+                if not out["baseline_fingerprint"]:
+                    raise SnapshotError("could not bind the scoped patch conflict proof")
+                if (
+                    expected_conflict_fingerprint
+                    and not secrets.compare_digest(
+                        out["baseline_fingerprint"], expected_conflict_fingerprint,
+                    )
+                ):
+                    out["tests_pass_in_worktree"] = False
+                    out["reason"] = "scoped conflict proof changed before live apply"
+                    ledger.record_event("skitarii_patch_stage", out)
+                    return out
                 passed, results, reason = _run_check_set(checks, verify_dir)
                 out["tests_pass_in_worktree"] = passed
                 out["verification_results"] = results
@@ -1666,15 +2437,23 @@ def _verify_and_stage_patch(
                     out["applies_to_live"] = False
                     out["reason"] = f"could not confirm run cancellation state: {exc}"
                     return out
-            live_snapshot = _full_repo_snapshot()
-            live_fingerprint = live_snapshot.fingerprint
-            out["live_fingerprint_before_apply"] = live_fingerprint
-            if live_fingerprint != expected_fingerprint:
+            live_metadata, live_targets = _stable_scoped_live_state(
+                root, authoritative_changed,
+                allowed_large=snapshot.external_assets,
+            )
+            out["live_metadata_fingerprint_before_apply"] = live_metadata
+            out["live_target_fingerprint_before_apply"] = live_targets
+            if live_metadata != expected_metadata:
                 out["applies_to_live"] = False
-                out["reason"] = "stale_baseline: live repository changed after mission dispatch"
+                out["reason"] = "stale_baseline: live HEAD or index changed after mission dispatch"
                 ledger.record_event("skitarii_patch_stage", out)
                 return out
-            pre_apply_metadata = _git_metadata_fingerprint(root)
+            if live_targets != expected_baseline_targets:
+                out["applies_to_live"] = False
+                out["reason"] = "stale_baseline: patch target changed after mission dispatch"
+                ledger.record_event("skitarii_patch_stage", out)
+                return out
+            pre_apply_metadata = live_metadata
 
             ignored = subprocess.run(
                 ["git", "check-ignore", "-z", "--stdin"],
@@ -1697,14 +2476,28 @@ def _verify_and_stage_patch(
                 return out
 
             checked = run_git(
-                ["apply", "--check", "--binary", "-"], root, 60, patch_input=True,
+                ["apply", "--check", "--binary", "--whitespace=nowarn", "-"],
+                root, 60, patch_input=True,
             )
-            out["applies_to_live"] = checked.returncode == 0
             if checked.returncode != 0:
+                out["applies_to_live"] = False
                 out["apply_stderr"] = (checked.stderr or checked.stdout or "")[:300]
                 out["reason"] = "verified patch no longer applies to the live baseline"
                 ledger.record_event("skitarii_patch_stage", out)
                 return out
+            confirmed_metadata, confirmed_targets = _stable_scoped_live_state(
+                root, authoritative_changed,
+                allowed_large=snapshot.external_assets,
+            )
+            if (
+                confirmed_metadata != pre_apply_metadata
+                or confirmed_targets != expected_baseline_targets
+            ):
+                out["applies_to_live"] = False
+                out["reason"] = "stale_baseline: patch target or Git metadata changed during apply validation"
+                ledger.record_event("skitarii_patch_stage", out)
+                return out
+            out["applies_to_live"] = True
 
             should_autoapply = (
                 os.environ.get("SKITARII_AUTOAPPLY") == "1"
@@ -1715,7 +2508,8 @@ def _verify_and_stage_patch(
                 return out
 
             live_apply = run_git(
-                ["apply", "--binary", "-"], root, 60, patch_input=True,
+                ["apply", "--binary", "--whitespace=nowarn", "-"],
+                root, 60, patch_input=True,
             )
             out["applied_to_live"] = live_apply.returncode == 0
             if live_apply.returncode != 0:
@@ -1732,13 +2526,26 @@ def _verify_and_stage_patch(
             post_fingerprint = post_snapshot.fingerprint
             out["post_apply_fingerprint"] = post_fingerprint
             post_content = _snapshot_content_fingerprint(post_snapshot)
-            post_metadata = _git_metadata_fingerprint(root)
+            post_targets = _snapshot_content_fingerprint(
+                post_snapshot, paths=authoritative_changed,
+            )
+            post_metadata, live_post_targets = _stable_scoped_live_state(
+                root, authoritative_changed,
+                allowed_large=snapshot.external_assets,
+            )
             out["post_apply_content_fingerprint"] = post_content
-            current_fingerprint = ""
+            out["post_apply_target_fingerprint"] = post_targets
+            out["post_apply_metadata_fingerprint"] = post_metadata
+            current_targets = ""
+            current_metadata = ""
             try:
-                if post_content != expected_post_content or post_metadata != pre_apply_metadata:
+                if (
+                    post_targets != expected_post_targets
+                    or live_post_targets != expected_post_targets
+                    or post_metadata != pre_apply_metadata
+                ):
                     out["post_apply_tests_passed"] = False
-                    out["reason"] = "live repository diverged from the verified patched baseline"
+                    out["reason"] = "live patch targets or Git metadata diverged from verification"
                 else:
                     post_dir = Path(tempfile.mkdtemp(prefix="skitarii-post-apply-"))
                     try:
@@ -1750,38 +2557,43 @@ def _verify_and_stage_patch(
                             out["reason"] = post_reason
                     finally:
                         shutil.rmtree(post_dir, ignore_errors=True)
-                current_fingerprint = _full_repo_snapshot(
-                    max_files=10_000,
-                    max_total_bytes=100_000_000,
-                    max_file_bytes=20_000_000,
-                ).fingerprint
+                current_metadata, current_targets = _stable_scoped_live_state(
+                    root, authoritative_changed,
+                    allowed_large=snapshot.external_assets,
+                )
             except Exception as exc:
                 out["post_apply_tests_passed"] = False
                 out["post_apply_error"] = f"{type(exc).__name__}: {str(exc)[:240]}"
                 out["reason"] = "post-apply verification infrastructure failed"
                 try:
-                    current_fingerprint = _full_repo_snapshot(
-                        max_files=10_000,
-                        max_total_bytes=100_000_000,
-                        max_file_bytes=20_000_000,
-                    ).fingerprint
+                    current_metadata, current_targets = _stable_scoped_live_state(
+                        root, authoritative_changed,
+                        allowed_large=snapshot.external_assets,
+                    )
                 except Exception as fingerprint_exc:
                     out["rollback_failed"] = True
                     out["rollback_error"] = (
-                        "could not prove the live post-apply state: "
+                        "could not prove the live patch-target state: "
                         f"{type(fingerprint_exc).__name__}: {str(fingerprint_exc)[:180]}"
                     )
-            if current_fingerprint != post_fingerprint:
+            if (
+                current_targets != expected_post_targets
+                or current_metadata != pre_apply_metadata
+            ):
                 out["post_apply_tests_passed"] = False
-                out["reason"] = "live repository changed during post-apply verification"
+                out["reason"] = "live patch targets or Git metadata changed during post-apply verification"
 
             if out["post_apply_tests_passed"] is not True:
                 rollback_live_if_safe()
     except Exception as exc:  # noqa: BLE001
         out["error"] = str(exc)[:300]
-        if not out.get("applied_to_live") and out.get("tests_pass_in_worktree") is not True:
-            out["tests_pass_in_worktree"] = False
-            out["reason"] = str(exc)[:300]
+        if not out.get("applied_to_live"):
+            if out.get("applies_to_live") is not True:
+                out["applies_to_live"] = False
+            if not out.get("reason"):
+                out["reason"] = str(exc)[:300]
+            if out.get("tests_pass_in_worktree") is not True:
+                out["tests_pass_in_worktree"] = False
         if out.get("applied_to_live") and out.get("post_apply_tests_passed") is not True:
             out["reason"] = "autoapply transaction failed; live repository requires inspection"
             rollback_live_if_safe()
@@ -1810,6 +2622,8 @@ def _apply_staged_patch_locked(
             expected_fingerprint != str(stage.get("baseline_fingerprint") or "")
             or expected_patch_sha256 != str(stage.get("patch_sha256") or "")
             or expected_checks_sha256 != str(stage.get("checks_sha256") or "")
+            or not _applied_stage_proof_valid(stage)
+            or not _stage_artifacts_match(run_dir, stage)
         ):
             return {"ok": False, "status": "blocked", "error": "reconciliation confirmation mismatch"}
         reconciled = dict(result)
@@ -1857,6 +2671,12 @@ def _apply_staged_patch_locked(
         return {"ok": False, "status": "blocked", "error": "patch digest confirmation mismatch"}
     if not expected_checks_sha256 or expected_checks_sha256 != recorded_checks_sha:
         return {"ok": False, "status": "blocked", "error": "verification digest confirmation mismatch"}
+    changed_paths = _stage_conflict_paths(stage)
+    recorded_metadata = str(stage.get("baseline_metadata_fingerprint") or "")
+    recorded_targets = str(stage.get("baseline_target_fingerprint") or "")
+    recorded_post_targets = str(stage.get("patched_target_fingerprint") or "")
+    if not changed_paths:
+        return {"ok": False, "status": "blocked", "error": "patch conflict proof is missing or invalid"}
     raw_patch_path = run_dir / "work" / "skitarii.patch"
     patch_path = raw_patch_path.resolve()
     root = run_dir.resolve()
@@ -1882,20 +2702,36 @@ def _apply_staged_patch_locked(
         return {"ok": False, "status": "blocked", "error": f"verification checks are unavailable: {exc}"}
     if not isinstance(checks, list):
         return {"ok": False, "status": "blocked", "error": "verification checks are corrupt"}
+    live_root = REPO_ROOT.resolve()
     try:
+        live_metadata, live_targets = _stable_scoped_live_state(
+            live_root, changed_paths,
+        )
+        if live_metadata != recorded_metadata:
+            return {"ok": False, "status": "stale_baseline",
+                    "error": "live HEAD or index changed after the patch was staged"}
+        if live_targets != recorded_targets:
+            return {"ok": False, "status": "stale_baseline",
+                    "error": "patch target changed after the patch was staged"}
         snapshot = _full_repo_snapshot()
-    except SnapshotError as exc:
+    except (OSError, subprocess.SubprocessError, SnapshotError) as exc:
         return {"ok": False, "status": "blocked", "error": f"live repository snapshot failed: {exc}"}
-    if snapshot.fingerprint != recorded:
+    if (
+        snapshot.metadata_fingerprint != recorded_metadata
+        or _snapshot_content_fingerprint(snapshot, paths=changed_paths) != recorded_targets
+    ):
         return {"ok": False, "status": "stale_baseline",
-                "error": "live repository changed after the patch was staged"}
+                "error": "patch target or Git metadata changed while apply was prepared"}
     verdict = {
         "accepted": True,
         "checks": checks,
         "patch_bundle": {"unified_diff": patch_text},
     }
     new_stage = _verify_and_stage_patch(
-        verdict, run_dir, ledger, snapshot, autoapply=True,
+        verdict, run_dir, ledger, snapshot,
+        autoapply=True,
+        persist_artifacts=False,
+        expected_conflict_fingerprint=recorded,
     )
     if not _patch_stage_passed(new_stage, require_applied=True):
         return {
@@ -1904,10 +2740,17 @@ def _apply_staged_patch_locked(
             "patch_stage": new_stage or {},
         }
     if (
-        str((new_stage or {}).get("patch_sha256") or "") != recorded_patch_sha
+        str((new_stage or {}).get("baseline_fingerprint") or "") != recorded
+        or str((new_stage or {}).get("patch_sha256") or "") != recorded_patch_sha
         or str((new_stage or {}).get("checks_sha256") or "") != recorded_checks_sha
+        or str((new_stage or {}).get("patched_target_fingerprint") or "")
+        != recorded_post_targets
     ):
-        return {"ok": False, "status": "blocked", "error": "verified artifacts changed during apply"}
+        return {
+            "ok": False,
+            "status": "blocked",
+            "error": "scoped conflict proof changed during apply",
+        }
     updated = dict(result)
     updated.update({
         "ok": True,
