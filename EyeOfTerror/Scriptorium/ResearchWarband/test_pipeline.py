@@ -18,7 +18,11 @@ from ResearchWarband.pipeline import (
     ResearchPipeline,
     ResearchSpec,
 )
-from ResearchWarband.model_client import TrustedReviewBoundary, canonical_json_sha256
+from ResearchWarband.model_client import (
+    ModelProtocolError,
+    TrustedReviewBoundary,
+    canonical_json_sha256,
+)
 from ResearchWarband.research_tools import FetchedSource, SearchHit
 from ResearchWarband.snapshot_store import RegisteredNormalizer, SnapshotStore
 
@@ -446,7 +450,7 @@ class ResearchPipelineTests(unittest.TestCase):
                 max_search_queries=1,
                 max_sources=1,
                 max_results_per_query=1,
-                max_model_calls=40,
+                max_model_calls=60,
                 max_source_bytes=200_000,
                 max_model_source_chars=150_000,
                 max_reader_chunks=20,
@@ -627,7 +631,7 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertNotIn("reader", [role for role, _ in model.calls])
         self.assertNotIn("analyst", [role for role, _ in model.calls])
 
-    def test_reader_reserves_analyst_repair_writer_and_review_budget(self) -> None:
+    def test_reader_reserves_role_repairs_writer_and_review_budget(self) -> None:
         url = "https://example.test/repair-headroom"
         model = FakeModel({"planner": [planner()]})
         result = self.pipeline(
@@ -639,7 +643,7 @@ class ResearchPipelineTests(unittest.TestCase):
                 max_search_queries=1,
                 max_sources=1,
                 max_results_per_query=1,
-                max_model_calls=6,
+                max_model_calls=7,
             ),
         ).run(self.spec())
 
@@ -1359,7 +1363,7 @@ class ResearchPipelineTests(unittest.TestCase):
         model = FakeModel(
             {
                 "planner": [planner()],
-                "reader": [fabricated_reader],
+                "reader": [fabricated_reader, fabricated_reader],
             }
         )
         result = self.pipeline(
@@ -1370,7 +1374,109 @@ class ResearchPipelineTests(unittest.TestCase):
 
         self.assertEqual("blocked", result.outcome)
         self.assertIn("does not occur exactly in its labeled chunk", result.reason)
+        self.assertEqual(2, len([role for role, _ in model.calls if role == "reader"]))
         self.assertNotIn("analyst", [role for role, _ in model.calls])
+
+    def test_reader_repairs_malformed_object_once_without_replaying_it(self) -> None:
+        url = "https://example.test/reader-repair"
+        source = "The exact answer is Alpha."
+        model = FakeModel(
+            {
+                "planner": [planner()],
+                "reader": [
+                    {"wrong_field": "PREVIOUS-READER-OUTPUT-MARKER"},
+                    reader_find(source),
+                ],
+                "analyst": [
+                    {"decision": "ready"},
+                    analyst_ready([claim_item(text=source, excerpt=source)])
+                ],
+                "writer": [writer_claim(text=source)],
+                "semantic_verifier": [semantic_accept()],
+            }
+        )
+
+        result = self.pipeline(
+            model,
+            FakeSearch({"primary query": [SearchHit("Reader repair", url)]}),
+            FakeFetch({url: fetched(url, source)}),
+            budgets=ResearchBudgets(max_model_calls=8),
+        ).run(self.spec())
+
+        self.assertEqual("accepted", result.outcome)
+        self.assertEqual(8, result.model_calls)
+        self.assertEqual(2, len([role for role, _ in model.calls if role == "reader"]))
+        repair_payload = [
+            payload for role, payload in model.calls if role == "reader"
+        ][1]
+        self.assertIn("repair_request", repair_payload)
+        self.assertIn(
+            "reader response must contain only candidates array",
+            repair_payload["repair_request"]["validator_error"],
+        )
+        self.assertNotIn(
+            "PREVIOUS-READER-OUTPUT-MARKER",
+            str(repair_payload),
+        )
+
+    def test_reader_gateway_protocol_failure_is_not_retried(self) -> None:
+        url = "https://example.test/reader-gateway-failure"
+
+        def fail_transport(_payload: Mapping[str, Any]) -> Mapping[str, Any]:
+            raise ModelProtocolError("gateway response was not strict JSON")
+
+        model = FakeModel(
+            {"planner": [planner()], "reader": [fail_transport, reader_find("Alpha")]}
+        )
+        result = self.pipeline(
+            model,
+            FakeSearch({"primary query": [SearchHit("Reader gateway", url)]}),
+            FakeFetch({url: fetched(url, "Alpha")}),
+        ).run(self.spec())
+
+        self.assertEqual("blocked", result.outcome)
+        self.assertIn("gateway response was not strict JSON", result.reason)
+        self.assertEqual(1, len([role for role, _ in model.calls if role == "reader"]))
+        self.assertFalse(any("reader_repair[" in item for item in result.diagnostics))
+
+    def test_ready_negative_claim_repairs_reports_to_supports(self) -> None:
+        url = "https://example.test/negative-record"
+        source = "The archive contains no Alpha record."
+        reported_claim = claim_item(text=source, excerpt=source)
+        reported_claim["evidence"][0]["relation"] = "reports"
+        supported_claim = claim_item(text=source, excerpt=source)
+        model = FakeModel(
+            {
+                "planner": [planner()],
+                "reader_coverage": [
+                    independent_reader_find(source, "counterevidence")
+                ],
+                "analyst": [
+                    analyst_ready([reported_claim]),
+                    analyst_ready([supported_claim]),
+                ],
+                "writer": [writer_claim(text=source)],
+                "semantic_verifier": [semantic_accept()],
+            }
+        )
+
+        result = self.pipeline(
+            model,
+            FakeSearch({"primary query": [SearchHit("Negative record", url)]}),
+            FakeFetch({url: fetched(url, source)}),
+        ).run(self.spec())
+
+        self.assertEqual("accepted", result.outcome)
+        self.assertEqual("supports", result.ledger.edges[0].relation)
+        analyst_calls = [
+            payload for role, payload in model.calls if role == "analyst"
+        ]
+        self.assertEqual(2, len(analyst_calls))
+        self.assertIn(
+            "relation=supports",
+            analyst_calls[1]["repair_request"]["validator_error"],
+        )
+        self.assertEqual(1, len(result.semantic_reviews))
 
     def test_independent_reader_fabricated_excerpt_is_rejected_before_analyst(self) -> None:
         url = "https://example.test/independent-exact"
@@ -1458,6 +1564,25 @@ class ResearchPipelineTests(unittest.TestCase):
                 self.spec(mode=mode)
         with self.assertRaises(ValueError):
             self.spec(mode="summary")
+
+    def test_depth_call_budgets_cover_one_reader_repair_per_chunk(self) -> None:
+        expected = {
+            "brief": (32, 104),
+            "standard": (168, 520),
+            "deep": (640, 1_944),
+            "exhaustive": (1_680, 5_072),
+        }
+        for depth, (chunks, calls) in expected.items():
+            with self.subTest(depth=depth):
+                budget = ResearchBudgets.for_depth(depth)
+                self.assertEqual(chunks, budget.max_reader_chunks)
+                self.assertEqual(calls, budget.max_model_calls)
+                allowance = calls - (3 * chunks)
+                adjusted = budget.with_reader_chunk_chars(16_000)
+                self.assertEqual(
+                    allowance,
+                    adjusted.max_model_calls - (3 * adjusted.max_reader_chunks),
+                )
 
 
 if __name__ == "__main__":

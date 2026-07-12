@@ -204,6 +204,29 @@ class ReaderLocatorTests(unittest.TestCase):
         self.assertEqual(text.index(excerpt), candidate.start_char)
         self.assertEqual(text.index(excerpt) + len(excerpt), candidate.end_char)
 
+    def test_unicode_codepoint_offsets_preserve_combining_and_emoji_text(self) -> None:
+        prefix = "🚀 префикс e\u0301 :: "
+        excerpt = "  Доказательство 🧪 e\u0301.  "
+        text = prefix + excerpt + " :: конец"
+        snapshot, payload = _payload(text)
+        chunk = payload["untrusted_source_chunk"]
+
+        candidates = parse_reader_response(
+            {"candidates": [_candidate(chunk["chunk_id"], excerpt)]},
+            snapshot=snapshot,
+            normalized_text=text,
+            chunk_start=0,
+            chunk_end=len(text),
+            chunk_index=1,
+            cache_key="reader-cache-author-test",
+            model_identity="reader-author-test",
+        )
+
+        candidate = candidates[0]
+        self.assertEqual(len(prefix), candidate.start_char)
+        self.assertEqual(len(prefix) + len(excerpt), candidate.end_char)
+        self.assertEqual(excerpt, text[candidate.start_char : candidate.end_char])
+
 
 if __name__ == "__main__":
     unittest.main()

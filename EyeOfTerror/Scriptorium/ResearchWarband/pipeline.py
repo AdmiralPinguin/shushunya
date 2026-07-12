@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 import re
+import unicodedata
 from typing import Any, Callable, Mapping, Sequence, TypeVar
 
 from .execution_policy import ExecutionPolicy
@@ -26,6 +27,7 @@ from .model_client import (
 from .reader import (
     READER_CHUNK_OVERLAP,
     ReaderCandidate,
+    ReaderProtocolError,
     build_independent_reader_payload,
     build_reader_payload,
     parse_independent_reader_response,
@@ -83,6 +85,7 @@ MAX_CLARIFICATION_TURNS = 16
 MAX_CLARIFICATION_FIELD_BYTES = 8_000
 MAX_CLARIFICATION_TOTAL_BYTES = 16_000
 _MAX_AUTHOR_REPAIR_ATTEMPTS = 1
+_MAX_REPAIR_VALIDATOR_ERROR_CHARS = 512
 _ValidatedAuthorResponse = TypeVar("_ValidatedAuthorResponse")
 
 
@@ -178,6 +181,76 @@ def _tuple_text(values: Sequence[str], context: str, *, allow_empty: bool = True
     if len(set(result)) != len(result):
         raise ValueError(f"{context} must not contain duplicates")
     return tuple(result)
+
+
+def _letter_script(character: str) -> str | None:
+    """Return a coarse Unicode script for one alphabetic character."""
+
+    if not character.isalpha():
+        return None
+    name = unicodedata.name(character, "")
+    if "LATIN" in name:
+        return "LATIN"
+    if any(
+        marker in name
+        for marker in ("CJK", "IDEOGRAPH", "HIRAGANA", "KATAKANA", "BOPOMOFO")
+    ):
+        return "EAST_ASIAN"
+    if "HANGUL" in name:
+        return "HANGUL"
+    for marker in (
+        "CYRILLIC",
+        "GREEK",
+        "ARABIC",
+        "HEBREW",
+        "DEVANAGARI",
+        "BENGALI",
+        "GURMUKHI",
+        "GUJARATI",
+        "ORIYA",
+        "TAMIL",
+        "TELUGU",
+        "KANNADA",
+        "MALAYALAM",
+        "SINHALA",
+        "THAI",
+        "LAO",
+        "GEORGIAN",
+        "ARMENIAN",
+    ):
+        if marker in name:
+            return marker
+    return name.split(" ", 1)[0] or "UNKNOWN"
+
+
+def _dominant_non_latin_script(text: str) -> str | None:
+    counts: dict[str, int] = {}
+    for character in text:
+        script = _letter_script(character)
+        if script is None or script == "LATIN":
+            continue
+        counts[script] = counts.get(script, 0) + 1
+    if not counts:
+        return None
+    return max(sorted(counts), key=counts.__getitem__)
+
+
+def _contains_identifier_token(text: str, identifier: str) -> bool:
+    return re.search(
+        rf"(?<![\w]){re.escape(identifier)}(?![\w])",
+        text,
+        flags=re.IGNORECASE,
+    ) is not None
+
+
+def _latin_search_word_count(text: str) -> int:
+    return len(
+        re.findall(
+            r"[A-Za-z][A-Za-z0-9]*(?:[-'][A-Za-z0-9]+)*",
+            text,
+            flags=re.ASCII,
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,7 +439,7 @@ class ResearchBudgets:
     max_search_queries: int = 8
     max_sources: int = 12
     max_results_per_query: int = 5
-    max_model_calls: int = 352
+    max_model_calls: int = 520
     max_source_bytes: int = 1_000_000
     max_model_source_chars: int = 1_140_000
     max_reader_chunks: int = 168
@@ -381,7 +454,7 @@ class ResearchBudgets:
             "max_search_queries": (1, 100),
             "max_sources": (1, 100),
             "max_results_per_query": (1, 10),
-            "max_model_calls": (4, 4_096),
+            "max_model_calls": (4, 8_192),
             "max_source_bytes": (1_024, 64 * 1024 * 1024),
             "max_model_source_chars": (1_000, 64 * 1024 * 1024),
             "max_reader_chunks": (1, 2_048),
@@ -407,7 +480,7 @@ class ResearchBudgets:
                 max_search_queries=3,
                 max_sources=4,
                 max_results_per_query=3,
-                max_model_calls=72,
+                max_model_calls=104,
                 max_source_bytes=500_000,
                 max_model_source_chars=190_000,
                 max_reader_chunks=32,
@@ -423,7 +496,7 @@ class ResearchBudgets:
                 max_search_queries=20,
                 max_sources=24,
                 max_results_per_query=7,
-                max_model_calls=1_304,
+                max_model_calls=1_944,
                 max_source_bytes=1_000_000,
                 max_model_source_chars=4_550_000,
                 max_reader_chunks=640,
@@ -437,7 +510,7 @@ class ResearchBudgets:
                 max_search_queries=50,
                 max_sources=50,
                 max_results_per_query=10,
-                max_model_calls=3_392,
+                max_model_calls=5_072,
                 max_source_bytes=1_000_000,
                 max_model_source_chars=12_150_000,
                 max_reader_chunks=1_680,
@@ -458,9 +531,9 @@ class ResearchBudgets:
         required_chunks = self.max_sources + (
             self.max_model_source_chars + stride - 1
         ) // stride
-        non_reader_allowance = self.max_model_calls - (2 * self.max_reader_chunks)
-        required_calls = (2 * required_chunks) + non_reader_allowance
-        if required_chunks > 2_048 or required_calls > 4_096:
+        non_reader_allowance = self.max_model_calls - (3 * self.max_reader_chunks)
+        required_calls = (3 * required_chunks) + non_reader_allowance
+        if required_chunks > 2_048 or required_calls > 8_192:
             raise ValueError(
                 "attested Reader chunk size cannot preserve this depth's complete "
                 "coverage within hard chunk/model-call ceilings"
@@ -708,8 +781,12 @@ class ResearchPipeline:
         response = self._call_model(state, role, payload)
         try:
             return validator(response)
-        except (ResearchProtocolError, SchemaError) as exc:
+        except (ResearchProtocolError, ReaderProtocolError, SchemaError) as exc:
             validator_error = f"{type(exc).__name__}: {exc}"
+            if len(validator_error) > _MAX_REPAIR_VALIDATOR_ERROR_CHARS:
+                validator_error = (
+                    validator_error[: _MAX_REPAIR_VALIDATOR_ERROR_CHARS - 1] + "…"
+                )
             state.diagnostics.append(
                 f"{role}_repair[1/{_MAX_AUTHOR_REPAIR_ATTEMPTS}]: {validator_error}"
             )
@@ -824,6 +901,13 @@ class ResearchPipeline:
             "hypothesis_policy": (
                 "two_or_three_only_for_investigation_or_interpretation"
             ),
+            "query_language_policy": {
+                "internal_task_and_mission_ids_are_not_search_terms": True,
+                "preserve_real_world_identifiers_acronyms_and_numbers": True,
+                "non_english_objective_requires_objective_language_query": True,
+                "non_english_objective_requires_concise_english_query": True,
+                "english_query_uses_concrete_nouns_likely_units_and_source_vocabulary": True,
+            },
             "output_contract": {
                 "json_object": True,
                 "unknown_fields_forbidden": True,
@@ -849,7 +933,8 @@ class ResearchPipeline:
                 "decision_rules": {
                     "proceed": (
                         "queries plus hypothesis discriminating_question values must "
-                        "contain at least one executable search query"
+                        "contain at least one executable search query and satisfy "
+                        "query_language_policy"
                     ),
                     "clarify": "clarification_question must be non-empty",
                     "mode_hypotheses": (
@@ -1134,6 +1219,36 @@ class ResearchPipeline:
         )
         if not pending_queries:
             raise ResearchProtocolError("planner produced no executable search queries")
+        for internal_id in (spec.task_id, spec.mission_id):
+            if any(
+                _contains_identifier_token(query, internal_id)
+                for query in pending_queries
+            ):
+                raise ResearchProtocolError(
+                    "planner search query contains an internal task or mission id"
+                )
+        objective_script = _dominant_non_latin_script(spec.question)
+        if objective_script is not None:
+            has_objective_language_query = any(
+                any(
+                    _letter_script(character) == objective_script
+                    for character in query
+                )
+                for query in pending_queries
+            )
+            has_english_query = any(
+                _latin_search_word_count(query) >= 2
+                and not any(
+                    _letter_script(character) == objective_script
+                    for character in query
+                )
+                for query in pending_queries
+            )
+            if not has_objective_language_query or not has_english_query:
+                raise ResearchProtocolError(
+                    "non-English objective requires separate objective-language and "
+                    "English search queries"
+                )
         return plan, pending_queries
 
     @staticmethod
@@ -1369,11 +1484,15 @@ class ResearchPipeline:
         independent_uncached = [
             item for item in work if item[8] not in state.independent_reader_cache
         ]
-        # Reserve an initial Analyst call, its single allowed repair, Writer and
-        # independent semantic review so complete reading cannot consume the
-        # only path to a terminal answer.
+        # Reserve both the initial and one repair call for every uncached author
+        # Reader chunk, plus the independent Reader pass, initial Analyst and its
+        # repair, Writer, and independent semantic review. Complete reading may
+        # never consume the only path to a terminal answer.
         if (
-            state.model_calls + len(uncached) + len(independent_uncached) + 4
+            state.model_calls
+            + (2 * len(uncached))
+            + len(independent_uncached)
+            + 4
             > state.budgets.max_model_calls
         ):
             raise ResearchBudgetExhausted(
@@ -1437,15 +1556,20 @@ class ResearchPipeline:
         ) in work:
             candidates = state.reader_cache.get(cache_key)
             if candidates is None:
-                candidates = parse_reader_response(
-                    self._call_model(state, "reader", payload),
-                    snapshot=snapshot,
-                    normalized_text=normalized,
-                    chunk_start=start,
-                    chunk_end=end,
-                    chunk_index=chunk_index,
-                    cache_key=cache_key,
-                    model_identity=self.author_identity,
+                candidates = self._call_validated_author_role(
+                    state,
+                    "reader",
+                    payload,
+                    lambda raw: parse_reader_response(
+                        raw,
+                        snapshot=snapshot,
+                        normalized_text=normalized,
+                        chunk_start=start,
+                        chunk_end=end,
+                        chunk_index=chunk_index,
+                        cache_key=cache_key,
+                        model_identity=self.author_identity,
+                    ),
                 )
                 state.reader_cache[cache_key] = candidates
             for candidate in candidates:
@@ -1617,6 +1741,12 @@ class ResearchPipeline:
                             "context",
                         ],
                     },
+                    "ready_factual_claim_rule": (
+                        "every source_assertion or direct_observation requires at "
+                        "least one evidence item with relation=supports; reports alone "
+                        "does not establish deterministic provenance support. Express "
+                        "a negative fact as a negative claim supported by its exact excerpt"
+                    ),
                 },
                 "inference_item": {
                     "required_fields": [
@@ -1666,8 +1796,12 @@ class ResearchPipeline:
                 },
                 "independent_candidate_accounting": (
                     "every candidate with independent_coverage_role must appear in "
-                    "at least one claim evidence entry with the required relation; "
-                    "omission blocks the mission"
+                    "at least one claim evidence entry. supporting_evidence requires "
+                    "supports; qualification requires supports or qualifies; "
+                    "counterevidence requires supports for a contrary/negative claim or "
+                    "refutes for the challenged claim. reports/context never account for "
+                    "an independent material candidate. The independent semantic reviewer "
+                    "judges whether the authored claim actually expresses that mapping."
                 ),
                 "decision_rules": {
                     "ready": "requires at least one structurally valid claim",
@@ -1843,6 +1977,17 @@ class ResearchPipeline:
                 )
 
         if analyst["decision"] == "ready":
+            for claim in claims:
+                if claim.kind not in {"source_assertion", "direct_observation"}:
+                    continue
+                if not any(
+                    edge.claim_id == claim.id and edge.relation == "supports"
+                    for edge in edges
+                ):
+                    raise ResearchProtocolError(
+                        f"ready factual claim {claim.id} requires at least one "
+                        "relation=supports evidence item; reports alone is insufficient"
+                    )
             missing_independent = set(state.independent_candidate_roles) - (
                 used_candidate_ids
             )
@@ -1865,33 +2010,22 @@ class ResearchPipeline:
                         f"conflict relation {claim.id}/{other_id} must be symmetric"
                     )
         if analyst["decision"] == "ready":
+            allowed_relations_by_role = {
+                "supporting_evidence": frozenset({"supports"}),
+                "qualification": frozenset({"supports", "qualifies"}),
+                "counterevidence": frozenset({"supports", "refutes"}),
+            }
             for candidate_id, coverage_role in state.independent_candidate_roles.items():
                 usages = candidate_usages.get(candidate_id, [])
-                if coverage_role == "supporting_evidence" and not any(
-                    relation == "supports" for _claim_id, relation in usages
+                if not any(
+                    relation in allowed_relations_by_role[coverage_role]
+                    for _claim_id, relation in usages
                 ):
                     raise ResearchProtocolError(
-                        f"independent supporting candidate {candidate_id} was not used as support"
+                        f"independent {coverage_role} candidate {candidate_id} requires "
+                        "one of these claim-relative evidence relations: "
+                        + ", ".join(sorted(allowed_relations_by_role[coverage_role]))
                     )
-                if coverage_role == "qualification" and not any(
-                    relation == "qualifies" for _claim_id, relation in usages
-                ):
-                    raise ResearchProtocolError(
-                        f"independent qualification candidate {candidate_id} was not recorded as qualifying evidence"
-                    )
-                if coverage_role == "counterevidence":
-                    records_refutation = any(
-                        relation == "refutes" for _claim_id, relation in usages
-                    )
-                    supports_conflicting_claim = any(
-                        relation == "supports"
-                        and bool(claims_by_id[usage_claim_id].conflict_claim_ids)
-                        for usage_claim_id, relation in usages
-                    )
-                    if not records_refutation and not supports_conflicting_claim:
-                        raise ResearchProtocolError(
-                            f"independent counterevidence candidate {candidate_id} was not recorded as a refutation or conflicting claim"
-                        )
 
         inferences: list[Inference] = []
         for index, raw_inference in enumerate(analyst["inferences"], 1):

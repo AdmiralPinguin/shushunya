@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from typing import Any, Mapping
 
+from ResearchWarband import pipeline as pipeline_module
 from ResearchWarband.execution_policy import ExecutionPolicy
 from ResearchWarband.model_client import ModelClientError, TrustedReviewBoundary
 from ResearchWarband.pipeline import ResearchPipeline, ResearchSpec
@@ -87,11 +88,11 @@ class RoleRepairTests(unittest.TestCase):
         self.store = SnapshotStore(Path(self.tempdir.name) / "snapshots")
 
     @staticmethod
-    def spec() -> ResearchSpec:
+    def spec(question: str = "Find the exact answer.") -> ResearchSpec:
         policy = ExecutionPolicy(
             task_id="repair-task",
             mission_id="repair-mission",
-            research_objective="Find the exact answer.",
+            research_objective=question,
             depth="brief",
             source_policy="balanced",
             error_tolerance="strict",
@@ -205,6 +206,103 @@ class RoleRepairTests(unittest.TestCase):
             planner_calls[1]["repair_request"]["validator_error"],
         )
 
+    def test_planner_repairs_internal_ids_and_missing_english_query(self) -> None:
+        russian_question = "Сопоставь архивные версии длительности полёта."
+        english_query = "archival flight duration minutes methodology"
+        russian_query = "архивные версии длительности полёта минуты"
+        author = QueueModel(
+            {
+                "planner": [
+                    {
+                        "decision": "proceed",
+                        "queries": ["repair-task архивная длительность полёта"],
+                    },
+                    {
+                        "decision": "proceed",
+                        "queries": [russian_query, english_query],
+                    },
+                ],
+                "analyst": [blocked_analyst(english_query)],
+            },
+            stable_identity="repair-author-model",
+        )
+        pipeline, search = self.pipeline(author)
+
+        result = pipeline.run(self.spec(russian_question))
+
+        self.assertEqual("blocked", result.outcome)
+        self.assertEqual(
+            [russian_query, english_query],
+            [query for query, _limit in search.calls],
+        )
+        planner_calls = [payload for role, payload in author.calls if role == "planner"]
+        self.assertEqual(2, len(planner_calls))
+        self.assertIn(
+            "internal task or mission id",
+            planner_calls[1]["repair_request"]["validator_error"],
+        )
+        self.assertTrue(
+            planner_calls[0]["query_language_policy"][
+                "non_english_objective_requires_concise_english_query"
+            ]
+        )
+
+    def test_planner_repairs_non_english_query_without_separate_english_variant(self) -> None:
+        russian_question = "Сообщи код архивной записи."
+        russian_query = "код архивной записи"
+        english_query = "archive record code"
+        author = QueueModel(
+            {
+                "planner": [
+                    {"decision": "proceed", "queries": [russian_query]},
+                    {
+                        "decision": "proceed",
+                        "queries": [russian_query, english_query],
+                    },
+                ],
+                "analyst": [blocked_analyst(english_query)],
+            },
+            stable_identity="repair-author-model",
+        )
+        pipeline, search = self.pipeline(author)
+
+        result = pipeline.run(self.spec(russian_question))
+
+        self.assertEqual("blocked", result.outcome)
+        self.assertEqual(
+            [russian_query, english_query],
+            [query for query, _limit in search.calls],
+        )
+        planner_calls = [payload for role, payload in author.calls if role == "planner"]
+        self.assertEqual(2, len(planner_calls))
+        self.assertIn(
+            "separate objective-language and English search queries",
+            planner_calls[1]["repair_request"]["validator_error"],
+        )
+
+    def test_query_language_helpers_use_script_and_identifier_boundaries(self) -> None:
+        self.assertIsNone(
+            pipeline_module._dominant_non_latin_script("Café provenance archive")
+        )
+        self.assertEqual(
+            "CYRILLIC",
+            pipeline_module._dominant_non_latin_script("архивная запись RV32I"),
+        )
+        self.assertEqual(
+            "EAST_ASIAN",
+            pipeline_module._dominant_non_latin_script("質問の履歴"),
+        )
+        self.assertFalse(
+            pipeline_module._contains_identifier_token("aircraft duration", "air")
+        )
+        self.assertTrue(
+            pipeline_module._contains_identifier_token("archive task-1 record", "task-1")
+        )
+        self.assertGreaterEqual(
+            pipeline_module._latin_search_word_count("Café provenance archive"),
+            2,
+        )
+
     def test_analyst_repairs_malformed_gap_without_application_defaults(self) -> None:
         malformed = {
             "decision": "blocked",
@@ -268,6 +366,25 @@ class RoleRepairTests(unittest.TestCase):
         self.assertEqual(2, result.model_calls)
         self.assertEqual(2, len(author.calls))
         self.assertEqual(1, len(author.responses["planner"]))
+        self.assertEqual([], search.calls)
+
+    def test_repair_validator_error_is_bounded(self) -> None:
+        invalid = {"decision": "blocked"}
+        invalid.update({f"unknown_field_{index:03d}": index for index in range(200)})
+        author = QueueModel(
+            {"planner": [invalid, {"decision": "blocked"}]},
+            stable_identity="repair-author-model",
+        )
+        pipeline, search = self.pipeline(author)
+
+        result = pipeline.run(self.spec())
+
+        self.assertEqual("blocked", result.outcome)
+        planner_calls = [payload for role, payload in author.calls if role == "planner"]
+        self.assertEqual(2, len(planner_calls))
+        error = planner_calls[1]["repair_request"]["validator_error"]
+        self.assertLessEqual(len(error), 512)
+        self.assertTrue(error.endswith("…"))
         self.assertEqual([], search.calls)
 
     def test_preflight_failure_is_not_retried(self) -> None:
