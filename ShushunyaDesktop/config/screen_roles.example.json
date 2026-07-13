@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "roles": {
+    "HDMI-A-1|MMF-270": "presence",
+    "HDMI-A-2|BIT-B2477IPS": "mind"
+  }
+}

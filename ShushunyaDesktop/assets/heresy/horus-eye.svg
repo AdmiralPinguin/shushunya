@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Око Хоруса</title>
+  <desc id="desc">Лаконичная оригинальная интерпретация Ока Хоруса в костяном, фиолетовом и циановом цветах.</desc>
+
+  <path d="M58 211C151 114 326 105 454 189C339 155 197 158 58 211Z"
+        fill="#a855f7"/>
+
+  <path d="M54 250C111 193 181 168 259 171C337 174 398 211 458 249C397 291 332 312 256 312C178 312 108 291 54 250Z"
+        fill="#e8dec7" stroke="#4a216a" stroke-width="15" stroke-linejoin="round"/>
+
+  <path d="M54 250C126 237 183 220 236 188C172 188 108 210 54 250ZM458 249C401 244 351 227 304 193C363 207 415 226 458 249Z"
+        fill="#a855f7" opacity=".88"/>
+
+  <ellipse cx="260" cy="246" rx="62" ry="68"
+           fill="#4debff" stroke="#4a216a" stroke-width="13"/>
+  <ellipse cx="260" cy="246" rx="25" ry="48" fill="#251032"/>
+  <ellipse cx="247" cy="224" rx="9" ry="14" fill="#fff7e5"/>
+
+  <path d="M260 313C252 347 232 375 195 397C231 402 270 383 286 350C292 337 294 324 293 310Z"
+        fill="#a855f7" stroke="#4a216a" stroke-width="9" stroke-linejoin="round"/>
+  <path d="M294 309C310 334 340 347 383 347C352 363 331 383 318 415C311 378 294 349 273 326Z"
+        fill="#4debff" stroke="#4a216a" stroke-width="9" stroke-linejoin="round"/>
+</svg>

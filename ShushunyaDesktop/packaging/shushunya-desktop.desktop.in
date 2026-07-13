@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Shushunya Desktop
+Comment=Пробудить визуальное тело Шушуни на всех экранах
+Exec=@@ROOT@@/scripts/run.sh
+Icon=@@ROOT@@/assets/sigils/eye.svg
+Path=@@ROOT@@
+Terminal=false
+StartupNotify=false
+Categories=Utility;
+Keywords=Shushunya;Chaos;Desktop;
+X-GNOME-Autostart-enabled=true

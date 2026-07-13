@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Восьмилучевая звезда хаоса</title>
+  <desc id="desc">Тонкая восьмилучевая звезда с разорванным кольцом и пустым центром под Око Хоруса.</desc>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#170920" stroke-width="24" opacity=".92">
+      <path d="M256 164V38M256 38L224 91M256 38L288 91"/>
+      <path d="M256 164V38M256 38L224 91M256 38L288 91" transform="rotate(45 256 256)"/>
+      <path d="M256 164V38M256 38L224 91M256 38L288 91" transform="rotate(90 256 256)"/>
+      <path d="M256 164V38M256 38L224 91M256 38L288 91" transform="rotate(135 256 256)"/>
+      <path d="M256 164V38M256 38L224 91M256 38L288 91" transform="rotate(180 256 256)"/>
+      <path d="M256 164V38M256 38L224 91M256 38L288 91" transform="rotate(225 256 256)"/>
+      <path d="M256 164V38M256 38L224 91M256 38L288 91" transform="rotate(270 256 256)"/>
+      <path d="M256 164V38M256 38L224 91M256 38L288 91" transform="rotate(315 256 256)"/>
+    </g>
+
+    <path d="M256 164V38M256 38L224 91M256 38L288 91" stroke="#a855f7" stroke-width="11"/>
+    <path d="M256 164V38M256 38L224 91M256 38L288 91" stroke="#e8dec7" stroke-width="11" transform="rotate(45 256 256)"/>
+    <path d="M256 164V38M256 38L224 91M256 38L288 91" stroke="#4debff" stroke-width="11" transform="rotate(90 256 256)"/>
+    <path d="M256 164V38M256 38L224 91M256 38L288 91" stroke="#a855f7" stroke-width="11" transform="rotate(135 256 256)"/>
+    <path d="M256 164V38M256 38L224 91M256 38L288 91" stroke="#e8dec7" stroke-width="11" transform="rotate(180 256 256)"/>
+    <path d="M256 164V38M256 38L224 91M256 38L288 91" stroke="#4debff" stroke-width="11" transform="rotate(225 256 256)"/>
+    <path d="M256 164V38M256 38L224 91M256 38L288 91" stroke="#a855f7" stroke-width="11" transform="rotate(270 256 256)"/>
+    <path d="M256 164V38M256 38L224 91M256 38L288 91" stroke="#4debff" stroke-width="11" transform="rotate(315 256 256)"/>
+
+    <circle cx="256" cy="256" r="105" stroke="#170920" stroke-width="18"/>
+    <circle cx="256" cy="256" r="105" stroke="#7b38bd" stroke-width="7"
+            stroke-dasharray="78 20 26 16 52 28" transform="rotate(-13 256 256)"/>
+  </g>
+</svg>

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "defaults": {
+    "scale_multiplier": 1.0,
+    "extra_safe_left": 0,
+    "extra_safe_right": 0,
+    "extra_safe_top": 0,
+    "extra_safe_bottom": 0
+  },
+  "profiles": {
+    "HDMI-A-1|MMF-270": {
+      "extra_safe_bottom": 8
+    },
+    "HDMI-A-2|BIT-B2477IPS": {
+      "extra_safe_bottom": 0
+    }
+  }
+}

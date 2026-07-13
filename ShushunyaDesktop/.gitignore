@@ -1,0 +1,9 @@
+.venv/
+runtime/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Superseded generated concept art. The live shell uses the SVG/QML body.
+assets/*.png

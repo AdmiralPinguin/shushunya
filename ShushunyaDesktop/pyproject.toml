@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "shushunya-desktop"
+version = "0.1.0"
+description = "Fullscreen multi-monitor visual shell for Shushunya"
+requires-python = ">=3.11"
+dependencies = [
+  "PySide6>=6.7,<7",
+]
+
+[project.scripts]
+shushunya-desktop = "shushunya_desktop.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shushunya_desktop"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
