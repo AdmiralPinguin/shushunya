@@ -54,6 +54,7 @@ SKITARII_SOURCE_FILES = (
 )
 SKITARII_SHARED_SOURCE_FILES = (
     "EyeOfTerror/common_protocol/ceraxia_directive.py",
+    "EyeOfTerror/common_protocol/protocol.py",
 )
 MAX_CERAXIA_REQUEST_BYTES = int(os.environ.get("CERAXIA_MAX_REQUEST_BYTES", "2000000"))
 CERAXIA_TRUSTED_ORIGINS_ENV = "CERAXIA_TRUSTED_ORIGINS"
