@@ -204,6 +204,7 @@ CoreOfMadness/vm-sandbox/*.log
 ArchiveOfHeresy/archive/assets/
 ArchiveOfHeresy/archive/artifacts/
 ArchiveOfHeresy/archive/task_journal_state.json
+ArchiveOfHeresy/archive/pending_decisions.json
 
 # Local voice references and generated audio previews
 WarpWails/refs/

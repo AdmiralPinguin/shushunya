@@ -47,6 +47,22 @@ from pending_reports import (
     pending_topics_note,
     reports_event_text,
 )
+from decision_requests import (
+    commit_answer_result,
+    conversational_text,
+    core_context as pending_decision_context,
+    decision_prompt_version,
+    decision_version,
+    extract_decision_request,
+    find_answer_receipt,
+    find_pending as find_pending_decision,
+    mark_answer_reconcile_pending,
+    normalize_decision_request,
+    reserve_answer_attempt,
+    render_decision_request,
+    render_dispatch_retry,
+    render_internal_stall,
+)
 from artifact_store import (
     ArtifactError,
     artifact_catalog_for_query,
@@ -337,14 +353,14 @@ def run_mobile_chat_payload(payload, on_token=None, *, trusted_turn_context=None
             if core_effect and core_effect.get("id"):
                 try:
                     dispatched = core_dispatch_effect(str(core_effect["id"]))
-                except Exception as exc:  # Core's durable steward still owns retry
+                except Exception as exc:  # transport loss does not prove a retry was scheduled
                     dispatched = {
                         "ok": False,
                         "effect": {
-                            "state": "retry_wait",
+                            "state": "not_confirmed",
                             "payload": core_effect.get("payload") if isinstance(core_effect.get("payload"), dict) else {},
                             "result": {
-                                "status": "core_transport_unavailable",
+                                "status": "core_delivery_not_confirmed",
                                 "explanation": (
                                     "Core сохранил обязательство, но Archive не дождался подтверждения доставки файла: "
                                     f"{exc}"
@@ -398,10 +414,22 @@ def run_mobile_chat_payload(payload, on_token=None, *, trusted_turn_context=None
                 )
             delivered_artifact = artifact if delivered else None
             if delivered:
-                factual_message = trim_chat_text(factual.get("caption") or "Файл приложен.") or "Файл приложен."
+                factual_message = conversational_text(factual.get("caption") or "Файл приложен.") or "Файл приложен."
             else:
-                factual_message = trim_chat_text(
-                    factual.get("explanation") or "Файл пока не приложен; Core сохранил эффект для безопасного повтора."
+                explanation = factual.get("explanation") or "файл пока не удалось приложить"
+                retry_scheduled = str(delivered_effect.get("state") or "") in {
+                    "pending",
+                    "leased",
+                    "retry_wait",
+                }
+                factual_message = (
+                    render_dispatch_retry(explanation)
+                    if retry_scheduled
+                    else render_internal_stall(
+                        "доставить файл",
+                        explanation,
+                        failed=True,
+                    )
                 )
                 append_chat_message(
                     session_id,
@@ -575,13 +603,13 @@ def run_mobile_chat_payload(payload, on_token=None, *, trusted_turn_context=None
             if core_effect and core_effect.get("id"):
                 try:
                     dispatched = core_dispatch_effect(str(core_effect["id"]))
-                except Exception as exc:  # durable Core steward still owns retry
+                except Exception as exc:  # transport loss does not prove a retry was scheduled
                     dispatched = {
                         "ok": False,
                         "effect": {
-                            "state": "retry_wait",
+                            "state": "not_confirmed",
                             "result": {
-                                "status": "core_transport_unavailable",
+                                "status": "core_delivery_not_confirmed",
                                 "explanation": (
                                     "Core сохранил обязательство, но Archive не дождался фактического ответа адаптера: "
                                     f"{exc}"
@@ -613,9 +641,10 @@ def run_mobile_chat_payload(payload, on_token=None, *, trusted_turn_context=None
                 administratum_message = {
                     "role": "system",
                     "content": (
-                        "Core выбрал создание задачи Administratum, но орган не подтвердил эффект. "
-                        f"Причина: {administratum_result.get('explanation') or administratum_result.get('reason')}. "
-                        "Задача НЕ создана — скажи владельцу, что именно нужно поправить или уточнить."
+                        "Создание напоминания или задачи не подтвердилось. "
+                        f"Причина: {conversational_text(administratum_result.get('explanation') or administratum_result.get('reason'))}. "
+                        "Ничего не было создано. Скажи об этом от первого лица и уточни только то, что реально нужно. "
+                        "Не называй внутренние сервисы, коды, ключи или идентификаторы."
                     ),
                 }
         # Pending-reports outbox: on a deliver turn the queued reports are injected
@@ -632,7 +661,7 @@ def run_mobile_chat_payload(payload, on_token=None, *, trusted_turn_context=None
             else:
                 reports_message = {
                     "role": "system",
-                    "content": "Владелец спросил про новости, но у Шушуни ничего не накопилось. Скажи честно, что сказать нечего.",
+                    "content": "Собеседник спросил про новости, но у тебя ничего не накопилось. Скажи честно, что сказать нечего.",
                 }
         elif not internal_flag(payload.get("system_event", False), default=False):
             reports_message = pending_topics_note(context_text=text)
@@ -1312,9 +1341,16 @@ def create_mobile_turn_job_once(request_payload):
             }
             if stable_request != stored_stable:
                 raise ValueError("client_request_id conflicts with a different turn payload")
-            if str(row[1]) == "interrupted":
+            if str(row[1]) in {"interrupted", "failed"}:
+                # A turn is safe to reopen under the same transport identity:
+                # Core resolves with the same idempotency key, durable effects
+                # keep their own receipts, decision answers keep an answer
+                # receipt, and chat rows are request-deduped.  This recovers a
+                # transient model/Core failure without authorizing any external
+                # action a second time.
                 db.execute(
-                    "UPDATE mobile_jobs SET status='queued',updated_at=?,error=NULL WHERE id=? AND status='interrupted'",
+                    "UPDATE mobile_jobs SET status='queued',updated_at=?,response_json=NULL,error=NULL "
+                    "WHERE id=? AND status IN ('interrupted','failed')",
                     (created_at, job_id),
                 )
                 return job_id, True, "queued"
@@ -1559,10 +1595,10 @@ def append_persona_mission_ack(session_id, task_id, task_text=""):
     stays instant; the dry static line is replaced by Shushunya's own reply."""
     note = (
         "[Миссия принята в работу]\n"
-        f"task_id: {task_id}\n"
         + (f"суть задачи: {trim_chat_text(task_text)[:300]}\n" if task_text else "")
-        + "Подтверди владельцу одной-двумя фразами своим голосом, что ты взял это в работу и доложишь результат. "
-        "По-русски. Не выдумывай прогресс, не задавай вопросов, не пересказывай задачу целиком."
+        + "Подтверди одной-двумя фразами от первого лица, что ты взял это в работу и сообщишь результат. "
+        "По-русски. Не называй внутренние сервисы, исполнителей или идентификаторы. "
+        "Не выдумывай прогресс, не задавай вопросов, не пересказывай задачу целиком."
     )
     payload = {
         "model": DEFAULT_MODEL,
@@ -1670,6 +1706,613 @@ def ensure_core_transport_identity(payload):
     return clean
 
 
+def _run_resume_state(task_id):
+    """Classify authoritative state after an ambiguous clarification reply.
+
+    A missing question is not proof that an answer was accepted: the run may
+    have failed, been cancelled, or moved into internal repair.  Only an
+    explicitly active or successfully completed run closes the lost-ACK gap as
+    a successful resume.
+    """
+    try:
+        http_status, state = proxy_json_url(
+            "GET",
+            f"{WARMASTER_BASE_URL}/runs/{quote(task_id, safe='')}/orchestration?event_limit=0",
+            timeout=20,
+        )
+    except Exception:  # noqa: BLE001 - this is only post-failure reconciliation
+        return {"kind": "unknown", "status": "unreadable"}
+    if not 200 <= int(http_status or 0) < 300 or not isinstance(state, dict):
+        return {"kind": "unknown", "status": f"http_{int(http_status or 0)}"}
+
+    snapshot = state.get("snapshot") if isinstance(state.get("snapshot"), dict) else {}
+    summary = snapshot.get("summary") if isinstance(snapshot.get("summary"), dict) else snapshot
+    result = summary.get("result") if isinstance(summary.get("result"), dict) else {}
+    mission_state = (
+        state.get("mission_state")
+        if isinstance(state.get("mission_state"), dict)
+        else summary.get("mission_state")
+        if isinstance(summary.get("mission_state"), dict)
+        else {}
+    )
+    run = state.get("run") if isinstance(state.get("run"), dict) else {}
+
+    def needs_user_marker(node):
+        if not isinstance(node, dict):
+            return None
+        if "needs_user" in node:
+            return node.get("needs_user") is True
+        visible = str(node.get("user_visible_state") or "").strip().lower()
+        status_value = str(node.get("status") or node.get("phase") or "").strip().lower()
+        if visible:
+            return visible == "needs_user_decision"
+        if status_value in {"needs_user", "waiting_user"}:
+            return True
+        return None
+
+    current_needs_user = None
+    for node in (mission_state, result, summary, state):
+        current_needs_user = needs_user_marker(node)
+        if current_needs_user is not None:
+            break
+    if current_needs_user is True:
+        raw_question = None
+        for node in (mission_state, result, summary, state):
+            if not isinstance(node, dict):
+                continue
+            explicit = node.get("decision_request")
+            question = (
+                node.get("question")
+                or node.get("clarification_question")
+                or node.get("exact_question")
+            )
+            if isinstance(explicit, dict):
+                raw_question = explicit
+                break
+            if question:
+                raw_question = node
+                break
+        decision = normalize_decision_request(raw_question, task_id=task_id) if raw_question else None
+        if decision:
+            return {"kind": "waiting", "status": "needs_user", "decision_request": decision}
+
+    completed = {"completed", "complete", "succeeded", "success", "done", "published"}
+    terminal = {
+        "failed", "failure", "cancelled", "canceled", "aborted", "rejected", "expired",
+        "corrupt", "preflight_failed",
+    }
+    active = {
+        "accepted", "active", "accepted_start", "created", "queued", "planning", "plan_review",
+        "running", "executing",
+        "applying", "publishing", "ready_to_apply", "resumed", "starting",
+    }
+    internal = {
+        "blocked", "needs_revision", "revision_required", "internal_repair_required",
+        "recovering", "repairing", "retry_wait", "revision", "revising", "interrupted",
+    }
+    # Durable mission/result state outranks the coarse outer run wrapper. That
+    # wrapper often remains `running` while the mission has already failed,
+    # completed, or entered an internal revision.
+    observed_status = ""
+    for node in (mission_state, result, summary, snapshot, run, state):
+        if not isinstance(node, dict):
+            continue
+        status_value = str(
+            node.get("status") or node.get("phase") or node.get("state") or ""
+        ).strip().lower()
+        if not status_value:
+            continue
+        observed_status = observed_status or status_value
+        if status_value in terminal:
+            return {"kind": "terminal", "status": status_value}
+        if status_value in completed:
+            return {"kind": "completed", "status": status_value}
+        if status_value in internal:
+            return {"kind": "internal", "status": status_value}
+        if status_value in active:
+            return {"kind": "active", "status": status_value}
+    if state.get("active") is True:
+        return {"kind": "active", "status": observed_status or "active"}
+    return {"kind": "unknown", "status": observed_status or "unknown"}
+
+
+def _mark_decision_report_closed(request):
+    report_id = request.get("vox_intent_id")
+    if report_id:
+        mark_delivered([report_id])
+
+
+def _commit_answer_transition(
+    request,
+    *,
+    bound_task_id,
+    answer,
+    request_id,
+    result,
+    replacement=None,
+    clear=False,
+):
+    committed = commit_answer_result(
+        request_id,
+        task_id=bound_task_id,
+        answer=answer,
+        request=request,
+        result=result,
+        pending_request=replacement,
+        clear_pending=clear,
+    )
+    if committed and (replacement is not None or clear):
+        _mark_decision_report_closed(request)
+    return committed
+
+
+def _finish_reconciled_decision(request, bound_task_id, run_state):
+    state_kind = str((run_state or {}).get("kind") or "unknown")
+    if state_kind not in {"active", "completed", "terminal", "internal"}:
+        return None
+    if state_kind == "active":
+        return {
+            "ok": True,
+            "status": "resumed_reconciled",
+            "message": "Понял. Ответ дошёл: вопрос закрыт, и задача продолжает выполняться.",
+            "task_id": bound_task_id,
+        }
+    if state_kind == "completed":
+        return {
+            "ok": True,
+            "status": "completed_reconciled",
+            "message": "Понял. Пока подтверждение шло обратно, задача уже завершилась.",
+            "task_id": bound_task_id,
+        }
+    if state_kind == "terminal":
+        message = (
+            "Не смог подтвердить передачу ответа: задача уже завершилась с ошибкой. "
+            "Старый вопрос закрыл как неактуальный; если решение ещё нужно, дай задачу заново."
+        )
+    else:
+        message = (
+            "Не смог подтвердить передачу ответа: задача уже ушла во внутреннее восстановление. "
+            "Старый вопрос закрыл как неактуальный — твой выбор сейчас не требуется."
+        )
+    return {
+        "ok": False,
+        "status": "resume_terminal" if state_kind == "terminal" else "resume_internal",
+        "message": message,
+        "task_id": bound_task_id,
+    }
+
+
+def _replacement_decision(response, bound_task_id, resume_kind, resume_payload):
+    raw = extract_decision_request(response)
+    replacement = normalize_decision_request(raw, task_id=bound_task_id) if raw else None
+    if not replacement:
+        return None
+    replacement["task_id"] = bound_task_id
+    if resume_kind == "retry_preflight_with_answer":
+        replacement["resume"] = {
+            "kind": "retry_preflight_with_answer",
+            "method": "POST",
+            "path": "/orchestrate_run",
+            "body": {
+                "task_id": bound_task_id,
+                "message": str(resume_payload.get("message") or "").strip(),
+            },
+            "condition": "после твоего ответа продолжу ту же задачу",
+        }
+    replacement["decision_id"] = decision_version(replacement)
+    return replacement
+
+
+def _replacement_decision_result(request, replacement, bound_task_id, technical):
+    return {
+        "ok": False,
+        "status": "needs_another_decision",
+        "message": render_decision_request(replacement),
+        "task_id": bound_task_id,
+        "technical": technical,
+    }
+
+
+def _answer_resume_call(request, bound_task_id, answer):
+    resume = request.get("resume") if isinstance(request.get("resume"), dict) else {}
+    resume_kind = str(resume.get("kind") or "").strip()
+    if resume_kind == "retry_preflight_with_answer":
+        resume_body = resume.get("body") if isinstance(resume.get("body"), dict) else {}
+        original_message = str(resume_body.get("message") or "").strip()
+        resume_task_id = str(resume_body.get("task_id") or "").strip()
+        if not original_message or resume_task_id != bound_task_id:
+            return {
+                "ok": False,
+                "result": {
+                    "ok": False,
+                    "status": "invalid_resume_contract",
+                    "message": "Ответ сохранил, но внутренний путь продолжения повреждён. Твой выбор не потерян.",
+                    "task_id": bound_task_id,
+                },
+            }
+        return {
+            "ok": True,
+            "resume_kind": resume_kind,
+            "endpoint": f"{WARMASTER_BASE_URL}/orchestrate_run",
+            "payload": {
+                "message": original_message
+                + "\n\nОтвет пользователя на уточнение к этой же задаче: "
+                + answer,
+                "task_id": bound_task_id,
+                "auto_start": True,
+                "reuse_existing": True,
+                "run_mode": "http",
+                "governor_transport": "http",
+                "governor_host": "127.0.0.1",
+                "host": "127.0.0.1",
+                "include_brigade_health": False,
+            },
+        }
+    return {
+        "ok": True,
+        "resume_kind": resume_kind,
+        "endpoint": f"{WARMASTER_BASE_URL}/runs/{quote(bound_task_id, safe='')}/clarification",
+        "payload": {"answer": answer},
+    }
+
+
+def _answer_request_conflict(task_id):
+    return {
+        "ok": False,
+        "status": "answer_request_conflict",
+        "message": "Этот идентификатор ответа уже связан с другим выбором. Ничего повторно не отправил.",
+        "task_id": str(task_id or ""),
+        "retryable": False,
+    }
+
+
+def _answer_reconcile_pending(request_id, task_id, error="", *, replay=False):
+    if request_id:
+        mark_answer_reconcile_pending(request_id, task_id, error)
+    return {
+        "ok": False,
+        "status": "answer_reconcile_pending",
+        "message": (
+            "Этот ответ уже отправлял и повторно не посылаю. Подтверждение пока недоступно; "
+            "вопрос оставил открытым. Повтори проверку позже тем же сообщением — "
+            "я сначала сверю состояние, не отправляя ответ заново."
+        ),
+        "task_id": task_id,
+        "retryable": True,
+        "idempotent_replay": bool(replay),
+        "technical": {"error": str(error or "")},
+    }
+
+
+def _reconcile_reserved_answer(receipt, answer, request_id, *, replay, error=""):
+    bound_task_id = str(receipt.get("task_id") or "").strip()
+    original_request = (
+        receipt.get("request") if isinstance(receipt.get("request"), dict) else {}
+    )
+    run_state = _run_resume_state(bound_task_id)
+    current_decision = (
+        run_state.get("decision_request")
+        if run_state.get("kind") == "waiting"
+        and isinstance(run_state.get("decision_request"), dict)
+        else None
+    )
+    if current_decision is not None:
+        original_prompt_id = str(
+            receipt.get("prompt_id") or decision_prompt_version(original_request)
+        )
+        if decision_prompt_version(current_decision) != original_prompt_id:
+            resume_call = _answer_resume_call(original_request, bound_task_id, answer)
+            if not resume_call.get("ok"):
+                return _answer_reconcile_pending(
+                    request_id,
+                    bound_task_id,
+                    "stored resume contract is invalid",
+                    replay=replay,
+                )
+            replacement = _replacement_decision(
+                {"decision_request": current_decision},
+                bound_task_id,
+                str(resume_call.get("resume_kind") or ""),
+                resume_call.get("payload") if isinstance(resume_call.get("payload"), dict) else {},
+            )
+            if replacement:
+                replacement_result = _replacement_decision_result(
+                    original_request,
+                    replacement,
+                    bound_task_id,
+                    {
+                        "lost_ack": True,
+                        "error": str(error or ""),
+                        "authoritative_state": run_state,
+                    },
+                )
+                if _commit_answer_transition(
+                    original_request,
+                    bound_task_id=bound_task_id,
+                    answer=answer,
+                    request_id=request_id,
+                    result=replacement_result,
+                    replacement=replacement,
+                ):
+                    replacement_result["idempotent_replay"] = bool(replay)
+                    return replacement_result
+    reconciled = _finish_reconciled_decision(original_request, bound_task_id, run_state)
+    if reconciled:
+        reconciled["technical"] = {
+            "lost_ack": True,
+            "error": str(error or ""),
+            "authoritative_state": run_state,
+        }
+        if _commit_answer_transition(
+            original_request,
+            bound_task_id=bound_task_id,
+            answer=answer,
+            request_id=request_id,
+            result=reconciled,
+            clear=True,
+        ):
+            reconciled["idempotent_replay"] = bool(replay)
+            return reconciled
+    return _answer_reconcile_pending(
+        request_id,
+        bound_task_id,
+        error or str(run_state.get("status") or "state unavailable"),
+        replay=replay,
+    )
+
+
+def _http_error_json(exc):
+    if not isinstance(exc, HTTPError):
+        return {}
+    try:
+        raw = exc.read().decode("utf-8", errors="replace")
+        payload = json.loads(raw) if raw else {}
+    except Exception:  # noqa: BLE001 - best-effort error body recovery
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def resume_pending_decision(task_id, answer, request_id=""):
+    # Two clients can display the same question.  Serialize their answers by
+    # the durable run identity so a retry cannot race a still-running forward.
+    lock_key = f"pending-decision:{str(task_id or request_id or '').strip()}"
+    with archive_state.CHAT_SESSION_LOCKS.hold(lock_key):
+        return _resume_pending_decision_locked(task_id, answer, request_id=request_id)
+
+
+def _resume_pending_decision_locked(task_id, answer, *, request_id=""):
+    """Forward a chat answer only to a durably bound waiting run.
+
+    The model may select the action, but it cannot invent authority: the task
+    id must already exist in Archive's pending-decision store.
+    """
+    answer = trim_chat_text(answer)
+    request_id = str(request_id or "").strip()[:200]
+    receipt = find_answer_receipt(request_id) if request_id else None
+    if receipt:
+        expected_task_id = str(receipt.get("task_id") or "").strip()
+        answer_sha256 = hashlib.sha256(answer.encode("utf-8")).hexdigest()
+        if (
+            (str(task_id or "").strip() and str(task_id or "").strip() != expected_task_id)
+            or str(receipt.get("answer_sha256") or "") != answer_sha256
+        ):
+            return _answer_request_conflict(expected_task_id or task_id)
+        replay = receipt.get("result") if isinstance(receipt.get("result"), dict) else {}
+        if replay:
+            return {
+                **replay,
+                "ok": bool(replay.get("ok")),
+                "status": str(replay.get("status") or "answer_replayed"),
+                "message": str(replay.get("message") or "Этот ответ я уже обработал."),
+                "task_id": str(replay.get("task_id") or expected_task_id or task_id or ""),
+                "idempotent_replay": True,
+            }
+        return _reconcile_reserved_answer(
+            receipt,
+            answer,
+            request_id,
+            replay=True,
+        )
+    request = find_pending_decision(task_id)
+    if not request:
+        return {
+            "ok": False,
+            "status": "no_pending_decision",
+            "message": "У меня нет открытого вопроса, к которому можно привязать этот ответ.",
+        }
+    if not answer:
+        return {
+            "ok": False,
+            "status": "empty_answer",
+            "message": "Не понял сам выбор. Ответь одним из вариантов или скажи решение своими словами.",
+        }
+    bound_task_id = str(request.get("task_id") or "").strip()
+    resume_call = _answer_resume_call(request, bound_task_id, answer)
+    if not resume_call.get("ok"):
+        return resume_call.get("result")
+    resume_kind = str(resume_call.get("resume_kind") or "")
+    endpoint = str(resume_call.get("endpoint") or "")
+    resume_payload = (
+        resume_call.get("payload") if isinstance(resume_call.get("payload"), dict) else {}
+    )
+    if request_id:
+        try:
+            reservation = reserve_answer_attempt(
+                request_id,
+                task_id=bound_task_id,
+                answer=answer,
+                request=request,
+            )
+        except Exception as exc:  # a non-durable answer must never be sent
+            return {
+                "ok": False,
+                "status": "answer_reservation_failed",
+                "message": "Не смог надёжно сохранить отправку ответа, поэтому ничего не отправил. Попробуй позже.",
+                "task_id": bound_task_id,
+                "retryable": True,
+                "technical": {"error": str(exc)},
+            }
+        if not reservation.get("ok"):
+            return _answer_request_conflict(bound_task_id)
+        if reservation.get("created") is not True:
+            return _reconcile_reserved_answer(
+                reservation.get("receipt") if isinstance(reservation.get("receipt"), dict) else {},
+                answer,
+                request_id,
+                replay=True,
+            )
+        receipt = reservation.get("receipt") if isinstance(reservation.get("receipt"), dict) else {}
+    try:
+        status, response = proxy_json_url(
+            "POST",
+            endpoint,
+            payload=resume_payload,
+            timeout=90,
+        )
+    except Exception as exc:  # noqa: BLE001 - keep the bound question durable
+        failure_response = _http_error_json(exc)
+        replacement = _replacement_decision(
+            failure_response,
+            bound_task_id,
+            resume_kind,
+            resume_payload,
+        )
+        if replacement:
+            replacement_result = _replacement_decision_result(
+                request,
+                replacement,
+                bound_task_id,
+                {"error": str(exc), "response": failure_response},
+            )
+            _commit_answer_transition(
+                request,
+                bound_task_id=bound_task_id,
+                answer=answer,
+                request_id=request_id,
+                result=replacement_result,
+                replacement=replacement,
+            )
+            return replacement_result
+        if request_id and receipt:
+            return _reconcile_reserved_answer(
+                receipt,
+                answer,
+                request_id,
+                replay=False,
+                error=str(exc),
+            )
+        # The gateway may have accepted the answer and only lost its HTTP ACK.
+        # Its durable run state is the truth; never resend blindly in that case.
+        run_state = _run_resume_state(bound_task_id)
+        if (
+            run_state.get("kind") == "waiting"
+            and isinstance(run_state.get("decision_request"), dict)
+        ):
+            authoritative_replacement = _replacement_decision(
+                {"decision_request": run_state["decision_request"]},
+                bound_task_id,
+                resume_kind,
+                resume_payload,
+            )
+            if (
+                authoritative_replacement
+                and decision_prompt_version(run_state["decision_request"])
+                != decision_prompt_version(request)
+            ):
+                replacement_result = _replacement_decision_result(
+                    request,
+                    authoritative_replacement,
+                    bound_task_id,
+                    {"lost_ack": True, "error": str(exc), "authoritative_state": run_state},
+                )
+                _commit_answer_transition(
+                    request,
+                    bound_task_id=bound_task_id,
+                    answer=answer,
+                    request_id=request_id,
+                    result=replacement_result,
+                    replacement=authoritative_replacement,
+                )
+                return replacement_result
+        reconciled = _finish_reconciled_decision(request, bound_task_id, run_state)
+        if reconciled:
+            reconciled["technical"] = {"lost_ack": True, "error": str(exc)}
+            _commit_answer_transition(
+                request,
+                bound_task_id=bound_task_id,
+                answer=answer,
+                request_id=request_id,
+                result=reconciled,
+                clear=True,
+            )
+            return reconciled
+        return {
+            "ok": False,
+            "status": "resume_unavailable",
+            "message": "Не смог передать ответ. Вопрос оставил открытым — повтори ответ позже.",
+            "task_id": bound_task_id,
+            "technical": {"error": str(exc)},
+        }
+    response = response if isinstance(response, dict) else {}
+    replacement = _replacement_decision(response, bound_task_id, resume_kind, resume_payload)
+    if replacement:
+        replacement_result = _replacement_decision_result(request, replacement, bound_task_id, response)
+        _commit_answer_transition(
+            request,
+            bound_task_id=bound_task_id,
+            answer=answer,
+            request_id=request_id,
+            result=replacement_result,
+            replacement=replacement,
+        )
+        return replacement_result
+    accepted = 200 <= int(status or 0) < 300 and response.get("ok") is True
+    if accepted:
+        accepted_result = {
+            "ok": True,
+            "status": "resumed",
+            "message": "Понял. Принял твой выбор и продолжаю ту же задачу.",
+            "task_id": bound_task_id,
+            "technical": response,
+        }
+        _commit_answer_transition(
+            request,
+            bound_task_id=bound_task_id,
+            answer=answer,
+            request_id=request_id,
+            result=accepted_result,
+            clear=True,
+        )
+        return accepted_result
+    run_state = _run_resume_state(bound_task_id)
+    reconciled = _finish_reconciled_decision(request, bound_task_id, run_state)
+    if reconciled:
+        reconciled["technical"] = response
+        _commit_answer_transition(
+            request,
+            bound_task_id=bound_task_id,
+            answer=answer,
+            request_id=request_id,
+            result=reconciled,
+            clear=True,
+        )
+        return reconciled
+    if request_id and receipt:
+        return _answer_reconcile_pending(
+            request_id,
+            bound_task_id,
+            str(response),
+            replay=False,
+        )
+    return {
+        "ok": False,
+        "status": "resume_rejected",
+        "message": "Не смог передать ответ. Вопрос оставил открытым — повтори ответ позже.",
+        "task_id": bound_task_id,
+        "technical": response,
+    }
+
+
 def assemble_shushunya_turn_context(session_id, user_text, image_data_url="", model=None, payload=None):
     """Assemble the rich situation once, before action selection.
 
@@ -1716,6 +2359,9 @@ def assemble_shushunya_turn_context(session_id, user_text, image_data_url="", mo
             magos_result = {"error": str(exc)}
     roster_message = None if internal_flag(payload.get("system_event", False), default=False) else task_roster_note()
     reports = pending_summary()
+    decisions = pending_decision_context()
+    if decisions:
+        reports = {**reports, "decision_requests": decisions}
     core_context = {
         "persona": str((persona_message or {}).get("content") or ""),
         "recalled_memory": str((magos_message or {}).get("content") or ""),
@@ -1748,9 +2394,11 @@ def decide_chat_turn_action(session_id, text, image_data_url="", model=None, pay
         or payload.get("source")
         or "app"
     ).strip().lower()[:80] or "app"
+    open_decisions = pending_decision_context()
     manifest = turn_capability_manifest(
         image_attached=bool(image_data_url),
         pending_reports=pending_summary(),
+        pending_decisions=open_decisions,
         artifacts=artifact_catalog_for_query(
             shared_chat_session_id(session_id),
             audience_source=source,
@@ -2244,9 +2892,9 @@ def administratum_intent_context(result):
         return {
             "role": "system",
             "content": (
-                "Administratum task created. Confirm to the owner in Shushunya's voice exactly what was recorded.\n"
-                f"id: {task.get('id')}\nkind: {task.get('kind')}\ntitle: {task.get('title')}\n"
-                f"due_at: {task.get('due_at')}\ninterval: {task.get('interval')}\nnext_run: {task.get('next_run')}"
+                "A task was actually created. Confirm it in first person without naming internal services or ids.\n"
+                f"title: {task.get('title')}\ndue_at: {task.get('due_at')}\n"
+                f"interval: {task.get('interval')}\nnext_run: {task.get('next_run')}"
             ),
         }
     if result.get("created") and isinstance(result.get("watch"), dict):
@@ -2254,8 +2902,8 @@ def administratum_intent_context(result):
         return {
             "role": "system",
             "content": (
-                "Administratum watch created. Confirm to the owner in Shushunya's voice exactly what was recorded.\n"
-                f"id: {watch.get('id')}\ntitle: {watch.get('title')}\nwatch_type: {watch.get('watch_type')}\n"
+                "A watch was actually created. Confirm it in first person without naming internal services or ids.\n"
+                f"title: {watch.get('title')}\nwatch_type: {watch.get('watch_type')}\n"
                 f"target: {watch.get('target')}\ncondition_json: {watch.get('condition_json')}"
             ),
         }
@@ -2263,28 +2911,31 @@ def administratum_intent_context(result):
         return {
             "role": "system",
             "content": (
-                "Administratum detected a reminder request but no time or interval was given, so nothing was created. "
-                "Do not claim a reminder was recorded. Ask the owner when to remind, in one short question."
+                "A reminder was requested but no time or interval was given, so nothing was created. "
+                "Do not claim it was recorded. Ask when to remind, in one short question."
             ),
         }
     if result.get("reason") == "confirmation_required":
         return {
             "role": "system",
             "content": (
-                "Administratum detected a possible routine/watch task but did not create it because confirmation is required. "
+                "A possible routine/watch was detected but not created because confirmation is required. "
                 f"Ask one concise clarification. Parsed intent: {json.dumps(result.get('intent') or {}, ensure_ascii=False)}"
             ),
         }
     if result.get("reason") == "administratum_unavailable":
         return {
             "role": "system",
-            "content": f"Administratum intent was detected, but AshurKai is unavailable: {result.get('error')}. Tell the owner clearly.",
+            "content": (
+                "The requested reminder/task could not be created. "
+                f"Reason: {conversational_text(result.get('error'))}. Say this clearly in first person without internal names."
+            ),
         }
     if result.get("reason") == "low_confidence_or_missing_title":
         return {
             "role": "system",
             "content": (
-                "Administratum did not create a task because the parsed task was incomplete or low-confidence. "
+                "The task was not created because its details were incomplete or low-confidence. "
                 "Do not claim that a reminder/task was recorded. Ask one concise clarification if the user seems to want a reminder. "
                 f"Parsed intent: {json.dumps(result.get('intent') or {}, ensure_ascii=False)}"
             ),

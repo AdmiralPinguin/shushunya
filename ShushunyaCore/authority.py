@@ -13,6 +13,7 @@ ALLOWED_ACTIONS = {
     "create_administratum_task",
     "deliver_pending_reports",
     "deliver_artifact",
+    "answer_pending_decision",
 }
 
 
@@ -28,7 +29,6 @@ def _artifact_catalog_hint(capability: dict[str, Any] | None) -> str:
             item.get("filename")
             or item.get("display_name")
             or item.get("name")
-            or item.get("artifact_id")
             or ""
         ).strip()
         value = " ".join(value.split())[:160]
@@ -37,18 +37,44 @@ def _artifact_catalog_hint(capability: dict[str, Any] | None) -> str:
         if len(names) >= 8:
             break
     if not names:
-        return "Сейчас Archive не показывает этому ходу ни одного доступного файла."
-    return "Доступные этому ходу файлы: " + "; ".join(names) + "."
+        return "Сейчас у меня нет ни одного доступного файла, который можно отправить в этот разговор."
+    return "Сейчас я могу отправить: " + "; ".join(names) + "."
 
 
 def _artifact_denial(message: str, capability: dict[str, Any] | None) -> str:
+    del message
     return (
-        f"{message} Archive доставляет только заранее зарегистрированный artifact_id, "
-        "видимый в каталоге текущих session/source. "
-        "Чтобы исправить: сначала варбанда (или локальный издатель) должна зарегистрировать "
-        "файл в Archive и открыть его текущему чату; после этого я смогу прислать его. "
+        "Этот файл я сейчас прислать не могу: его ещё нет среди доступных мне вложений для этого разговора. "
+        "Сначала мне нужно получить или создать файл и добавить его в доступные; после этого я смогу его отправить. "
         f"{_artifact_catalog_hint(capability)}"
     )
+
+
+def pending_decision_ids(manifest: dict[str, Any]) -> list[str]:
+    """Return only task ids published by the trusted turn capability."""
+    result: list[str] = []
+    root_id = str(manifest.get("pending_decision_task_id") or "").strip()[:240]
+    if root_id:
+        result.append(root_id)
+    for capability in manifest.get("capabilities", []):
+        if not (
+            isinstance(capability, dict)
+            and capability.get("action") == "answer_pending_decision"
+            and capability.get("available") is True
+        ):
+            continue
+        direct_id = str(capability.get("pending_decision_task_id") or "").strip()[:240]
+        if direct_id and direct_id not in result:
+            result.append(direct_id)
+        decisions = capability.get("pending_decisions")
+        for item in decisions if isinstance(decisions, list) else []:
+            if not isinstance(item, dict):
+                continue
+            task_id = str(item.get("task_id") or "").strip()[:240]
+            if task_id and task_id not in result:
+                result.append(task_id)
+        break
+    return result[:12]
 
 
 @dataclass(frozen=True)
@@ -74,7 +100,7 @@ class Authority:
         context_scope: str = "*",
     ) -> Authorization:
         if action not in ALLOWED_ACTIONS:
-            return Authorization("deny", "unknown_action", "Действие отсутствует в жёстком реестре Core.")
+            return Authorization("deny", "unknown_action", "Я не умею надёжно выполнить это действие доступным способом.")
         declared_capabilities = {
             str(item.get("action") or ""): item
             for item in manifest.get("capabilities", [])
@@ -95,15 +121,45 @@ class Authority:
                         None,
                     ),
                 )
-            return Authorization("deny", "capability_unavailable", "Текущий capability contract не разрешает это действие.")
+            return Authorization("deny", "capability_unavailable", "Сейчас я не могу выполнить это действие из этого разговора.")
         if action in {"answer_in_chat", "ask_clarification", "deliver_pending_reports"}:
             return Authorization("auto", "local_turn", "Действие остаётся внутри текущего разговора.")
+        if action == "answer_pending_decision":
+            trusted_task_ids = pending_decision_ids(manifest)
+            pending = decision.get("pending_decision") if isinstance(decision.get("pending_decision"), dict) else {}
+            decision_task_id = str(
+                decision.get("pending_decision_task_id") or pending.get("task_id") or ""
+            ).strip()
+            answer = str(pending.get("answer") or "").strip()
+            if not trusted_task_ids:
+                return Authorization(
+                    "deny",
+                    "pending_decision_unavailable",
+                    "В текущем контексте нет подтверждённого вопроса, которому можно передать ответ.",
+                )
+            if decision_task_id not in trusted_task_ids:
+                return Authorization(
+                    "deny",
+                    "pending_decision_mismatch",
+                    "Я не смог однозначно связать этот ответ с открытым вопросом.",
+                )
+            if not answer:
+                return Authorization(
+                    "deny",
+                    "pending_decision_answer_empty",
+                    "Ответ на ожидающий вопрос пуст; передавать в миссию нечего.",
+                )
+            return Authorization(
+                "auto",
+                "explicit_pending_decision_answer",
+                "Текущий текст будет передан только подтверждённой ожидающей миссии.",
+            )
         if action == "request_warmaster_mission":
             request = decision.get("warmaster_request") if isinstance(decision.get("warmaster_request"), dict) else {}
             if not str(request.get("user_request") or "").strip() or not str(request.get("expected_outcome") or "").strip():
                 return Authorization("deny", "incomplete_abaddon_request", "Нет исходной задачи или проверяемого ожидаемого результата.")
         if action == "create_administratum_task" and not str(decision.get("task") or "").strip():
-            return Authorization("deny", "incomplete_administratum_request", "Нечего записывать в Administratum.")
+            return Authorization("deny", "incomplete_administratum_request", "Я не понял, что именно нужно записать.")
         if action == "deliver_artifact":
             delivery = decision.get("artifact_delivery") if isinstance(decision.get("artifact_delivery"), dict) else {}
             artifact_id = str(delivery.get("artifact_id") or "").strip()
@@ -154,10 +210,10 @@ class Authority:
         )
         if rule and not forced:
             if rule.get("verdict") == "never_auto":
-                return Authorization("ask", "owner_never_auto", "Владелец запретил выполнять этот класс действий без отдельного подтверждения.")
+                return Authorization("ask", "owner_never_auto", "Я помню, что ты запретил мне делать такие вещи без отдельного подтверждения.")
             if rule.get("verdict") == "ask":
-                return Authorization("ask", "owner_rejected_before", "Владелец ранее отклонил такое действие в этом контексте; нужно отдельное подтверждение.")
+                return Authorization("ask", "owner_rejected_before", "Я помню, что раньше ты отклонил такое действие; сейчас мне нужно отдельное подтверждение.")
         # These effects exist only after the current user turn explicitly
         # asked for them and the controller selected the matching capability.
         # They are cancellable delegations, not money/messages/destructive IO.
-        return Authorization("auto", "explicit_turn_capability", "Текущий запрос владельца и capability contract дают узкое разрешение.")
+        return Authorization("auto", "explicit_turn_capability", "Твой текущий запрос даёт мне узкое разрешение на это действие.")

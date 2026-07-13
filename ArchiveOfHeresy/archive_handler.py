@@ -28,6 +28,15 @@ from archivist_agent.magos_agent import MAGOS_CONTEXT_LAYERS, Magos
 from archivist_agent.quality_report import generate_quality_report
 from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_user_message
 from task_journal import final_response_message_from_orchestration
+from decision_requests import (
+    conversational_document,
+    extract_decision_request,
+    normalize_decision_request,
+    render_decision_request,
+    render_dispatch_retry,
+    render_internal_stall,
+    upsert_pending as upsert_pending_decision,
+)
 from artifact_store import (
     ArtifactError,
     ArtifactRangeError,
@@ -793,7 +802,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "system_event": True,
                 "intent_detection": False,
                 "turn_decision": {"action": "deliver_pending_reports"},
-                "text": "[Кнопка доклада] Владелец нажал кнопку и разрешил доложить накопленное.",
+                "text": "[Кнопка доклада] Расскажи, что у тебя накопилось.",
                 "stream": False,
             }
             job_id = create_mobile_job("chat", job_payload)
@@ -1218,7 +1227,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     append_chat_message(
                         SHARED_CHAT_SESSION_ID,
                         "assistant",
-                        final_message,
+                        conversational_document(final_message),
                         source="warmaster",
                         dedupe_key=f"warmaster:{task_id}:final",
                     )
@@ -1262,6 +1271,26 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             write_json(self, 502, {"ok": False, "error": f"Abaddon unavailable: {exc}"})
 
+    def warmaster_http_error_response(self, exc):
+        body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+        try:
+            parsed = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            parsed = {"ok": False, "error": body or str(exc)}
+        return int(exc.code or 502), parsed if isinstance(parsed, dict) else {"ok": False, "error": str(exc)}
+
+    def warmaster_orchestrate(self, payload):
+        """Keep typed preflight 4xx outcomes in the normal conversation path."""
+        try:
+            return proxy_json_url(
+                "POST",
+                f"{WARMASTER_BASE_URL}/orchestrate_run",
+                payload=payload,
+                timeout=240,
+            )
+        except HTTPError as exc:
+            return self.warmaster_http_error_response(exc)
+
     def warmaster_start_research_loop(self, task_id, payload):
         loop_payload = {
             "run_mode": str(payload.get("run_mode") or "http"),
@@ -1278,15 +1307,59 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 timeout=60,
             )
         except HTTPError as exc:
-            body = exc.read().decode("utf-8") if exc.fp else ""
-            try:
-                parsed = json.loads(body) if body else {}
-            except json.JSONDecodeError:
-                parsed = {"ok": False, "error": body or str(exc)}
-            return exc.code, parsed
+            return self.warmaster_http_error_response(exc)
 
     def warmaster_acceptance_message(self, task_id):
-        return f"Абаддон принял задачу и ведет исполнение: task_id={task_id}. Ход работы доступен во вкладке Бригады."
+        del task_id
+        return "Принял. Работа запущена; я сам слежу за ней и сообщу, когда будет результат или понадобится твой выбор."
+
+    def warmaster_start_outcome_message(self, task, task_id, accepted, *outcomes):
+        if accepted:
+            return self.warmaster_acceptance_message(task_id)
+        envelope = {"outcomes": [item for item in outcomes if isinstance(item, dict)]}
+        raw_decision = extract_decision_request(envelope)
+        if isinstance(raw_decision, dict):
+            resume = raw_decision.get("resume") if isinstance(raw_decision.get("resume"), dict) else {}
+            if not str(resume.get("kind") or "").strip() or not str(resume.get("path") or "").strip():
+                # A preflight question can be returned before a run exists.  A
+                # generic /runs/<id>/clarification fallback would point at a
+                # run which was never created, so preserve an executable retry
+                # of the original orchestration request with the same identity.
+                raw_decision = dict(raw_decision)
+                raw_decision["resume"] = {
+                    "kind": "retry_preflight_with_answer",
+                    "method": "POST",
+                    "path": "/orchestrate_run",
+                    "body": {
+                        "task_id": str(task_id or "").strip(),
+                        "message": str(task or "").strip(),
+                    },
+                    "condition": "после твоего ответа продолжу ту же задачу",
+                }
+        decision_request = normalize_decision_request(
+            raw_decision,
+            task_id=task_id,
+            fallback_problem=str(task or "порученная работа"),
+        )
+        if decision_request:
+            upsert_pending_decision(decision_request)
+            return render_decision_request(decision_request)
+        explanation = ""
+        for outcome in outcomes:
+            if not isinstance(outcome, dict):
+                continue
+            explanation = str(
+                outcome.get("explanation")
+                or outcome.get("error")
+                or outcome.get("detail")
+                or ""
+            ).strip()
+            if explanation:
+                break
+        return render_internal_stall(
+            str(task or "порученная работа"),
+            explanation or "Запуск не получил строгого подтверждения.",
+        )
 
     def append_warmaster_acceptance_message(self, session_id, task_id, task_text=""):
         clean_task_id = str(task_id or "").strip()
@@ -1300,11 +1373,78 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             dedupe_key=f"warmaster:{clean_task_id}:accepted",
         )
 
-    def warmaster_loop_started_or_active(self, status, payload):
-        if 200 <= int(status or 0) < 300:
-            return True
-        error = str((payload or {}).get("error") or "").lower()
-        return int(status or 0) == 409 and "already active" in error
+    def warmaster_loop_started_or_active(self, status, payload, expected_task_id=""):
+        """Accept a start only when the reply proves which run owns it."""
+        payload = payload if isinstance(payload, dict) else {}
+        expected_task_id = str(expected_task_id or "").strip()
+        status_node = payload.get("status") if isinstance(payload.get("status"), dict) else {}
+        run_node = payload.get("run") if isinstance(payload.get("run"), dict) else {}
+        received_task_id = str(
+            payload.get("task_id")
+            or payload.get("mission_id")
+            or status_node.get("task_id")
+            or run_node.get("task_id")
+            or ""
+        ).strip()
+        if not expected_task_id:
+            return False
+        if received_task_id != expected_task_id:
+            return False
+
+        http_status = int(status or 0)
+        error = str(payload.get("error") or "").strip().lower()
+        if http_status == 409:
+            return received_task_id == expected_task_id and "already active" in error
+        if not 200 <= http_status < 300 or payload.get("ok") is not True:
+            return False
+
+        state = str(
+            payload.get("phase")
+            or payload.get("state")
+            or (payload.get("status") if isinstance(payload.get("status"), str) else "")
+            or status_node.get("phase")
+            or status_node.get("status")
+            or run_node.get("status")
+            or ""
+        ).strip().lower()
+        acknowledged_states = {
+            "accepted", "active", "created", "queued", "resumed", "running", "started", "starting",
+        }
+        return state in acknowledged_states
+
+    @staticmethod
+    def warmaster_start_response_status(accepted, initial_status=0, loop_status=0):
+        """Keep real upstream failures while mapping ambiguous replies to conflict."""
+        if accepted:
+            return 202
+        candidate = int(loop_status or initial_status or 0)
+        return candidate if 400 <= candidate <= 599 else 409
+
+    def warmaster_core_effect_start_ack(self, core_effect, dispatched, fallback_task_id=""):
+        """Project only Core's actual, identity-bound Abaddon acknowledgement."""
+        core_effect = core_effect if isinstance(core_effect, dict) else {}
+        dispatched = dispatched if isinstance(dispatched, dict) else {}
+        requested_payload = core_effect.get("payload") if isinstance(core_effect.get("payload"), dict) else {}
+        expected_task_id = str(requested_payload.get("task_id") or fallback_task_id or "").strip()
+        effect = dispatched.get("effect") if isinstance(dispatched.get("effect"), dict) else {}
+        result = effect.get("result") if isinstance(effect.get("result"), dict) else {}
+        evidence = result.get("evidence") if isinstance(result.get("evidence"), dict) else {}
+        received_task_id = str(result.get("delegate_ref") or "").strip()
+        result_status = str(result.get("status") or evidence.get("phase") or "").strip()
+        try:
+            http_status = int(evidence.get("http_status") or 0)
+        except (TypeError, ValueError):
+            http_status = 0
+        acknowledgement = {
+            "ok": effect.get("state") == "delivered" and result.get("ok") is True,
+            "core_owned": True,
+            "auto_start": True,
+            "task_id": received_task_id,
+            "status": result_status,
+            "explanation": str(result.get("explanation") or "").strip(),
+            "core_effect": effect,
+        }
+        return expected_task_id, http_status, acknowledgement
 
     def mobile_agent_start(self):
         try:
@@ -1316,7 +1456,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         if not task:
             write_json(self, 400, {"ok": False, "error": "task is required"})
             return
-        task_id = str(payload.get("task_id") or "").strip()
+        task_id = str(payload.get("task_id") or f"client-{uuid.uuid4().hex[:12]}").strip()
         client_source = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
         warmaster_payload = {
             "message": task,
@@ -1331,30 +1471,59 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             if duplicate_id:
                 # Same job already on the board: resume it, don't spawn a twin.
                 status, response = 200, {"ok": True, "task_id": duplicate_id, "resumed_existing": True}
+                expected_task_id = duplicate_id
                 resolved_task_id = duplicate_id
             else:
-                status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=240)
+                expected_task_id = task_id
+                status, response = self.warmaster_orchestrate(warmaster_payload)
                 response_status = response.get("status") if isinstance(response.get("status"), dict) else {}
                 resolved_task_id = str(response.get("task_id") or response_status.get("task_id") or task_id)
             loop_status = 0
             loop_response = {}
-            if 200 <= status < 300 and resolved_task_id:
+            if 200 <= status < 300 and resolved_task_id == expected_task_id:
                 loop_status, loop_response = self.warmaster_start_research_loop(resolved_task_id, payload)
+            ack_status, ack_payload = (loop_status, loop_response) if loop_status else (status, response)
+            accepted_status = self.warmaster_loop_started_or_active(
+                ack_status,
+                ack_payload,
+                expected_task_id,
+            )
+            outcome_message = self.warmaster_start_outcome_message(
+                task,
+                expected_task_id,
+                accepted_status,
+                loop_response,
+                response,
+            )
             append_chat_message(
                 SHARED_CHAT_SESSION_ID,
                 "user",
                 task,
                 source=client_source,
-                dedupe_key=f"warmaster:{resolved_task_id}:user" if resolved_task_id else None,
+                dedupe_key=f"warmaster:{expected_task_id}:user",
             )
-            self.append_warmaster_acceptance_message(SHARED_CHAT_SESSION_ID, resolved_task_id, task_text=task)
+            if accepted_status:
+                self.append_warmaster_acceptance_message(SHARED_CHAT_SESSION_ID, expected_task_id, task_text=task)
+            else:
+                append_chat_message(
+                    SHARED_CHAT_SESSION_ID,
+                    "assistant",
+                    outcome_message,
+                    source="shushunya-core",
+                    dedupe_key=f"warmaster:{expected_task_id}:start-outcome",
+                )
             response["backend"] = "warmaster"
-            response["task_id"] = resolved_task_id
-            response["message"] = self.warmaster_acceptance_message(resolved_task_id) if resolved_task_id else "Абаддон принял задачу."
+            if resolved_task_id != expected_task_id:
+                response["reported_task_id"] = resolved_task_id
+            response["task_id"] = expected_task_id
+            response["message"] = outcome_message
             response["research_loop"] = loop_response
-            accepted_status = self.warmaster_loop_started_or_active(loop_status, loop_response) if loop_status else 200 <= status < 300
             response["ok"] = accepted_status
-            write_json(self, 202 if accepted_status else (loop_status if loop_status else 409), response)
+            write_json(
+                self,
+                self.warmaster_start_response_status(accepted_status, status, loop_status),
+                response,
+            )
         except HTTPError as exc:
             self.write_proxy_error(exc)
         except Exception as exc:
@@ -1525,17 +1694,19 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             raise ValueError("Abaddon task is empty")
 
         task_id = str(payload.get("task_id") or f"client-{uuid.uuid4().hex[:12]}").strip()
+        expected_start_task_id = task_id
         core_effect = payload.get("core_effect") if isinstance(payload.get("core_effect"), dict) else None
         if core_effect and core_effect.get("id"):
             try:
                 dispatched = core_dispatch_effect(str(core_effect["id"]))
-            except Exception as exc:  # commitment/outbox are already durable in Core
+            except Exception as exc:  # transport loss does not prove Core scheduled a retry
                 dispatched = {
                     "ok": False,
                     "effect": {
-                        "state": "retry_wait",
+                        "state": "not_confirmed",
                         "payload": core_effect.get("payload") if isinstance(core_effect.get("payload"), dict) else {},
                         "result": {
+                            "status": "core_delivery_not_confirmed",
                             "explanation": (
                                 "Core сохранил обязательство, но Archive не дождался подтверждения Абаддона: "
                                 f"{exc}"
@@ -1545,20 +1716,62 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 }
             effect = dispatched.get("effect") if isinstance(dispatched.get("effect"), dict) else {}
             effect_result = effect.get("result") if isinstance(effect.get("result"), dict) else {}
-            resolved_task_id = str(
-                effect_result.get("delegate_ref")
-                or (effect.get("payload") or {}).get("task_id")
-                or task_id
-            ).strip()
-            if effect.get("state") != "delivered" or not effect_result.get("delegate_ref"):
+            expected_start_task_id, loop_status, loop_response = self.warmaster_core_effect_start_ack(
+                core_effect,
+                dispatched,
+                task_id,
+            )
+            resolved_task_id = expected_start_task_id or task_id
+            core_confirmed = self.warmaster_loop_started_or_active(
+                loop_status,
+                loop_response,
+                expected_start_task_id,
+            )
+            if not core_confirmed:
                 explanation = str(
                     effect_result.get("explanation")
-                    or "Абаддон пока не подтвердил приём задачи."
+                    or (
+                        "Абаддон вернул подтверждение для другой задачи."
+                        if str(effect_result.get("delegate_ref") or "").strip() != expected_start_task_id
+                        else "Абаддон пока не подтвердил приём задачи."
+                    )
                 ).strip()
-                message = (
-                    f"{explanation} Обязательство не потеряно: Core сохранил его и повторит тем же "
-                    f"idempotency key. task_id={resolved_task_id}."
+                raw_decision = extract_decision_request(effect_result)
+                decision_request = normalize_decision_request(
+                    raw_decision,
+                    task_id=resolved_task_id,
+                    fallback_problem=explanation,
                 )
+                report_id = None
+                if decision_request:
+                    message = render_decision_request(decision_request)
+                    report_id = enqueue_report(
+                        "warmaster",
+                        "decision_required",
+                        "мне нужен твой выбор",
+                        message,
+                        dedupe_key=f"decision:{resolved_task_id}",
+                    )
+                    if report_id:
+                        decision_request["vox_intent_id"] = report_id
+                    upsert_pending_decision(decision_request)
+                else:
+                    evidence = effect_result.get("evidence") if isinstance(effect_result.get("evidence"), dict) else {}
+                    outcome_type = str(evidence.get("outcome_type") or "").strip()
+                    retry_scheduled = str(effect.get("state") or "") in {
+                        "pending",
+                        "leased",
+                        "retry_wait",
+                    }
+                    message = (
+                        render_dispatch_retry(explanation)
+                        if retry_scheduled
+                        else render_internal_stall(
+                            task or original_text or "эта задача",
+                            explanation,
+                            failed=outcome_type in {"rejected", "permanent_failure"},
+                        )
+                    )
                 append_chat_message(
                     session_id,
                     "user",
@@ -1566,30 +1779,26 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     source=client_source,
                     dedupe_key=f"core-effect:{core_effect['id']}:user",
                 )
-                append_chat_message(
+                assistant_message_id = append_chat_message(
                     session_id,
                     "assistant",
                     message,
                     source="shushunya-core",
                     dedupe_key=f"core-effect:{core_effect['id']}:retry",
                 )
+                if decision_request and report_id and assistant_message_id:
+                    mark_delivered([report_id])
                 return {
                     "ok": False,
                     "backend": "shushunya-core",
                     "task_id": resolved_task_id,
                     "message": message,
                     "core_effect": effect,
-                    "status": effect.get("state") or "retry_wait",
+                    "status": effect.get("state") or effect_result.get("status") or "not_confirmed",
                 }
-            status = 202
-            response = {
-                "ok": True,
-                "task_id": resolved_task_id,
-                "core_effect": effect,
-                "canonical_start": True,
-            }
-            loop_status = 202
-            loop_response = {"ok": True, "core_owned": True, "auto_start": True}
+            status = loop_status
+            response = dict(loop_response)
+            response["canonical_start"] = True
         else:
             warmaster_payload = {
                 "message": task,
@@ -1603,27 +1812,50 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             if duplicate_id:
                 # Legacy explicit /abaddon path: resume the same run, do not clone it.
                 status, response = 200, {"ok": True, "task_id": duplicate_id, "resumed_existing": True}
+                expected_start_task_id = duplicate_id
                 resolved_task_id = duplicate_id
             else:
-                status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=240)
+                status, response = self.warmaster_orchestrate(warmaster_payload)
                 response_status = response.get("status") if isinstance(response.get("status"), dict) else {}
                 resolved_task_id = str(response.get("task_id") or response_status.get("task_id") or task_id).strip()
             loop_status = 0
             loop_response = {}
-            if 200 <= status < 300 and resolved_task_id:
+            if 200 <= status < 300 and resolved_task_id == expected_start_task_id:
                 loop_status, loop_response = self.warmaster_start_research_loop(resolved_task_id, payload)
 
+        ack_status, ack_payload = (loop_status, loop_response) if loop_status else (status, response)
+        accepted_status = self.warmaster_loop_started_or_active(
+            ack_status,
+            ack_payload,
+            expected_start_task_id,
+        )
+        outcome_message = self.warmaster_start_outcome_message(
+            original_text or task,
+            expected_start_task_id,
+            accepted_status,
+            loop_response,
+            response,
+        )
         append_chat_message(
             session_id,
             "user",
             original_text or task,
             source=client_source,
-            dedupe_key=f"warmaster:{resolved_task_id}:user" if resolved_task_id else None,
+            dedupe_key=f"warmaster:{expected_start_task_id}:user",
         )
-        self.append_warmaster_acceptance_message(session_id, resolved_task_id or task_id, task_text=original_text or task)
+        if accepted_status:
+            self.append_warmaster_acceptance_message(session_id, expected_start_task_id, task_text=original_text or task)
+        else:
+            append_chat_message(
+                session_id,
+                "assistant",
+                outcome_message,
+                source="shushunya-core",
+                dedupe_key=f"warmaster:{expected_start_task_id}:start-outcome",
+            )
         activity = {}
         try:
-            activity = self.warmaster_fetch_activity(resolved_task_id or task_id)
+            activity = self.warmaster_fetch_activity(expected_start_task_id)
         except Exception:
             activity = {}
         activity_entries = activity.get("entries") if isinstance(activity.get("entries"), list) else []
@@ -1633,11 +1865,12 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         summary_cards = activity.get("summary_activity_cards") if isinstance(activity.get("summary_activity_cards"), list) else []
         brigade_tabs = activity.get("brigade_tabs") if isinstance(activity.get("brigade_tabs"), list) else []
         mission_state = activity.get("mission_state") if isinstance(activity.get("mission_state"), dict) else {}
-        accepted = self.warmaster_acceptance_message(resolved_task_id or task_id)
-        response["ok"] = self.warmaster_loop_started_or_active(loop_status, loop_response) if loop_status else 200 <= status < 300
+        response["ok"] = accepted_status
         response["backend"] = "warmaster"
-        response["task_id"] = resolved_task_id or task_id
-        response["message"] = accepted
+        if resolved_task_id != expected_start_task_id:
+            response["reported_task_id"] = resolved_task_id
+        response["task_id"] = expected_start_task_id
+        response["message"] = outcome_message
         response["mission_state"] = mission_state
         response["activity_log"] = ""
         response["progress_events"] = progress_events
@@ -1656,7 +1889,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         session_id = shared_chat_session_id(payload.get("session_id") or payload.get("user") or SHARED_CHAT_SESSION_ID)
         text = trim_chat_text(payload.get("text") or payload.get("message") or "")
         image_data_url = str(payload.get("image_data_url") or "").strip()
-        ensure_core_transport_identity(payload)
+        request_id = ensure_core_transport_identity(payload)
         with archive_state.CHAT_SESSION_LOCKS.hold(session_id), CHAT_QUEUE_LOCK:
             turn = decide_chat_turn_action(
                 session_id,
@@ -1680,6 +1913,39 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 effect_payload = payload["core_effect"].get("payload") if isinstance(payload.get("core_effect"), dict) else {}
                 payload["task_id"] = str((effect_payload or {}).get("task_id") or payload.get("task_id") or "")
                 return self.run_mobile_warmaster_payload(payload)
+            if decision.get("action") == "answer_pending_decision":
+                decision_answer = decision.get("pending_decision") if isinstance(decision.get("pending_decision"), dict) else {}
+                requested_task_id = str(
+                    decision.get("pending_decision_task_id")
+                    or decision_answer.get("task_id")
+                    or ""
+                ).strip()
+                pending = find_pending_decision(requested_task_id)
+                bound_task_id = str((pending or {}).get("task_id") or requested_task_id or "").strip()
+                resumed = resume_pending_decision(
+                    bound_task_id,
+                    decision_answer.get("answer") or text,
+                    request_id=request_id,
+                )
+                append_chat_message(
+                    session_id,
+                    "user",
+                    text,
+                    source=str(payload.get("client_source") or payload.get("source") or "app"),
+                    dedupe_key=f"decision-answer:{request_id}:user" if request_id else None,
+                )
+                append_chat_message(
+                    session_id,
+                    "assistant",
+                    resumed.get("message") or "Ответ принял.",
+                    source="shushunya-core",
+                    dedupe_key=f"decision-answer:{request_id}:assistant" if request_id else None,
+                )
+                return {
+                    **resumed,
+                    "backend": "warmaster",
+                    "message": resumed.get("message") or "Ответ принял.",
+                }
             if decision.get("action") in {"answer_in_chat", "ask_clarification"} and str(decision.get("reply") or "").strip():
                 payload["forced_chat_reply"] = str(decision.get("reply") or "").strip()
             return run_mobile_chat_payload(
@@ -2074,6 +2340,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             return
 
         session_id = shared_chat_session_id(payload.get("session_id") or payload.get("user") or SHARED_CHAT_SESSION_ID)
+        request_id = ensure_core_transport_identity(payload)
         # Preserve turn order inside one conversation, but do not let queued
         # turns from that conversation occupy all four global pipeline slots.
         with archive_state.CHAT_SESSION_LOCKS.hold(session_id), CHAT_QUEUE_LOCK:
@@ -2131,10 +2398,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 payload["task_id"] = task_id
                 job_id = create_mobile_job("warmaster", payload)
                 run_mobile_job(job_id, lambda payload=payload: self.run_mobile_warmaster_payload(payload))
-                message = (
-                    f"Core зафиксировал обязательство и поставил отправку Абаддону в durable-очередь: task_id={task_id}. "
-                    "Приём Абаддоном будет подтверждён отдельно фактическим ответом; ход принятой миссии появится во вкладке Бригады."
-                )
+                message = "Принял. Запускаю работу и сам прослежу за ней. Если понадобится именно твой выбор — спрошу отдельно."
                 extra = {"warmaster": {"ok": True, "task_id": task_id, "job_id": job_id, "status": "queued"}}
                 if stream:
                     self.stream_static_mobile_chat_completion(message, finish_reason="warmaster_queued", extra=extra)
@@ -2146,6 +2410,51 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                             message,
                             finish_reason="warmaster_queued",
                             extra=extra,
+                        ),
+                    )
+                return
+
+            if decision.get("action") == "answer_pending_decision":
+                decision_answer = decision.get("pending_decision") if isinstance(decision.get("pending_decision"), dict) else {}
+                requested_task_id = str(
+                    decision.get("pending_decision_task_id")
+                    or decision_answer.get("task_id")
+                    or ""
+                ).strip()
+                pending = find_pending_decision(requested_task_id)
+                bound_task_id = str((pending or {}).get("task_id") or requested_task_id or "").strip()
+                resumed = resume_pending_decision(
+                    bound_task_id,
+                    decision_answer.get("answer") or text,
+                    request_id=request_id,
+                )
+                append_chat_message(
+                    session_id,
+                    "user",
+                    text,
+                    source=client_source,
+                    dedupe_key=f"decision-answer:{request_id}:user",
+                )
+                append_chat_message(
+                    session_id,
+                    "assistant",
+                    resumed.get("message") or "Ответ принял.",
+                    source="shushunya-core",
+                    dedupe_key=f"decision-answer:{request_id}:assistant",
+                )
+                if stream:
+                    self.stream_static_mobile_chat_completion(
+                        resumed.get("message") or "Ответ принял.",
+                        finish_reason="decision_resumed" if resumed.get("ok") else "decision_pending",
+                    )
+                else:
+                    write_json(
+                        self,
+                        200 if resumed.get("ok") else 409,
+                        self.mobile_chat_protocol_completion_payload(
+                            resumed.get("message") or "Ответ принял.",
+                            finish_reason="decision_resumed" if resumed.get("ok") else "decision_pending",
+                            extra={"decision_resume": resumed},
                         ),
                     )
                 return

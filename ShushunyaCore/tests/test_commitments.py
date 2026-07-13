@@ -90,6 +90,23 @@ class CommitmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current["state"], "waiting_user")
         self.assertIn("репозиторий", current["diagnostic"]["explanation"])
 
+    async def test_needs_user_flag_without_exact_question_stays_internal(self):
+        snapshot = {
+            "task_id": "mission-1",
+            "status": "blocked",
+            "phase": "running",
+            "summary": {
+                "result": {
+                    "status": "needs_user",
+                    "needs_user": True,
+                    "action": {"reason": "internal preflight did not complete"},
+                }
+            },
+        }
+        current = await Commitments(self.ledger, FakeOrgans(snapshot)).reconcile_one(self.item())
+        self.assertEqual(current["state"], "retry_wait")
+        self.assertNotEqual(current["state"], "waiting_user")
+
     async def test_external_dependency_has_explanation_and_resume_condition(self):
         snapshot = {
             "task_id": "mission-1",
@@ -143,6 +160,24 @@ class CommitmentTests(unittest.IsolatedAsyncioTestCase):
             db.execute("UPDATE commitments SET state='working',next_attempt_at=NULL,diagnostic_json=NULL WHERE id='commitment-1'")
         current = await commitments.reconcile_one(self.item())
         self.assertEqual(current["state"], "working")
+
+    async def test_waiting_user_is_reconciled_after_answer_resumes_mission(self):
+        snapshot = {
+            "task_id": "mission-1",
+            "status": "running",
+            "phase": "executing",
+            "mission_state": {},
+        }
+        with self.ledger.write() as db:
+            db.execute(
+                "UPDATE commitments SET state='waiting_user',diagnostic_json='{}' "
+                "WHERE id='commitment-1'"
+            )
+
+        summary = await Commitments(self.ledger, FakeOrgans(snapshot)).reconcile_all()
+
+        self.assertEqual(summary["checked"], 1)
+        self.assertEqual(self.item()["state"], "working")
 
     async def test_steward_cycles_are_serialized(self):
         class HealthProbe:

@@ -69,11 +69,18 @@ class Steward:
                     evidence={"destination": claim["destination"]},
                 )
         except OrganError as exc:
-            clarification = exc.code in {
+            outcome_type = str(exc.evidence.get("outcome_type") or "").strip()
+            decision_request = (
+                exc.evidence.get("decision_request")
+                if isinstance(exc.evidence.get("decision_request"), dict)
+                else {}
+            )
+            clarification = outcome_type == "needs_user_decision" or exc.code in {
                 "administratum_needs_clarification",
                 "clarification_required",
                 "confirmation_required",
             }
+            repair_required = outcome_type == "repair_required"
             organ_name = {
                 "archive_adapter": "Archive/Administratum",
                 "archive_artifact_adapter": "Archive/Artifacts",
@@ -88,13 +95,20 @@ class Steward:
                     "explanation": exc.explanation,
                     "evidence": exc.evidence,
                     "required_action": (
-                        "Дать недостающие параметры или подтверждение."
+                        str(decision_request.get("question") or "Дать недостающие параметры или подтверждение.")
                         if clarification
+                        else str(exc.evidence.get("required_action") or "Выполнить внутреннее восстановление.")
+                        if repair_required
                         else "Повторить тем же idempotency key или выбрать новый подтверждаемый путь."
                     ),
                     "resume_condition": (
-                        "Владелец уточнит задачу."
+                        str(decision_request.get("resume_condition") or "Получен ответ на запрос решения.")
                         if clarification
+                        else str(
+                            exc.evidence.get("resume_condition")
+                            or "Внутреннее восстановление выполнено и запуск снова подтверждён."
+                        )
+                        if repair_required
                         else f"{organ_name} снова отвечает и даёт однозначный фактический результат."
                     ),
                 },

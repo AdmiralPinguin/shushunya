@@ -12,6 +12,7 @@ TurnAction = Literal[
     "create_administratum_task",
     "deliver_pending_reports",
     "deliver_artifact",
+    "answer_pending_decision",
 ]
 
 

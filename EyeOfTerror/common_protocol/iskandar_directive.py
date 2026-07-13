@@ -217,6 +217,20 @@ def directive_request_payload(
                 "one exact question only for needs_clarification; otherwise empty"
             ),
         },
+        "decision_policy": {
+            "default": (
+                "Delegate with defensible research defaults and record them as policy choices."
+            ),
+            "ask_user_only_if": [
+                "jurisdiction, edition, identity, or date range materially changes the answer and cannot be inferred",
+                "the work needs private corpus access, credentials, paid acquisition, or user authority",
+                "two legitimate interpretations lead to materially different deliverables and neither is a safe default",
+            ],
+            "do_not_ask_for": [
+                "search queries, source selection, research depth, answer formatting, or other worker-owned details",
+                "preferences for which a conventional and reversible default satisfies the request",
+            ],
+        },
         "forbidden_detailed_plan_fields": sorted(DETAILED_RESEARCH_FIELDS),
     }
 
@@ -244,6 +258,10 @@ def directive_model_instructions() -> str:
         "claims, evidence, citations, excerpts, locators, a timeline, artifact paths, or a "
         "detailed work plan. ResearchWarband owns detailed planning, search, reading, "
         "evidence construction, analysis, writing, verification, and repair. Source class "
+        "choices, search strategy, depth, and answer formatting have sensible defaults and are not "
+        "reasons to stop. Use needs_clarification only when a material jurisdiction/edition/identity/"
+        "date-range ambiguity cannot be inferred, private access or user authority is required, or two "
+        "legitimate interpretations lead to materially different outcomes with no safe default. "
         f"items must be chosen only from {sorted(SOURCE_CLASSES)}. Preserve "
         "explicit caller constraints without expanding them into a plan. The object must "
         "contain exactly the fourteen literal top-level keys in this shape and no others: "

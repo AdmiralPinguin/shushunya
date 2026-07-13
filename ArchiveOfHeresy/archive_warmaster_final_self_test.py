@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import io
+import inspect
+import json
+from urllib.error import HTTPError
+
 import archive_handler
+import archive_ops
 from archive_handler import ArchiveHandler
 import task_journal
 from task_journal import deliver_final_to_chat, final_message_from_orchestration
@@ -70,14 +76,204 @@ class FakeArchiveHandler:
     def warmaster_final_message(self, orchestration):
         return ArchiveHandler.warmaster_final_message(self, orchestration)
 
+    def warmaster_acceptance_message(self, task_id):
+        return ArchiveHandler.warmaster_acceptance_message(self, task_id)
+
+    def warmaster_start_outcome_message(self, task, task_id, accepted, *outcomes):
+        return ArchiveHandler.warmaster_start_outcome_message(self, task, task_id, accepted, *outcomes)
+
+    def warmaster_http_error_response(self, exc):
+        return ArchiveHandler.warmaster_http_error_response(self, exc)
+
+    def warmaster_orchestrate(self, payload):
+        return ArchiveHandler.warmaster_orchestrate(self, payload)
+
+    def warmaster_start_response_status(self, accepted, initial_status=0, loop_status=0):
+        return ArchiveHandler.warmaster_start_response_status(accepted, initial_status, loop_status)
+
+    def warmaster_core_effect_start_ack(self, core_effect, dispatched, fallback_task_id=""):
+        return ArchiveHandler.warmaster_core_effect_start_ack(self, core_effect, dispatched, fallback_task_id)
+
     def warmaster_run_as_agent_task(self, run, active=False, final_text="", activity=None):
         return ArchiveHandler.warmaster_run_as_agent_task(self, run, active=active, final_text=final_text, activity=activity)
 
 
 def main() -> int:
+    committed_decisions = []
+    original_find_pending = archive_ops.find_pending_decision
+    original_decision_proxy = archive_ops.proxy_json_url
+    original_commit_answer = archive_ops.commit_answer_result
+    original_mark_delivered = archive_ops.mark_delivered
+    archive_ops.find_pending_decision = lambda _task_id: {
+        "task_id": "lost-clarification-ack",
+        "question": "Which option?",
+    }
+    archive_ops.commit_answer_result = lambda request_id, **kwargs: committed_decisions.append(
+        {"request_id": request_id, **kwargs}
+    ) or True
+    archive_ops.mark_delivered = lambda _report_ids: None
+
+    def lost_ack_proxy(method, url, **_kwargs):
+        if method == "POST":
+            raise RuntimeError("response was lost")
+        return 200, {"status": "running", "snapshot": {"summary": {"status": "running"}}}
+
+    archive_ops.proxy_json_url = lost_ack_proxy
+    try:
+        reconciled_answer = archive_ops.resume_pending_decision("lost-clarification-ack", "option A")
+    finally:
+        archive_ops.find_pending_decision = original_find_pending
+        archive_ops.proxy_json_url = original_decision_proxy
+        archive_ops.commit_answer_result = original_commit_answer
+        archive_ops.mark_delivered = original_mark_delivered
+    if (
+        reconciled_answer.get("status") != "resumed_reconciled"
+        or len(committed_decisions) != 1
+        or committed_decisions[0].get("task_id") != "lost-clarification-ack"
+        or committed_decisions[0].get("clear_pending") is not True
+    ):
+        raise AssertionError(f"lost clarification ACK was not reconciled from durable run state: {reconciled_answer!r}")
+
+    start_ack = ArchiveHandler.warmaster_loop_started_or_active
+    if start_ack(None, 200, {"ok": False, "task_id": "strict"}, "strict"):
+        raise AssertionError("HTTP 200 with ok=false was accepted as a started run")
+    if start_ack(None, 202, {"ok": True, "task_id": "other", "status": "started"}, "strict"):
+        raise AssertionError("start acknowledgement for another task was accepted")
+    if not start_ack(None, 202, {"ok": True, "task_id": "strict", "status": "started"}, "strict"):
+        raise AssertionError("strict start acknowledgement was rejected")
+    if not start_ack(None, 409, {"ok": False, "task_id": "strict", "error": "run already active"}, "strict"):
+        raise AssertionError("identity-bound already-active acknowledgement was rejected")
+    if start_ack(None, 202, {"ok": True, "active": True}, "strict"):
+        raise AssertionError("active acknowledgement without task identity was accepted")
+    if start_ack(None, 202, {"ok": True, "core_owned": True, "auto_start": True}, "strict"):
+        raise AssertionError("Core-owned acknowledgement without task identity/state was accepted")
+    if not start_ack(
+        None,
+        202,
+        {"ok": True, "core_owned": True, "auto_start": True, "task_id": "strict", "status": "started"},
+        "strict",
+    ):
+        raise AssertionError("identity-bound Core-owned start acknowledgement was rejected")
+
+    core_effect = {"id": "effect-1", "payload": {"task_id": "strict"}}
+    wrong_core_dispatch = {
+        "effect": {
+            "state": "delivered",
+            "result": {
+                "ok": True,
+                "delegate_ref": "wrong",
+                "status": "failed",
+                "evidence": {"http_status": 202},
+            },
+        },
+    }
+    expected_id, core_status, core_ack = ArchiveHandler.warmaster_core_effect_start_ack(
+        None,
+        core_effect,
+        wrong_core_dispatch,
+        "fallback",
+    )
+    if expected_id != "strict" or start_ack(None, core_status, core_ack, expected_id):
+        raise AssertionError(f"Core result for another failed task was fabricated as started: {core_ack!r}")
+    valid_core_dispatch = {
+        "effect": {
+            "state": "delivered",
+            "result": {
+                "ok": True,
+                "delegate_ref": "strict",
+                "status": "running",
+                "evidence": {"http_status": 202},
+            },
+        },
+    }
+    expected_id, core_status, core_ack = ArchiveHandler.warmaster_core_effect_start_ack(
+        None,
+        core_effect,
+        valid_core_dispatch,
+        "fallback",
+    )
+    if not start_ack(None, core_status, core_ack, expected_id):
+        raise AssertionError(f"actual identity-bound Core acknowledgement was rejected: {core_ack!r}")
+
+    response_status = ArchiveHandler.warmaster_start_response_status
+    if response_status(True, 503, 0) != 202:
+        raise AssertionError("accepted start did not map to HTTP 202")
+    if response_status(False, 503, 0) != 503 or response_status(False, 200, 0) != 409:
+        raise AssertionError("upstream failure status was masked or ambiguous success was not rejected")
+
+    outcome_handler = FakeArchiveHandler("/")
+    original_proxy = archive_handler.proxy_json_url
+    original_upsert = archive_handler.upsert_pending_decision
+    stored_preflight = []
+    preflight_payload = {
+        "ok": False,
+        "needs_user": True,
+        "task_id": "preflight-choice",
+        "decision_request": {
+            "kind": "decision_request",
+            "task_id": "preflight-choice",
+            "problem": "Нужно выбрать формат результата",
+            "question": "APK или исходники?",
+        },
+    }
+
+    def preflight_conflict(*_args, **_kwargs):
+        body = json.dumps(preflight_payload, ensure_ascii=False).encode("utf-8")
+        raise HTTPError("http://warmaster/orchestrate_run", 409, "Conflict", {}, io.BytesIO(body))
+
+    try:
+        archive_handler.proxy_json_url = preflight_conflict
+        archive_handler.upsert_pending_decision = lambda request: stored_preflight.append(request) or True
+        preflight_status, preflight_response = outcome_handler.warmaster_orchestrate({"task_id": "preflight-choice"})
+        preflight_message = outcome_handler.warmaster_start_outcome_message(
+            "build the app",
+            "preflight-choice",
+            False,
+            preflight_response,
+        )
+    finally:
+        archive_handler.proxy_json_url = original_proxy
+        archive_handler.upsert_pending_decision = original_upsert
+    if preflight_status != 409 or not stored_preflight or "APK или исходники?" not in preflight_message:
+        raise AssertionError(
+            f"initial preflight 409 bypassed decision storage/rendering: "
+            f"{preflight_status}, {preflight_response!r}, {preflight_message!r}"
+        )
+    preflight_resume = stored_preflight[-1].get("resume") if isinstance(stored_preflight[-1], dict) else {}
+    if (
+        preflight_resume.get("kind") != "retry_preflight_with_answer"
+        or preflight_resume.get("path") != "/orchestrate_run"
+        or (preflight_resume.get("body") or {}).get("task_id") != "preflight-choice"
+        or (preflight_resume.get("body") or {}).get("message") != "build the app"
+    ):
+        raise AssertionError(f"preflight decision has no executable same-run resume contract: {preflight_resume!r}")
+    synthetic_sources = (
+        inspect.getsource(ArchiveHandler.run_mobile_warmaster_payload),
+        inspect.getsource(archive_ops.run_mobile_chat_payload),
+    )
+    if any('"state": "retry_wait"' in source for source in synthetic_sources):
+        raise AssertionError("an unconfirmed Core transport exception still fabricates retry_wait")
+
+    rejected_start = outcome_handler.warmaster_start_outcome_message(
+        "build the app",
+        "rejected-start",
+        False,
+        {"error": "strict start acknowledgement is missing"},
+    )
+    if "Работа запущена" in rejected_start or rejected_start.startswith("Принял"):
+        raise AssertionError(f"rejected start was reported as accepted: {rejected_start!r}")
+    accepted_start = outcome_handler.warmaster_start_outcome_message(
+        "build the app",
+        "accepted-start",
+        True,
+        {"ok": True},
+    )
+    if not accepted_start.startswith("Принял"):
+        raise AssertionError(f"accepted start lost its acknowledgement: {accepted_start!r}")
     acceptance = ArchiveHandler.warmaster_acceptance_message(None, "public-name-test")
-    if "Абаддон" not in acceptance or "Вармастер" in acceptance or "Warmaster" in acceptance:
-        raise AssertionError(f"acceptance message leaked the legacy public commander name: {acceptance!r}")
+    forbidden = ("Абаддон", "Вармастер", "Warmaster", "task_id", "public-name-test")
+    if any(item in acceptance for item in forbidden) or not acceptance.startswith("Принял"):
+        raise AssertionError(f"acceptance message leaked internal anatomy: {acceptance!r}")
     accepted = final_message(
         {
             "task_id": STATIC_TASK_ID,
@@ -228,8 +424,12 @@ def main() -> int:
     if journal_accepted != "Финал для доставки из фонового журнала.":
         raise AssertionError(f"journal final_response was not preferred: {journal_accepted!r}")
     queued_reports = []
+    final_chat_messages = []
+    conveyed_reports = []
     original_fetch = task_journal.fetch_orchestration
     original_enqueue = task_journal.enqueue_report
+    original_mark = task_journal.mark_delivered
+    original_append = archive_ops.append_chat_message
     task_journal.fetch_orchestration = lambda task_id: {
         "task_id": task_id,
         "status": "completed",
@@ -243,22 +443,40 @@ def main() -> int:
             },
     }
     task_journal.enqueue_report = lambda *args, **kwargs: queued_reports.append({"args": args, "kwargs": kwargs}) or 777
+    task_journal.mark_delivered = lambda ids: conveyed_reports.extend(ids) or len(ids)
+    archive_ops.append_chat_message = lambda *args, **kwargs: final_chat_messages.append(
+        {"args": args, "kwargs": kwargs}
+    ) or 991
     try:
         if not deliver_final_to_chat("task-final-delivery"):
             raise AssertionError("deliver_final_to_chat returned false for completed final_response")
     finally:
         task_journal.fetch_orchestration = original_fetch
         task_journal.enqueue_report = original_enqueue
+        task_journal.mark_delivered = original_mark
+        archive_ops.append_chat_message = original_append
     if len(queued_reports) != 1:
         raise AssertionError(f"final delivery queued unexpected reports: {queued_reports}")
     if queued_reports[0]["args"][:3] != ("warmaster", "task_completed", "готово: task-final-delivery"):
         raise AssertionError(f"final delivery queued wrong report header: {queued_reports}")
     if "Доставленный финал task-final-delivery." not in queued_reports[0]["args"][3]:
         raise AssertionError(f"final delivery queued wrong report body: {queued_reports}")
-    if "принята Абаддоном" not in queued_reports[0]["args"][3] or "Warmaster" in queued_reports[0]["args"][3]:
-        raise AssertionError(f"final delivery report leaked the legacy public commander name: {queued_reports}")
+    if "Я закончил задачу" not in queued_reports[0]["args"][3] or any(
+        item in queued_reports[0]["args"][3]
+        for item in ("Абаддон", "Warmaster", "task_id", "idempotency")
+    ):
+        raise AssertionError(f"final delivery report leaked internal anatomy: {queued_reports}")
     if queued_reports[0]["kwargs"].get("dedupe_key") != "warmaster:task-final-delivery:final":
         raise AssertionError(f"final delivery did not use stable dedupe key: {queued_reports}")
+    if (
+        len(final_chat_messages) != 1
+        or final_chat_messages[0]["args"][:2] != (task_journal.SHARED_CHAT_SESSION_ID, "assistant")
+        or final_chat_messages[0]["kwargs"].get("dedupe_key")
+        != "warmaster:task-final-delivery:final:chat"
+    ):
+        raise AssertionError(f"accepted final was not appended idempotently to shared chat: {final_chat_messages}")
+    if conveyed_reports != [777]:
+        raise AssertionError(f"visible final report was not marked conveyed: {conveyed_reports}")
     queued_reports.clear()
     task_journal.fetch_orchestration = lambda task_id: {
         "status": "completed",

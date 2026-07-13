@@ -96,6 +96,73 @@ def main() -> int:
             or failed_revision_state.get("next_owner") != "governor"
         ):
             raise AssertionError(f"failed run with revision plan did not normalize to revision: {failed_revision_state}")
+
+        internal_block_run = root / "internal-block"
+        write_minimal_run(
+            internal_block_run,
+            "blocked",
+            result={"ok": False, "status": "blocked", "needs_user": False},
+        )
+        internal_state = run_summary(internal_block_run)["mission_state"]
+        if (
+            internal_state.get("needs_user") is not False
+            or internal_state.get("next_owner") != "governor"
+            or internal_state.get("user_visible_state") != "internal_repair_required"
+        ):
+            raise AssertionError(f"internal block was misclassified as a user decision: {internal_state}")
+
+        user_block_run = root / "user-block"
+        write_minimal_run(
+            user_block_run,
+            "blocked",
+            result={"ok": False, "status": "needs_user", "needs_user": True},
+        )
+        user_state = run_summary(user_block_run)["mission_state"]
+        if (
+            user_state.get("needs_user") is not True
+            or user_state.get("next_owner") != "user"
+            or user_state.get("user_visible_state") != "needs_user_decision"
+        ):
+            raise AssertionError(f"real user decision was not projected: {user_state}")
+
+        durable_user_mission = root / "missions" / "mission-durable-user"
+        write_json(
+            durable_user_mission / "mission.json",
+            {
+                "mission_id": "mission-durable-user",
+                "status": "blocked",
+                "assigned_governor": "Ceraxia",
+            },
+        )
+        write_json(
+            durable_user_mission / "mission_state.json",
+            {
+                "kind": "mission_state",
+                "mission_id": "mission-durable-user",
+                "status": "blocked",
+                "needs_user": True,
+                "assigned_governor": "Ceraxia",
+            },
+        )
+        durable_user_run = root / "durable-user-run"
+        write_minimal_run(durable_user_run, "blocked")
+        write_json(
+            durable_user_run / "mission_ref.json",
+            {
+                "mission_id": "mission-durable-user",
+                "mission_dir": str(durable_user_mission),
+                "assigned_governor": "Ceraxia",
+            },
+        )
+        durable_user_state = run_summary(durable_user_run)["mission_state"]
+        if (
+            durable_user_state.get("needs_user") is not True
+            or durable_user_state.get("next_owner") != "user"
+            or durable_user_state.get("user_visible_state") != "needs_user_decision"
+        ):
+            raise AssertionError(
+                f"durable user decision was lost in run summary: {durable_user_state}"
+            )
     print("[ok] Warmaster lifecycle status")
     return 0
 

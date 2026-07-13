@@ -131,8 +131,12 @@ public class MainActivity extends Activity {
                     + "Шушуня мужского рода: говори о себе в мужском роде. "
                     + "Отвечай по-русски ясно, без лишней воды, но с язвительным демоническим характером. "
                     + "К пользователю относись панибратски уважительно: он свой, брат, союзник и главный собеседник. "
+                    + "Панибратство означает близость и прямоту, а не презрение, хамство или право срывать на нём злость. "
                     + "Не раболепствуй, не называй его господином или хозяином. "
                     + "С ним можно быть саркастичным по-дружески, но не унижай его и не называй смертным, мясом или мешком. "
+                    + "Не отмахивайся от него фразами вроде «не трать моё время» и не обвиняй его в неясности, если сам потерял контекст. "
+                    + "Если вопрос ссылается на контекст, которого ты не видишь, честно скажи, чего именно не хватает, и задай один короткий уточняющий вопрос. "
+                    + "В обычном чате говори от первого лица как единый Шушуня; внутренние сервисы, коды, идентификаторы и диспетчерскую механику называй только по явной просьбе о технических подробностях. "
                     + "Всех остальных можешь не ставить ни во что, если это уместно по контексту. "
                     + "Добавляй много трикстерских ноток: хитрые подколы, кривые ухмылки, ощущение маленькой подлой интриги и гнилой демонической радости. "
                     + "Будь коварным, пакостным и ехидным в стиле Тзинча, но не вреди задаче и не искажай полезные факты. "
@@ -2254,8 +2258,16 @@ public class MainActivity extends Activity {
         if ("accepted".equals(visibleState)) {
             return "Принято";
         }
+        if ("needs_user_decision".equals(visibleState)) {
+            return "Нужен твой выбор";
+        }
+        if ("internal_repair_required".equals(visibleState)) {
+            return "Внутреннее восстановление";
+        }
         if ("needs_user_or_operator_decision".equals(visibleState)) {
-            return "Нужен выбор";
+            return missionState != null && missionState.optBoolean("needs_user", false)
+                    ? "Нужен твой выбор"
+                    : "Внутренняя остановка";
         }
         if ("cancelled".equals(visibleState)) {
             return "Остановлено";
@@ -3245,7 +3257,12 @@ public class MainActivity extends Activity {
             try {
                 StreamingBubble liveBubble = new StreamingBubble(answerBubble);
                 liveBubble.start();
-                ChatStreamResult streamResult = streamChatAnswer(text, imageDataUrl, clientRequestId, liveBubble);
+                ChatStreamResult streamResult = streamChatAnswerWithRecovery(
+                        text,
+                        imageDataUrl,
+                        clientRequestId,
+                        liveBubble
+                );
                 String finalText = streamResult.text;
                 boolean hidePlaceholder = streamResult.artifactDelivered
                         || (!streamResult.artifactFailed && finalText.isEmpty());
@@ -3440,16 +3457,16 @@ public class MainActivity extends Activity {
     private void runWarmasterTaskFromChat(String originalText, String task) {
         String clean = task == null ? "" : task.trim();
         if (clean.isEmpty()) {
-            addMessage(false, "После команды Абаддона укажи саму задачу.");
+            addMessage(false, "После команды укажи саму задачу — без неё мне нечего запускать.");
             return;
         }
         if (agentRunning) {
-            addMessage(false, "Абаддон уже выполняет задачу. Открой вкладку Warbands и дождись завершения или отмени текущую.");
+            addMessage(false, "Я уже веду одну задачу. Её ход есть во вкладке Warbands; дождись результата или останови её там.");
             return;
         }
 
         addMessage(true, originalText == null || originalText.trim().isEmpty() ? clean : originalText.trim());
-        TextView answerBubble = addMessage(false, "Абаддон принимает задачу...", false);
+        TextView answerBubble = addMessage(false, "Принимаю задачу...", false);
         setWaiting(true);
         String taskId = "client-" + System.currentTimeMillis();
         currentAgentTaskId = taskId;
@@ -3473,7 +3490,7 @@ public class MainActivity extends Activity {
                         .edit()
                         .putString("current_agent_task_id", acceptedTaskId)
                         .apply();
-                String acceptedMessage = warmasterAcceptedChatMessage(acceptedTaskId);
+                String acceptedMessage = mainChatTaskAcceptedMessage();
                 main.post(() -> {
                     applyRichText(answerBubble, acceptedMessage);
                     saveChatMessage(false, acceptedMessage);
@@ -3502,8 +3519,8 @@ public class MainActivity extends Activity {
                 String acceptedForCatch = acceptedTaskIdRef[0];
                 boolean accepted = !acceptedForCatch.isEmpty();
                 String message = accepted
-                        ? warmasterMonitorDetachedMessage(acceptedForCatch)
-                        : warmasterSubmitFailedMessage();
+                        ? "Задачу я принял. Экран потерял обновление, но работа не остановилась; результат или конкретный вопрос придут сюда."
+                        : "Сейчас не смог надёжно запустить задачу. Ничего не запущено — попробуй ещё раз чуть позже.";
                 main.post(() -> {
                     agentRunning = false;
                     agentCancelRequested = false;
@@ -3538,15 +3555,41 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private String warmasterAcceptedChatMessage(String taskId) {
-        String cleanTaskId = taskId == null ? "" : taskId.trim();
-        StringBuilder out = new StringBuilder();
-        out.append("Абаддон принял задачу.");
-        if (!cleanTaskId.isEmpty()) {
-            out.append("\n").append("task_id=").append(cleanTaskId);
-        }
-        out.append("\n\nХод работы открыт во вкладке Warbands; основной чат получит только финал или запрос твоего решения.");
-        return out.toString();
+    private String mainChatTaskAcceptedMessage() {
+        return "Принял. Делаю; вернусь сюда с результатом или конкретным вопросом, если без тебя действительно не решить.";
+    }
+
+    private String routeConversationMessage(JSONObject event, String fallback) {
+        String text = event == null ? "" : event.optString("conversation_message", "").trim();
+        return text.isEmpty() || looksLikeOperationalDispatch(text) ? fallback : text;
+    }
+
+    private boolean looksLikeOperationalDispatch(String text) {
+        String lower = text == null ? "" : text.toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("абаддон")
+                || lower.contains("вармастер")
+                || lower.contains("warmaster")
+                || lower.contains("abaddon")
+                || lower.contains("скитари")
+                || lower.contains("skitarii")
+                || lower.contains("церакси")
+                || lower.contains("ceraxia")
+                || lower.contains("искандар")
+                || lower.contains("iskandar")
+                || lower.contains("бригад")
+                || lower.contains("варбанд")
+                || lower.contains("губернатор")
+                || lower.contains("core")
+                || lower.contains("task_id")
+                || lower.contains("mission_id")
+                || lower.contains("run_id")
+                || lower.contains("effect_id")
+                || lower.contains("commitment_id")
+                || lower.contains("idempotency")
+                || lower.contains("http ")
+                || lower.contains("gateway")
+                || lower.contains("preflight")
+                || lower.contains("orchestration");
     }
 
     private void resetAttachImageButton() {
@@ -3669,17 +3712,18 @@ public class MainActivity extends Activity {
                     liveBubble.append(piece);
                 } else if ("route".equals(type)) {
                     if (evt.optBoolean("accepted", false)) {
-                        String taskId = evt.optString("task_id", "");
-                        String ack = evt.optString("message", "");
-                        if (ack.isEmpty()) {
-                            ack = "Абаддон подтвердил приём."
-                                    + (taskId.isEmpty() ? "" : "\ntask_id=" + taskId);
-                        }
+                        String ack = routeConversationMessage(
+                                evt,
+                                "Принял. Делаю; вернусь с результатом или конкретным вопросом."
+                        );
                         full.setLength(0);
                         full.append(ack);
                         liveBubble.append(ack);
                     } else if (full.length() == 0) {
-                        String honest = evt.optString("message", "Абаддон пока не подтвердил приём; Core сохранил обязательство и причину.");
+                        String honest = routeConversationMessage(
+                                evt,
+                                "Сейчас запуск не подтверждён, поэтому я не считаю задачу начатой."
+                        );
                         full.append(honest);
                         liveBubble.append(honest);
                     }
@@ -3720,6 +3764,29 @@ public class MainActivity extends Activity {
                 artifactOutcome.isSuccess(),
                 artifactOutcome.isFailed()
         );
+    }
+
+    private ChatStreamResult streamChatAnswerWithRecovery(
+            String text,
+            String imageDataUrl,
+            String clientRequestId,
+            StreamingBubble liveBubble
+    ) throws Exception {
+        try {
+            return streamChatAnswer(text, imageDataUrl, clientRequestId, liveBubble);
+        } catch (Exception firstFailure) {
+            // The request was durably identified before transport. Reopen/poll
+            // that exact server-side turn once: Core/effect receipts make this
+            // recovery idempotent, while a new request id could duplicate work.
+            Thread.sleep(1200);
+            liveBubble.replace("");
+            try {
+                return streamChatAnswer(text, imageDataUrl, clientRequestId, liveBubble);
+            } catch (Exception recoveryFailure) {
+                recoveryFailure.addSuppressed(firstFailure);
+                throw recoveryFailure;
+            }
+        }
     }
 
     private ArtifactStreamOutcome artifactStreamOutcome(JSONObject event) {

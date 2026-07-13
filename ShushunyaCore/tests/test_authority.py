@@ -90,11 +90,11 @@ class AuthorityTests(unittest.TestCase):
         )
         self.assertEqual(verdict.verdict, "deny")
         self.assertEqual(verdict.code, "artifact_not_in_capability")
-        self.assertIn("зарегистрирован", verdict.explanation)
-        self.assertIn("видим", verdict.explanation)
+        self.assertIn("нет среди доступных", verdict.explanation)
         self.assertIn("result.zip", verdict.explanation)
-        self.assertIn("после этого я смогу прислать", verdict.explanation)
+        self.assertIn("после этого я смогу его отправить", verdict.explanation)
         self.assertNotIn("разрешение", verdict.explanation)
+        self.assert_user_facing(verdict.explanation)
 
     def test_available_flag_without_catalog_does_not_grant_file_access(self):
         manifest = {"capabilities": [{"action": "deliver_artifact", "available": True}]}
@@ -102,6 +102,7 @@ class AuthorityTests(unittest.TestCase):
         self.assertEqual(verdict.verdict, "deny")
         self.assertEqual(verdict.code, "artifact_not_in_capability")
         self.assertIn("ни одного доступного файла", verdict.explanation)
+        self.assert_user_facing(verdict.explanation)
 
     def test_missing_artifact_id_lists_visible_filenames_without_permission_question(self):
         verdict = self.authority.authorize(
@@ -110,18 +111,88 @@ class AuthorityTests(unittest.TestCase):
         self.assertEqual(verdict.verdict, "deny")
         self.assertEqual(verdict.code, "incomplete_artifact_delivery")
         self.assertIn("result.zip", verdict.explanation)
-        self.assertIn("локальный издатель", verdict.explanation)
+        self.assertIn("мне нужно получить или создать файл", verdict.explanation)
         self.assertNotIn("разрешение", verdict.explanation)
+        self.assert_user_facing(verdict.explanation)
 
     def test_unavailable_artifact_catalog_explains_registration_and_visibility(self):
         manifest = {"capabilities": [{"action": "deliver_artifact", "available": False}]}
         verdict = self.authority.authorize("deliver_artifact", artifact_decision(), manifest)
         self.assertEqual(verdict.verdict, "deny")
         self.assertEqual(verdict.code, "artifact_catalog_unavailable")
-        self.assertIn("зарегистрирован", verdict.explanation)
-        self.assertIn("после этого я смогу прислать", verdict.explanation)
-        self.assertIn("session/source", verdict.explanation)
+        self.assertIn("нет среди доступных", verdict.explanation)
+        self.assertIn("после этого я смогу его отправить", verdict.explanation)
         self.assertIn("ни одного доступного файла", verdict.explanation)
+        self.assert_user_facing(verdict.explanation)
+
+    def assert_user_facing(self, text):
+        lowered = str(text or "").casefold()
+        for forbidden in (
+            "archive",
+            "artifact_id",
+            "session",
+            "source",
+            "варбанд",
+            "владел",
+            "core",
+            "абаддон",
+        ):
+            self.assertNotIn(forbidden, lowered)
+
+    def test_preference_denials_use_peer_language(self):
+        self.preferences.record(
+            PreferenceEvidence(
+                action_kind="request_warmaster_mission",
+                target_scope="*",
+                verdict="never_auto",
+                evidence="explicit user rule",
+            )
+        )
+        verdict = self.authority.authorize("request_warmaster_mission", decision("code"), MANIFEST)
+        self.assertEqual("ask", verdict.verdict)
+        self.assertIn("Я помню, что ты запретил мне", verdict.explanation)
+        self.assert_user_facing(verdict.explanation)
+
+    def test_pending_decision_requires_manifest_bound_task_and_exact_answer(self):
+        manifest = {
+            "capabilities": [
+                {
+                    "action": "answer_pending_decision",
+                    "available": True,
+                    "pending_decisions": [
+                        {"task_id": "task-real"},
+                        {"task_id": "task-other"},
+                    ],
+                }
+            ],
+        }
+        verdict = self.authority.authorize(
+            "answer_pending_decision",
+            {
+                "pending_decision_task_id": "task-real",
+                "pending_decision": {"task_id": "task-real", "answer": "Выбирай сам"},
+            },
+            manifest,
+        )
+        self.assertEqual(verdict.verdict, "auto")
+
+        invented = self.authority.authorize(
+            "answer_pending_decision",
+            {"pending_decision": {"task_id": "task-invented", "answer": "Выбирай сам"}},
+            manifest,
+        )
+        self.assertEqual(invented.verdict, "deny")
+        self.assertEqual(invented.code, "pending_decision_mismatch")
+
+    def test_pending_decision_cannot_exist_without_manifest_task(self):
+        manifest = {"capabilities": [{"action": "answer_pending_decision", "available": True}]}
+        verdict = self.authority.authorize(
+            "answer_pending_decision",
+            {"pending_decision": {"task_id": "task-invented", "answer": "ответ"}},
+            manifest,
+        )
+        self.assertEqual(verdict.verdict, "deny")
+        self.assertEqual(verdict.code, "pending_decision_unavailable")
 
 
 if __name__ == "__main__":

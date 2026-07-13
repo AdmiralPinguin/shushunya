@@ -94,6 +94,7 @@ def record_mission_state(
     run_status: str = "",
     active: bool = False,
     phase: str = "",
+    needs_user: bool = False,
 ) -> dict[str, Any]:
     if status not in LIFECYCLE_STATUSES:
         raise ValueError(f"unknown mission lifecycle status: {status}")
@@ -104,7 +105,13 @@ def record_mission_state(
     _write_json(mission_dir / "mission.json", mission)
     intake = _read_json(mission_dir / "mission_intake.json")
     command = _read_json(mission_dir / "commander_order.json")
-    state = mission_state_projection(mission_id, mission, intake, command)
+    state = mission_state_projection(
+        mission_id,
+        mission,
+        intake,
+        command,
+        needs_user=needs_user,
+    )
     state["run_status"] = run_status
     state["phase"] = phase or status
     state["active"] = bool(active)
@@ -653,8 +660,12 @@ def governor_report_from_run(run_dir: Path, mission_id: str) -> dict[str, Any]:
         str(manifest.get("status") or "").strip().lower() in {"ready", "completed", "passed"}
         and int(manifest.get("blocker_count") or 0) == 0
     )
-    if result_status == "blocked" or (result_status == "needs_revision" and not manifest_ready) or (revision_plan.get("required") and not manifest_ready):
-        status = "needs_revision" if result_status != "blocked" else "blocked"
+    if result_status in {"blocked", "needs_user"} or (result_status == "needs_revision" and not manifest_ready) or (revision_plan.get("required") and not manifest_ready):
+        status = (
+            "blocked"
+            if result_status in {"blocked", "needs_user"}
+            else "needs_revision"
+        )
     elif bool(result.get("ok")) or manifest_ready or result_status in {"ready", "completed", "passed", "passed_with_warnings"}:
         status = "ready"
     else:
@@ -692,7 +703,8 @@ def acceptance_prompt_payload(command: dict[str, Any], report: dict[str, Any], l
         "required_json_schema": {
             "accepted": "boolean",
             "reason": "short concrete acceptance or rejection reason",
-            "escalate_to_user": "boolean, true only for real user choice/access blocker",
+            "escalate_to_user": "boolean; must be false at terminal acceptance because this stage has no live clarification route",
+            "question": "must be empty at terminal acceptance",
             "required_revision": {
                 "order": "revision order for the governor if accepted=false and escalate_to_user=false",
                 "required_steps": ["optional existing pipeline step ids to prefer"],
@@ -718,12 +730,20 @@ def build_acceptance_review(command: dict[str, Any], report: dict[str, Any], led
         validate_protocol_payload(review, expected_type="acceptance_review")
         return {"ok": True, "acceptance_review": review, "model_brain": {"status": "skipped", "reason": "governor_report.status=needs_revision"}}
     if report_status == "blocked":
+        reason = (
+            "Бригадир вернул terminal blocked. На финальной приёмке уже нет живого "
+            "clarification-маршрута, поэтому это внутренняя ревизия, а не вопрос пользователю."
+        )
+        required_order = (
+            "Устранить внутренний блокер и повторить миссию. Если действительно нужен "
+            "пользовательский выбор, запросить его typed decision_request до terminal результата."
+        )
         review = acceptance_review(
             str(report.get("mission_id") or ""),
             accepted=False,
-            reason="Бригадир заблокировал задачу; требуется решение или внешний ресурс пользователя.",
-            required_revision={"to": str(report.get("governor") or ""), "order": "Ожидать решения пользователя по блокеру.", "required_steps": []},
-            escalate_to_user=True,
+            reason=reason,
+            required_revision={"to": str(report.get("governor") or ""), "order": required_order, "required_steps": []},
+            escalate_to_user=False,
         )
         validate_protocol_payload(review, expected_type="acceptance_review")
         return {"ok": True, "acceptance_review": review, "model_brain": {"status": "skipped", "reason": "governor_report.status=blocked"}}
@@ -741,7 +761,8 @@ def build_acceptance_review(command: dict[str, Any], report: dict[str, Any], led
             "Judge against the commander_order success_conditions, not against the mere presence of worker problems: "
             "problems prefixed 'gap:' are informational coverage notes and are acceptable when success_conditions are still met. "
             "Do not order a revision that repeats a previously failed revision without a new approach. "
-            "Set escalate_to_user=true only when a real user decision, missing access, or external impossibility blocks progress."
+            "This is terminal acceptance and has no live clarification route: always set escalate_to_user=false and question empty. "
+            "Resolve ordinary implementation choices yourself; if the result cannot be accepted, return a concrete internal revision order."
         ),
     )
     if not model_decision.get("ok"):
@@ -750,7 +771,7 @@ def build_acceptance_review(command: dict[str, Any], report: dict[str, Any], led
             accepted=False,
             reason="Abaddon acceptance model brain unavailable.",
             required_revision={"to": str(report.get("governor") or ""), "order": "Повторить приемку после восстановления модели."},
-            escalate_to_user=True,
+            escalate_to_user=False,
         )
         return {"ok": False, "acceptance_review": review, "model_brain": model_decision, "error_code": "acceptance_model_unavailable"}
     try:
@@ -761,20 +782,43 @@ def build_acceptance_review(command: dict[str, Any], report: dict[str, Any], led
             accepted=False,
             reason=f"Abaddon acceptance returned invalid JSON: {exc}",
             required_revision={"to": str(report.get("governor") or ""), "order": "Повторить приемку с валидным JSON-решением."},
-            escalate_to_user=True,
+            escalate_to_user=False,
         )
         return {"ok": False, "acceptance_review": review, "model_brain": model_decision, "error_code": "invalid_acceptance_json"}
     required_revision = parsed.get("required_revision") if isinstance(parsed.get("required_revision"), dict) else {}
+    requested_escalation = parsed.get("escalate_to_user") is True
+    escalate_to_user = False
+    accepted = parsed.get("accepted") is True
+    if requested_escalation:
+        required_revision = {
+            "order": (
+                "Приёмка попыталась запросить пользователя после завершения живого backend. "
+                "Продолжить внутреннюю ревизию и принимать реализационные решения самостоятельно; "
+                "необходимый пользовательский вопрос допустим только внутри живой миссии."
+            ),
+            "required_steps": required_revision.get("required_steps")
+            if isinstance(required_revision.get("required_steps"), list)
+            else [],
+        }
+    if accepted and requested_escalation:
+        accepted = False
+        required_revision = {
+            "order": (
+                "Приёмка одновременно вернула accepted и escalate_to_user. "
+                "Повторить приёмку с одним непротиворечивым решением."
+            ),
+            "required_steps": [],
+        }
     review = acceptance_review(
         str(report.get("mission_id") or ""),
-        accepted=bool(parsed.get("accepted")),
+        accepted=accepted,
         reason=str(parsed.get("reason") or "").strip() or "Abaddon acceptance decision recorded.",
         required_revision={
             "to": str(report.get("governor") or ""),
             "order": str(required_revision.get("order") or parsed.get("reason") or "Доработать результат по условиям приемки."),
             "required_steps": required_revision.get("required_steps") if isinstance(required_revision.get("required_steps"), list) else [],
         },
-        escalate_to_user=bool(parsed.get("escalate_to_user")),
+        escalate_to_user=escalate_to_user,
     )
     validate_protocol_payload(review, expected_type="acceptance_review")
     return {"ok": True, "acceptance_review": review, "model_brain": model_decision}
@@ -813,6 +857,23 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
     )
     decision = build_acceptance_review(command, report, result)
     review = decision["acceptance_review"]
+    if review.get("escalate_to_user"):
+        # Terminal acceptance has no backend clarification consumer.  Fail
+        # closed into a resumable internal revision even if an older/custom
+        # acceptance implementation emits the legacy escalation shape.
+        review = dict(review)
+        review["accepted"] = False
+        review["escalate_to_user"] = False
+        review.pop("decision_request", None)
+        review["required_revision"] = {
+            "to": str(report.get("governor") or ""),
+            "order": (
+                "Продолжить внутреннюю ревизию; пользовательский вопрос можно "
+                "публиковать только пока жива backend-миссия, способная принять ответ."
+            ),
+            "required_steps": [],
+        }
+        decision["acceptance_review"] = review
     mission = _read_json(mission_dir / "mission.json")
     if mission:
         record_mission_state(mission_dir, "warmaster_acceptance", active=True)
@@ -829,14 +890,6 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
             progress_event(mission_id, "Warmaster", "commander", "completed", "done", "Финал принят", str(review.get("reason") or "Результат принят.")),
         )
         return {"ok": True, "accepted": True, "governor_report": report, "acceptance_review": review, "decision": decision}
-    if review.get("escalate_to_user"):
-        record_mission_state(mission_dir, "blocked")
-        ledger.force_status("blocked", reason=str(review.get("reason") or "Abaddon acceptance requires user escalation."))
-        append_progress_event(
-            mission_dir / "progress_events.jsonl",
-            progress_event(mission_id, "Warmaster", "commander", "blocked", "blocked", "Нужна эскалация", str(review.get("reason") or "")),
-        )
-        return {"ok": False, "accepted": False, "blocked": True, "governor_report": report, "acceptance_review": review, "decision": decision}
     rev_order_payload = revision_order(
         mission_id,
         to=str(report.get("governor") or ""),
@@ -849,10 +902,25 @@ def record_warmaster_acceptance(run_dir: Path) -> dict[str, Any]:
     _write_json(_next_numbered_path(mission_dir / "revision_orders", "revision_order"), rev_order_payload)
     revision_plan = revision_plan_from_acceptance(run_dir, result, review)
     updated_result = dict(result)
+    # A terminal result may contain the live question that originally stopped
+    # its backend. Acceptance has converted that outcome into an internal
+    # revision, whose backend cannot consume a clarification answer anymore.
+    # Remove the whole decision surface before persisting the new current
+    # result, otherwise observers resurrect a dead question.
+    for key in (
+        "decision_request",
+        "question",
+        "user_question",
+        "clarification_question",
+        "exact_question",
+        "resume_condition",
+    ):
+        updated_result.pop(key, None)
     updated_result.update(
         {
             "ok": False,
             "status": "needs_revision",
+            "needs_user": False,
             "summary": str(review.get("reason") or "Abaddon rejected the result and ordered revision."),
             "revision_plan": revision_plan,
             "warmaster_acceptance": review,
@@ -1030,17 +1098,17 @@ def _count_by_key(items: list[dict[str, Any]], key: str) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
-def mission_next_owner(status: str) -> str:
+def mission_next_owner(status: str, *, needs_user: bool = False) -> str:
     if status in {"completed", "failed", "cancelled"}:
         return "none"
     if status == "blocked":
-        return "user_or_operator"
+        return "user" if needs_user else "governor"
     if status in {"created", "intake", "assigned", "warmaster_acceptance"}:
         return "Warmaster"
     return "governor"
 
 
-def mission_user_visible_state(status: str) -> str:
+def mission_user_visible_state(status: str, *, needs_user: bool = False) -> str:
     if status == "completed":
         return "final_ready"
     if status == "failed":
@@ -1048,13 +1116,20 @@ def mission_user_visible_state(status: str) -> str:
     if status == "cancelled":
         return "cancelled"
     if status == "blocked":
-        return "needs_user_or_operator_decision"
+        return "needs_user_decision" if needs_user else "internal_repair_required"
     if status in {"executing", "governor_review", "warmaster_acceptance", "revision"}:
         return "working"
     return "accepted"
 
 
-def mission_state_projection(mission_id: str, mission: dict[str, Any], intake: dict[str, Any], command: dict[str, Any]) -> dict[str, Any]:
+def mission_state_projection(
+    mission_id: str,
+    mission: dict[str, Any],
+    intake: dict[str, Any],
+    command: dict[str, Any],
+    *,
+    needs_user: bool = False,
+) -> dict[str, Any]:
     status = str(mission.get("status") or intake.get("status") or "created")
     if status not in LIFECYCLE_STATUSES:
         status = "created"
@@ -1068,8 +1143,9 @@ def mission_state_projection(mission_id: str, mission: dict[str, Any], intake: d
         "phase": status,
         "active": False,
         "assigned_governor": str(mission.get("assigned_governor") or command.get("to") or ""),
-        "next_owner": mission_next_owner(status),
-        "user_visible_state": mission_user_visible_state(status),
+        "needs_user": bool(needs_user),
+        "next_owner": mission_next_owner(status, needs_user=needs_user),
+        "user_visible_state": mission_user_visible_state(status, needs_user=needs_user),
         "revision_is_internal": True,
         "source": "mission_protocol",
     }

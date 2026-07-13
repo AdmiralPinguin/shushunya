@@ -148,26 +148,26 @@ class Commitments:
     def _needs_user_diagnostic(snapshot: dict[str, Any]) -> dict[str, Any] | None:
         for node in _dicts(snapshot):
             status = str(node.get("status") or node.get("phase") or "").lower()
-            action = node.get("client_action") or node.get("next_action")
-            action = action if isinstance(action, dict) else node
-            kind = str(action.get("kind") or action.get("action") or "").lower()
             needs_user = node.get("needs_user") is True or status in {"needs_user", "waiting_user"}
-            needs_user = needs_user or kind in {"provide_clarification", "prompt_user", "ask_user", "confirm"}
+            decision_request = (
+                node.get("decision_request")
+                if isinstance(node.get("decision_request"), dict)
+                else {}
+            )
             question = str(
-                node.get("question")
+                decision_request.get("question")
+                or node.get("question")
                 or node.get("user_question")
-                or node.get("required_user_action")
-                or action.get("reason")
+                or node.get("clarification_question")
                 or ""
             ).strip()
-            if needs_user:
-                explanation = question or "Для продолжения миссии нужен ответ владельца."
+            if needs_user and question:
                 return {
                     "code": "abaddon_needs_user",
-                    "explanation": explanation,
+                    "explanation": question,
                     "evidence": {"task_id": snapshot.get("task_id"), "detail": node},
-                    "required_action": question or "Дать недостающие параметры или подтверждение.",
-                    "resume_condition": "Ответ владельца будет передан в опубликованный clarification action.",
+                    "required_action": question,
+                    "resume_condition": "Ответ будет передан в ту же ожидающую миссию.",
                 }
         return None
 
@@ -434,7 +434,11 @@ class Commitments:
         for item in items:
             if item.get("delegate_kind") != "abaddon" or not item.get("delegate_ref"):
                 continue
-            if item.get("state") in {"waiting_user", "quarantined"}:
+            # A waiting-user mission must remain observable: after Archive
+            # delivers the answer directly to Abaddon, its next snapshot is
+            # the durable evidence that this commitment resumed. Quarantined
+            # work still requires an explicit recovery path.
+            if item.get("state") == "quarantined":
                 continue
             if item.get("state") == "retry_wait" and str(item.get("next_attempt_at") or "") > now:
                 continue

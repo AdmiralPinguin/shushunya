@@ -1240,8 +1240,10 @@ def _full_repo_snapshot(
 
     Git is the security boundary: ignored secrets, runtimes, models, generated media and
     caches never enter the snapshot. Inline UTF-8 files remain text and inline binary
-    files are base64 encoded. Clean tracked assets above the inline cap are immutable
-    hash/size manifest entries; dirty/untracked oversized files and submodules block.
+    files are base64 encoded. Any Git-visible asset above the inline cap is represented
+    by an immutable hash/size manifest entry. This preserves an exact, conflict-checked
+    baseline without letting an unrelated large dirty or untracked image stop the whole
+    warband. Submodules still block because their contents are a separate repository.
     """
     root = REPO_ROOT.resolve()
     inventory_output_limit = max(1_000_000, max_files * 4096)
@@ -1329,38 +1331,36 @@ def _full_repo_snapshot(
         try:
             size = p.stat().st_size
             if size > max_file_bytes:
-                if size > max_external_file_bytes:
-                    raise SnapshotError(
-                        f"tracked external asset exceeds {max_external_file_bytes} bytes: {rel}",
-                    )
                 if len(external_assets) >= max_external_assets:
                     raise SnapshotError(f"repository exceeds {max_external_assets} external assets")
+                stable, content_sha = _stable_regular_file_digest(
+                    p,
+                    max_external_file_bytes,
+                )
+                size = stable.st_size
                 if external_total + size > max_external_total_bytes:
                     raise SnapshotError(
                         f"tracked external assets exceed {max_external_total_bytes} bytes",
                     )
-                if not indexed_mode:
-                    raise SnapshotError(f"untracked repository file exceeds inline limit: {rel}")
-                worktree_clean = subprocess.run(
+                worktree_clean = bool(indexed_mode) and subprocess.run(
                     ["git", "diff", "--quiet", "--", rel], cwd=root, timeout=30,
                 ).returncode == 0
-                index_clean = subprocess.run(
+                index_clean = bool(indexed_mode) and subprocess.run(
                     ["git", "diff", "--cached", "--quiet", "--", rel], cwd=root, timeout=30,
                 ).returncode == 0
-                if not worktree_clean or not index_clean:
-                    raise SnapshotError(f"modified repository file exceeds inline limit: {rel}")
                 if len(files) + len(blobs) + len(symlinks) + len(external_assets) >= max_files:
                     raise SnapshotError(f"repository snapshot exceeds {max_files} files")
-                digest = hashlib.sha256()
-                with p.open("rb") as handle:
-                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                        digest.update(chunk)
                 external_assets[rel] = {
                     "size": size,
-                    "sha256": digest.hexdigest(),
-                    "mode": "100755" if p.stat().st_mode & stat.S_IXUSR else "100644",
+                    "sha256": content_sha,
+                    "mode": "100755" if stable.st_mode & stat.S_IXUSR else "100644",
                     "materialized": False,
-                    "reason": "clean tracked asset exceeds inline snapshot limit",
+                    "source_state": (
+                        "untracked" if not indexed_mode
+                        else "tracked_clean" if worktree_clean and index_clean
+                        else "tracked_dirty"
+                    ),
+                    "reason": "Git-visible asset exceeds inline snapshot limit and is immutable during this mission",
                 }
                 external_total += size
                 continue
@@ -4289,7 +4289,13 @@ def _finalize_linked_blocked(
     if next_action:
         final["next_action"] = next_action
     mc._write_json(mission_dir / "final_response.json", final)
-    mc.record_mission_state(mission_dir, "blocked", run_status="blocked", phase=phase)
+    mc.record_mission_state(
+        mission_dir,
+        "blocked",
+        run_status="blocked",
+        phase=phase,
+        needs_user=needs_user,
+    )
     mc.append_progress_event(
         mission_dir / "progress_events.jsonl",
         terminal_event,

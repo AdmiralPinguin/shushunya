@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from typing import Any
+from typing import Any, Iterator
 from urllib.parse import quote
 
 import httpx
@@ -18,6 +18,196 @@ class OrganError(RuntimeError):
         self.explanation = explanation
         self.retryable = retryable
         self.evidence = evidence or {}
+
+
+def _dict_nodes(value: Any) -> Iterator[dict[str, Any]]:
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _dict_nodes(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _dict_nodes(child)
+
+
+def _text_items(value: Any, limit: int = 5) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in result:
+            result.append(text[:500])
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _published_action(body: dict[str, Any]) -> dict[str, Any]:
+    for node in _dict_nodes(body):
+        for key in ("client_action", "next_action"):
+            action = node.get(key)
+            if isinstance(action, dict) and (action.get("kind") or action.get("path") or action.get("endpoint")):
+                return action
+    return {}
+
+
+def _action_summary(action: dict[str, Any]) -> dict[str, Any]:
+    if not action:
+        return {}
+    return {
+        key: str(action.get(key) or "").strip()[:500]
+        for key in ("kind", "method", "path", "endpoint", "reason")
+        if str(action.get(key) or "").strip()
+    }
+
+
+def _clarification_directive(body: dict[str, Any]) -> dict[str, Any]:
+    for node in _dict_nodes(body):
+        state = str(node.get("decision") or node.get("status") or "").strip().lower()
+        code = str(node.get("error_code") or node.get("code") or "").strip().lower()
+        explicitly_waiting = (
+            node.get("needs_user") is True
+            or state in {"needs_clarification", "clarification_required", "waiting_user", "needs_user"}
+            or code in {"needs_clarification", "clarification_required", "confirmation_required"}
+            or str(node.get("kind") or "").strip().lower() == "decision_request"
+        )
+        if not explicitly_waiting:
+            continue
+        explicit_question = str(
+            node.get("question")
+            or node.get("exact_question")
+            or node.get("user_question")
+            or node.get("clarification_question")
+            or ""
+        ).strip()
+        if not explicit_question and state == "needs_clarification":
+            conditions = _text_items(node.get("escalation_conditions"), 1)
+            candidate = conditions[0] if conditions else ""
+            explicit_question = candidate if candidate.endswith("?") else ""
+        if explicit_question:
+            return {**node, "clarification_question": explicit_question}
+    return {}
+
+
+def _body_error_code(body: dict[str, Any]) -> str:
+    for node in _dict_nodes(body):
+        code = str(node.get("error_code") or node.get("code") or "").strip()
+        if code:
+            return code[:160]
+    action = _published_action(body)
+    return str(action.get("reason") or "").strip()[:160]
+
+
+def _decision_options(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, str]] = []
+    for index, item in enumerate(value):
+        if isinstance(item, dict):
+            label = str(item.get("label") or item.get("title") or item.get("value") or "").strip()
+            description = str(item.get("description") or item.get("explanation") or "").strip()
+            option_id = str(item.get("id") or item.get("value") or f"option_{index + 1}").strip()
+        else:
+            label = str(item or "").strip()
+            description = ""
+            option_id = f"option_{index + 1}"
+        if label:
+            result.append({"id": option_id[:80], "label": label[:240], "description": description[:500]})
+        if len(result) >= 3:
+            break
+    return result
+
+
+def _decision_request(
+    payload: dict[str, Any],
+    task_id: str,
+    directive: dict[str, Any],
+) -> dict[str, Any] | None:
+    request = payload.get("warmaster_request") if isinstance(payload.get("warmaster_request"), dict) else {}
+    problem = str(
+        request.get("expected_outcome")
+        or request.get("user_request")
+        or directive.get("mission_intent")
+        or payload.get("message")
+        or "Продолжить порученную работу."
+    ).strip()[:1_200]
+    missing_inputs = _text_items(request.get("known_missing_inputs"), 3)
+    escalation_conditions = _text_items(directive.get("escalation_conditions"), 3)
+    explicit_question = str(
+        directive.get("question")
+        or directive.get("user_question")
+        or directive.get("clarification_question")
+        or ""
+    ).strip()
+    if not explicit_question:
+        return None
+    topics = missing_inputs or escalation_conditions
+    question = explicit_question[:1_000]
+
+    options = _decision_options(directive.get("options") or directive.get("choices"))
+    sensitive = " ".join([explicit_question, *topics]).lower()
+    unsafe_default = any(
+        marker in sensitive
+        for marker in ("подтвержд", "разреш", "удален", "платеж", "секрет", "доступ", "irreversible")
+    )
+    recommended_option = ""
+    if not options and topics and not unsafe_default:
+        options = [
+            {
+                "id": "use_reasonable_defaults",
+                "label": "Выбери сам",
+                "description": "Я выберу рабочий вариант по критериям результата и продолжу без нового круга вопросов.",
+            },
+            {
+                "id": "provide_preferences",
+                "label": "Я уточню",
+                "description": "Ты назовёшь только обязательные предпочтения, которые нельзя выбирать за тебя.",
+            },
+        ]
+        recommended_option = "use_reasonable_defaults"
+    elif options:
+        recommended_option = str(directive.get("recommended_option") or directive.get("recommended") or "").strip()[:80]
+
+    recommendation = ""
+    if recommended_option:
+        recommended = next((item for item in options if item.get("id") == recommended_option), None)
+        if recommended:
+            recommendation = str(recommended.get("label") or "").strip()
+            description = str(recommended.get("description") or "").strip()
+            if description:
+                recommendation = f"{recommendation}: {description}"
+
+    resume_body = {
+        "message": str(payload.get("message") or "").strip()[:20_000],
+        "task_id": task_id,
+        "auto_start": True,
+        "reuse_existing": True,
+        "run_mode": "http",
+        "governor_transport": "http",
+        "governor_host": "127.0.0.1",
+        "host": "127.0.0.1",
+        "include_brigade_health": False,
+    }
+    return {
+        "kind": "decision_request",
+        "task_id": task_id,
+        "problem": problem,
+        "what_i_tried": "Я подготовил задачу и попытался запустить её; предварительная проверка потребовала явного выбора.",
+        "missing_inputs": topics,
+        "options": options,
+        "recommended_option": recommended_option,
+        "recommendation": recommendation[:700],
+        "question": question,
+        "resume_condition": "После твоего ответа я передам выбор в эту же миссию и продолжу её.",
+        "resume": {
+            "kind": "retry_preflight_with_answer",
+            "method": "POST",
+            "path": "/orchestrate_run",
+            "body": resume_body,
+            "condition": "После ответа повторить подготовку под тем же task_id и продолжить эту же миссию.",
+        },
+    }
 
 
 class Organs:
@@ -123,19 +313,67 @@ class Organs:
             and phase not in {"blocked", "failed", "cancelled", "rejected", "error"}
         )
         if not accepted:
-            retryable = response.status_code >= 500 or response.status_code in {408, 409, 425, 429}
+            structured = body if isinstance(body, dict) else {}
+            directive = _clarification_directive(structured)
+            action = _published_action(structured)
+            technical = {
+                "http_status": response.status_code,
+                "error_code": _body_error_code(structured),
+                "published_action": _action_summary(action),
+            }
+            if directive:
+                decision_request = _decision_request(payload, task_id, directive)
+                if decision_request:
+                    raise OrganError(
+                        "clarification_required",
+                        str(decision_request["question"]),
+                        retryable=False,
+                        evidence={
+                            "task_id": task_id,
+                            "outcome_type": "needs_user_decision",
+                            "decision_request": decision_request,
+                            "technical": technical,
+                        },
+                    )
+            if response.status_code == 409 and action:
+                action_kind = str(action.get("kind") or "").strip()
+                raise OrganError(
+                    "abaddon_repair_required",
+                    "Запуск не подтверждён: сначала требуется опубликованное внутреннее действие; "
+                    "повторять тот же запрос без него бессмысленно.",
+                    retryable=False,
+                    evidence={
+                        "task_id": task_id,
+                        "outcome_type": "repair_required",
+                        "repair_action": _action_summary(action),
+                        "required_action": (
+                            f"Выполнить внутреннее действие {action_kind}."
+                            if action_kind
+                            else "Выполнить опубликованное внутреннее действие."
+                        ),
+                        "resume_condition": "После успешного внутреннего действия повторно подтвердить запуск миссии.",
+                        "technical": technical,
+                    },
+                )
+            # A conflict is a stable protocol outcome, not a transient network
+            # failure. Retrying the identical body cannot repair it.
+            retryable = response.status_code >= 500 or response.status_code in {408, 425, 429}
             raise OrganError(
                 "abaddon_rejected",
-                f"Абаддон вернул HTTP {response.status_code}, но не дал строгого подтверждения запуска.",
+                "Запуск миссии не получил строгого подтверждения.",
                 retryable=retryable,
-                evidence={"task_id": task_id, "response": body},
+                evidence={
+                    "task_id": task_id,
+                    "outcome_type": "transient_failure" if retryable else "rejected",
+                    "technical": technical,
+                },
             )
         resolved_id = accepted_task_id
         return {
             "ok": True,
             "delegate_ref": resolved_id,
             "status": phase,
-            "explanation": f"Абаддон принял задачу {resolved_id}; Core будет сверять фактический прогресс.",
+            "explanation": "Я запустил миссию и буду сверять её фактический прогресс.",
             "evidence": {
                 "http_status": response.status_code,
                 "task_id": resolved_id,

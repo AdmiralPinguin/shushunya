@@ -90,6 +90,25 @@ def directive_request_payload(
             "tradeoffs": ["leadership decisions and accepted tradeoffs"],
             "escalation_conditions": ["conditions Ceraxia must decide or escalate"],
         },
+        "decision_policy": {
+            "default": (
+                "Delegate with sensible reversible engineering defaults; record those choices "
+                "as leadership tradeoffs instead of asking the user."
+            ),
+            "ask_user_only_if": [
+                "a material product preference has no safe default and changes the requested outcome",
+                "the action needs user authority, credentials, money, publication, deletion, or another irreversible commitment",
+                "a genuinely missing external input cannot be discovered or produced by the warband",
+            ],
+            "do_not_ask_for": [
+                "technology stack, library, project structure, test strategy, or implementation detail",
+                "visual style or minor feature choices when a conventional default satisfies the goal",
+            ],
+            "clarification_encoding": (
+                "Only for needs_clarification, put one exact user-facing question first in "
+                "escalation_conditions."
+            ),
+        },
         "forbidden_detailed_plan_fields": sorted(DETAILED_PLAN_FIELDS),
     }
 
@@ -109,7 +128,13 @@ def directive_model_instructions() -> str:
         "dependency graph, implementation steps, patch instructions, shell commands, or test commands. "
         "Do not invent file-level detail; preserve explicit caller constraints without expanding them. "
         "Skitarii owns repository exploration, detailed planning, implementation, verification, and "
-        "internal repair. The object must contain exactly these seven literal top-level keys and no "
+        "internal repair. Delegate with sensible reversible engineering and product defaults. Missing "
+        "stack, library, project structure, test strategy, visual style, or minor feature preferences "
+        "are leadership choices, not reasons to stop. Use needs_clarification only for a material user "
+        "preference with no safe default, user authority/credentials/money/publication/deletion, or a "
+        "genuinely unavailable external input. When clarification is truly required, put one exact "
+        "user-facing question as the first escalation_conditions item. The object must contain exactly "
+        "these seven literal top-level keys and no "
         "others: decision, mission_intent, priorities, constraints, success_conditions, tradeoffs, "
         "escalation_conditions. Do not echo task_id or delegation_subject. Use this exact literal "
         f"shape, replacing only the values: {literal_schema}. Use JSON string arrays only."

@@ -82,6 +82,7 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
+        self.root = root
         self.settings = settings(root)
         self.ledger = Ledger(self.settings.db_path)
         self.ledger.initialize()
@@ -166,6 +167,76 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["effect"]["destination"], "abaddon")
         self.assertEqual(self.ledger.list_commitments()[0]["state"], "queued")
 
+    async def test_pending_decision_binds_trusted_task_and_exact_user_text(self):
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        manifest["capabilities"].append(
+            {
+                "action": "answer_pending_decision",
+                "available": True,
+                "pending_decisions": [
+                    {"task_id": "task-real", "question": "Какой движок выбрать?"},
+                ],
+            }
+        )
+        engine = FakeDecisionEngine(
+            *self.args,
+            replies=[{
+                "action": "answer_pending_decision",
+                "reply": "я уже передал ответ",
+                "pending_decision": {"task_id": "task-invented", "answer": "переписанный ответ"},
+                "confidence": 0.95,
+            }],
+        )
+        envelope = self.envelope(key="pending-decision", text="Выбирай сам, главное собери APK")
+        envelope.capability_manifest = manifest
+
+        result = await engine.resolve(envelope)
+
+        self.assertEqual(result["decision"]["action"], "answer_pending_decision")
+        self.assertEqual(
+            result["decision"]["pending_decision"],
+            {"task_id": "task-real", "answer": "Выбирай сам, главное собери APK"},
+        )
+        self.assertEqual(result["decision"]["pending_decision_task_id"], "task-real")
+        self.assertEqual(result["decision"]["reply"], "")
+        self.assertIsNone(result["effect"])
+
+    async def test_pending_decision_prefers_explicit_trusted_older_task(self):
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        manifest["pending_decision_task_id"] = "task-new"
+        manifest["capabilities"].append(
+            {
+                "action": "answer_pending_decision",
+                "available": True,
+                "pending_decisions": [
+                    {"task_id": "task-old", "question": "Old question?"},
+                    {"task_id": "task-new", "question": "New question?"},
+                ],
+            }
+        )
+        engine = FakeDecisionEngine(
+            *self.args,
+            replies=[{
+                "action": "answer_pending_decision",
+                "pending_decision_task_id": "task-old",
+                "confidence": 0.99,
+            }],
+        )
+        envelope = self.envelope(
+            key="pending-decision-explicit-old",
+            text="For task-old choose option A",
+        )
+        envelope.capability_manifest = manifest
+
+        result = await engine.resolve(envelope)
+
+        self.assertEqual(result["decision"]["action"], "answer_pending_decision")
+        self.assertEqual(result["decision"]["pending_decision_task_id"], "task-old")
+        self.assertEqual(
+            result["decision"]["pending_decision"],
+            {"task_id": "task-old", "answer": "For task-old choose option A"},
+        )
+
     async def test_registered_artifact_creates_one_durable_no_speech_effect(self):
         engine = FakeDecisionEngine(
             *self.args,
@@ -218,9 +289,10 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["decision"]["action"], "ask_clarification")
         self.assertEqual(result["decision"]["reason"], "artifact_not_in_capability")
         self.assertIn("shushunya.apk", result["decision"]["reply"])
-        self.assertIn("зарегистрирован", result["decision"]["reply"])
-        self.assertIn("после этого я смогу прислать", result["decision"]["reply"])
+        self.assertIn("нет среди доступных мне вложений", result["decision"]["reply"])
+        self.assertIn("после этого я смогу его отправить", result["decision"]["reply"])
         self.assertNotIn("разрешение", result["decision"]["reply"])
+        self.assertNotIn("artifact_id", result["decision"]["reply"])
         self.assertIsNone(result["effect"])
         self.assertEqual(self.ledger.list_commitments(), [])
 
@@ -238,8 +310,9 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["decision"]["action"], "ask_clarification")
         self.assertEqual(result["decision"]["reason"], "incomplete_artifact_delivery")
         self.assertIn("shushunya.apk", result["decision"]["reply"])
-        self.assertIn("видим", result["decision"]["reply"])
+        self.assertIn("нет среди доступных мне вложений", result["decision"]["reply"])
         self.assertNotIn("разрешение", result["decision"]["reply"])
+        self.assertNotIn("artifact_id", result["decision"]["reply"])
         self.assertIsNone(result["effect"])
         self.assertEqual(self.ledger.list_commitments(), [])
 
@@ -273,6 +346,65 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertLessEqual(len(json.dumps(situation, ensure_ascii=False, separators=(",", ":"))), 2_800)
         self.assertEqual(situation["available_artifacts"][0]["artifact_id"], ARTIFACT_ID)
+
+    def test_pending_decision_binding_survives_hard_situation_compaction(self):
+        compact_settings = replace(self.settings, context_char_budget=2_800)
+        assembler = SituationAssembler(
+            compact_settings,
+            self.ledger,
+            self.identity,
+            self.relationship,
+            self.preferences,
+            self.organs,
+        )
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        manifest["capabilities"].append(
+            {
+                "action": "answer_pending_decision",
+                "available": True,
+                "pending_decisions": [
+                    {"task_id": "task-pending", "question": "Какой движок выбрать? " * 100},
+                ],
+            }
+        )
+        envelope = TurnEnvelope(
+            idempotency_key="compact-pending-decision",
+            text="выбирай сам",
+            source="test",
+            recent_history=[{"role": "user", "content": "история " * 500}],
+            capability_manifest=manifest,
+            context=TurnContext(
+                persona="личность " * 500,
+                recalled_memory="память " * 500,
+                live_roster="статус " * 500,
+            ),
+        )
+
+        situation = assembler.assemble(envelope)
+
+        self.assertLessEqual(len(json.dumps(situation, ensure_ascii=False, separators=(",", ":"))), 2_800)
+        self.assertEqual(situation["pending_decisions"][0]["task_id"], "task-pending")
+
+    def test_relationship_migrates_legacy_contract_without_losing_corrections(self):
+        ledger = Ledger(self.root / "legacy-relationship.sqlite3")
+        ledger.initialize()
+        ledger.projection_put(
+            "relationship",
+            "owner_contract",
+            {"language": "ru", "directness": "custom-high"},
+            actor="legacy-test",
+        )
+        relationship = Relationship(ledger)
+
+        relationship.seed()
+        snapshot = relationship.snapshot()
+
+        self.assertNotIn("owner_contract", snapshot)
+        contract = snapshot["conversation_contract"]
+        self.assertEqual(contract["directness"], "custom-high")
+        self.assertEqual(contract["relationship"], "peer_brotherly")
+        self.assertIn("владелец", contract["forbidden_hierarchy_terms"])
+        self.assertIn("Панибратство не равно хамству", contract["panibrat_boundary"])
 
     def test_identity_proposal_decision_is_single_assignment(self):
         identity = Identity(self.ledger)

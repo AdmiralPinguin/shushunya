@@ -943,6 +943,7 @@ def _finalize_protocol(
         public_status,
         run_status=public_status,
         phase=status,
+        needs_user=bool(result.get("needs_user")),
     )
     _append_protocol_progress(
         mission_dir,

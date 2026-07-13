@@ -265,7 +265,12 @@ def lifecycle_status_for(summary_status: str, mission: dict[str, Any]) -> str:
     return RUN_STATUS_TO_LIFECYCLE.get(normalized, "created")
 
 
-def _mission_user_visible_state(lifecycle_status: str, active: bool = False) -> str:
+def _mission_user_visible_state(
+    lifecycle_status: str,
+    active: bool = False,
+    *,
+    needs_user: bool = False,
+) -> str:
     if lifecycle_status == "completed":
         return "final_ready"
     if lifecycle_status == "cancelled":
@@ -273,19 +278,24 @@ def _mission_user_visible_state(lifecycle_status: str, active: bool = False) -> 
     if lifecycle_status == "failed":
         return "failed"
     if lifecycle_status == "blocked":
-        return "needs_user_or_operator_decision"
+        return "needs_user_decision" if needs_user else "internal_repair_required"
     if active or lifecycle_status in {"executing", "governor_review", "warmaster_acceptance", "revision"}:
         return "working"
     return "accepted"
 
 
-def _mission_next_owner(lifecycle_status: str, active: bool = False) -> str:
+def _mission_next_owner(
+    lifecycle_status: str,
+    active: bool = False,
+    *,
+    needs_user: bool = False,
+) -> str:
     if lifecycle_status in {"created", "intake", "assigned", "warmaster_acceptance"}:
         return "Warmaster"
     if lifecycle_status in {"planning", "plan_review", "executing", "governor_review", "revision"} or active:
         return "governor"
     if lifecycle_status == "blocked":
-        return "user_or_operator"
+        return "user" if needs_user else "governor"
     if lifecycle_status in TERMINAL_LIFECYCLE_STATUSES:
         return "none"
     return "Warmaster"
@@ -306,6 +316,17 @@ def mission_state_view(summary: dict[str, Any], active: bool = False, phase: str
     if lifecycle_status == "failed" and bool(revision_plan.get("required")):
         lifecycle_status = "revision"
     assigned_governor = str(durable_state.get("assigned_governor") or mission.get("assigned_governor") or mission_ref.get("assigned_governor") or command.get("to") or summary.get("governor") or "")
+    result = summary.get("result") if isinstance(summary.get("result"), dict) else {}
+    final_response = (
+        protocol.get("final_response")
+        if isinstance(protocol.get("final_response"), dict)
+        else {}
+    )
+    # The protocol state is the durable authority. Acceptance escalation can
+    # exist before a final_response and must survive a run-summary round trip.
+    needs_user = any(source.get("needs_user") is True for source in (
+        durable_state, result, final_response,
+    ))
     return {
         "kind": "mission_state",
         "mission_id": mission_id,
@@ -316,8 +337,17 @@ def mission_state_view(summary: dict[str, Any], active: bool = False, phase: str
         "phase": phase or lifecycle_status,
         "active": bool(active),
         "assigned_governor": assigned_governor,
-        "next_owner": _mission_next_owner(lifecycle_status, active=active),
-        "user_visible_state": _mission_user_visible_state(lifecycle_status, active=active),
+        "needs_user": needs_user,
+        "next_owner": _mission_next_owner(
+            lifecycle_status,
+            active=active,
+            needs_user=needs_user,
+        ),
+        "user_visible_state": _mission_user_visible_state(
+            lifecycle_status,
+            active=active,
+            needs_user=needs_user,
+        ),
         "revision_is_internal": True,
         "source": "durable_mission_state" if durable_state else ("mission_protocol" if mission_id else "legacy_run_summary"),
     }

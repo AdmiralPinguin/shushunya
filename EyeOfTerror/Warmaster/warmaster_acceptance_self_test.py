@@ -154,6 +154,13 @@ def main() -> int:
                 "artifacts": [],
                 "workspace_root": str(root / "runs" / "acceptance-needs-revision" / "work"),
                 "status": "needs_revision",
+                "needs_user": True,
+                "question": "Старый вопрос уже завершившегося backend?",
+                "decision_request": {
+                    "kind": "decision_request",
+                    "question": "Старый вопрос уже завершившегося backend?",
+                    "resume": {"path": "/runs/acceptance-needs-revision/clarification"},
+                },
                 "summary": "Бригадир требует внутреннюю доработку.",
                 "revision_plan": {
                     "required": True,
@@ -197,6 +204,18 @@ def main() -> int:
         revision_summary = run_summary(revision_run_dir)
         if revision_summary.get("status") != "needs_revision":
             raise AssertionError(f"internal revision should not be exposed as failed: {revision_summary}")
+        persisted_revision_result = TaskLedger.load(revision_run_dir / "task_ledger.json").to_dict().get("result") or {}
+        forbidden_decision_fields = {
+            "decision_request",
+            "question",
+            "user_question",
+            "clarification_question",
+            "exact_question",
+        }
+        if persisted_revision_result.get("needs_user") is not False or forbidden_decision_fields.intersection(persisted_revision_result):
+            raise AssertionError(f"internal revision retained a dead user question: {persisted_revision_result}")
+        if revision_state.get("needs_user") is not False:
+            raise AssertionError(f"internal revision mission_state still needs the user: {revision_state}")
         actions = revision_summary.get("actions") if isinstance(revision_summary.get("actions"), dict) else {}
         if not actions.get("can_execute_revision"):
             raise AssertionError(f"revision run is not directly actionable: {actions}")
@@ -207,6 +226,46 @@ def main() -> int:
             or revision_state_payload.get("protocol_summary", {}).get("has_revision_order") is not True
         ):
             raise AssertionError(f"mission_state did not expose latest revision artifacts: {revision_state_payload}")
+
+        blocked_report = {
+            "mission_id": "mission-blocked-contract",
+            "governor": "Ceraxia",
+            "status": "blocked",
+            "summary": "Внутренняя проверка остановила миссию.",
+        }
+        internal_block = mission_control.build_acceptance_review(
+            {},
+            blocked_report,
+            {"status": "blocked", "needs_user": False},
+        )["acceptance_review"]
+        if internal_block.get("escalate_to_user") is not False:
+            raise AssertionError(
+                f"blocked without a typed question escaped to the user: {internal_block}"
+            )
+        if internal_block.get("status") != "revision_required":
+            raise AssertionError(
+                f"internal blocker did not become a revision: {internal_block}"
+            )
+
+        exact_question = "Разрешаешь опубликовать результат во внешнем магазине?"
+        user_block = mission_control.build_acceptance_review(
+            {},
+            blocked_report,
+            {
+                "status": "needs_user",
+                "needs_user": True,
+                "question": exact_question,
+                "summary": "Для публикации нужно явное разрешение.",
+            },
+        )["acceptance_review"]
+        if (
+            user_block.get("escalate_to_user") is not False
+            or user_block.get("status") != "revision_required"
+            or isinstance(user_block.get("decision_request"), dict)
+        ):
+            raise AssertionError(
+                f"terminal acceptance exposed an unresumable user decision: {user_block}"
+            )
         print("[ok] Warmaster live acceptance")
         return 0
 

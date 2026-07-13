@@ -23,7 +23,14 @@ from archive_config import ARTIFACT_MAX_BYTES, SHARED_CHAT_SESSION_ID, WARMASTER
 from archive_httpio import proxy_json_url
 from archive_util import shared_memory_namespace, wiki_bookshelf_for_namespace
 from artifact_store import trusted_import_stream
-from pending_reports import enqueue_report
+from pending_reports import enqueue_report, mark_delivered
+from decision_requests import (
+    clear_pending as clear_pending_decision,
+    normalize_decision_request,
+    render_decision_request,
+    render_internal_stall,
+    upsert_pending as upsert_pending_decision,
+)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -78,6 +85,11 @@ STATE_PATH = Path(__file__).resolve().parent / "archive" / "task_journal_state.j
 JOURNAL_PAGE_TITLE = "Brigade Task Journal"
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 ARTIFACT_PUBLICATIONS_STATE_KEY = "_artifact_publications_v1"
+CONVERSATION_DELIVERIES_STATE_KEY = "_conversation_deliveries_v1"
+STATE_METADATA_KEYS = {
+    ARTIFACT_PUBLICATIONS_STATE_KEY,
+    CONVERSATION_DELIVERIES_STATE_KEY,
+}
 MAX_PUBLICATION_ERRORS_PER_RUN = 128
 
 
@@ -532,9 +544,13 @@ def publish_completed_artifacts(task_id, publications, *, byte_budget, file_budg
     }
 
 
-def deliver_final_to_chat(task_id, run=None):
-    """Queue the accepted final answer; the owner releases it via the report
-    button or by asking for news (pending-reports outbox)."""
+def _deliver_final_event(task_id, run=None):
+    """Publish one accepted result to chat and Vox through idempotent keys.
+
+    Chat is the durable conversation record.  Vox owns the independently durable
+    FCM outbox, so marking the already-visible report conveyed must not cancel a
+    push that was owed while the owner was away.
+    """
     try:
         final_message = final_message_from_orchestration(
             fetch_orchestration(task_id),
@@ -542,13 +558,130 @@ def deliver_final_to_chat(task_id, run=None):
         )
     except Exception as exc:  # noqa: BLE001 - final delivery must not break the journal loop
         print(f"Task journal final fetch failed for {task_id}: {exc}", flush=True)
-        return False
+        return {
+            "ok": False,
+            "chat": False,
+            "vox": False,
+            "conveyed": False,
+            "report_id": None,
+            "error": str(exc),
+        }
     if not final_message:
-        return False
+        return {
+            "ok": False,
+            "chat": False,
+            "vox": False,
+            "conveyed": False,
+            "report_id": None,
+            "error": "accepted final response is missing",
+        }
     goal = human_goal(run or {})[:120] or task_id
-    body = f"Задача бригады выполнена и принята Абаддоном.\ntask: {goal}\nfinal ответ:\n{final_message[:4000]}"
+    body = f"Я закончил задачу «{goal}».\nРезультат:\n{final_message[:4000]}"
     report_id = enqueue_report("warmaster", "task_completed", f"готово: {goal}", body, dedupe_key=f"warmaster:{task_id}:final")
-    return bool(report_id)
+    try:
+        from archive_ops import append_chat_message  # local import avoids module-init cycle
+
+        message_id = append_chat_message(
+            SHARED_CHAT_SESSION_ID,
+            "assistant",
+            body,
+            source="shushunya",
+            dedupe_key=f"warmaster:{task_id}:final:chat",
+        )
+    except Exception as exc:  # noqa: BLE001 - Vox can still notify; the journal retries chat
+        print(f"Task journal final chat delivery failed for {task_id}: {exc}", flush=True)
+        message_id = None
+    conveyed = bool(mark_delivered([report_id])) if report_id and message_id else False
+    return {
+        "ok": bool(report_id and message_id and conveyed),
+        "chat": bool(message_id),
+        "vox": bool(report_id),
+        "conveyed": conveyed,
+        "report_id": int(report_id) if report_id else None,
+    }
+
+
+def deliver_final_to_chat(task_id, run=None):
+    """Compatibility wrapper used by direct final-delivery callers/tests."""
+    return bool(_deliver_final_event(task_id, run).get("ok"))
+
+
+def _current_decision_request(result, mission_state, *, task_id, fallback_problem):
+    """Read only the authoritative current result/state, never protocol history."""
+    def direct_request(value):
+        explicit = value.get("decision_request")
+        if isinstance(explicit, dict):
+            return explicit
+        question = str(
+            value.get("question")
+            or value.get("clarification_question")
+            or value.get("exact_question")
+            or ""
+        ).strip()
+        return value if question else None
+
+    current_needs_user = (
+        result.get("needs_user") is True
+        or mission_state.get("needs_user") is True
+        or str(mission_state.get("user_visible_state") or "") == "needs_user_decision"
+        or str(mission_state.get("status") or "") == "needs_user"
+    )
+    if not current_needs_user:
+        return None
+    raw_decision = direct_request(result) or direct_request(mission_state)
+    if not isinstance(raw_decision, dict):
+        return None
+    exact_question = str(
+        raw_decision.get("question")
+        or raw_decision.get("clarification_question")
+        or raw_decision.get("exact_question")
+        or ""
+    ).strip()
+    if not exact_question:
+        return None
+    return normalize_decision_request(
+        raw_decision,
+        task_id=task_id,
+        fallback_problem=fallback_problem,
+        fallback_question=exact_question,
+    )
+
+
+def _decision_fingerprint_payload(value):
+    if isinstance(value, dict):
+        return {
+            str(key): _decision_fingerprint_payload(item)
+            for key, item in value.items()
+            if str(key) not in {"stored_at", "vox_intent_id"}
+        }
+    if isinstance(value, list):
+        return [_decision_fingerprint_payload(item) for item in value]
+    return value
+
+
+def escalation_fingerprint(facts, event_kind):
+    """Stable identity for one user-visible lifecycle/decision version."""
+    decision_request = (
+        facts.get("decision_request")
+        if isinstance(facts.get("decision_request"), dict)
+        else {}
+    )
+    if decision_request:
+        # A live question keeps one identity while the coarse run wrapper moves
+        # through running/needs_user/blocked.  Only a changed question/options/
+        # resume contract is a new interruption worth another notification.
+        payload = {
+            "event_kind": "decision_required",
+            "decision_request": _decision_fingerprint_payload(decision_request),
+        }
+    else:
+        payload = {
+            "event_kind": str(event_kind or ""),
+            "status": str(facts.get("status") or ""),
+            "needs_user": False,
+        }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def escalation_facts(task_id, run):
@@ -569,6 +702,10 @@ def escalation_facts(task_id, run):
     summary = _orchestration_summary(orchestration)
     protocol = summary.get("mission_protocol") if isinstance(summary.get("mission_protocol"), dict) else {}
     facts["goal"] = human_goal(run, protocol)
+    result = summary.get("result") if isinstance(summary.get("result"), dict) else {}
+    mission_state = summary.get("mission_state") if isinstance(summary.get("mission_state"), dict) else {}
+    facts["result_needs_user"] = result.get("needs_user") is True
+    facts["mission_state"] = mission_state
     review = _latest_acceptance_review(protocol)
     if review:
         facts["warmaster_reason"] = str(review.get("reason") or "")
@@ -580,30 +717,93 @@ def escalation_facts(task_id, run):
     blockers = manifest.get("blockers") if isinstance(manifest.get("blockers"), list) else []
     if blockers:
         facts["blockers"] = [str(item)[:200] for item in blockers[:5]]
+    fallback_problem = (
+        facts.get("warmaster_reason")
+        or "; ".join(facts.get("blockers") or [])
+        or str(result.get("reason") or result.get("summary") or "")
+    )
+    decision_request = _current_decision_request(
+        result,
+        mission_state,
+        task_id=task_id,
+        fallback_problem=fallback_problem,
+    )
+    facts["decision_request"] = decision_request
+    # A blocked status or next_owner label is not authority to interrupt the
+    # user. Only a valid contract containing an exact question is.
+    facts["needs_user"] = decision_request is not None
     return facts
 
 
-def deliver_escalation_to_chat(task_id, run, event_kind):
-    """Queue a Warmaster escalation report; it reaches the chat only when the
-    owner presses the report button or asks for news (pending-reports outbox)."""
+def deliver_escalation_to_chat(task_id, run, event_kind, *, facts=None, delivery_token=""):
+    """Project a technical stop into one idempotent conversational event."""
     if not TASK_ESCALATION_TO_CHAT:
-        return False
-    facts = escalation_facts(task_id, run)
-    if event_kind == "task_blocked":
-        lines = ["Задача бригады остановлена и ждёт решения владельца."]
+        return {"ok": False, "chat": False, "vox": False, "report_id": None}
+    facts = facts if isinstance(facts, dict) else escalation_facts(task_id, run)
+    fingerprint = escalation_fingerprint(facts, event_kind)
+    if not delivery_token:
+        delivery_token = hashlib.sha256(
+            f"{task_id}|{event_kind}|{fingerprint}".encode("utf-8")
+        ).hexdigest()[:24]
+    decision_request = facts.get("decision_request")
+    if isinstance(decision_request, dict):
+        message = render_decision_request(decision_request)
+        topic = "мне нужен твой выбор: " + str(facts.get("goal") or "задача")[:120]
+        report_id = enqueue_report(
+            "warmaster",
+            "decision_required",
+            topic,
+            message,
+            dedupe_key=f"decision:{delivery_token}",
+        )
+        if report_id:
+            decision_request["vox_intent_id"] = report_id
+        upsert_pending_decision(decision_request)
+        dedupe_key = f"decision:{delivery_token}:chat"
     else:
-        lines = ["Задача бригады провалена."]
-    lines.append(f"task: {facts.get('goal')}")
-    lines.append(f"губернатор: {facts.get('governor')}; task_id: {task_id}")
-    if facts.get("warmaster_reason"):
-        lines.append(f"вердикт Абаддона: {facts['warmaster_reason']}")
-    if facts.get("required_order"):
-        lines.append(f"что требуется: {facts['required_order']}")
-    for blocker in facts.get("blockers") or []:
-        lines.append(f"блокер: {blocker}")
-    topic = ("нужно решение: " if event_kind == "task_blocked" else "провал задачи: ") + str(facts.get("goal") or task_id)[:120]
-    report_id = enqueue_report("warmaster", event_kind, topic, "\n".join(lines), dedupe_key=f"warmaster:{task_id}:{event_kind}")
-    return bool(report_id)
+        clear_pending_decision(task_id)
+        reason = (
+            facts.get("warmaster_reason")
+            or "; ".join(facts.get("blockers") or [])
+            or facts.get("required_order")
+            or "внутренняя проверка не пропустила текущий результат"
+        )
+        message = render_internal_stall(
+            str(facts.get("goal") or "эта задача"),
+            str(reason),
+            failed=event_kind == "task_failed",
+        )
+        report_id = enqueue_report(
+            "warmaster",
+            "task_failed" if event_kind == "task_failed" else "task_stalled_internal",
+            "работа остановилась: " + str(facts.get("goal") or "задача")[:120],
+            message,
+            dedupe_key=f"warmaster:{delivery_token}",
+        )
+        dedupe_key = f"warmaster:{delivery_token}:chat"
+    try:
+        from archive_ops import append_chat_message  # local import avoids module-init cycle
+
+        message_id = append_chat_message(
+            SHARED_CHAT_SESSION_ID,
+            "assistant",
+            message,
+            source="shushunya",
+            dedupe_key=dedupe_key,
+        )
+    except Exception as exc:  # noqa: BLE001 - Vox still carries the notification
+        print(f"Task journal proactive chat delivery failed for {task_id}: {exc}", flush=True)
+        message_id = None
+    conveyed = bool(mark_delivered([report_id])) if report_id and message_id else False
+    return {
+        "ok": bool(report_id and message_id and conveyed),
+        "chat": bool(message_id),
+        "vox": bool(report_id),
+        "conveyed": conveyed,
+        "report_id": int(report_id) if report_id else None,
+        "fingerprint": fingerprint,
+        "delivery_token": delivery_token,
+    }
 
 
 def _user_request_from_protocol(protocol):
@@ -621,7 +821,7 @@ def human_goal(run, protocol=None):
     Warmaster...' boilerplate, and quoting it back at the owner reads like
     machine garbage, so the wrapper is unwrapped wherever it comes from."""
     request = _user_request_from_protocol(protocol or {}) or str(run.get("goal") or "")
-    match = re.search(r"Исходный запрос пользователя:\s*(.+?)(?:\n\n|$)", request, re.S)
+    match = re.search(r"Исходный запрос (?:пользователя|владельца):\s*(.+?)(?:\n\n|$)", request, re.S)
     if match:
         request = match.group(1)
     return " ".join(request.split())[:300]
@@ -637,9 +837,9 @@ def run_entry_text(run, event):
     step_note = f", шаги {completed}/{planned}" if planned else ""
     status = str(run.get("status") or "").lower()
     if event == "started":
-        return f"Шушуня начал задачу бригады {task_id} (губернатор {governor}): {goal}"
+        return f"Шушуня начал задачу {task_id} (исполнитель {governor}): {goal}"
     if event == "blocked":
-        return f"Задача бригады {task_id} остановлена и ждёт решения владельца (губернатор {governor}{step_note}): {goal}"
+        return f"Задача {task_id} остановилась на проверке (исполнитель {governor}{step_note}): {goal}"
     outcome = {"completed": "успешно выполнил", "failed": "провалил", "cancelled": "отменил"}.get(status, f"завершил со статусом {status}")
     return f"Шушуня {outcome} задачу бригады {task_id} (губернатор {governor}{step_note}): {goal}"
 
@@ -697,15 +897,147 @@ def append_journal_page(entry_text, namespace, task_id, event):
         bookshelf.save_index(index)
 
 
+def _delivery_token(task_id, version, fingerprint):
+    return hashlib.sha256(
+        f"{task_id}|{int(version)}|{fingerprint}".encode("utf-8")
+    ).hexdigest()[:24]
+
+
+def _new_delivery_checkpoint(task_id, status, event_kind, fingerprint, previous=None):
+    previous = previous if isinstance(previous, dict) else {}
+    version = max(0, int(previous.get("version") or 0)) + 1
+    return {
+        "version": version,
+        "fingerprint": fingerprint,
+        "delivery_token": _delivery_token(task_id, version, fingerprint),
+        "status": status,
+        "event_kind": event_kind,
+        "active": True,
+        "chat": False,
+        "vox": False,
+        "conveyed": False,
+        "report_id": None,
+        "complete": False,
+        "attempts": 0,
+        "updated_at": now_iso(),
+    }
+
+
+def _delivery_checkpoint_changed(before, after):
+    return json.dumps(before, ensure_ascii=False, sort_keys=True) != json.dumps(
+        after,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _attempt_escalation_delivery(task_id, run, event_kind, facts, checkpoint):
+    """Merge one idempotent chat/Vox attempt into its durable checkpoint."""
+    before = dict(checkpoint)
+    checkpoint["attempts"] = int(checkpoint.get("attempts") or 0) + 1
+    checkpoint["last_attempt_at"] = now_iso()
+    try:
+        outcome = deliver_escalation_to_chat(
+            task_id,
+            run,
+            event_kind,
+            facts=facts,
+            delivery_token=str(checkpoint.get("delivery_token") or ""),
+        )
+    except Exception as exc:  # noqa: BLE001 - the checkpoint makes this retryable
+        outcome = {
+            "ok": False,
+            "chat": False,
+            "vox": False,
+            "conveyed": False,
+            "report_id": None,
+            "error": str(exc),
+        }
+    checkpoint["chat"] = bool(checkpoint.get("chat") or outcome.get("chat"))
+    checkpoint["vox"] = bool(checkpoint.get("vox") or outcome.get("vox"))
+    checkpoint["conveyed"] = bool(
+        checkpoint.get("conveyed") or outcome.get("conveyed")
+    )
+    if outcome.get("report_id"):
+        checkpoint["report_id"] = int(outcome["report_id"])
+    report_id = checkpoint.get("report_id")
+    if checkpoint["chat"] and checkpoint["vox"] and not checkpoint["conveyed"] and report_id:
+        checkpoint["conveyed"] = bool(mark_delivered([report_id]))
+    checkpoint["complete"] = bool(
+        checkpoint["chat"] and checkpoint["vox"] and checkpoint["conveyed"]
+    )
+    checkpoint["last_error"] = (
+        ""
+        if checkpoint["complete"]
+        else str(outcome.get("error") or "chat/Vox delivery is incomplete")[:500]
+    )
+    checkpoint["updated_at"] = now_iso()
+    return _delivery_checkpoint_changed(before, checkpoint)
+
+
+def _final_delivery_fingerprint(task_id, run):
+    payload = {
+        "event_kind": "task_completed",
+        "task_id": str(task_id or ""),
+        "goal": human_goal(run or {}),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _attempt_final_delivery(task_id, run, checkpoint):
+    """Merge an idempotent final chat/Vox publication into its checkpoint."""
+    before = dict(checkpoint)
+    checkpoint["attempts"] = int(checkpoint.get("attempts") or 0) + 1
+    checkpoint["last_attempt_at"] = now_iso()
+    try:
+        outcome = _deliver_final_event(task_id, run)
+    except Exception as exc:  # noqa: BLE001 - checkpointed and retried next poll
+        outcome = {
+            "ok": False,
+            "chat": False,
+            "vox": False,
+            "conveyed": False,
+            "report_id": None,
+            "error": str(exc),
+        }
+    checkpoint["chat"] = bool(checkpoint.get("chat") or outcome.get("chat"))
+    checkpoint["vox"] = bool(checkpoint.get("vox") or outcome.get("vox"))
+    checkpoint["conveyed"] = bool(
+        checkpoint.get("conveyed") or outcome.get("conveyed")
+    )
+    if outcome.get("report_id"):
+        checkpoint["report_id"] = int(outcome["report_id"])
+    report_id = checkpoint.get("report_id")
+    if checkpoint["chat"] and checkpoint["vox"] and not checkpoint["conveyed"] and report_id:
+        checkpoint["conveyed"] = bool(mark_delivered([report_id]))
+    checkpoint["complete"] = bool(
+        checkpoint["chat"] and checkpoint["vox"] and checkpoint["conveyed"]
+    )
+    checkpoint["last_error"] = (
+        ""
+        if checkpoint["complete"]
+        else str(outcome.get("error") or "final chat/Vox delivery is incomplete")[:500]
+    )
+    checkpoint["updated_at"] = now_iso()
+    return _delivery_checkpoint_changed(before, checkpoint)
+
+
 def poll_once():
     runs = fetch_runs()
     state = load_state()
-    first_run = not any(key != ARTIFACT_PUBLICATIONS_STATE_KEY for key in state)
+    first_run = not any(key not in STATE_METADATA_KEYS for key in state)
     publications = state.get(ARTIFACT_PUBLICATIONS_STATE_KEY)
+    deliveries = state.get(CONVERSATION_DELIVERIES_STATE_KEY)
+    delivery_baseline = not isinstance(deliveries, dict)
     changed = False
     if not isinstance(publications, dict):
         publications = {}
         state[ARTIFACT_PUBLICATIONS_STATE_KEY] = publications
+        changed = True
+    if not isinstance(deliveries, dict):
+        deliveries = {}
+        state[CONVERSATION_DELIVERIES_STATE_KEY] = deliveries
         changed = True
     # A just-completed run is never starved behind legacy baseline backfill.
     # Python's stable sort preserves Warmaster's order within both groups.
@@ -734,17 +1066,115 @@ def poll_once():
             state[task_id] = status
             changed = True
             if not first_run:
-                if previous is None and status not in TERMINAL_STATUSES and status != "blocked":
+                if previous is None and status not in TERMINAL_STATUSES and status not in {"blocked", "needs_user"}:
                     remember_entry(run_entry_text(run, "started"), task_id, "started")
-                elif status == "blocked":
+                elif status in {"blocked", "needs_user"}:
                     remember_entry(run_entry_text(run, "blocked"), task_id, "blocked")
-                    deliver_escalation_to_chat(task_id, run, "task_blocked")
                 elif status in TERMINAL_STATUSES:
                     remember_entry(run_entry_text(run, "finished"), task_id, f"finished-{status}")
-                    if status == "completed":
-                        deliver_final_to_chat(task_id, run)
-                    elif status == "failed":
-                        deliver_escalation_to_chat(task_id, run, "task_failed")
+
+        # Native warbands remain top-level `running` while their durable
+        # mission result carries a typed needs_user question.  Read that current
+        # truth independently from the wrapper status; otherwise the normal live
+        # clarification path never reaches chat or the phone.
+        facts = None
+        if status == "failed" or status not in TERMINAL_STATUSES:
+            facts = escalation_facts(task_id, run)
+        has_current_decision = bool(
+            isinstance(facts, dict)
+            and isinstance(facts.get("decision_request"), dict)
+        )
+        escalation_event = (
+            "decision_required"
+            if has_current_decision
+            else "task_failed"
+            if status == "failed"
+            else "task_blocked"
+            if status in {"blocked", "needs_user"}
+            else ""
+        )
+        delivery_event = "task_completed" if status == "completed" else escalation_event
+        checkpoint = deliveries.get(task_id)
+        if delivery_event:
+            if delivery_event == "task_completed":
+                clear_pending_decision(task_id)
+                fingerprint = _final_delivery_fingerprint(task_id, run)
+            else:
+                facts = facts if isinstance(facts, dict) else escalation_facts(task_id, run)
+                # A failed orchestration read is not authority to discard the
+                # last durable question, even when the coarse run says blocked.
+                if (
+                    not isinstance(facts.get("decision_request"), dict)
+                    and not facts.get("detail_error")
+                ):
+                    clear_pending_decision(task_id)
+                fingerprint = escalation_fingerprint(facts, delivery_event)
+            checkpoint_changed = (
+                not isinstance(checkpoint, dict)
+                or checkpoint.get("fingerprint") != fingerprint
+                or checkpoint.get("event_kind") != delivery_event
+                or checkpoint.get("active") is not True
+            )
+            if checkpoint_changed:
+                checkpoint = _new_delivery_checkpoint(
+                    task_id,
+                    status,
+                    delivery_event,
+                    fingerprint,
+                    previous=checkpoint,
+                )
+                deliveries[task_id] = checkpoint
+                changed = True
+
+            # Do not flood the user with every historical internal block at
+            # service bootstrap. A real current decision request is different:
+            # it must be asked even on the first baseline poll.
+            if (
+                delivery_baseline
+                and (first_run or previous == status)
+                and not (
+                    delivery_event == "decision_required"
+                    and isinstance(facts, dict)
+                    and facts.get("needs_user") is True
+                )
+                and not checkpoint.get("attempts")
+            ):
+                before = dict(checkpoint)
+                checkpoint["complete"] = True
+                checkpoint["baseline_suppressed"] = True
+                checkpoint["updated_at"] = now_iso()
+                changed = changed or _delivery_checkpoint_changed(before, checkpoint)
+            elif isinstance(facts, dict) and facts.get("detail_error"):
+                detail_error = str(facts["detail_error"])[:500]
+                if checkpoint.get("last_error") != detail_error:
+                    checkpoint["last_error"] = detail_error
+                    checkpoint["updated_at"] = now_iso()
+                    changed = True
+            elif checkpoint.get("complete") is not True:
+                if delivery_event == "task_completed":
+                    changed = _attempt_final_delivery(task_id, run, checkpoint) or changed
+                else:
+                    changed = (
+                        _attempt_escalation_delivery(
+                            task_id,
+                            run,
+                            delivery_event,
+                            facts,
+                            checkpoint,
+                        )
+                        or changed
+                    )
+        else:
+            # Clear a stale question only after an authoritative current read.
+            # A transient orchestration error must leave it durable for retry.
+            if status in TERMINAL_STATUSES or (
+                isinstance(facts, dict) and not facts.get("detail_error")
+            ):
+                clear_pending_decision(task_id)
+            if isinstance(checkpoint, dict) and checkpoint.get("active") is True:
+                checkpoint["active"] = False
+                checkpoint["updated_at"] = now_iso()
+                changed = True
 
         # Artifact publication is deliberately independent of lifecycle event
         # replay.  This backfills accepted runs on the very first baseline poll
@@ -783,6 +1213,13 @@ def poll_once():
         "artifacts_attempted": artifacts_attempted,
         "artifact_errors": artifact_errors,
         "artifact_bytes": TASK_JOURNAL_ARTIFACT_BYTES_PER_POLL - artifact_budget_remaining,
+        "conversation_deliveries_pending": sum(
+            1
+            for checkpoint in deliveries.values()
+            if isinstance(checkpoint, dict)
+            and checkpoint.get("active") is True
+            and checkpoint.get("complete") is not True
+        ),
     }
 
 

@@ -40,6 +40,31 @@ class FakeArtifactOrgans:
         raise AssertionError("artifact effect was routed to Administratum")
 
 
+class FakeClarifyingOrgans:
+    async def dispatch_abaddon(self, payload):
+        raise OrganError(
+            "clarification_required",
+            "Какой движок выбрать?",
+            retryable=False,
+            evidence={
+                "task_id": payload["task_id"],
+                "outcome_type": "needs_user_decision",
+                "decision_request": {
+                    "kind": "decision_request",
+                    "task_id": payload["task_id"],
+                    "question": "Какой движок выбрать?",
+                    "resume_condition": "После ответа продолжить ту же миссию.",
+                },
+            },
+        )
+
+    async def dispatch_archive_artifact_adapter(self, _effect_id, _payload):  # pragma: no cover
+        raise AssertionError("Abaddon effect was routed to Artifact adapter")
+
+    async def dispatch_archive_adapter(self, _effect_id, _payload):  # pragma: no cover
+        raise AssertionError("Abaddon effect was routed to Administratum")
+
+
 class ArchiveAdapterAuthTests(unittest.TestCase):
     def test_dedicated_core_archive_header_is_mandatory(self):
         configured = Organs(SimpleNamespace(archive_effect_key="core-test-key-0123456789abcdefghijkl"))
@@ -162,6 +187,68 @@ class StewardArtifactTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(commitment["state"], "quarantined")
         self.assertEqual(
             commitment["diagnostic"]["code"], "archive_artifact_adapter_unreachable",
+        )
+
+
+class StewardClarificationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ledger = Ledger(Path(self.tmp.name) / "core.sqlite3")
+        self.ledger.initialize()
+
+    async def asyncTearDown(self):
+        self.tmp.cleanup()
+
+    async def test_clarification_is_waiting_user_once_not_retry_wait(self):
+        turn_id, _cached = self.ledger.accept_turn(
+            "mission-turn", {"source": "test", "text": "собери игру"},
+        )
+        payload = {
+            "message": "собери игру",
+            "task_id": "core-game",
+            "idempotency_key": "effect-game",
+        }
+        self.ledger.save_turn_resolution(
+            idempotency_key="mission-turn",
+            turn_id=turn_id,
+            resolution={"ok": True, "turn_id": turn_id},
+            commitment={
+                "id": "commitment-game",
+                "kind": "abaddon_mission",
+                "goal": "собрать игру",
+                "spec": payload,
+                "state": "queued",
+                "delegate_kind": "abaddon",
+                "max_attempts": 3,
+            },
+            effect={
+                "id": "effect-game",
+                "commitment_id": "commitment-game",
+                "kind": "request_warmaster_mission",
+                "destination": "abaddon",
+                "payload": payload,
+                "idempotency_key": "effect-game",
+                "max_attempts": 3,
+            },
+        )
+        steward = Steward(
+            SimpleNamespace(effect_lease_sec=60),
+            self.ledger,
+            FakeClarifyingOrgans(),
+            Commitments(self.ledger, FakeClarifyingOrgans()),
+        )
+
+        effect = await steward.dispatch_effect("effect-game")
+
+        self.assertEqual(effect["state"], "dead_letter")
+        commitment = self.ledger.list_commitments()[0]
+        self.assertEqual(commitment["state"], "waiting_user")
+        self.assertEqual(commitment["attempt_count"], 1)
+        self.assertEqual(commitment["diagnostic"]["code"], "clarification_required")
+        self.assertEqual(commitment["diagnostic"]["required_action"], "Какой движок выбрать?")
+        self.assertEqual(
+            commitment["diagnostic"]["evidence"]["decision_request"]["task_id"],
+            "core-game",
         )
 
 

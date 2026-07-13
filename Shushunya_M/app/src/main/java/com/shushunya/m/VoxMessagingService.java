@@ -37,20 +37,50 @@ public class VoxMessagingService extends FirebaseMessagingService {
 
     @Override
     public void onMessageReceived(RemoteMessage message) {
-        String title = "Шушуня хочет что-то сказать";
-        String body = "";
-        if (message.getNotification() != null) {
-            if (message.getNotification().getTitle() != null) {
-                title = message.getNotification().getTitle();
-            }
-            if (message.getNotification().getBody() != null) {
-                body = message.getNotification().getBody();
-            }
+        String title = clean(message.getData().get("conversation_title"));
+        String body = clean(message.getData().get("conversation_body"));
+        if (title.isEmpty() || looksLikeOperationalDispatch(title)) {
+            title = "Шушуня хочет что-то сказать";
         }
-        if (body.isEmpty() && message.getData().containsKey("body")) {
-            body = message.getData().get("body");
+        if (body.isEmpty() || looksLikeOperationalDispatch(body)) {
+            body = "У меня есть обновление. Открой чат — там скажу нормально.";
         }
         showAlert(title, body);
+    }
+
+    private String clean(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private boolean looksLikeOperationalDispatch(String text) {
+        String lower = text == null ? "" : text.toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("абаддон")
+                || lower.contains("вармастер")
+                || lower.contains("warmaster")
+                || lower.contains("abaddon")
+                || lower.contains("скитари")
+                || lower.contains("skitarii")
+                || lower.contains("церакси")
+                || lower.contains("ceraxia")
+                || lower.contains("искандар")
+                || lower.contains("iskandar")
+                || lower.contains("бригад")
+                || lower.contains("варбанд")
+                || lower.contains("губернатор")
+                || lower.contains("core")
+                || lower.contains("task_id")
+                || lower.contains("mission_id")
+                || lower.contains("run_id")
+                || lower.contains("effect_id")
+                || lower.contains("commitment_id")
+                || lower.contains("idempotency")
+                || lower.contains("http ")
+                || lower.contains("gateway")
+                || lower.contains("preflight")
+                || lower.contains("orchestration")
+                || lower.contains("владел")
+                || lower.contains("хозяин")
+                || lower.contains("господин");
     }
 
     private void showAlert(String title, String body) {

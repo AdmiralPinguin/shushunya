@@ -10,6 +10,8 @@ import json
 import os
 import urllib.request
 
+from decision_requests import conversational_document, conversational_text
+
 VOX_BASE_URL = os.environ.get("ARCHIVE_VOX_BASE_URL", "http://127.0.0.1:7400").rstrip("/")
 
 
@@ -69,17 +71,25 @@ def task_roster_note():
     tasks = [t for t in (roster.get("tasks") or []) if t.get("state") not in ("completed", "cancelled")]
     if not tasks:
         return None
-    lines = [f"- {t['goal']} — {t['state_label']} (task_id {t['task_id']}, бригада {t['governor']})" for t in tasks[:10]]
+    lines = []
+    for task in tasks[:10]:
+        state = str(task.get("state") or "").lower()
+        state_label = (
+            "остановилась на внутренней проверке"
+            if state == "blocked"
+            else "ждёт моего ответа на отдельный вопрос"
+            if state == "needs_user"
+            else conversational_text(task.get("state_label"))
+        )
+        lines.append(f"- {conversational_text(task.get('goal'))} — {state_label}")
     return {
         "role": "system",
         "content": (
-            "[Твои задачи сейчас — живой статус от Абаддона. АВТОРИТЕТНЕЕ всего остального в промпте]\n"
-            "Эти задачи ведут варбанды Абаддона, а НЕ ты лично. Не описывай процесс от первого лица "
-            "('я выкапываю', 'я собираю осколки') — так делает бригада, не ты. "
-            "Статус задачи бери ТОЛЬКО из этого списка. Твой focus-файл и твои прошлые реплики в истории "
-            "могут быть устаревшими — НЕ верь им про статус, верь только этому списку. "
-            "Если задача 'остановлена, ждёт решения' — честно скажи, что она стоит, и спроси у владельца, "
-            "что делать; 'провалена' — признай провал; 'в работе' — так и скажи, что бригада работает.\n"
+            "[Мои текущие дела — живой статус, авторитетнее старых реплик]\n"
+            "Это твои дела и твоя ответственность. В обычном разговоре говори о них от первого лица: "
+            "'я работаю', 'я закончил', 'мне нужен твой выбор'. Не раскрывай внутренние сервисы, исполнителей, "
+            "идентификаторы или транспорт. Статус бери только из списка. Само слово 'остановлена' не означает, "
+            "что нужен пользователь: спрашивай только когда рядом есть отдельный typed decision_request.\n"
             + "\n".join(lines)
         ),
     }
@@ -117,15 +127,16 @@ def mark_delivered(report_ids):
 def reports_event_text(reports):
     """Combined system-event text: Shushunya voices all open intents at once."""
     lines = [
-        "[Накопленные доклады для владельца]",
-        "Владелец разрешил доложить. Изложи доклады своим голосом, по порядку, ничего не выдумывая сверх текста.",
+        "[То, что я ещё не успел сказать]",
+        "Изложи это своим голосом и от первого лица, по порядку, ничего не выдумывая сверх текста.",
         "Докладывай строго по-русски: если фрагменты доклада на другом языке, переведи их.",
+        "Не называй внутренние сервисы, исполнителей, HTTP-коды, идентификаторы задач или ключи запросов.",
         "Не создавай из этого новые задачи.",
         "",
     ]
     for index, report in enumerate(reports, 1):
         lines.append(f"--- доклад {index} [{report.get('kind')}] от {report.get('created_at')}")
-        lines.append(str(report.get("body") or ""))
+        lines.append(conversational_document(report.get("body") or ""))
         lines.append("")
     return "\n".join(lines).strip()
 
@@ -146,15 +157,18 @@ def pending_topics_note(context_text=""):
     for intent in intents:
         speech_class = intent.get("class")
         if speech_class == "срочно":
-            lines.append(f"- СРОЧНОЕ [{intent.get('topic')}]: {intent.get('body')}")
+            lines.append(
+                f"- СРОЧНОЕ [{conversational_text(intent.get('topic'))}]: "
+                f"{conversational_text(intent.get('body'))}"
+            )
         else:
-            lines.append(f"- [{speech_class}] {intent.get('topic')}")
+            lines.append(f"- [{speech_class}] {conversational_text(intent.get('topic'))}")
     urgent = any(intent.get("class") == "срочно" for intent in intents)
     guidance = (
-        "У Шушуни есть что сказать владельцу. Срочное изложи в этом ответе прямо, своими словами. "
+        "У тебя есть что сказать собеседнику. Срочное изложи в этом ответе прямо, своими словами и от первого лица. "
         if urgent
         else (
-            "У Шушуни есть что сказать владельцу. Если это уместно по ходу разговора, ввернёшь одной фразой; "
+            "У тебя есть что сказать собеседнику. Если это уместно по ходу разговора, ввернёшь одной фразой; "
             "если не к месту — промолчи, скажешь позже. Не пересказывай списком."
         )
     )

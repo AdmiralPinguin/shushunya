@@ -1868,7 +1868,7 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
                  "каталоге с их путями — читай и правь их, НЕ переписывай с нуля.)")
         if workspace_external_assets:
             external_paths = sorted(_safe_workspace_path(path) for path in workspace_external_assets)
-            goal += ("\nLarge clean tracked assets are inventory-only in the fighter VM and must remain "
+            goal += ("\nLarge Git-visible assets are inventory-only in the fighter VM and must remain "
                      "unchanged: " + ", ".join(external_paths[:50]))
     _memory(task_id, f"Загружено {visible_count} файлов проекта." if visible_count else f"Старт: {goal[:200]}")
 
