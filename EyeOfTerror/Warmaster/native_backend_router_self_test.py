@@ -179,9 +179,15 @@ def main() -> int:
         skitarii_calls: list[str] = []
         linked_before_start: set[str] = set()
 
-        def fake_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 0) -> dict:
+        def fake_skitarii(
+            run_dir: Path,
+            task_id: str,
+            timeout_sec: int = 0,
+            execution_mode: str = "full",
+        ) -> dict:
             assert run_dir.name == task_id
             assert timeout_sec > 0
+            assert execution_mode in {"full", "resume", "revision"}
             assert (run_dir / "mission_ref.json").is_file(), "executor started before mission_ref was durable"
             if task_id == auto_run.name:
                 assert task_id in linked_before_start, "executor started before link_run_to_mission completed"

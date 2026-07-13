@@ -2,8 +2,8 @@
 Description=Shushunya full stack (LLMs, archive, governors, bots)
 # Wait until the SHUSHUNYA data disk is mounted and the network is up.
 Requires=media-shushunya-SHUSHUNYA.mount
-After=media-shushunya-SHUSHUNYA.mount network-online.target
-Wants=network-online.target
+After=media-shushunya-SHUSHUNYA.mount network-online.target user@1001.service
+Wants=network-online.target user@1001.service
 
 [Service]
 Type=oneshot

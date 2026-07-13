@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import queue
 import re
 import sqlite3
 import threading
@@ -499,6 +500,28 @@ class ArchiveHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path.startswith("/archive/client/"):
             self.path = "/archive/mobile/" + self.path[len("/archive/client/") :]
+
+        if self.path == "/archive/internal/core/administratum-effect":
+            peer = str((self.client_address or ("",))[0] or "")
+            if peer not in {"127.0.0.1", "::1"}:
+                write_json(self, 403, {"ok": False, "error": "loopback only"})
+                return
+            try:
+                content_length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                content_length = -1
+            if content_length < 0 or content_length > 262_144:
+                write_json(self, 413, {"ok": False, "error": "invalid internal effect size"})
+                return
+            try:
+                request = read_json(self)
+                result = run_core_administratum_effect(request.get("effect_id"), request.get("payload"))
+            except (json.JSONDecodeError, ValueError) as exc:
+                write_json(self, 400, {"ok": False, "retryable": False, "code": "invalid_effect", "explanation": str(exc)})
+                return
+            status = 200 if result.get("ok") else 503 if result.get("retryable") else 422
+            write_json(self, status, result)
+            return
 
         if self.path in {"/archive/mobile/chat/completions", "/archive/chat/completions"}:
             if not require_auth(self, allow_mobile=True):
@@ -1076,9 +1099,13 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         clean_task_id = str(task_id or "").strip()
         if not clean_task_id:
             return
-        # Voiced by the persona in a background thread: the chat gets a live
-        # "взял в работу" reply instead of a dry static line.
-        start_persona_mission_ack(session_id or SHARED_CHAT_SESSION_ID, clean_task_id, task_text)
+        append_chat_message(
+            shared_chat_session_id(session_id or SHARED_CHAT_SESSION_ID),
+            "assistant",
+            self.warmaster_acceptance_message(clean_task_id),
+            source="shushunya-core",
+            dedupe_key=f"warmaster:{clean_task_id}:accepted",
+        )
 
     def warmaster_loop_started_or_active(self, status, payload):
         if 200 <= int(status or 0) < 300:
@@ -1305,27 +1332,93 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             raise ValueError("Abaddon task is empty")
 
         task_id = str(payload.get("task_id") or f"client-{uuid.uuid4().hex[:12]}").strip()
-        warmaster_payload = {
-            "message": task,
-            "task_id": task_id,
-            "auto_start": False,
-            "reuse_existing": True,
-            "run_mode": str(payload.get("run_mode") or "http"),
-            "governor_transport": str(payload.get("governor_transport") or "http"),
-        }
-        duplicate_id = warmaster_duplicate_task_id(task)
-        if duplicate_id:
-            # Same job already on the board: resume it, don't spawn a twin.
-            status, response = 200, {"ok": True, "task_id": duplicate_id, "resumed_existing": True}
-            resolved_task_id = duplicate_id
+        core_effect = payload.get("core_effect") if isinstance(payload.get("core_effect"), dict) else None
+        if core_effect and core_effect.get("id"):
+            try:
+                dispatched = core_dispatch_effect(str(core_effect["id"]))
+            except Exception as exc:  # commitment/outbox are already durable in Core
+                dispatched = {
+                    "ok": False,
+                    "effect": {
+                        "state": "retry_wait",
+                        "payload": core_effect.get("payload") if isinstance(core_effect.get("payload"), dict) else {},
+                        "result": {
+                            "explanation": (
+                                "Core сохранил обязательство, но Archive не дождался подтверждения Абаддона: "
+                                f"{exc}"
+                            )
+                        },
+                    },
+                }
+            effect = dispatched.get("effect") if isinstance(dispatched.get("effect"), dict) else {}
+            effect_result = effect.get("result") if isinstance(effect.get("result"), dict) else {}
+            resolved_task_id = str(
+                effect_result.get("delegate_ref")
+                or (effect.get("payload") or {}).get("task_id")
+                or task_id
+            ).strip()
+            if effect.get("state") != "delivered" or not effect_result.get("delegate_ref"):
+                explanation = str(
+                    effect_result.get("explanation")
+                    or "Абаддон пока не подтвердил приём задачи."
+                ).strip()
+                message = (
+                    f"{explanation} Обязательство не потеряно: Core сохранил его и повторит тем же "
+                    f"idempotency key. task_id={resolved_task_id}."
+                )
+                append_chat_message(
+                    session_id,
+                    "user",
+                    original_text or task,
+                    source=client_source,
+                    dedupe_key=f"core-effect:{core_effect['id']}:user",
+                )
+                append_chat_message(
+                    session_id,
+                    "assistant",
+                    message,
+                    source="shushunya-core",
+                    dedupe_key=f"core-effect:{core_effect['id']}:retry",
+                )
+                return {
+                    "ok": False,
+                    "backend": "shushunya-core",
+                    "task_id": resolved_task_id,
+                    "message": message,
+                    "core_effect": effect,
+                    "status": effect.get("state") or "retry_wait",
+                }
+            status = 202
+            response = {
+                "ok": True,
+                "task_id": resolved_task_id,
+                "core_effect": effect,
+                "canonical_start": True,
+            }
+            loop_status = 202
+            loop_response = {"ok": True, "core_owned": True, "auto_start": True}
         else:
-            status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=240)
-            response_status = response.get("status") if isinstance(response.get("status"), dict) else {}
-            resolved_task_id = str(response.get("task_id") or response_status.get("task_id") or task_id).strip()
-        loop_status = 0
-        loop_response = {}
-        if 200 <= status < 300 and resolved_task_id:
-            loop_status, loop_response = self.warmaster_start_research_loop(resolved_task_id, payload)
+            warmaster_payload = {
+                "message": task,
+                "task_id": task_id,
+                "auto_start": False,
+                "reuse_existing": True,
+                "run_mode": str(payload.get("run_mode") or "http"),
+                "governor_transport": str(payload.get("governor_transport") or "http"),
+            }
+            duplicate_id = warmaster_duplicate_task_id(task)
+            if duplicate_id:
+                # Legacy explicit /abaddon path: resume the same run, do not clone it.
+                status, response = 200, {"ok": True, "task_id": duplicate_id, "resumed_existing": True}
+                resolved_task_id = duplicate_id
+            else:
+                status, response = proxy_json_url("POST", f"{WARMASTER_BASE_URL}/orchestrate_run", payload=warmaster_payload, timeout=240)
+                response_status = response.get("status") if isinstance(response.get("status"), dict) else {}
+                resolved_task_id = str(response.get("task_id") or response_status.get("task_id") or task_id).strip()
+            loop_status = 0
+            loop_response = {}
+            if 200 <= status < 300 and resolved_task_id:
+                loop_status, loop_response = self.warmaster_start_research_loop(resolved_task_id, payload)
 
         append_chat_message(
             session_id,
@@ -1364,6 +1457,40 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         response["research_loop"] = loop_response
         return response
 
+    def run_core_turn_payload(self, payload, on_token=None):
+        """Resolve and execute one complete turn under the shared admission gates."""
+        payload = dict(payload)
+        session_id = shared_chat_session_id(payload.get("session_id") or payload.get("user") or SHARED_CHAT_SESSION_ID)
+        text = trim_chat_text(payload.get("text") or payload.get("message") or "")
+        image_data_url = str(payload.get("image_data_url") or "").strip()
+        ensure_core_transport_identity(payload)
+        with archive_state.CHAT_SESSION_LOCKS.hold(session_id), CHAT_QUEUE_LOCK:
+            turn = decide_chat_turn_action(
+                session_id,
+                text,
+                image_data_url=image_data_url,
+                model=payload.get("model") or DEFAULT_MODEL,
+                payload=payload,
+            )
+            decision = turn.get("decision") if isinstance(turn.get("decision"), dict) else {"action": "answer_in_chat"}
+            payload["session_id"] = session_id
+            payload["turn_decision"] = decision
+            payload["turn_capabilities"] = turn.get("capabilities") if isinstance(turn.get("capabilities"), dict) else {}
+            payload["turn_protocol"] = {"request": turn.get("request"), "response": turn.get("response")}
+            payload["core_context_bundle"] = turn.get("context_bundle") if isinstance(turn.get("context_bundle"), dict) else {}
+            payload["core_resolution"] = turn.get("core_resolution") if isinstance(turn.get("core_resolution"), dict) else {}
+            payload["core_effect"] = turn.get("effect") if isinstance(turn.get("effect"), dict) else None
+            if decision.get("action") == "request_warmaster_mission":
+                payload["warmaster_task"] = warmaster_request_to_message(
+                    decision.get("warmaster_request") if isinstance(decision.get("warmaster_request"), dict) else {}
+                )
+                effect_payload = payload["core_effect"].get("payload") if isinstance(payload.get("core_effect"), dict) else {}
+                payload["task_id"] = str((effect_payload or {}).get("task_id") or payload.get("task_id") or "")
+                return self.run_mobile_warmaster_payload(payload)
+            if decision.get("action") in {"answer_in_chat", "ask_clarification"} and str(decision.get("reply") or "").strip():
+                payload["forced_chat_reply"] = str(decision.get("reply") or "").strip()
+            return run_mobile_chat_payload(payload, on_token=on_token)
+
     def mobile_chat_start(self):
         try:
             payload = read_json(self)
@@ -1380,29 +1507,30 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         payload["session_id"] = session_id
         payload["memory_namespace"] = shared_memory_namespace(payload.get("memory_namespace"))
         payload["client_source"] = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
+        request_id = ensure_core_transport_identity(payload)
+        # Queue immediately. Decision, Magos and execution run under the same
+        # four-slot/session gate, so a slow 31B turn cannot time out the start
+        # request or observe history out of order.
         try:
-            turn = decide_chat_turn_action(session_id, text, image_data_url=image_data_url, model=payload.get("model") or DEFAULT_MODEL)
-        except Exception as exc:
-            write_json(self, 502, {"ok": False, "error": f"turn protocol unavailable: {exc}", "session_id": session_id})
+            job_id, created, job_status = create_mobile_turn_job_once(payload)
+        except ValueError as exc:
+            write_json(self, 409, {"ok": False, "error": str(exc), "client_request_id": request_id})
             return
-        decision = turn.get("decision") if isinstance(turn.get("decision"), dict) else {"action": "answer_in_chat"}
-        payload["turn_decision"] = decision
-        payload["turn_capabilities"] = turn.get("capabilities") if isinstance(turn.get("capabilities"), dict) else {}
-        payload["turn_protocol"] = {
-            "request": turn.get("request"),
-            "response": turn.get("response"),
-        }
-        if decision.get("action") == "request_warmaster_mission":
-            payload["warmaster_task"] = warmaster_request_to_message(decision.get("warmaster_request") if isinstance(decision.get("warmaster_request"), dict) else {})
-            job_id = create_mobile_job("warmaster", payload)
-            run_mobile_job(job_id, lambda payload=payload: self.run_mobile_warmaster_payload(payload))
-            write_json(self, 202, {"ok": True, "job_id": job_id, "type": "warmaster", "session_id": session_id, "status": "queued"})
-            return
-        if decision.get("action") == "ask_clarification":
-            payload["forced_chat_reply"] = str(decision.get("reply") or "").strip()
-        job_id = create_mobile_job("chat", payload)
-        run_mobile_job(job_id, lambda payload=payload: run_mobile_chat_payload(payload))
-        write_json(self, 202, {"ok": True, "job_id": job_id, "type": "chat", "session_id": session_id, "status": "queued"})
+        if created:
+            run_mobile_job(job_id, lambda payload=payload: self.run_core_turn_payload(payload))
+        write_json(
+            self,
+            202,
+            {
+                "ok": True,
+                "job_id": job_id,
+                "type": "turn",
+                "client_request_id": request_id,
+                "session_id": session_id,
+                "status": job_status,
+                "reused": not created,
+            },
+        )
 
     def mobile_chat_stream(self):
         """Token-by-token SSE for a chat send: the answer appears fluidly as it
@@ -1422,15 +1550,12 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         payload["session_id"] = session_id
         payload["memory_namespace"] = shared_memory_namespace(payload.get("memory_namespace"))
         payload["client_source"] = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
+        request_id = ensure_core_transport_identity(payload)
         try:
-            turn = decide_chat_turn_action(session_id, text, image_data_url=image_data_url, model=payload.get("model") or DEFAULT_MODEL)
-        except Exception as exc:
-            write_json(self, 502, {"ok": False, "error": f"turn protocol unavailable: {exc}", "session_id": session_id})
+            job_id, created, _job_status = create_mobile_turn_job_once(payload)
+        except ValueError as exc:
+            write_json(self, 409, {"ok": False, "error": str(exc), "client_request_id": request_id})
             return
-        decision = turn.get("decision") if isinstance(turn.get("decision"), dict) else {"action": "answer_in_chat"}
-        payload["turn_decision"] = decision
-        payload["turn_capabilities"] = turn.get("capabilities") if isinstance(turn.get("capabilities"), dict) else {}
-        payload["turn_protocol"] = {"request": turn.get("request"), "response": turn.get("response")}
 
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -1443,35 +1568,104 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             self.wfile.write(("data: " + json.dumps(obj, ensure_ascii=False) + "\n\n").encode("utf-8"))
             self.wfile.flush()
 
+        events = queue.Queue()
+        outcome = {}
+
+        def on_token(piece):
+            if piece:
+                events.put(("token", str(piece)))
+
+        def worker():
+            try:
+                if created:
+                    try:
+                        update_mobile_job(job_id, "running")
+                    except Exception as exc:  # noqa: BLE001 - surface durable-state failure through SSE
+                        diagnostic = f"mobile_job_running_persist_failed: {type(exc).__name__}: {exc}"
+                        outcome["error"] = RuntimeError(diagnostic)
+                        mark_mobile_job_interrupted(job_id, diagnostic)
+                        return
+                    try:
+                        outcome["result"] = self.run_core_turn_payload(payload, on_token=on_token)
+                    except Exception as exc:  # noqa: BLE001 - reported through SSE
+                        outcome["error"] = exc
+                        try:
+                            update_mobile_job(job_id, "failed", error=exc)
+                        except Exception as persist_exc:  # noqa: BLE001
+                            diagnostic = (
+                                "mobile_job_failure_persist_failed: "
+                                f"worker={type(exc).__name__}: {exc}; "
+                                f"storage={type(persist_exc).__name__}: {persist_exc}"
+                            )
+                            outcome["error"] = RuntimeError(diagnostic)
+                            mark_mobile_job_interrupted(job_id, diagnostic)
+                        return
+                    try:
+                        update_mobile_job(job_id, "done", response=outcome["result"])
+                    except Exception as exc:  # noqa: BLE001
+                        diagnostic = f"mobile_job_result_persist_failed: {type(exc).__name__}: {exc}"
+                        outcome["error"] = RuntimeError(diagnostic)
+                        mark_mobile_job_interrupted(job_id, diagnostic)
+                    return
+                # A duplicate transport request observes the original durable job.
+                # It does not run Core, Magos or an external effect again.
+                while True:
+                    snapshot = mobile_job_snapshot(job_id)
+                    status = str(snapshot.get("status") or "")
+                    if status == "done":
+                        outcome["result"] = snapshot.get("response") if isinstance(snapshot.get("response"), dict) else {}
+                        break
+                    if status in {"failed", "interrupted"}:
+                        outcome["error"] = RuntimeError(str(snapshot.get("error") or f"turn job {status}"))
+                        break
+                    if status not in {"queued", "running"}:
+                        outcome["error"] = RuntimeError(f"turn job has unexpected status: {status or 'missing'}")
+                        break
+                    time.sleep(0.5)
+            except Exception as exc:  # noqa: BLE001 - no worker failure may strand the SSE loop
+                outcome["error"] = exc
+            finally:
+                events.put(("done", ""))
+
+        threading.Thread(target=worker, daemon=True, name=f"core-turn-{request_id}").start()
+        collected = []
         try:
-            if decision.get("action") == "request_warmaster_mission":
-                # Brigade work isn't a token stream: hand the app back to its
-                # warmaster flow, and kick the mission off here so nothing is lost.
-                task = warmaster_request_to_message(decision.get("warmaster_request") if isinstance(decision.get("warmaster_request"), dict) else {})
-                payload["warmaster_task"] = task
-                job_id = create_mobile_job("warmaster", payload)
-                run_mobile_job(job_id, lambda payload=payload: self.run_mobile_warmaster_payload(payload))
-                sse({"type": "route", "backend": "warmaster", "job_id": job_id, "warmaster_task": task})
-                sse({"type": "done"})
+            sse({"type": "status", "status": "thinking", "client_request_id": request_id})
+            while True:
+                try:
+                    kind, value = events.get(timeout=10)
+                except queue.Empty:
+                    sse({"type": "status", "status": "working", "client_request_id": request_id})
+                    continue
+                if kind == "done":
+                    break
+                collected.append(value)
+                sse({"type": "token", "text": value})
+            if outcome.get("error"):
+                raise outcome["error"]
+            result = outcome.get("result") if isinstance(outcome.get("result"), dict) else {}
+            message = str(result.get("message") or "")
+            if result.get("backend") == "warmaster":
+                sse(
+                    {
+                        "type": "route",
+                        "backend": "warmaster",
+                        "accepted": bool(result.get("ok")),
+                        "task_id": result.get("task_id"),
+                        "status": result.get("status") or ("accepted" if result.get("ok") else "not_confirmed"),
+                        "message": message,
+                    }
+                )
+                if message:
+                    collected[:] = [message]
+                sse({"type": "done", "full": message or "".join(collected), "client_request_id": request_id})
                 return
-            if decision.get("action") == "ask_clarification":
-                reply = str(decision.get("reply") or "").strip()
-                payload["forced_chat_reply"] = reply
-                run_mobile_chat_payload(payload)  # persists the forced reply
-                if reply:
-                    sse({"type": "token", "text": reply})
-                sse({"type": "done", "full": reply})
-                return
-            collected = []
-
-            def on_token(piece):
-                collected.append(piece)
-                sse({"type": "token", "text": piece})
-
-            run_mobile_chat_payload(payload, on_token=on_token)
-            sse({"type": "done", "full": "".join(collected)})
+            if not collected and message:
+                collected.append(message)
+                sse({"type": "token", "text": message})
+            sse({"type": "done", "full": "".join(collected), "client_request_id": request_id})
         except (BrokenPipeError, ConnectionResetError):
-            return  # client walked away mid-stream; the answer is already persisted
+            return  # worker continues; durable effects and history are not cancelled
         except Exception as exc:  # noqa: BLE001
             try:
                 sse({"type": "error", "error": str(exc)})
@@ -1481,7 +1675,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
     def mobile_chat_protocol_completion_payload(self, message, finish_reason="turn_protocol_reply", extra=None):
         payload = {
             "object": "chat.completion",
-            "model": "archive-turn-protocol",
+            "model": "shushunya-core",
             "choices": [
                 {
                     "index": 0,
@@ -1502,12 +1696,12 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         self.end_headers()
         chunk = {
             "object": "chat.completion.chunk",
-            "model": "archive-turn-protocol",
+            "model": "shushunya-core",
             "choices": [{"index": 0, "delta": {"content": message}, "finish_reason": None}],
         }
         done = {
             "object": "chat.completion.chunk",
-            "model": "archive-turn-protocol",
+            "model": "shushunya-core",
             "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
         }
         if isinstance(extra, dict):
@@ -1692,7 +1886,13 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             temperature = float(payload.get("temperature") or 0.4)
 
             try:
-                turn = decide_chat_turn_action(session_id, text, image_data_url=image_data_url, model=model)
+                turn = decide_chat_turn_action(
+                    session_id,
+                    text,
+                    image_data_url=image_data_url,
+                    model=model,
+                    payload=payload,
+                )
             except Exception as exc:
                 write_json(self, 502, {"error": f"turn protocol unavailable: {exc}", "session_id": session_id})
                 return
@@ -1709,11 +1909,17 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 payload["turn_decision"] = decision
                 payload["turn_capabilities"] = turn_capabilities
                 payload["turn_protocol"] = {"request": turn.get("request"), "response": turn.get("response")}
+                payload["core_context_bundle"] = turn.get("context_bundle") if isinstance(turn.get("context_bundle"), dict) else {}
+                payload["core_resolution"] = turn.get("core_resolution") if isinstance(turn.get("core_resolution"), dict) else {}
+                payload["core_effect"] = turn.get("effect") if isinstance(turn.get("effect"), dict) else None
+                effect_payload = payload["core_effect"].get("payload") if isinstance(payload.get("core_effect"), dict) else {}
+                task_id = str((effect_payload or {}).get("task_id") or task_id).strip()
+                payload["task_id"] = task_id
                 job_id = create_mobile_job("warmaster", payload)
                 run_mobile_job(job_id, lambda payload=payload: self.run_mobile_warmaster_payload(payload))
                 message = (
-                    f"Пайплайн Абаддона поставлен в очередь: task_id={task_id}. "
-                    "Ход работы будет во вкладке Бригады, а в основной чат вернется финальный результат или запрос решения."
+                    f"Core зафиксировал обязательство и поставил отправку Абаддону в durable-очередь: task_id={task_id}. "
+                    "Приём Абаддоном будет подтверждён отдельно фактическим ответом; ход принятой миссии появится во вкладке Бригады."
                 )
                 extra = {"warmaster": {"ok": True, "task_id": task_id, "job_id": job_id, "status": "queued"}}
                 if stream:
@@ -1742,7 +1948,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             payload["turn_decision"] = decision
             payload["turn_capabilities"] = turn_capabilities
             payload["turn_protocol"] = {"request": turn.get("request"), "response": turn.get("response")}
-            if decision.get("action") == "ask_clarification":
+            payload["core_context_bundle"] = turn.get("context_bundle") if isinstance(turn.get("context_bundle"), dict) else {}
+            payload["core_resolution"] = turn.get("core_resolution") if isinstance(turn.get("core_resolution"), dict) else {}
+            payload["core_effect"] = turn.get("effect") if isinstance(turn.get("effect"), dict) else None
+            if decision.get("action") in {"answer_in_chat", "ask_clarification"} and str(decision.get("reply") or "").strip():
                 payload["forced_chat_reply"] = str(decision.get("reply") or "").strip()
             try:
                 result = run_mobile_chat_payload(payload)

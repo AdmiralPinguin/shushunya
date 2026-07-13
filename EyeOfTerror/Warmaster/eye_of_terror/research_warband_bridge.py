@@ -508,15 +508,50 @@ def _research_revision_findings(raw_result: dict[str, Any]) -> list[dict[str, An
         ) from exc
 
 
-def _research_revision_action(raw_result: dict[str, Any]) -> dict[str, Any]:
+def _research_revision_token(
+    task_id: str,
+    mission_id: str,
+    raw_result: dict[str, Any],
+    findings: list[dict[str, Any]],
+) -> str:
+    """Bind one public revision request to the exact rejected attempt."""
+    result_sha256 = hashlib.sha256(_canonical_bytes(raw_result)).hexdigest()
+    findings_sha256 = hashlib.sha256(
+        _canonical_bytes({"findings": findings})
+    ).hexdigest()
+    return hashlib.sha256(
+        _canonical_bytes(
+            {
+                "version": 1,
+                "task_id": task_id,
+                "mission_id": mission_id,
+                "result_sha256": result_sha256,
+                "findings_sha256": findings_sha256,
+            }
+        )
+    ).hexdigest()
+
+
+def _research_revision_action(
+    task_id: str,
+    mission_id: str,
+    raw_result: dict[str, Any],
+) -> dict[str, Any]:
     findings = _research_revision_findings(raw_result)
     first = findings[0] if findings else {}
     remediation = str(
         first.get("remediation")
         or "Iskandar must select a different bounded research strategy and redispatch the warband."
     )
+    revision_token = _research_revision_token(
+        task_id, mission_id, raw_result, findings
+    )
     return {
         "kind": "revise_research_mission",
+        "method": "POST",
+        "endpoint": "POST /runs/{task_id}/start_revision_http",
+        "body": {"revision_token": revision_token},
+        "revision_token": revision_token,
         "reason": str(first.get("what_failed") or raw_result.get("reason") or "revision required"),
         "remediation": remediation,
         "revision_owner": str(first.get("revision_owner") or "governor"),
@@ -1114,7 +1149,7 @@ def _terminal_result(
             raw_result=raw_result,
         )
     if service_status == "needs_revision":
-        action = _research_revision_action(raw_result)
+        action = _research_revision_action(task_id, mission_id, raw_result)
         reason = str(raw_result.get("reason") or "ResearchWarband requires revision.").strip()
         result = _warmaster_result(
             run_dir,
@@ -1189,20 +1224,32 @@ def run_via_research_warband(
     run_dir: Path,
     task_id: str,
     timeout_sec: int = 604_800,
+    execution_mode: str | None = None,
 ) -> dict[str, Any]:
     """Submit, adopt and poll one durable production research mission."""
     from .ledger import TaskLedger
 
     target = Path(run_dir).resolve()
     ledger = TaskLedger.load(target / "task_ledger.json")
+    ledger_status = str(ledger.data.get("status") or "")
+    if execution_mode is None:
+        execution_mode = (
+            "revision" if ledger_status in {"revision", "needs_revision"}
+            else ("resume" if ledger_status == "interrupted" else "full")
+        )
     mission_id = ""
     request_hash = ""
     remote_identity_bound = False
     remote_operation_ambiguous = False
+    duplicate_revision_resume_conflict = False
     preflight = True
     try:
         envelope = load_research_warband_envelope(target, task_id)
         preflight = False
+        if execution_mode not in {"full", "revision", "resume"}:
+            raise ResearchWarbandBridgeError(
+                "ResearchWarband execution_mode must be full, revision, or resume"
+            )
         mission_id = _validate_service_mission_id(envelope.get("mission_id"))
         request_hash = _request_sha256(envelope)
         old_meta = (
@@ -1310,6 +1357,77 @@ def run_via_research_warband(
         )
         remote_identity_bound = True
         remote_operation_ambiguous = False
+        if execution_mode == "revision" and initial_service_status == "needs_revision":
+            raw_revision_result = snapshot.get("result")
+            if not isinstance(raw_revision_result, dict):
+                raise ResearchWarbandBridgeError(
+                    "ResearchWarband needs_revision mission has no object result"
+                )
+            revision_action = _research_revision_action(
+                task_id, mission_id, raw_revision_result
+            )
+            remote_operation_ambiguous = True
+            resume_status, resume_response = _json_request(
+                "POST",
+                f"/missions/{encoded_id}/resume",
+                payload={},
+                allowed_statuses=frozenset({409}),
+            )
+            adopted_duplicate = resume_status == 409
+            duplicate_revision_resume_conflict = adopted_duplicate
+            if not adopted_duplicate and (
+                set(resume_response) != {"ok", "status"}
+                or resume_response.get("ok") is not True
+                or resume_response.get("status") not in {"queued", "running"}
+            ):
+                raise ResearchWarbandBridgeError(
+                    "ResearchWarband did not acknowledge the exact revision resume "
+                    "as queued or running"
+                )
+
+            # A concurrent exact retry may win the service-side resume race after
+            # both callers observed needs_revision.  A 409 is therefore not a
+            # cleanup condition: re-read the already identity-bound mission and
+            # adopt the winner.  Cancelling here would destroy the legitimate
+            # queued/running revision that proved the idempotency race was safe.
+            remote_operation_ambiguous = True
+            _get_status, resumed_snapshot = _json_request(
+                "GET", f"/missions/{encoded_id}"
+            )
+            resumed_status = _validate_snapshot_identity(
+                resumed_snapshot, mission_id, request_hash
+            )
+            remote_identity_bound = True
+            adoptable_after_duplicate = (
+                resumed_status in ACTIVE_SERVICE_STATUSES
+                or (
+                    resumed_status in TERMINAL_SERVICE_STATUSES
+                    and resumed_status != "needs_revision"
+                )
+            )
+            if adopted_duplicate and not adoptable_after_duplicate:
+                raise ResearchWarbandBridgeError(
+                    "ResearchWarband rejected the revision resume and no exact "
+                    "queued, running, or completed duplicate attempt exists"
+                )
+            snapshot = resumed_snapshot
+            initial_service_status = resumed_status
+            remote_operation_ambiguous = False
+            ledger = TaskLedger.load(target / "task_ledger.json")
+            ledger.record_event(
+                (
+                    "research_warband_revision_resume_adopted"
+                    if adopted_duplicate
+                    else "research_warband_revision_resumed"
+                ),
+                {
+                    "mission_id": mission_id,
+                    "revision_token": revision_action["revision_token"],
+                    "status": initial_service_status,
+                    "findings": revision_action["findings"],
+                    "remediation": revision_action["remediation"],
+                },
+            )
         ledger = TaskLedger.load(target / "task_ledger.json")
         _update_remote_meta(
             ledger,
@@ -1433,6 +1551,10 @@ def run_via_research_warband(
             mission_id
             and _SHA256_RE.fullmatch(request_hash)
             and (remote_identity_bound or remote_operation_ambiguous)
+            # A revision-resume 409 means another exact caller may now own the
+            # queued/running attempt.  This bridge may inspect/adopt it, but must
+            # never run cancellation cleanup against that winner.
+            and not duplicate_revision_resume_conflict
         ):
             try:
                 cleanup = _cancel_remote_and_wait_for_cleanup(

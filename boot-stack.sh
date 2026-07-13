@@ -4,6 +4,10 @@
 # Requires /media/shushunya/SHUSHUNYA mounted first (see fstab).
 ROOT=/media/shushunya/SHUSHUNYA/shushunya
 cd "$ROOT" || { echo "disk not mounted at $ROOT"; exit 1; }
+# This script is launched by a system unit as codexbox, not by a login shell.
+# Route all user units through the lingering codexbox manager explicitly.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
 RESEARCH_SECRET="$ROOT/.secrets/research-warband-shadow.env"
 if [ -r "$RESEARCH_SECRET" ]; then
   set -a
@@ -21,6 +25,8 @@ else
   echo "  research-warband-shadow.service is not installed"
 fi
 echo "[boot] governors+gateway…";       bash EyeOfTerror/Warmaster/start-governors.sh
+echo "[boot] Shushunya personality core (7600)…"
+bash ShushunyaCore/start-core.sh || echo "  ShushunyaCore FAILED; Archive will keep speech-only chat available"
 echo "[boot] moriana (7103)…"
 if ! curl -fsS --max-time 3 http://127.0.0.1:7103/health >/dev/null 2>&1; then
   setsid nohup DemonsForge/DemonsForge/bin/python -m EyeOfTerror.Pictorium.Moriana.moriana_governor \
@@ -60,12 +66,14 @@ echo "[boot] cloudflare tunnel (chat.shushunya.com — вход для прил�
 bash start-cloudflare-tunnel.sh >/dev/null 2>&1 || echo "  tunnel FAILED (см. runtime/cloudflare/)"
 
 echo "[boot] done. Status:"
-for pp in "8080 gemma" "8081 qwen" "8079 dispatcher" "8090 archive" "7000 gateway" "7101 iskandar" "7104 ceraxia" "7103 moriana" "7200 skitarii-warband" "7201 research-warband" "7300 administratum" "7500 warpwails"; do
+for pp in "8080 gemma" "8081 qwen" "8079 dispatcher" "8090 archive" "7600 shushunya-core" "7000 gateway" "7101 iskandar" "7104 ceraxia" "7103 moriana" "7200 skitarii-warband" "7201 research-warband" "7300 administratum" "7500 warpwails"; do
   set -- $pp
   auth=()
   if [ "$1" = 7201 ] && [ -n "${RESEARCH_WARBAND_BEARER_TOKEN:-}" ]; then
     auth=(-H "Authorization: Bearer $RESEARCH_WARBAND_BEARER_TOKEN")
   fi
-  if curl -fsS -m2 "${auth[@]}" "http://127.0.0.1:$1/health" >/dev/null 2>&1 || curl -fsS -m2 "http://127.0.0.1:$1/v1/models" >/dev/null 2>&1; then
+  health_path="health"
+  if [ "$1" = 7600 ]; then health_path="health/ready"; fi
+  if curl -fsS -m2 "${auth[@]}" "http://127.0.0.1:$1/$health_path" >/dev/null 2>&1 || curl -fsS -m2 "http://127.0.0.1:$1/v1/models" >/dev/null 2>&1; then
     echo "  UP   $2 ($1)"; else echo "  DOWN $2 ($1)"; fi
 done

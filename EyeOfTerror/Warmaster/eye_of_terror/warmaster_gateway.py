@@ -6,6 +6,7 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 import shutil
 import sys
 import threading
@@ -980,6 +981,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         host=host,
                         timeout_sec=timeout_sec,
                         force=bool(payload.get("force")),
+                        revision_token=str(payload.get("revision_token") or ""),
                     )
                     started = attach_model_brain(started, model_decision)
                     response(self, 202 if started.get("ok") else 409, started)
@@ -1794,6 +1796,95 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                                 },
                             )
                             return
+                    native_revision_reserved = False
+                    if native_backend and revision_mode:
+                        revision_rejection: dict[str, Any] = {}
+                        # Validate and reserve under the same process-wide lock.
+                        # This makes the revision token a single-flight command
+                        # for both asynchronous start_* and synchronous execute_*
+                        # routes; no second request may pass validation before the
+                        # first request makes the ledger state change visible.
+                        with ACTIVE_RUNS_LOCK:
+                            if task_id in ACTIVE_RUNS:
+                                poll_action = {
+                                    "kind": "poll",
+                                    "method": "GET",
+                                    "endpoint": "GET /runs/{task_id}/snapshot",
+                                    "body": {"events_after": 0},
+                                    "reason": "the exact native revision is already active",
+                                }
+                                revision_rejection = {
+                                    "ok": False,
+                                    "error_code": "native_revision_already_active",
+                                    "error": "the native revision is already active",
+                                    "remediation": (
+                                        "poll the current run; do not submit the same revision token again"
+                                    ),
+                                    "task_id": task_id,
+                                    "next_action": poll_action,
+                                    "client_action": executable_client_action(
+                                        task_id, poll_action
+                                    ),
+                                }
+                            else:
+                                current_summary = run_summary(run_dir)
+                                current_actions = (
+                                    current_summary.get("actions")
+                                    if isinstance(current_summary.get("actions"), dict)
+                                    else {}
+                                )
+                                current_action = (
+                                    current_actions.get("next_action")
+                                    if isinstance(current_actions.get("next_action"), dict)
+                                    else {}
+                                )
+                                current_body = (
+                                    current_action.get("body")
+                                    if isinstance(current_action.get("body"), dict)
+                                    else {}
+                                )
+                                expected_token = str(
+                                    current_body.get("revision_token") or ""
+                                )
+                                provided_token = str(payload.get("revision_token") or "")
+                                if (
+                                    not expected_token
+                                    or not provided_token
+                                    or not secrets.compare_digest(
+                                        provided_token, expected_token
+                                    )
+                                ):
+                                    revision_rejection = {
+                                        "ok": False,
+                                        "error_code": "stale_or_missing_revision_token",
+                                        "error": (
+                                            "native revision was not started: the revision token "
+                                            "is missing or no longer matches the current mission attempt"
+                                        ),
+                                        "remediation": (
+                                            "fetch the current run summary and execute its published "
+                                            "revision action unchanged"
+                                        ),
+                                        "task_id": task_id,
+                                        "status": current_summary.get("status", ""),
+                                        "next_action": current_action,
+                                        "client_action": executable_client_action(
+                                            task_id, current_action
+                                        ),
+                                    }
+                                else:
+                                    ACTIVE_RUNS.add(task_id)
+                                    native_revision_reserved = True
+                        if revision_rejection:
+                            response(self, 409, revision_rejection)
+                            return
+
+                    def release_native_revision_reservation() -> None:
+                        if not native_revision_reserved:
+                            return
+                        with ACTIVE_RUNS_LOCK:
+                            ACTIVE_RUNS.discard(task_id)
+
                     executor = lambda: execute_with_ledger_failure_guard(
                         run_dir,
                         lambda: execute_routed_run(
@@ -1818,7 +1909,25 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                                 TaskLedger.load(ledger_path).record_event("background_start_requested", event_payload)
                             except Exception:
                                 pass
-                        started = start_background(task_id, executor)
+                        if native_revision_reserved:
+                            def reserved_background_execution() -> None:
+                                try:
+                                    executor()
+                                finally:
+                                    release_native_revision_reservation()
+
+                            try:
+                                threading.Thread(
+                                    target=reserved_background_execution,
+                                    daemon=True,
+                                    name=f"native-revision-{task_id}",
+                                ).start()
+                            except Exception:
+                                release_native_revision_reservation()
+                                raise
+                            started = True
+                        else:
+                            started = start_background(task_id, executor)
                         if not started:
                             poll_action = {"kind": "poll", "method": "GET", "endpoint": "GET /runs/{task_id}/snapshot", "body": {"events_after": 0}, "reason": "run is already active"}
                             response(
@@ -1847,7 +1956,13 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                             },
                         )
                         return
-                    summary = executor()
+                    if native_revision_reserved:
+                        try:
+                            summary = executor()
+                        finally:
+                            release_native_revision_reservation()
+                    else:
+                        summary = executor()
                     post_summary = run_summary(run_dir)
                     post_view = orchestration_view_fields(post_summary, task_id=task_id)
                     response(

@@ -1,6 +1,7 @@
 """ArchiveOfHeresy operations: memory search/context, chat, storage, mobile,
 and maintenance. Uses shared singletons via archive_state."""
 import json
+import hashlib
 import os
 import re
 import sqlite3
@@ -25,11 +26,14 @@ from archivist_agent.magos_agent import MAGOS_CONTEXT_LAYERS, MAGOS_EXTRA_NAMESP
 from archivist_agent.quality_report import generate_quality_report
 from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_user_message
 from turn_protocol import (
-    build_turn_decision_request,
+    TURN_ACTIONS,
     capability_contract_message,
-    normalize_turn_decision,
     turn_capability_manifest,
     warmaster_request_to_message,
+)
+from shushunya_core_client import (
+    dispatch_effect as core_dispatch_effect,
+    resolve_turn as core_resolve_turn,
 )
 from pending_reports import (
     enqueue_report,
@@ -235,16 +239,20 @@ def run_mobile_chat_payload(payload, on_token=None):
     maintenance_record = None
     payload = dict(payload)
     session_id = shared_chat_session_id(payload.get("session_id") or payload.get("user") or "default")
+    core_context_bundle = payload.get("core_context_bundle") if isinstance(payload.get("core_context_bundle"), dict) else {}
+    core_resolution = payload.get("core_resolution") if isinstance(payload.get("core_resolution"), dict) else {}
+    core_effect = payload.get("core_effect") if isinstance(payload.get("core_effect"), dict) else None
     # Same-session waiters stay outside the four global pipeline slots, so one
     # noisy conversation cannot head-of-line block unrelated sessions.
     with CHAT_SESSION_LOCKS.hold(session_id), CHAT_QUEUE_LOCK:
         created_at = now_iso()
-        turn_id = str(uuid.uuid4())
+        turn_id = str(core_context_bundle.get("turn_id") or uuid.uuid4())
         # Carry only a named, allow-listed route. Direct llama.cpp deployments
         # safely ignore the internal header emitted by archive_httpio.
         model_route = set_llm_route(payload.get("model_route"))
         payload["stream"] = False
         client_source = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
+        client_request_id = ensure_core_transport_identity(payload)
         text = trim_chat_text(payload.get("text") or payload.get("message") or "")
         image_data_url = str(payload.get("image_data_url") or "").strip()
         if not text and not image_data_url:
@@ -266,19 +274,31 @@ def run_mobile_chat_payload(payload, on_token=None):
 
         request_messages = messages_for_chat_context(session_id, system_prompt, text, image_data_url=image_data_url)
         request_messages.insert(0, capability_contract_message(turn_capabilities, turn_decision))
+        memory_messages = sanitize_messages_for_memory(request_messages)
+        precomputed_magos = core_context_bundle.get("magos_message") if isinstance(core_context_bundle.get("magos_message"), dict) else None
+        precomputed_magos_result = core_context_bundle.get("magos_result") if isinstance(core_context_bundle.get("magos_result"), dict) else None
+        magos_already_attempted = bool(core_context_bundle.get("magos_attempted"))
+        precomputed_roster = core_context_bundle.get("roster_message") if isinstance(core_context_bundle.get("roster_message"), dict) else None
         append_chat_message(
             session_id,
             "user",
             text if not image_data_url else f"{text}\n[image attached server-side]",
             created_at=created_at,
             source=client_source,
+            dedupe_key=f"turn:{client_request_id}:user",
         )
         if forced_chat_reply:
             assistant = {"role": "assistant", "content": forced_chat_reply}
-            append_chat_message(session_id, "assistant", forced_chat_reply, source=client_source)
+            append_chat_message(
+                session_id,
+                "assistant",
+                forced_chat_reply,
+                source=client_source,
+                dedupe_key=f"turn:{client_request_id}:assistant",
+            )
             response = {
                 "object": "chat.completion",
-                "model": "archive-turn-protocol",
+                "model": "shushunya-core",
                 "choices": [
                     {
                         "index": 0,
@@ -298,14 +318,15 @@ def run_mobile_chat_payload(payload, on_token=None):
                 "vector_enabled": vector_enabled,
                 "graph_enabled": graph_enabled,
                 "archive_system_prompt_enabled": archive_system_prompt_enabled,
-                "magos_enabled": False,
-                "magos_result": None,
+                "magos_enabled": bool(precomputed_magos),
+                "magos_result": precomputed_magos_result,
                 "administratum_intent": None,
                 "administratum_result": None,
                 "turn_decision": turn_decision,
                 "turn_capabilities": turn_capabilities,
                 "prompt_diagnostics": {},
-                "model": "archive-turn-protocol",
+                "core_resolution": core_resolution,
+                "model": "shushunya-core",
                 "request": {
                     "session_id": session_id,
                     "client_source": client_source,
@@ -313,7 +334,17 @@ def run_mobile_chat_payload(payload, on_token=None):
                     "has_image": bool(image_data_url),
                     "stream": False,
                 },
-                "prepared_messages": request_messages,
+                "prepared_messages": prepare_messages(
+                    memory_messages,
+                    include_focus=focus_enabled and precomputed_roster is None,
+                    include_vector=vector_enabled,
+                    include_graph=graph_enabled,
+                    include_system_prompt=archive_system_prompt_enabled,
+                    magos_message=precomputed_magos,
+                    roster_message=precomputed_roster,
+                    query_messages=memory_messages,
+                    memory_namespace=memory_namespace,
+                ),
                 "status": "ok",
                 "http_status": 200,
                 "response": response,
@@ -321,24 +352,64 @@ def run_mobile_chat_payload(payload, on_token=None):
                 "error": None,
             }
             maybe_write_archives(record)
+            threading.Thread(
+                target=maybe_update_focus_memory,
+                args=(record,),
+                daemon=True,
+                name=f"librarian-{turn_id}",
+            ).start()
             return {"ok": True, "session_id": session_id, "response": response, "message": forced_chat_reply}
         administratum_intent = None
         administratum_result = None
         administratum_message = None
-        # One decision point: the turn controller gates task creation. The intent
-        # parser runs only to STRUCTURE the task the controller already ordered —
-        # not as a second brain on every message (that both doubled latency and
-        # let the two models disagree about whether a task was created).
-        if str(turn_decision.get("action") or "") == "create_administratum_task" and should_detect_administratum_intent(client_source, payload):
-            administratum_intent = detect_administratum_intent(str(turn_decision.get("task") or "") or text, model=model)
-            administratum_result = create_administratum_task_from_intent(administratum_intent, session_id, client_source)
+        # Core is the only delivery owner. It leases the durable effect, calls
+        # Archive's loopback structurer, and records the factual result. Keeping
+        # creation here as a second path would race recovery and duplicate tasks.
+        if str(turn_decision.get("action") or "") == "create_administratum_task":
+            if core_effect and core_effect.get("id"):
+                try:
+                    dispatched = core_dispatch_effect(str(core_effect["id"]))
+                except Exception as exc:  # durable Core steward still owns retry
+                    dispatched = {
+                        "ok": False,
+                        "effect": {
+                            "state": "retry_wait",
+                            "result": {
+                                "status": "core_transport_unavailable",
+                                "explanation": (
+                                    "Core сохранил обязательство, но Archive не дождался фактического ответа адаптера: "
+                                    f"{exc}"
+                                ),
+                            },
+                        },
+                    }
+                delivered_effect = dispatched.get("effect") if isinstance(dispatched.get("effect"), dict) else {}
+                factual = delivered_effect.get("result") if isinstance(delivered_effect.get("result"), dict) else {}
+                evidence = factual.get("evidence") if isinstance(factual.get("evidence"), dict) else {}
+                administratum_result = evidence if evidence else {
+                    "created": False,
+                    "reason": factual.get("status") or delivered_effect.get("state") or "not_confirmed",
+                    "explanation": factual.get("explanation") or "Administratum не подтвердил создание задачи.",
+                }
+                administratum_intent = (
+                    administratum_result.get("intent")
+                    if isinstance(administratum_result.get("intent"), dict)
+                    else None
+                )
+            else:
+                administratum_result = {
+                    "created": False,
+                    "reason": "missing_durable_effect",
+                    "explanation": "Core не создал durable-эффект; задача не записана.",
+                }
             administratum_message = administratum_intent_context(administratum_result)
             if administratum_message is None:
                 administratum_message = {
                     "role": "system",
                     "content": (
-                        "Turn controller выбрал создание задачи Администратума, но структуратор не распознал в ней "
-                        "task/watch. Задача НЕ создана — скажи владельцу честно и уточни, что именно записать."
+                        "Core выбрал создание задачи Administratum, но орган не подтвердил эффект. "
+                        f"Причина: {administratum_result.get('explanation') or administratum_result.get('reason')}. "
+                        "Задача НЕ создана — скажи владельцу, что именно нужно поправить или уточнить."
                     ),
                 }
         # Pending-reports outbox: on a deliver turn the queued reports are injected
@@ -363,8 +434,8 @@ def run_mobile_chat_payload(payload, on_token=None):
                 vox_on_tongue = reports_message.get("on_tongue") or []
         # Live task roster is always at hand on ordinary turns, so task status is
         # answered from truth (authoritative over stale focus/ack lines).
-        roster_message = None
-        if not internal_flag(payload.get("system_event", False), default=False):
+        roster_message = precomputed_roster
+        if roster_message is None and not internal_flag(payload.get("system_event", False), default=False):
             roster_message = task_roster_note()
         # When the roster carries live work, suppress the focus file: a focus that
         # narrates delegated work as "я собираю" is the stale crutch that fought
@@ -384,11 +455,10 @@ def run_mobile_chat_payload(payload, on_token=None):
             "stream": False,
             "messages": request_messages,
         }
-        memory_messages = sanitize_messages_for_memory(request_messages)
-        magos_message = None
-        magos_result = None
+        magos_message = precomputed_magos
+        magos_result = precomputed_magos_result
         magos = focus_components(memory_namespace)["magos"]
-        if focus_enabled and magos is not None:
+        if focus_enabled and magos is not None and magos_message is None and not magos_already_attempted:
             try:
                 magos_message = magos.prepare_request(
                     memory_messages,
@@ -456,6 +526,7 @@ def run_mobile_chat_payload(payload, on_token=None):
             "administratum_result": administratum_result,
             "turn_decision": turn_decision,
             "turn_capabilities": turn_capabilities,
+            "core_resolution": core_resolution,
             "vox_on_tongue": vox_on_tongue,
             "prompt_diagnostics": diagnostics,
             "model": model,
@@ -483,7 +554,13 @@ def run_mobile_chat_payload(payload, on_token=None):
                 status, response = proxy_json("POST", "/v1/chat/completions", payload=prepared_payload)
                 assistant = assistant_message(response)
             if assistant:
-                append_chat_message(session_id, "assistant", assistant.get("content") or "", source=client_source)
+                append_chat_message(
+                    session_id,
+                    "assistant",
+                    assistant.get("content") or "",
+                    source=client_source,
+                    dedupe_key=f"turn:{client_request_id}:assistant",
+                )
             record["status"] = "ok"
             record["http_status"] = status
             record["response"] = response
@@ -905,9 +982,78 @@ def create_mobile_job(job_type, request_payload):
     return job_id
 
 
-def update_mobile_job(job_id, status, response=None, error=None):
-    with sqlite3.connect(SQLITE_PATH) as db:
+def create_mobile_turn_job_once(request_payload):
+    """Create the one durable execution slot for a client request.
+
+    Android/Telegram network retries must observe the existing job instead of
+    running the same turn, LLM answer and external effects a second time.
+    """
+    request_payload = dict(request_payload or {})
+    request_id = ensure_core_transport_identity(request_payload)
+    stable_request = {
+        "client_request_id": request_id,
+        "session_id": shared_chat_session_id(request_payload.get("session_id") or request_payload.get("user") or "default"),
+        "text": trim_chat_text(request_payload.get("text") or request_payload.get("message") or ""),
+        "image_sha256": hashlib.sha256(str(request_payload.get("image_data_url") or "").encode("utf-8")).hexdigest(),
+        "client_source": str(request_payload.get("client_source") or request_payload.get("source") or "app")[:80],
+        "model": str(request_payload.get("model") or DEFAULT_MODEL),
+        "memory_namespace": shared_memory_namespace(request_payload.get("memory_namespace")),
+    }
+    # The durable slot is keyed by transport identity, not payload. Reusing
+    # one client id with different text must conflict, not quietly create a
+    # second job under another payload-derived id.
+    identity = {
+        "client_request_id": request_id,
+        "session_id": stable_request["session_id"],
+        "client_source": stable_request["client_source"],
+    }
+    digest = hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    job_id = f"turn-{digest[:32]}"
+    created_at = now_iso()
+    encoded = json.dumps(request_payload, ensure_ascii=False, sort_keys=True)
+    with MOBILE_JOB_LOCK, sqlite3.connect(SQLITE_PATH) as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT request_json,status FROM mobile_jobs WHERE id=?", (job_id,)).fetchone()
+        if row:
+            stored = json.loads(row[0])
+            stored_stable = {
+                "client_request_id": str(stored.get("client_request_id") or stored.get("core_turn_id") or ""),
+                "session_id": shared_chat_session_id(stored.get("session_id") or stored.get("user") or "default"),
+                "text": trim_chat_text(stored.get("text") or stored.get("message") or ""),
+                "image_sha256": hashlib.sha256(str(stored.get("image_data_url") or "").encode("utf-8")).hexdigest(),
+                "client_source": str(stored.get("client_source") or stored.get("source") or "app")[:80],
+                "model": str(stored.get("model") or DEFAULT_MODEL),
+                "memory_namespace": shared_memory_namespace(stored.get("memory_namespace")),
+            }
+            if stable_request != stored_stable:
+                raise ValueError("client_request_id conflicts with a different turn payload")
+            if str(row[1]) == "interrupted":
+                db.execute(
+                    "UPDATE mobile_jobs SET status='queued',updated_at=?,error=NULL WHERE id=? AND status='interrupted'",
+                    (created_at, job_id),
+                )
+                return job_id, True, "queued"
+            return job_id, False, str(row[1])
         db.execute(
+            """
+            INSERT INTO mobile_jobs (id, type, status, created_at, updated_at, request_json, response_json, error)
+            VALUES (?, 'turn', 'queued', ?, ?, ?, NULL, NULL)
+            """,
+            (job_id, created_at, created_at, encoded),
+        )
+    return job_id, True, "queued"
+
+
+def update_mobile_job(job_id, status, response=None, error=None):
+    # All mobile-job state transitions share one process-wide lock.  The
+    # explicit busy timeout also covers a short-lived writer in another
+    # Archive process during deployment/recovery instead of losing the
+    # transition immediately with ``database is locked``.
+    with MOBILE_JOB_LOCK, sqlite3.connect(SQLITE_PATH, timeout=30) as db:
+        db.execute("PRAGMA busy_timeout=30000")
+        cursor = db.execute(
             """
             UPDATE mobile_jobs
             SET status = ?, updated_at = ?, response_json = ?, error = ?
@@ -921,6 +1067,17 @@ def update_mobile_job(job_id, status, response=None, error=None):
                 job_id,
             ),
         )
+        if cursor.rowcount != 1:
+            raise KeyError(f"mobile job not found: {job_id}")
+
+
+def mark_mobile_job_interrupted(job_id, diagnostic):
+    """Best-effort durable tombstone for a worker that cannot finish safely."""
+    try:
+        update_mobile_job(job_id, "interrupted", error=diagnostic)
+    except Exception:  # The caller must still terminate its delivery channel.
+        return False
+    return True
 
 
 def mobile_job_snapshot(job_id):
@@ -957,12 +1114,34 @@ def mobile_job_snapshot(job_id):
 
 def run_mobile_job(job_id, worker):
     def _run():
-        update_mobile_job(job_id, "running")
+        try:
+            update_mobile_job(job_id, "running")
+        except Exception as exc:
+            mark_mobile_job_interrupted(
+                job_id,
+                f"mobile_job_running_persist_failed: {type(exc).__name__}: {exc}",
+            )
+            return
         try:
             response = worker()
+        except Exception as exc:
+            try:
+                update_mobile_job(job_id, "failed", error=exc)
+            except Exception as persist_exc:
+                mark_mobile_job_interrupted(
+                    job_id,
+                    "mobile_job_failure_persist_failed: "
+                    f"worker={type(exc).__name__}: {exc}; "
+                    f"storage={type(persist_exc).__name__}: {persist_exc}",
+                )
+            return
+        try:
             update_mobile_job(job_id, "done", response=response)
         except Exception as exc:
-            update_mobile_job(job_id, "failed", error=exc)
+            mark_mobile_job_interrupted(
+                job_id,
+                f"mobile_job_result_persist_failed: {type(exc).__name__}: {exc}",
+            )
 
     thread = threading.Thread(target=_run, name=f"mobile-job-{job_id}", daemon=True)
     thread.start()
@@ -1194,26 +1373,162 @@ def warmaster_duplicate_task_id(task_text):
     return ""
 
 
-def decide_chat_turn_action(session_id, text, image_data_url="", model=None):
-    LLM_PRIORITY.set("chat")  # turn decision is part of serving the owner's message
+def ensure_core_transport_identity(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    raw = str(payload.get("client_request_id") or payload.get("core_turn_id") or "").strip()
+    clean = "".join(ch for ch in raw if ch.isalnum() or ch in "-_.:")[:160]
+    if not clean:
+        clean = uuid.uuid4().hex
+    payload["client_request_id"] = clean
+    payload["core_turn_id"] = clean
+    payload["core_idempotency_key"] = str(
+        payload.get("core_idempotency_key") or f"archive-turn:{clean}"
+    )[:240]
+    return clean
+
+
+def assemble_shushunya_turn_context(session_id, user_text, image_data_url="", model=None, payload=None):
+    """Assemble the rich situation once, before action selection.
+
+    The old controller saw only raw history while the answering model later saw
+    persona, Magos and live task truth.  Core must see the same reality it will
+    speak from, and the downstream answer path reuses this bundle.
+    """
+    payload = payload if isinstance(payload, dict) else {}
+    ensure_core_transport_identity(payload)
+    memory_namespace = shared_memory_namespace(payload.get("memory_namespace"))
+    turn_id = str(payload.get("core_turn_id") or uuid.uuid4())
+    history = chat_history(session_id, limit=12)
+    request_messages = messages_for_chat_context(
+        session_id,
+        "",
+        user_text,
+        image_data_url=image_data_url,
+    )
+    memory_messages = sanitize_messages_for_memory(request_messages)
+    persona_message = persona_page_context(memory_namespace)
+    magos_message = None
+    magos_result = None
+    diagnostics = {}
+    magos = focus_components(memory_namespace)["magos"]
+    focus_enabled = internal_flag(payload.get("focus_enabled", True), default=True)
+    if focus_enabled and magos is not None:
+        try:
+            magos_message = magos.prepare_request(
+                memory_messages,
+                model=model or DEFAULT_MODEL,
+                conversation_id=session_id,
+                turn_id=turn_id,
+                memory_namespace=memory_namespace,
+            )
+            magos_result = magos.last_result
+        except Exception as exc:
+            diagnostics["magos_error"] = str(exc)
+            magos_result = {"error": str(exc)}
+    roster_message = None if internal_flag(payload.get("system_event", False), default=False) else task_roster_note()
+    reports = pending_summary()
+    core_context = {
+        "persona": str((persona_message or {}).get("content") or ""),
+        "recalled_memory": str((magos_message or {}).get("content") or ""),
+        "live_roster": str((roster_message or {}).get("content") or ""),
+        "pending_reports": reports,
+        "diagnostics": diagnostics,
+    }
+    return {
+        "turn_id": turn_id,
+        "memory_namespace": memory_namespace,
+        "history": history,
+        "request_messages": request_messages,
+        "memory_messages": memory_messages,
+        "persona_message": persona_message,
+        "magos_message": magos_message,
+        "magos_result": magos_result,
+        "magos_attempted": bool(focus_enabled and magos is not None),
+        "roster_message": roster_message,
+        "core_context": core_context,
+    }
+
+
+def decide_chat_turn_action(session_id, text, image_data_url="", model=None, payload=None):
+    LLM_PRIORITY.set("chat")
+    payload = payload if isinstance(payload, dict) else {}
     user_text = trim_chat_text(text)
     manifest = turn_capability_manifest(image_attached=bool(image_data_url), pending_reports=pending_summary())
-    history = chat_history(session_id, limit=12)
-    request = build_turn_decision_request(
-        model=model or DEFAULT_MODEL,
-        user_text=user_text,
-        recent_history=history,
-        manifest=manifest,
-    )
-    _status, response = proxy_json("POST", "/v1/chat/completions", payload=request, timeout=180)
-    content = str((((response.get("choices") or [{}])[0].get("message") or {}).get("content")) or "")
-    decision = normalize_turn_decision(extract_json_object(content))
-    return {
-        "decision": decision,
-        "capabilities": manifest,
-        "request": request,
-        "response": response,
-    }
+    try:
+        context_bundle = assemble_shushunya_turn_context(
+            session_id,
+            user_text,
+            image_data_url=image_data_url,
+            model=model,
+            payload=payload,
+        )
+    except Exception as exc:
+        ensure_core_transport_identity(payload)
+        context_bundle = {
+            "turn_id": payload["core_turn_id"],
+            "memory_namespace": shared_memory_namespace(payload.get("memory_namespace")),
+            "history": [],
+            "request_messages": [],
+            "memory_messages": [],
+            "persona_message": None,
+            "magos_message": None,
+            "magos_result": {"error": str(exc)},
+            "magos_attempted": True,
+            "roster_message": None,
+            "core_context": {
+                "persona": "",
+                "recalled_memory": "",
+                "live_roster": "",
+                "pending_reports": {},
+                "diagnostics": {"context_assembly_error": str(exc)[:2_000]},
+            },
+        }
+    source = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
+    idempotency_key = str(payload.get("core_idempotency_key") or f"archive-turn:{context_bundle['turn_id']}")
+    try:
+        resolution = core_resolve_turn(
+            idempotency_key=idempotency_key,
+            session_id=session_id,
+            memory_namespace=context_bundle["memory_namespace"],
+            source=source,
+            text=user_text,
+            image_attached=bool(image_data_url),
+            model=model or DEFAULT_MODEL,
+            recent_history=context_bundle["history"],
+            capability_manifest=manifest,
+            context=context_bundle["core_context"],
+        )
+        decision = resolution.get("decision") if isinstance(resolution.get("decision"), dict) else {}
+        if str(decision.get("action") or "") not in TURN_ACTIONS:
+            raise ValueError("Core returned an unknown action")
+        return {
+            "decision": decision,
+            "capabilities": manifest,
+            "request": {"core_turn": idempotency_key, "context_diagnostics": context_bundle["core_context"]["diagnostics"]},
+            "response": resolution.get("protocol"),
+            "core_resolution": resolution,
+            "context_bundle": context_bundle,
+            "effect": resolution.get("effect") if isinstance(resolution.get("effect"), dict) else None,
+        }
+    except Exception as exc:
+        # Fail open into the existing rich answering pass, never into an
+        # external action. One broken Core process cannot silence Shushunya.
+        return {
+            "decision": {
+                "action": "answer_in_chat",
+                "reply": "",
+                "task": "",
+                "warmaster_request": {},
+                "confidence": 0.0,
+                "reason": f"ShushunyaCore speech-only degradation: {exc}",
+            },
+            "capabilities": manifest,
+            "request": {"core_turn": idempotency_key},
+            "response": {"degraded": True, "error": str(exc)},
+            "core_resolution": {"ok": False, "core": {"degraded": True, "error": str(exc)}},
+            "context_bundle": context_bundle,
+            "effect": None,
+        }
 
 
 def persona_page_context(memory_namespace="default", max_chars=12000):
@@ -1285,7 +1600,14 @@ def detect_administratum_intent(user_text, model=None):
         return {"ok": False, "intent": "error", "confidence": 0.0, "error": str(exc)}
 
 
-def create_administratum_task_from_intent(intent, session_id, client_source):
+def create_administratum_task_from_intent(
+    intent,
+    session_id,
+    client_source,
+    *,
+    dedupe_key="",
+    created_from_message_id="",
+):
     intent = normalize_intent(intent)
     if str(intent.get("intent") or "").strip() != "create_task":
         return {"created": False, "reason": "no_create_task_intent", "intent": intent}
@@ -1304,16 +1626,143 @@ def create_administratum_task_from_intent(intent, session_id, client_source):
         return {"created": False, "reason": "reminder_without_schedule", "intent": intent}
     endpoint_kind, administratum_payload = administratum_payload_from_intent(intent, session_id=session_id, client_source=client_source)
     if endpoint_kind == "watch":
+        if created_from_message_id:
+            stable = hashlib.sha256(created_from_message_id.encode("utf-8")).hexdigest()[:32]
+            administratum_payload["id"] = f"core-watch-{stable}"
         try:
             _status, response = proxy_json_url("POST", f"{ADMINISTRATUM_BASE_URL}/watch", payload=administratum_payload, timeout=60)
             return {"created": bool(response.get("ok")), "watch": response.get("watch"), "intent": intent, "response": response}
         except Exception as exc:
             return {"created": False, "reason": "administratum_unavailable", "error": str(exc), "intent": intent}
     try:
+        if dedupe_key:
+            administratum_payload["dedupe_key"] = dedupe_key
+        if created_from_message_id:
+            administratum_payload["created_from_message_id"] = created_from_message_id
         _status, response = proxy_json_url("POST", f"{ADMINISTRATUM_BASE_URL}/task", payload=administratum_payload, timeout=60)
         return {"created": bool(response.get("ok")), "task": response.get("task"), "intent": intent, "response": response}
     except Exception as exc:
         return {"created": False, "reason": "administratum_unavailable", "error": str(exc), "intent": intent}
+
+
+def _core_effect_receipt(effect_id, request_sha256):
+    with sqlite3.connect(SQLITE_PATH, timeout=30) as db:
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT * FROM core_effect_receipts WHERE effect_id=?", (effect_id,)).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    if item["request_sha256"] != request_sha256:
+        raise ValueError("effect_id was reused with a different Administratum request")
+    item["intent"] = json.loads(item["intent_json"]) if item.get("intent_json") else None
+    item["result"] = json.loads(item["result_json"]) if item.get("result_json") else None
+    return item
+
+
+def _save_core_effect_receipt(effect_id, request_sha256, *, intent=None, state="classified", result=None):
+    now = now_iso()
+    with sqlite3.connect(SQLITE_PATH, timeout=30) as db:
+        db.execute("PRAGMA busy_timeout=30000")
+        db.execute(
+            """
+            INSERT INTO core_effect_receipts(
+                effect_id,request_sha256,intent_json,state,result_json,created_at,updated_at
+            ) VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(effect_id) DO UPDATE SET
+                intent_json=COALESCE(excluded.intent_json,core_effect_receipts.intent_json),
+                state=excluded.state,
+                result_json=COALESCE(excluded.result_json,core_effect_receipts.result_json),
+                updated_at=excluded.updated_at
+            """,
+            (
+                effect_id,
+                request_sha256,
+                json.dumps(intent, ensure_ascii=False, sort_keys=True) if intent is not None else None,
+                state,
+                json.dumps(result, ensure_ascii=False, sort_keys=True) if result is not None else None,
+                now,
+                now,
+            ),
+        )
+
+
+def run_core_administratum_effect(effect_id, payload):
+    effect_id = str(effect_id or "").strip()
+    payload = payload if isinstance(payload, dict) else {}
+    task = trim_chat_text(payload.get("task") or payload.get("source_text") or "")
+    if not effect_id or not task:
+        return {
+            "ok": False,
+            "retryable": False,
+            "code": "invalid_administratum_effect",
+            "explanation": "В durable-эффекте нет effect_id или текста задачи.",
+            "evidence": {},
+        }
+    request_payload = {
+        "task": task,
+        "session_id": shared_chat_session_id(payload.get("session_id") or SHARED_CHAT_SESSION_ID),
+        "source": str(payload.get("source") or "shushunya-core")[:80],
+        "model": str(payload.get("model") or DEFAULT_MODEL),
+    }
+    request_sha256 = hashlib.sha256(
+        json.dumps(request_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    receipt = _core_effect_receipt(effect_id, request_sha256)
+    if receipt and receipt.get("result") and receipt.get("state") in {"delivered", "failed"}:
+        return receipt["result"]
+    intent = receipt.get("intent") if receipt else None
+    if isinstance(intent, dict) and str(intent.get("intent") or "") == "error":
+        # A transport/model failure is not a classification. Reusing it would
+        # make every idempotent delivery retry fail forever without asking the
+        # classifier again.
+        intent = None
+    if not isinstance(intent, dict):
+        intent = detect_administratum_intent(task, model=request_payload["model"])
+        intent = normalize_intent(intent)
+        if str(intent.get("intent") or "") != "error":
+            _save_core_effect_receipt(effect_id, request_sha256, intent=intent, state="classified")
+    created = create_administratum_task_from_intent(
+        intent,
+        request_payload["session_id"],
+        request_payload["source"],
+        dedupe_key=f"shushunya-core:{effect_id}",
+        created_from_message_id=effect_id,
+    )
+    delegate = created.get("task") if isinstance(created.get("task"), dict) else created.get("watch")
+    delegate = delegate if isinstance(delegate, dict) else {}
+    if created.get("created"):
+        result = {
+            "ok": True,
+            "retryable": False,
+            "delegate_ref": str(delegate.get("id") or ""),
+            "status": "created",
+            "explanation": "Administratum подтвердил запись задачи.",
+            "evidence": created,
+        }
+        _save_core_effect_receipt(effect_id, request_sha256, intent=intent, state="delivered", result=result)
+        return result
+    reason = str(created.get("reason") or "not_created")
+    retryable = reason == "administratum_unavailable" or str(intent.get("intent") or "") == "error"
+    result = {
+        "ok": False,
+        "retryable": retryable,
+        "code": "administratum_unavailable" if retryable else "administratum_needs_clarification",
+        "status": reason,
+        "explanation": (
+            "Administratum сейчас недоступен; эффект можно безопасно повторить с тем же id."
+            if retryable
+            else f"Задача не создана: {reason}. Нужны недостающие параметры или подтверждение владельца."
+        ),
+        "evidence": created,
+    }
+    _save_core_effect_receipt(
+        effect_id,
+        request_sha256,
+        intent=intent,
+        state="retry_wait" if retryable else "failed",
+        result=result,
+    )
+    return result
 
 
 def administratum_intent_context(result):
@@ -1605,6 +2054,28 @@ def init_storage():
             """
         )
         db.execute("CREATE INDEX IF NOT EXISTS idx_mobile_jobs_updated ON mobile_jobs(updated_at)")
+        db.execute(
+            """
+            UPDATE mobile_jobs
+            SET status='interrupted',updated_at=?,
+                error='Archive restarted before the durable turn job recorded its result; retry the same client_request_id.'
+            WHERE status IN ('queued','running')
+            """,
+            (now_iso(),),
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS core_effect_receipts (
+                effect_id TEXT PRIMARY KEY,
+                request_sha256 TEXT NOT NULL,
+                intent_json TEXT,
+                state TEXT NOT NULL,
+                result_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
 
 
 def assistant_content(message):

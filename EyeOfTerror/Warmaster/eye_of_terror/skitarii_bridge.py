@@ -4715,6 +4715,75 @@ def _service_request_sha256(payload: dict[str, Any]) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def _canonical_json_sha256(payload: Any) -> str:
+    """Hash one JSON value using the same representation on every retry."""
+
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _revision_execution_action(
+    *,
+    task_id: str,
+    mission_meta: dict[str, Any],
+    findings: list[dict[str, Any]],
+    current_result: dict[str, Any],
+    reason: str,
+    remediation: str,
+    revision_owner: str,
+) -> dict[str, Any]:
+    """Build a replay-stable continuation bound to the exact failed attempt.
+
+    The token is an idempotency/evidence key, not a bearer secret.  It commits to
+    the Warmaster task, the concrete Skitarii attempt and the canonical verifier
+    evidence/result which justified starting another revision.
+    """
+
+    mission_id = str(mission_meta.get("id") or "").strip()
+    try:
+        attempt = int(mission_meta.get("attempt") or 0)
+    except (TypeError, ValueError):
+        return {}
+    if not mission_id or attempt < 1:
+        return {}
+
+    mission_binding = {"id": mission_id, "attempt": attempt}
+    token_payload = {
+        "schema": "skitarii-revision-execution/v1",
+        "task_id": task_id,
+        "skitarii_mission": mission_binding,
+        "findings": findings,
+        # next_action is deliberately absent from current_result, otherwise the
+        # token would recursively contain itself.
+        "current_result": current_result,
+    }
+    revision_token = _canonical_json_sha256(token_payload)
+    return {
+        "kind": "execute_revision",
+        "method": "POST",
+        "endpoint": "POST /runs/{task_id}/start_revision_http",
+        "body": {"revision_token": revision_token},
+        "reason": reason,
+        "remediation": remediation,
+        "revision_owner": revision_owner,
+        "retryable": True,
+        "findings": findings,
+        "revision_binding": {
+            "schema": token_payload["schema"],
+            "task_id": task_id,
+            "skitarii_mission": mission_binding,
+            "findings_sha256": _canonical_json_sha256(findings),
+            "current_result_sha256": _canonical_json_sha256(current_result),
+        },
+    }
+
+
 def _service_mission_id(task_id: str, attempt: int = 1) -> str:
     safe_task = re.sub(r"[^A-Za-z0-9_.-]", "-", task_id)[:88].strip(".-") or "task"
     normalized_attempt = max(1, int(attempt))
@@ -5266,14 +5335,27 @@ def _cancelled_bridge_result(run_dir: Path, task_id: str) -> dict[str, Any] | No
     return cancelled
 
 
-def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> dict[str, Any]:
-    """Execute the code mission through Skitarii and record a terminal result."""
+def run_via_skitarii(
+    run_dir: Path,
+    task_id: str,
+    timeout_sec: int = 5400,
+    execution_mode: str | None = None,
+) -> dict[str, Any]:
+    """Execute or continue the same durable code mission through Skitarii."""
     from .ledger import TaskLedger  # local import to avoid cycles
     from . import mission_control as mc
 
     contract = _read_json(run_dir / "contract.json")
     goal = str(contract.get("goal") or "")
     ledger = TaskLedger.load(run_dir / "task_ledger.json")
+    ledger_status = str(ledger.to_dict().get("status") or "")
+    if execution_mode is None:
+        execution_mode = (
+            "revision" if ledger_status in {"revision", "needs_revision"}
+            else ("resume" if ledger_status == "interrupted" else "full")
+        )
+    if execution_mode not in {"full", "resume", "revision"}:
+        raise ValueError("execution_mode must be full, resume, or revision")
     try:
         leadership_directive = _load_ceraxia_directive(run_dir, task_id)
     except CeraxiaDirectiveError as exc:
@@ -5384,6 +5466,7 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
         },
     )
     ledger.record_event("skitarii_dispatch", {"service": SKITARII_URL, "mode": mode,
+                                              "execution_mode": execution_mode,
                                               "preloaded_file_count": len(inventory),
                                               "preloaded_file_sample": inventory[:50]})
     ledger.set_status("running")
@@ -5645,11 +5728,27 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
         )
     service_verdict_status = str(verdict.get("status") or "").strip().lower()
     revision_exhausted = verdict.get("revision_exhausted") is True
+    reported_revision_required = verdict.get("revision_required") is True
+    reported_revision_retryable = bool(
+        reported_revision_required
+        and verification_findings
+        # A verifier may report both a non-retryable invariant and a separate
+        # repairable defect.  The mission remains revisable when at least one
+        # validated finding supplies a retry path; keep every finding in the
+        # action so the next attempt does not lose the non-retryable evidence.
+        and any(finding.get("retryable") is True for finding in verification_findings)
+    )
     worker_failed = bool(
         not accepted
         and not ready_to_apply
         and not publish_pending
-        and (revision_exhausted or service_verdict_status == "failed")
+        and (
+            revision_exhausted
+            or (
+                service_verdict_status == "failed"
+                and not reported_revision_retryable
+            )
+        )
     )
     if not accepted:
         verdict["accepted"] = False
@@ -5668,7 +5767,7 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
     question = str(verdict.get("question") or "")
     revision_required = bool(
         not accepted
-        and verdict.get("revision_required") is True
+        and reported_revision_required
         and not ready_to_apply
         and not publish_pending
         and not needs_user
@@ -5690,6 +5789,27 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
             )
         )
     )
+    # This is the canonical result to which an executable revision token is
+    # bound.  next_action is added only after the token exists to avoid a
+    # self-referential hash.
+    current_result = {
+        "ok": accepted,
+        "status": status,
+        "final_step": "skitarii",
+        "phase": status,
+        "summary": summary,
+        "artifacts": saved,
+        "artifact_root": str(run_dir.resolve()),
+        "patch_stage": patch_stage or {},
+        "ready_to_apply": ready_to_apply,
+        "needs_user": needs_user,
+        "question": question,
+        "verification_degraded": verification_degraded,
+        "verification_mode": str(verdict.get("verification_mode") or "private_held_out"),
+        "verification_findings": verification_findings,
+        "revision_required": revision_required,
+        "revision_exhausted": revision_exhausted,
+    }
     next_action = {}
     if ready_to_apply:
         next_action = {
@@ -5716,17 +5836,37 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
         next_action = _expired_clarification_action(question)
     elif revision_required:
         first_finding = verification_findings[0] if verification_findings else {}
-        next_action = {
-            "kind": "revise_code_mission",
-            "reason": str(first_finding.get("what_failed") or summary),
-            "remediation": str(
-                first_finding.get("remediation")
-                or "Ceraxia must select another repair approach and redispatch Skitarii."
-            ),
-            "revision_owner": str(first_finding.get("revision_owner") or "governor"),
-            "retryable": bool(first_finding.get("retryable", True)),
-            "findings": verification_findings,
-        }
+        revision_reason = str(first_finding.get("what_failed") or summary)
+        remediation = str(
+            first_finding.get("remediation")
+            or "Ceraxia must select another repair approach and redispatch Skitarii."
+        )
+        revision_owner = str(first_finding.get("revision_owner") or "governor")
+        mission_meta = (
+            ledger.to_dict().get("skitarii_mission")
+            if isinstance(ledger.to_dict().get("skitarii_mission"), dict) else {}
+        )
+        if reported_revision_retryable:
+            next_action = _revision_execution_action(
+                task_id=task_id,
+                mission_meta=mission_meta,
+                findings=verification_findings,
+                current_result=current_result,
+                reason=revision_reason,
+                remediation=remediation,
+                revision_owner=revision_owner,
+            )
+        if not next_action:
+            # Non-retryable findings and an unbound/malformed mission identity
+            # remain diagnostic only; neither may become an executable command.
+            next_action = {
+                "kind": "revise_code_mission",
+                "reason": revision_reason,
+                "remediation": remediation,
+                "revision_owner": revision_owner,
+                "retryable": reported_revision_retryable,
+                "findings": verification_findings,
+            }
     elif worker_failed:
         next_action = {
             "kind": "inspect_exhausted_attempts",
@@ -5738,21 +5878,7 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
                                              "rounds": len(rounds),
                                              "seconds": int(time.monotonic() - started),
                                              "artifacts": saved, "next_action": next_action})
-    result_payload = {
-        "ok": accepted, "status": status, "final_step": "skitarii",
-        "phase": status, "summary": summary, "artifacts": saved,
-        "artifact_root": str(run_dir.resolve()),
-        "patch_stage": patch_stage or {},
-        "ready_to_apply": ready_to_apply,
-        "next_action": next_action,
-        "needs_user": needs_user,
-        "question": question,
-        "verification_degraded": verification_degraded,
-        "verification_mode": str(verdict.get("verification_mode") or "private_held_out"),
-        "verification_findings": verification_findings,
-        "revision_required": revision_required,
-        "revision_exhausted": revision_exhausted,
-    }
+    result_payload = {**current_result, "next_action": next_action}
     if accepted:
         reconcile_action = {
             "kind": "reconcile_mission_protocol",

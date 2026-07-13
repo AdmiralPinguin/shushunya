@@ -38,6 +38,40 @@ def json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+def _task_request_matches(
+    existing: dict[str, Any],
+    values: dict[str, Any],
+    *,
+    explicit_id: bool,
+) -> bool:
+    # status/next_run are lifecycle fields and may legitimately change after
+    # creation.  Everything below describes the immutable request that owns the
+    # dedupe key.
+    fields = (
+        "kind",
+        "title",
+        "body",
+        "due_at",
+        "interval",
+        "timezone",
+        "created_by",
+        "created_from_session",
+        "created_from_message_id",
+        "dedupe_key",
+        "payload_json",
+    )
+    if explicit_id and str(existing.get("id") or "") != str(values.get("id") or ""):
+        return False
+    return all(existing.get(field) == values.get(field) for field in fields)
+
+
+def _watch_request_matches(existing: dict[str, Any], values: dict[str, Any]) -> bool:
+    return all(
+        existing.get(field) == values.get(field)
+        for field in ("id", "title", "watch_type", "target", "condition_json")
+    )
+
+
 def create_task(payload: dict[str, Any], db_path: Path = DB_PATH) -> dict[str, Any]:
     init_db(db_path)
     kind = str(payload.get("kind") or "reminder").strip().lower()
@@ -85,25 +119,44 @@ def create_task(payload: dict[str, Any], db_path: Path = DB_PATH) -> dict[str, A
         raise ValueError(f"invalid task status: {values['status']}")
     existing = get_task_by_dedupe(values["dedupe_key"], db_path)
     if existing:
+        if not _task_request_matches(existing, values, explicit_id=bool(payload.get("id"))):
+            raise ValueError(
+                f"dedupe key {values['dedupe_key']} already belongs to a different task request"
+            )
         with connect(db_path) as db:
             db.execute("UPDATE tasks SET updated_at = ? WHERE id = ?", (created_at, existing["id"]))
         return get_task(existing["id"], db_path) or existing
-    with connect(db_path) as db:
-        db.execute(
-            """
-            INSERT INTO tasks (
-                id, kind, title, body, due_at, interval, status, next_run, timezone,
-                created_by, created_from_session, created_from_message_id, dedupe_key,
-                payload_json, last_error, created_at, updated_at
+    try:
+        with connect(db_path) as db:
+            db.execute(
+                """
+                INSERT INTO tasks (
+                    id, kind, title, body, due_at, interval, status, next_run, timezone,
+                    created_by, created_from_session, created_from_message_id, dedupe_key,
+                    payload_json, last_error, created_at, updated_at
+                )
+                VALUES (
+                    :id, :kind, :title, :body, :due_at, :interval, :status, :next_run, :timezone,
+                    :created_by, :created_from_session, :created_from_message_id, :dedupe_key,
+                    :payload_json, :last_error, :created_at, :updated_at
+                )
+                """,
+                values,
             )
-            VALUES (
-                :id, :kind, :title, :body, :due_at, :interval, :status, :next_run, :timezone,
-                :created_by, :created_from_session, :created_from_message_id, :dedupe_key,
-                :payload_json, :last_error, :created_at, :updated_at
+    except sqlite3.IntegrityError:
+        # Concurrent at-least-once deliveries with the same dedupe key must
+        # converge on one row, not turn an unknown acknowledgement into an
+        # extra task or a false failure.
+        raced = get_task_by_dedupe(values["dedupe_key"], db_path)
+        if raced and _task_request_matches(
+            raced, values, explicit_id=bool(payload.get("id")),
+        ):
+            return raced
+        if raced:
+            raise ValueError(
+                f"dedupe key {values['dedupe_key']} already belongs to a different task request"
             )
-            """,
-            values,
-        )
+        raise
     return get_task(task_id, db_path) or get_task_by_dedupe(values["dedupe_key"], db_path) or values
 
 
@@ -208,14 +261,27 @@ def create_watch(payload: dict[str, Any], db_path: Path = DB_PATH) -> dict[str, 
     }
     if values["status"] not in VALID_WATCH_STATUSES:
         raise ValueError(f"invalid watch status: {values['status']}")
-    with connect(db_path) as db:
-        db.execute(
-            """
-            INSERT INTO watches (id, title, watch_type, target, condition_json, last_value_json, next_check, status, created_at, updated_at)
-            VALUES (:id, :title, :watch_type, :target, :condition_json, :last_value_json, :next_check, :status, :created_at, :updated_at)
-            """,
-            values,
-        )
+    existing = get_watch(watch_id, db_path)
+    if existing:
+        if not _watch_request_matches(existing, values):
+            raise ValueError(f"watch id {watch_id} already belongs to a different request")
+        return existing
+    try:
+        with connect(db_path) as db:
+            db.execute(
+                """
+                INSERT INTO watches (id, title, watch_type, target, condition_json, last_value_json, next_check, status, created_at, updated_at)
+                VALUES (:id, :title, :watch_type, :target, :condition_json, :last_value_json, :next_check, :status, :created_at, :updated_at)
+                """,
+                values,
+            )
+    except sqlite3.IntegrityError:
+        raced = get_watch(watch_id, db_path)
+        if raced and _watch_request_matches(raced, values):
+            return raced
+        if raced:
+            raise ValueError(f"watch id {watch_id} already belongs to a different request")
+        raise
     return get_watch(watch_id, db_path) or values
 
 

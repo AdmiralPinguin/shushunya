@@ -1,0 +1,31 @@
+[Unit]
+Description=Shushunya durable personality and agency core
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/media/shushunya/SHUSHUNYA/shushunya
+ConditionPathIsDirectory=/media/shushunya/SHUSHUNYA/shushunya
+
+[Service]
+Type=simple
+WorkingDirectory=/media/shushunya/SHUSHUNYA/shushunya
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPYCACHEPREFIX=/tmp/shushunya-core-pycache
+EnvironmentFile=/media/shushunya/SHUSHUNYA/shushunya/deploy/shushunya-core.conf
+EnvironmentFile=-/media/shushunya/SHUSHUNYA/shushunya/.secrets/shushunya-core.env
+ExecStartPre=/usr/bin/install -d -m 0700 /media/shushunya/SHUSHUNYA/shushunya/runtime/shushunya-core
+ExecStartPre=/media/shushunya/SHUSHUNYA/shushunya/DemonsForge/DemonsForge/bin/python -m ShushunyaCore.preflight
+ExecStart=/media/shushunya/SHUSHUNYA/shushunya/DemonsForge/DemonsForge/bin/python -m ShushunyaCore.service
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=120
+KillMode=mixed
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/media/shushunya/SHUSHUNYA/shushunya/runtime/shushunya-core
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=default.target

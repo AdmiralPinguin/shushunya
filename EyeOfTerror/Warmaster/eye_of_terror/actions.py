@@ -5,6 +5,29 @@ from __future__ import annotations
 from typing import Any
 
 
+def _is_explicit_revision_start(action: dict[str, Any]) -> bool:
+    """Accept only the two native revision-start endpoints published by a run."""
+    if str(action.get("method") or "").strip().upper() != "POST":
+        return False
+    endpoint = str(action.get("endpoint") or "").strip()
+    if endpoint.startswith("POST "):
+        endpoint = endpoint[5:].strip()
+    if not endpoint.startswith("/runs/") or any(marker in endpoint for marker in ("?", "#")):
+        return False
+    parts = endpoint.split("/")
+    task_segment = parts[2] if len(parts) == 4 else ""
+    return (
+        len(parts) == 4
+        and parts[0] == ""
+        and parts[1] == "runs"
+        # run_actions has no task-id argument and therefore cannot prove that a
+        # concrete path still targets this run.  Only the bound placeholder may
+        # cross this trust boundary; clients expand it from the current run.
+        and task_segment == "{task_id}"
+        and parts[3] in {"start_revision_http", "start_revision_local"}
+    )
+
+
 def created_task_actions(task_id: str) -> dict[str, Any]:
     return {
         "can_preflight_run": True,
@@ -156,10 +179,19 @@ def run_actions(
         if isinstance(result_next_action, dict) and result_next_action.get("kind")
         else {}
     )
+    explicit_revision_start = _is_explicit_revision_start(explicit_next_action)
+    revision_status = status in {"revision", "needs_revision"}
     resume_required = status == "interrupted"
-    runnable = not terminal_locked and not revision_required and not resume_required and package_valid and oversight_valid
+    runnable = (
+        not terminal_locked
+        and not revision_required
+        and not revision_status
+        and not resume_required
+        and package_valid
+        and oversight_valid
+    )
     revision_runnable = (
-        revision_required
+        (revision_required or (revision_status and explicit_revision_start))
         and revision_valid
         and package_valid
         and oversight_valid
@@ -192,10 +224,12 @@ def run_actions(
         next_action = {"kind": "inspect_package", "method": "GET", "endpoint": "GET /runs/{task_id}/package", "body": {}, "reason": "run package is incomplete or inconsistent"}
     elif not oversight_valid:
         next_action = {"kind": "inspect_oversight", "method": "GET", "endpoint": "GET /runs/{task_id}/oversight", "body": {}, "reason": "governor oversight is missing or inconsistent"}
-    elif revision_required and not revision_valid:
+    elif (revision_required or revision_status) and not revision_valid:
         next_action = {"kind": "inspect_revision", "method": "GET", "endpoint": "GET /runs/{task_id}/summary", "body": {}, "reason": "revision_plan is invalid"}
     elif research_loop_blocked:
         next_action = {"kind": "inspect_blockers", "method": "GET", "endpoint": "GET /runs/{task_id}/summary", "body": {}, "reason": "research loop stopped on a stable blocker"}
+    elif revision_runnable and explicit_revision_start:
+        next_action = explicit_next_action
     elif revision_runnable:
         next_action = {"kind": "execute_revision", "method": "POST", "endpoint": "POST /runs/{task_id}/start_revision_http", "body": {}, "reason": "revision_plan requires selected steps to rerun"}
     elif status in {

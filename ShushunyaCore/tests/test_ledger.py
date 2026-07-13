@@ -1,0 +1,162 @@
+from __future__ import annotations
+
+import sqlite3
+import tempfile
+import unittest
+from pathlib import Path
+
+from ShushunyaCore.ledger import IdempotencyConflict, InvariantViolation, Ledger
+
+
+class LedgerTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ledger = Ledger(Path(self.tmp.name) / "core.sqlite3")
+        self.ledger.initialize()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @staticmethod
+    def request(text="сделай исследование"):
+        return {"source": "test", "text": text, "correlation_id": "corr-1"}
+
+    def create_effect(self):
+        turn_id, cached = self.ledger.accept_turn("turn-key", self.request())
+        self.assertIsNone(cached)
+        resolution = {"ok": True, "turn_id": turn_id, "decision": {"action": "request_warmaster_mission"}}
+        commitment = {
+            "id": "commitment-1",
+            "kind": "abaddon_mission",
+            "goal": "проверенный результат",
+            "spec": {"goal": "проверенный результат"},
+            "state": "queued",
+            "honest_status": "Ещё не отправлено.",
+            "delegate_kind": "abaddon",
+        }
+        effect = {
+            "id": "effect-1",
+            "commitment_id": "commitment-1",
+            "kind": "request_warmaster_mission",
+            "destination": "abaddon",
+            "payload": {"message": "x", "task_id": "core-1"},
+        }
+        self.ledger.save_turn_resolution(
+            idempotency_key="turn-key",
+            turn_id=turn_id,
+            resolution=resolution,
+            commitment=commitment,
+            effect=effect,
+        )
+        return turn_id, resolution
+
+    def test_turn_commitment_and_outbox_are_idempotent(self):
+        _turn_id, expected = self.create_effect()
+        turn_id, cached = self.ledger.accept_turn("turn-key", self.request())
+        self.assertEqual(cached, expected)
+        self.assertTrue(turn_id.startswith("turn-"))
+        self.assertEqual(len(self.ledger.list_commitments()), 1)
+        self.assertEqual(self.ledger.status()["pending_effects"], 1)
+
+    def test_same_key_with_different_request_is_conflict(self):
+        self.create_effect()
+        with self.assertRaises(IdempotencyConflict):
+            self.ledger.accept_turn("turn-key", self.request("другая задача"))
+
+    def test_explicit_claim_honors_retry_backoff(self):
+        self.create_effect()
+        with self.ledger.write() as db:
+            db.execute(
+                "UPDATE outbox SET state='retry_wait',next_attempt_at='2999-01-01T00:00:00+00:00' "
+                "WHERE message_id='effect-1'"
+            )
+            db.execute("UPDATE effects SET state='retry_wait' WHERE id='effect-1'")
+        self.assertIsNone(self.ledger.claim_outbox("foreground", 60, message_id="effect-1"))
+        with self.ledger.write() as db:
+            db.execute(
+                "UPDATE outbox SET next_attempt_at='2000-01-01T00:00:00+00:00' WHERE message_id='effect-1'"
+            )
+        self.assertIsNotNone(self.ledger.claim_outbox("foreground", 60, message_id="effect-1"))
+
+    def test_stale_lease_cannot_finalize_and_valid_delivery_advances_commitment(self):
+        self.create_effect()
+        claim = self.ledger.claim_outbox("worker-a", 60, message_id="effect-1")
+        self.assertEqual(self.ledger.get_effect("effect-1")["state"], "leased")
+        with self.assertRaises(InvariantViolation):
+            self.ledger.finish_effect(
+                effect_id="effect-1",
+                lease_token="wrong",
+                ok=True,
+                result={"delegate_ref": "mission-1", "explanation": "ok"},
+            )
+        effect = self.ledger.finish_effect(
+            effect_id="effect-1",
+            lease_token=claim["lease_token"],
+            ok=True,
+            result={"delegate_ref": "mission-1", "explanation": "accepted"},
+        )
+        self.assertEqual(effect["state"], "delivered")
+        commitment = self.ledger.list_commitments()[0]
+        self.assertEqual(commitment["state"], "working")
+        self.assertEqual(commitment["delegate_ref"], "mission-1")
+
+    def test_reclaimed_lease_fences_first_worker(self):
+        self.create_effect()
+        first = self.ledger.claim_outbox("worker-a", 10, message_id="effect-1")
+        with self.ledger.write() as db:
+            db.execute("UPDATE outbox SET lease_until='2000-01-01T00:00:00+00:00' WHERE message_id='effect-1'")
+        second = self.ledger.claim_outbox("worker-b", 10, message_id="effect-1")
+        self.assertNotEqual(first["lease_token"], second["lease_token"])
+        with self.assertRaises(InvariantViolation):
+            self.ledger.finish_effect(
+                effect_id="effect-1",
+                lease_token=first["lease_token"],
+                ok=True,
+                result={"delegate_ref": "mission-1", "explanation": "stale"},
+            )
+        self.ledger.finish_effect(
+            effect_id="effect-1",
+            lease_token=second["lease_token"],
+            ok=True,
+            result={"delegate_ref": "mission-1", "explanation": "current"},
+        )
+
+    def test_events_are_physically_append_only_and_blocked_is_not_a_state(self):
+        self.create_effect()
+        with self.ledger.connect() as db, self.assertRaises(sqlite3.IntegrityError):
+            db.execute("UPDATE events SET kind='lie' WHERE seq=1")
+        with self.ledger.connect() as db, self.assertRaises(sqlite3.IntegrityError):
+            db.execute("UPDATE commitments SET state='blocked' WHERE id='commitment-1'")
+
+    def test_restart_recovers_unknown_delivery_ack(self):
+        self.create_effect()
+        self.ledger.claim_outbox("worker-a", 60, message_id="effect-1")
+        restarted = Ledger(self.ledger.db_path)
+        restarted.initialize()
+        recovered = restarted.recover_after_restart()
+        self.assertEqual(recovered["outbox"], 1)
+        effect = restarted.get_effect("effect-1")
+        self.assertEqual(effect["state"], "retry_wait")
+
+    def test_exhausted_unknown_ack_is_quarantined_not_declared_failed(self):
+        self.create_effect()
+        with self.ledger.write() as db:
+            db.execute("UPDATE outbox SET max_attempts=1 WHERE message_id='effect-1'")
+        claim = self.ledger.claim_outbox("worker-a", 60, message_id="effect-1")
+        self.ledger.finish_effect(
+            effect_id="effect-1",
+            lease_token=claim["lease_token"],
+            ok=False,
+            result={
+                "code": "delivery_ack_unknown_after_restart",
+                "explanation": "ack unknown",
+            },
+            retryable=True,
+        )
+        commitment = self.ledger.list_commitments()[0]
+        self.assertEqual(commitment["state"], "quarantined")
+        self.assertEqual(commitment["delegate_ref"], "core-1")
+
+
+if __name__ == "__main__":
+    unittest.main()

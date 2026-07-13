@@ -74,6 +74,9 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -99,6 +102,8 @@ public class MainActivity extends Activity {
     private static final int CYAN = Color.rgb(76, 224, 215);
 
     private static final String PREFS = "shushunya_m";
+    private static final String PENDING_CHAT_FILENAME = "pending-chat-turn.json";
+    private static final String PENDING_CHAT_TMP_FILENAME = "pending-chat-turn.json.tmp";
     private static final String NOTIFICATION_CHANNEL_ID = "shushunya_answers";
     private static final int CHAT_HISTORY_LIMIT = 30;
     private static final int CHAT_OLDER_PAGE = 25;
@@ -150,6 +155,8 @@ public class MainActivity extends Activity {
     private boolean noOlderChat;
     private final android.util.LruCache<String, Bitmap> imageCache = new android.util.LruCache<>(16);
     private TextView pendingAnswerBubble;
+    private String pendingChatRequestId = "";
+    private boolean pendingChatRecoveryActive;
     private LinearLayout agentAppendTarget;
     private String brigadeStateKey = "";
     private boolean brigadeDeltaLoopRunning;
@@ -275,6 +282,7 @@ public class MainActivity extends Activity {
         addMessage(false, "Шушуня здесь. Пиши, брат, пока нити судьбы не спутались окончательно.", false);
         loadServerChatHistory();
         loadAgentHistoryAndRestore();
+        resumePendingChatIfAny();
     }
 
     @Override
@@ -3175,14 +3183,20 @@ public class MainActivity extends Activity {
         if ((text.isEmpty() && !hasImage) || waiting) {
             return;
         }
-        send.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
-        String warmasterTask = hasImage ? "" : warmasterTaskFromChatCommand(text);
-        if (!warmasterTask.isEmpty()) {
-            input.setText("");
-            runWarmasterTaskFromChat(text, warmasterTask);
+        JSONObject durablePending = loadPendingChatTurn();
+        if (durablePending != null) {
+            resumePendingChat(durablePending);
+            Toast.makeText(this, "Сначала довожу уже сохранённый ход — без дубля.", Toast.LENGTH_SHORT).show();
             return;
         }
-
+        String clientRequestId = "android-" + java.util.UUID.randomUUID();
+        try {
+            persistPendingChatTurn(clientRequestId, text, imageDataUrl);
+        } catch (Exception e) {
+            Toast.makeText(this, "Не смог надёжно сохранить ход; отправка отменена.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        send.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
         input.setText("");
         pendingImageDataUrl = null;
         pendingImageLabel = null;
@@ -3200,27 +3214,45 @@ public class MainActivity extends Activity {
         }
         TextView answerBubble = addMessage(false, "", false);
         pendingAnswerBubble = answerBubble;
+        pendingChatRequestId = clientRequestId;
         setWaiting(true);
+        executePendingChatTurn(text, imageDataUrl, clientRequestId, answerBubble);
+    }
+
+    private void executePendingChatTurn(
+            String text,
+            String imageDataUrl,
+            String clientRequestId,
+            TextView answerBubble
+    ) {
         new Thread(() -> {
             PowerManager.WakeLock wakeLock = acquireAnswerWakeLock();
             try {
                 StreamingBubble liveBubble = new StreamingBubble(answerBubble);
                 liveBubble.start();
-                String finalText = streamChatAnswer(text, imageDataUrl, liveBubble);
+                String finalText = streamChatAnswer(text, imageDataUrl, clientRequestId, liveBubble);
                 pendingLocalEchoes.addLast("assistant\n" + finalText);
+                clearPendingChatTurn(clientRequestId);
                 main.post(() -> {
                     if (pendingAnswerBubble == answerBubble) {
                         pendingAnswerBubble = null;
                     }
+                    if (clientRequestId.equals(pendingChatRequestId)) {
+                        pendingChatRequestId = "";
+                    }
+                    pendingChatRecoveryActive = false;
                 });
                 liveBubble.finish();
                 showAnswerNotification(finalText);
                 main.post(() -> setWaiting(false));
             } catch (Exception e) {
-                // No manual recovery needed: the delta stream is the recovery.
-                // The answer lands server-side and the delta loop fills this bubble.
+                // The exact request payload and id remain durable. A later app
+                // start or submit retries the same server-side job, never a new
+                // turn/warband mission. The delta stream may still deliver an
+                // already-accepted answer in the meantime.
                 main.post(() -> {
-                    answerBubble.setText("⏳ связь моргнула — ответ доедет сюда сам");
+                    answerBubble.setText("⏳ связь моргнула — ход сохранён и будет повторён с тем же ID");
+                    pendingChatRecoveryActive = false;
                     setWaiting(false);
                 });
             } finally {
@@ -3229,6 +3261,107 @@ public class MainActivity extends Activity {
                 }
             }
         }).start();
+    }
+
+    private File pendingChatFile() {
+        return new File(getFilesDir(), PENDING_CHAT_FILENAME);
+    }
+
+    private File pendingChatTmpFile() {
+        return new File(getFilesDir(), PENDING_CHAT_TMP_FILENAME);
+    }
+
+    private synchronized void persistPendingChatTurn(
+            String clientRequestId,
+            String text,
+            String imageDataUrl
+    ) throws Exception {
+        if (loadPendingChatTurn() != null) {
+            throw new IllegalStateException("another durable chat turn is pending");
+        }
+        JSONObject payload = new JSONObject()
+                .put("client_request_id", clientRequestId)
+                .put("text", text == null ? "" : text)
+                .put("image_data_url", imageDataUrl == null ? "" : imageDataUrl);
+        byte[] encoded = payload.toString().getBytes(StandardCharsets.UTF_8);
+        File target = pendingChatFile();
+        File temporary = pendingChatTmpFile();
+        if (temporary.exists() && !temporary.delete()) {
+            throw new IllegalStateException("stale pending chat temp file cannot be removed");
+        }
+        try (FileOutputStream out = new FileOutputStream(temporary, false)) {
+            out.write(encoded);
+            out.flush();
+            out.getFD().sync();
+        }
+        if (!temporary.renameTo(target)) {
+            throw new IllegalStateException("pending chat turn could not be committed atomically");
+        }
+    }
+
+    private synchronized JSONObject loadPendingChatTurn() {
+        File target = pendingChatFile();
+        File temporary = pendingChatTmpFile();
+        if (!target.exists() && temporary.exists()) {
+            // A crash after fsync but before rename still leaves a complete
+            // recoverable request. Promote it before reading.
+            temporary.renameTo(target);
+        }
+        if (!target.exists()) {
+            return null;
+        }
+        try (FileInputStream in = new FileInputStream(target)) {
+            JSONObject payload = new JSONObject(readAll(in));
+            String requestId = payload.optString("client_request_id", "").trim();
+            if (requestId.isEmpty()) {
+                throw new IllegalStateException("pending chat request id is empty");
+            }
+            return payload;
+        } catch (Exception e) {
+            // A malformed local journal cannot be retried safely. Keep the
+            // visible failure honest and remove it so the owner can resend.
+            target.delete();
+            temporary.delete();
+            return null;
+        }
+    }
+
+    private synchronized void clearPendingChatTurn(String clientRequestId) {
+        JSONObject pending = loadPendingChatTurn();
+        if (pending == null || !clientRequestId.equals(
+                pending.optString("client_request_id", "").trim())) {
+            return;
+        }
+        pendingChatFile().delete();
+        pendingChatTmpFile().delete();
+    }
+
+    private void resumePendingChatIfAny() {
+        JSONObject pending = loadPendingChatTurn();
+        if (pending != null) {
+            resumePendingChat(pending);
+        }
+    }
+
+    private void resumePendingChat(JSONObject pending) {
+        if (pendingChatRecoveryActive || waiting) {
+            return;
+        }
+        String requestId = pending.optString("client_request_id", "").trim();
+        if (requestId.isEmpty()) {
+            return;
+        }
+        pendingChatRecoveryActive = true;
+        pendingChatRequestId = requestId;
+        TextView answerBubble = addMessage(false, "↻ Возобновляю сохранённый ход…", false);
+        pendingAnswerBubble = answerBubble;
+        setWaiting(true);
+        executePendingChatTurn(
+                pending.optString("text", ""),
+                pending.optString("image_data_url", ""),
+                requestId,
+                answerBubble
+        );
     }
 
     private String warmasterTaskFromChatCommand(String text) {
@@ -3435,7 +3568,7 @@ public class MainActivity extends Activity {
         showAnswerNotification(finalText);
     }
 
-    private String streamChatAnswer(String text, String imageDataUrl, StreamingBubble liveBubble) throws Exception {
+    private String streamChatAnswer(String text, String imageDataUrl, String clientRequestId, StreamingBubble liveBubble) throws Exception {
         URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/stream");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
@@ -3449,6 +3582,7 @@ public class MainActivity extends Activity {
         payload.put("session_id", SERVER_CHAT_SESSION_ID);
         payload.put("text", text);
         payload.put("client_source", "app");
+        payload.put("client_request_id", clientRequestId);
         if (imageDataUrl != null && !imageDataUrl.isEmpty()) {
             payload.put("image_data_url", imageDataUrl);
         }
@@ -3476,13 +3610,21 @@ public class MainActivity extends Activity {
                     full.append(piece);
                     liveBubble.append(piece);
                 } else if ("route".equals(type)) {
-                    // The turn controller sent this to the brigade; the mission is
-                    // already running server-side. Surface an ack; progress shows
-                    // in the Brigades tab and the delta stream.
-                    String ack = "Взял в работу — веду через варбанду. Прогресс во вкладке Warbands.";
-                    full.setLength(0);
-                    full.append(ack);
-                    liveBubble.append(ack);
+                    if (evt.optBoolean("accepted", false)) {
+                        String taskId = evt.optString("task_id", "");
+                        String ack = evt.optString("message", "");
+                        if (ack.isEmpty()) {
+                            ack = "Абаддон подтвердил приём."
+                                    + (taskId.isEmpty() ? "" : "\ntask_id=" + taskId);
+                        }
+                        full.setLength(0);
+                        full.append(ack);
+                        liveBubble.append(ack);
+                    } else if (full.length() == 0) {
+                        String honest = evt.optString("message", "Абаддон пока не подтвердил приём; Core сохранил обязательство и причину.");
+                        full.append(honest);
+                        liveBubble.append(honest);
+                    }
                 } else if ("error".equals(type)) {
                     throw new IllegalStateException(evt.optString("error", "stream error"));
                 } else if ("done".equals(type)) {
@@ -4162,6 +4304,12 @@ public class MainActivity extends Activity {
                 // a dropped poll): fill the waiting bubble instead of appending.
                 applyRichText(pendingAnswerBubble, text);
                 pendingAnswerBubble = null;
+                String deliveredRequestId = pendingChatRequestId;
+                if (!deliveredRequestId.isEmpty()) {
+                    clearPendingChatTurn(deliveredRequestId);
+                    pendingChatRequestId = "";
+                }
+                pendingChatRecoveryActive = false;
                 setWaiting(false);
                 showAnswerNotification(text);
                 appended = true;

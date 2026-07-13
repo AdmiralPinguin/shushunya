@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 import threading
 import urllib.error
 import urllib.request
@@ -14,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from .actions import run_preflight_actions
+from .actions import action_for_mode, run_preflight_actions
 from .gateway_util import resolve_run_child_path, valid_task_id, validate_service_host
 from .http_executor import execute_run as execute_http_run, preflight_workers as preflight_http_workers
 from .ledger import TaskLedger
@@ -463,22 +464,33 @@ def _native_preflight(
         or bool(run_actions.get("can_execute_revision"))
     ) and not immutable_terminal
     if can_start_run:
-        start_action = {
-            "kind": f"start_{adapter.route_kind}",
-            "method": "POST",
-            "endpoint": (
-                "POST /runs/{task_id}/start_local"
-                if mode == "local"
-                else "POST /runs/{task_id}/start_http"
-            ),
-            "body": {},
-            "reason": (
-                f"native contract, {adapter.governor} directive, mission link, "
-                f"and {adapter.backend} health passed"
-            ),
-        }
+        revision_runnable = bool(
+            run_actions.get("can_start_revision")
+            or run_actions.get("can_execute_revision")
+        )
+        if revision_runnable and run_next_action:
+            # A native revision is an attempt inside the same durable mission.
+            # Preserve the backend-issued token and revision endpoint instead of
+            # laundering it into a generic start action.
+            start_action = action_for_mode(run_next_action, mode)
+        else:
+            start_action = {
+                "kind": f"start_{adapter.route_kind}",
+                "method": "POST",
+                "endpoint": (
+                    "POST /runs/{task_id}/start_local"
+                    if mode == "local"
+                    else "POST /runs/{task_id}/start_http"
+                ),
+                "body": {},
+                "reason": (
+                    f"native contract, {adapter.governor} directive, mission link, "
+                    f"and {adapter.backend} health passed"
+                ),
+            }
         preflight["actions"] = {
             "can_start_run": True,
+            "can_start_revision": revision_runnable,
             "can_inspect_package": True,
             "force_required_for_rerun": force_required,
             "terminal_run_immutable": immutable_terminal,
@@ -1352,7 +1364,47 @@ def execute_routed_run(
             failure["backend_route"] = route
             failure["mission_ref_errors"] = mission_ref_errors
             return failure
-        current_status = str(run_summary(run_dir).get("status") or "")
+        current_summary = run_summary(run_dir)
+        current_status = str(current_summary.get("status") or "")
+        current_actions = (
+            current_summary.get("actions")
+            if isinstance(current_summary.get("actions"), dict)
+            else {}
+        )
+        revision_available = bool(
+            current_actions.get("can_start_revision")
+            or current_actions.get("can_execute_revision")
+        )
+        current_next_action = (
+            current_actions.get("next_action")
+            if isinstance(current_actions.get("next_action"), dict)
+            else {}
+        )
+        if execution_mode != "revision" and (
+            current_status in {"revision", "needs_revision"} or revision_available
+        ):
+            failure = _route_failure(
+                run_dir,
+                phase="native_revision_mode_required",
+                error=(
+                    "native mission requires a revision attempt; execute the "
+                    "published revision action instead of starting a new run"
+                ),
+                error_code="native_revision_mode_required",
+                next_action=current_next_action,
+            )
+            failure["backend_route"] = route
+            return failure
+        if execution_mode == "revision" and not revision_available:
+            failure = _route_failure(
+                run_dir,
+                phase="native_revision_not_available",
+                error="the current native mission state does not offer a revision attempt",
+                error_code="native_revision_not_available",
+                next_action=current_next_action,
+            )
+            failure["backend_route"] = route
+            return failure
         if current_status in {"blocked", "completed", "failed", "cancelled", "corrupt"}:
             action = _native_reprepare_action(
                 run_dir,
@@ -1422,7 +1474,12 @@ def execute_routed_run(
                     pass
             return failure
         if native_adapter is NATIVE_CODE_ADAPTER:
-            result = run_via_skitarii(run_dir, run_dir.name, timeout_sec=timeout_sec)
+            result = run_via_skitarii(
+                run_dir,
+                run_dir.name,
+                timeout_sec=timeout_sec,
+                execution_mode=execution_mode,
+            )
         elif native_adapter.backend == "ResearchWarband":
             try:
                 from .research_warband_bridge import run_via_research_warband
@@ -1435,7 +1492,10 @@ def execute_routed_run(
                 }
             else:
                 result = run_via_research_warband(
-                    run_dir, run_dir.name, timeout_sec=timeout_sec,
+                    run_dir,
+                    run_dir.name,
+                    timeout_sec=timeout_sec,
+                    execution_mode=execution_mode,
                 )
         else:
             result = {
@@ -1910,6 +1970,7 @@ def orchestrate_start_run(
     host: str = "127.0.0.1",
     timeout_sec: int = 1800,
     force: bool = False,
+    revision_token: str = "",
 ) -> dict[str, Any]:
     if run_mode not in {"local", "http"}:
         raise ValueError("run_mode must be local or http")
@@ -1927,6 +1988,39 @@ def orchestrate_start_run(
     execution_mode = "full"
     step_ids: list[str] | None = None
     native_backend = native_adapter_for_route(backend_route) is not None
+    native_revision_requested = native_backend and (
+        str(summary.get("status") or "") in {"revision", "needs_revision"}
+        or bool(actions.get("can_start_revision"))
+    )
+    if native_revision_requested:
+        action_body = (
+            next_action.get("body")
+            if isinstance(next_action.get("body"), dict)
+            else {}
+        )
+        expected_token = str(action_body.get("revision_token") or "")
+        provided_token = str(revision_token or "")
+        if (
+            not expected_token
+            or not provided_token
+            or not secrets.compare_digest(provided_token, expected_token)
+        ):
+            return {
+                "ok": False,
+                "phase": "native_revision_token_required",
+                "error_code": "stale_or_missing_revision_token",
+                "error": (
+                    "native revision was not started: generic orchestration cannot "
+                    "bypass the current mission's revision token"
+                ),
+                "remediation": (
+                    "execute the current run summary's published revision action unchanged"
+                ),
+                "task_id": task_id,
+                "next_action": next_action,
+                "client_action": executable_client_action(task_id, next_action),
+                "snapshot": run_snapshot(run_dir, event_limit=5, events_after=0),
+            }
     if native_backend:
         start_preflight = _native_preflight(
             run_dir,
@@ -1960,7 +2054,13 @@ def orchestrate_start_run(
             }
     ledger_data, ledger_error = load_ledger_dict(run_dir / "task_ledger.json")
     native_status = str(ledger_data.get("status") or "") if not ledger_error else ""
-    if native_backend and native_status in {"created", "assigned"}:
+    if native_backend and (
+        native_status in {"revision", "needs_revision"}
+        or actions.get("can_start_revision")
+    ):
+        operation = "revision"
+        execution_mode = "revision"
+    elif native_backend and native_status in {"created", "assigned"}:
         operation = "start"
     elif native_backend and native_status == "interrupted":
         operation = "resume"

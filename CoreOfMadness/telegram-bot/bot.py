@@ -239,7 +239,7 @@ def archive_get(path, timeout=30):
         return json.loads(response.read().decode("utf-8"))
 
 
-def shared_chat_answer(chat_id, text, username=None):
+def shared_chat_answer(chat_id, text, username=None, message_id=None):
     model_key = selected_model_key(chat_id)
     llm = selected_model(chat_id)
     model = str(llm.get("model") or "").strip() or LLM_MODEL
@@ -256,6 +256,8 @@ def shared_chat_answer(chat_id, text, username=None):
         "stream": False,
         "text": text,
     }
+    if message_id is not None:
+        payload["client_request_id"] = f"telegram-{chat_id}-{message_id}"
     started = request_json(f"{LLM_BASE_URL}/archive/client/chat/start", payload, timeout=30)
     job_id = str(started.get("job_id") or "").strip()
     if not job_id:
@@ -626,7 +628,10 @@ def handle_message(message):
     send_typing(chat_id)
     try:
         if TELEGRAM_SHARED_CHAT_ENABLED:
-            send_message(chat_id, shared_chat_answer(chat_id, text, username=username))
+            send_message(
+                chat_id,
+                shared_chat_answer(chat_id, text, username=username, message_id=message.get("message_id")),
+            )
         elif STREAM_ENABLED:
             send_message(chat_id, stream_llm(chat_id, text, username=username))
         else:
