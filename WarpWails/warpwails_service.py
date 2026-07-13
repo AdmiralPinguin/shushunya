@@ -55,11 +55,19 @@ class Speaker:
         from warp_sfx import WarpSfxInserter
 
         device = self.f5_cfg.get("device", "cpu")
+        if device.startswith("cuda") and not torch.cuda.is_available():
+            print("[warpwails] cuda недоступна, откатываюсь на cpu", flush=True)
+            device = "cpu"
         ckpt = hf_hub_download("Misha24-10/F5-TTS_RUSSIAN", "F5TTS_v1_Base_accent_tune/model_last_inference.safetensors")
         vocab = hf_hub_download("Misha24-10/F5-TTS_RUSSIAN", "F5TTS_v1_Base/vocab.txt")
         if device == "cpu":
             torch.set_num_threads(max(1, min(16, torch.get_num_threads())))
         self.f5 = F5TTS(model="F5TTS_v1_Base", ckpt_file=ckpt, vocab_file=vocab, device=device)
+        if device.startswith("cuda") and bool(self.f5_cfg.get("fp32", False)):
+            # опционально: полная точность (вдвое медленнее); по умолчанию fp16 — выбор владельца
+            from f5_tts.infer.utils_infer import load_checkpoint
+
+            self.f5.ema_model = load_checkpoint(self.f5.ema_model, ckpt, device, dtype=torch.float32)
         self.effect = WarpImpEffect(self.profile, SR)
         self.sfx = WarpSfxInserter(self.profile, SR)
         threading.Thread(target=self._worker, daemon=True).start()
@@ -95,7 +103,7 @@ class Speaker:
         lines = parse_lines(text, self.profile)
         if not lines:
             return
-        _, command, problem = detect_player(SR)
+        _, command, problem = detect_player(SR, self.profile.get("audio", {}).get("alsa_device"))
         if not command:
             print(f"[warpwails] нет аудиовывода: {problem}", flush=True)
             return
@@ -181,7 +189,13 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    import os
+
     profile = json.loads((ROOT / "voice_profile.json").read_text(encoding="utf-8"))
+    gpu_index = profile.get("f5", {}).get("gpu_index")
+    if gpu_index is not None:
+        # только указанная карта: F5 на мульти-GPU уползает не туда (2060 = не Ampere, валит flash-attention)
+        os.environ.setdefault("CUDA_VISIBLE_DEVICES", str(gpu_index))
     port = int(profile.get("service", {}).get("port", 7500))
     print("[warpwails] грузим модель...", flush=True)
     Handler.speaker = Speaker()

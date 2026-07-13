@@ -124,8 +124,11 @@ def command_accepts_audio(command: list[str], sr: int) -> bool:
         return False
 
 
-def detect_player(sr: int) -> tuple[str | None, list[str], str | None]:
+def detect_player(sr: int, preferred_alsa: str | None = None) -> tuple[str | None, list[str], str | None]:
     candidates = []
+    if preferred_alsa and which("aplay"):
+        # прибитый гвоздём выход (колонки): двойной PipeWire роняет звук то в null, то в моник
+        candidates.append(("aplay", ["aplay", "-q", "-D", preferred_alsa, "-t", "raw", "-f", "S16_LE", "-r", str(sr), "-c", str(CHANNELS)]))
     if has_real_pulse_sink():
         if which("pw-play"):
             candidates.append(("pw-play", ["pw-play", "--raw", "--rate", str(sr), "--channels", str(CHANNELS), "--format", "s16", "-"]))
