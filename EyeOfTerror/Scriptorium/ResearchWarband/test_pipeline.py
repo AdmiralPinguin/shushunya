@@ -16,7 +16,9 @@ from ResearchWarband.pipeline import (
     HypothesisSpec,
     RESEARCH_MODES,
     ResearchBudgets,
+    ResearchIntegrityError,
     ResearchPipeline,
+    ResearchPipelineError,
     ResearchSpec,
 )
 from ResearchWarband.model_client import (
@@ -27,6 +29,8 @@ from ResearchWarband.model_client import (
 )
 from ResearchWarband.research_tools import FetchedSource, SearchHit
 from ResearchWarband.reader import ReaderCandidate
+from ResearchWarband.production_runner import build_external_evaluator_result
+from ResearchWarband.schema import SchemaError
 from ResearchWarband.semantic_review import (
     ReviewCoverageCandidate,
     build_semantic_review_payload,
@@ -319,6 +323,7 @@ def semantic_accept(
     return {
         "decision": "accepted",
         "reason": "all exact excerpts entail their claims and units align",
+        "findings": [],
         "claim_reviews": [
             {"claim_id": claim_id, "status": "entailed"}
             for claim_id in claim_ids
@@ -329,6 +334,63 @@ def semantic_accept(
         "unit_reviews": [
             {"unit_id": unit_id, "status": "entailed"} for unit_id in unit_ids
         ],
+        "mission_alignment": "entailed",
+        "scope_alignment": "entailed",
+        "policy_alignment": "entailed",
+        "next_queries": [],
+    }
+
+
+def semantic_revise_writer() -> dict[str, Any]:
+    return {
+        "decision": "revise",
+        "reason": "the draft unit overstates the reviewed claim",
+        "findings": [{
+            "code": "unit_overstatement",
+            "entity_kind": "unit",
+            "entity_id": "unit-1",
+            "what_failed": "The draft unit says more than the reviewed claim.",
+            "evidence": "unit-1 introduces an unsupported conclusion.",
+            "expected": "The unit preserves the exact supported proposition.",
+            "remediation": "Rewrite unit-1 from claim-1 without the unsupported conclusion.",
+            "revision_owner": "writer",
+            "retryable": True,
+        }],
+        "claim_reviews": [{"claim_id": "claim-1", "status": "entailed"}],
+        "edge_reviews": [{"edge_id": "edge-1-1", "status": "entailed"}],
+        "unit_reviews": [{"unit_id": "unit-1", "status": "not_entailed"}],
+        "mission_alignment": "entailed",
+        "scope_alignment": "entailed",
+        "policy_alignment": "entailed",
+        "next_queries": [],
+    }
+
+
+def semantic_escalate(
+    *,
+    owner: str = "operator",
+    retryable: bool = False,
+    remediation: str = (
+        "Resume when an operator restores access to the named evidence service."
+    ),
+) -> dict[str, Any]:
+    return {
+        "decision": "escalate",
+        "reason": "the named external evidence service is unavailable",
+        "findings": [{
+            "code": "external_evidence_service_unavailable",
+            "entity_kind": "source_service",
+            "entity_id": "evidence-service",
+            "what_failed": "The required external evidence service cannot be reached.",
+            "evidence": "The trusted service boundary reported that access is unavailable.",
+            "expected": "The named evidence service is reachable under the immutable directive.",
+            "remediation": remediation,
+            "revision_owner": owner,
+            "retryable": retryable,
+        }],
+        "claim_reviews": [{"claim_id": "claim-1", "status": "uncertain"}],
+        "edge_reviews": [{"edge_id": "edge-1-1", "status": "uncertain"}],
+        "unit_reviews": [{"unit_id": "unit-1", "status": "uncertain"}],
         "mission_alignment": "entailed",
         "scope_alignment": "entailed",
         "policy_alignment": "entailed",
@@ -401,6 +463,7 @@ class ResearchPipelineTests(unittest.TestCase):
         depth: str = "standard",
         caller_source_urls: tuple[str, ...] = (),
         clarification_turns: tuple[ClarificationTurn, ...] = (),
+        revision_context: tuple[dict[str, Any], ...] = (),
         hypotheses: tuple[HypothesisSpec, ...] = (),
     ) -> ResearchSpec:
         answer_mode = {
@@ -438,6 +501,7 @@ class ResearchPipelineTests(unittest.TestCase):
             source_policy=(policy.source_policy,),
             success_conditions=policy.success_conditions,
             clarification_turns=clarification_turns,
+            revision_context=revision_context,
             hypotheses=hypotheses,
         )
 
@@ -540,6 +604,71 @@ class ResearchPipelineTests(unittest.TestCase):
             ],
         )
 
+    def test_semantic_revision_returns_to_warband_with_actionable_feedback(self) -> None:
+        source = "The answer is Alpha."
+        url = "https://example.test/revision"
+        model = FakeModel({
+            "planner": [planner()],
+            "analyst": [
+                analyst_ready([claim_item(excerpt=source)]),
+                analyst_ready([claim_item(excerpt=source)]),
+            ],
+            "writer": [
+                writer_claim(text="The answer is Alpha and therefore final."),
+                writer_claim(text=source),
+            ],
+            "semantic_verifier": [semantic_revise_writer(), semantic_accept()],
+        })
+        result = self.pipeline(
+            model,
+            FakeSearch({"primary query": [SearchHit("Revision source", url, "snippet")]}),
+            FakeFetch({url: fetched(url, source)}),
+        ).run(self.spec())
+
+        self.assertEqual("accepted", result.outcome)
+        self.assertEqual(2, len(result.semantic_reviews))
+        self.assertEqual("revise", result.semantic_reviews[0].decision)
+        self.assertEqual((), result.review_findings)
+        revised_writer_payload = [
+            payload for role, payload in model.calls if role == "writer"
+        ][1]
+        self.assertEqual(
+            "Rewrite unit-1 from claim-1 without the unsupported conclusion.",
+            revised_writer_payload["revision_feedback"][0]["remediation"],
+        )
+
+    def test_persisted_revision_context_reaches_planner_analyst_and_writer(self) -> None:
+        model, search, fetcher = self.accepted_fixture()
+        finding = {
+            "code": "source_strategy_incomplete",
+            "entity_kind": "research_mission",
+            "entity_id": "source-strategy",
+            "what_failed": "The previous source strategy did not establish the answer.",
+            "evidence": "The previous bounded attempt ended without accepted evidence.",
+            "expected": "A grounded answer or a proven scoped absence.",
+            "remediation": "Use a genuinely different source route.",
+            "revision_owner": "scout",
+            "retryable": True,
+        }
+        revision_context = ({
+            "attempt": 1,
+            "result_sha256": "a" * 64,
+            "reason": "The first bounded approach was exhausted.",
+            "findings": [finding],
+        },)
+
+        result = self.pipeline(model, search, fetcher).run(
+            self.spec(revision_context=revision_context)
+        )
+
+        self.assertEqual("accepted", result.outcome)
+        for role in ("planner", "analyst", "writer"):
+            payload = next(item for called, item in model.calls if called == role)
+            self.assertEqual(
+                "Use a genuinely different source route.",
+                payload["revision_feedback"][0]["remediation"],
+            )
+
     def test_caller_exact_url_is_classified_and_fetched_without_search_recall(self) -> None:
         exact_url = "https://www.rfc-editor.org/rfc/rfc1149.txt"
         source = "The answer is Alpha."
@@ -598,7 +727,7 @@ class ResearchPipelineTests(unittest.TestCase):
 
         result = self.pipeline(model, FakeSearch({}), FakeFetch({})).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("URL absent from the research objective", result.reason)
 
     def test_disallowed_candidate_before_allowed_candidate_is_skipped(self) -> None:
@@ -680,7 +809,7 @@ class ResearchPipelineTests(unittest.TestCase):
             budgets=ResearchBudgets(max_rounds=1, max_search_queries=1),
         ).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertEqual([], fetcher.calls)
         self.assertEqual(
             2,
@@ -718,7 +847,7 @@ class ResearchPipelineTests(unittest.TestCase):
                     fetcher,
                 ).run(self.spec())
 
-                self.assertEqual("blocked", result.outcome)
+                self.assertEqual("needs_revision", result.outcome)
                 self.assertIn(expected_reason, result.reason)
                 self.assertEqual([], fetcher.calls)
                 self.assertFalse(
@@ -942,7 +1071,7 @@ class ResearchPipelineTests(unittest.TestCase):
             budgets=ResearchBudgets(max_sources=1),
         ).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("partial tie selection is forbidden", result.reason)
         self.assertEqual([], fetcher.calls)
 
@@ -1033,7 +1162,7 @@ class ResearchPipelineTests(unittest.TestCase):
             FakeFetch({url: fetched(url, source)}),
         ).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("omitted review-pass selected material", result.reason)
         self.assertEqual(3, sum(role == "analyst" for role, _ in model.calls))
         self.assertNotIn("writer", [role for role, _ in model.calls])
@@ -1153,7 +1282,7 @@ class ResearchPipelineTests(unittest.TestCase):
             ),
         ).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("partial source or tail loss is forbidden", result.reason)
         self.assertNotIn("reader", [role for role, _ in model.calls])
         self.assertNotIn("analyst", [role for role, _ in model.calls])
@@ -1174,7 +1303,7 @@ class ResearchPipelineTests(unittest.TestCase):
             ),
         ).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("finish analysis/review", result.reason)
         self.assertEqual(["planner"], [role for role, _ in model.calls])
 
@@ -1217,7 +1346,7 @@ class ResearchPipelineTests(unittest.TestCase):
             ),
         ).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("no candidates were silently dropped", result.reason)
         self.assertNotIn("analyst", [role for role, _ in model.calls])
 
@@ -1300,6 +1429,17 @@ class ResearchPipelineTests(unittest.TestCase):
                     {
                         "decision": "search_more",
                         "reason": "the citation is related but does not entail the claim",
+                        "findings": [{
+                            "code": "claim_not_entailed",
+                            "entity_kind": "claim",
+                            "entity_id": "claim-1",
+                            "what_failed": "The cited excerpt does not entail claim-1.",
+                            "evidence": "The excerpt says only that Paris hosted the event.",
+                            "expected": "A source excerpt that directly supports claim-1.",
+                            "remediation": "Search for an authoritative source stating the capital relationship.",
+                            "revision_owner": "scout",
+                            "retryable": True,
+                        }],
                         "claim_reviews": [
                             {"claim_id": "claim-1", "status": "not_entailed"}
                         ],
@@ -1327,7 +1467,7 @@ class ResearchPipelineTests(unittest.TestCase):
             budgets=ResearchBudgets(max_rounds=1),
         ).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertEqual("search_more", result.semantic_reviews[0].decision)
         self.assertEqual("not_entailed", result.ledger.claims[0].verification_status)
         self.assertIsNone(result.verification_report)
@@ -1384,7 +1524,7 @@ class ResearchPipelineTests(unittest.TestCase):
                     FakeFetch({url: fetched(url, "The answer is Alpha.")}),
                 ).run(spec)
 
-                self.assertEqual("blocked", result.outcome)
+                self.assertEqual("needs_revision", result.outcome)
                 self.assertIn(
                     "requires entailed mission, scope, and policy alignment",
                     result.reason,
@@ -1545,7 +1685,7 @@ class ResearchPipelineTests(unittest.TestCase):
             ),
         ).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIsNone(result.verification_report)
         self.assertIn("writer omitted required uncertainty disclosure", result.reason)
         writer_calls = [payload for role, payload in model.calls if role == "writer"]
@@ -1719,7 +1859,7 @@ class ResearchPipelineTests(unittest.TestCase):
                     FakeFetch({url: fetched(url, source)}),
                 ).run(self.spec())
 
-                self.assertEqual("blocked", result.outcome)
+                self.assertEqual("needs_revision", result.outcome)
                 writer_calls = [
                     payload for role, payload in model.calls if role == "writer"
                 ]
@@ -1730,7 +1870,7 @@ class ResearchPipelineTests(unittest.TestCase):
                     [role for role, _ in self.last_review_model.calls],
                 )
 
-    def test_closed_world_absence_uses_validated_search_ids_and_stays_blocked(self) -> None:
+    def test_open_world_absence_requires_revision_without_complete_catalog(self) -> None:
         url = "https://example.test/closed-world"
         source = "The archive contains no record for Event 2003."
         analysis = analyst_ready(
@@ -1777,8 +1917,8 @@ class ResearchPipelineTests(unittest.TestCase):
             FakeFetch({url: fetched(url, source)}),
         ).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
-        self.assertIn("scoped not-found", result.reason)
+        self.assertEqual("needs_revision", result.outcome)
+        self.assertIn("open world", result.reason)
         self.assertTrue(result.verification_report.accepted)
         self.assertEqual(
             ("primary query",),
@@ -1978,7 +2118,7 @@ class ResearchPipelineTests(unittest.TestCase):
             budgets=ResearchBudgets(max_rounds=1, max_search_queries=1),
         ).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertEqual("blocked", result.ledger.gaps[0].status)
         self.assertEqual(("primary query",), result.ledger.gaps[0].search_attempts)
         self.assertEqual(0, len(result.ledger.claims))
@@ -2065,7 +2205,7 @@ class ResearchPipelineTests(unittest.TestCase):
         )
         search = FakeSearch({})
         result = self.pipeline(model, search, FakeFetch({})).run(self.spec())
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("must not create hypotheses", result.reason)
         self.assertEqual([], search.calls)
         self.assertEqual(2, sum(role == "planner" for role, _ in model.calls))
@@ -2101,7 +2241,7 @@ class ResearchPipelineTests(unittest.TestCase):
             self.spec(mode="investigation", hypotheses=hypotheses)
         )
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertEqual(
             [
                 "broad chronology",
@@ -2122,7 +2262,7 @@ class ResearchPipelineTests(unittest.TestCase):
         model.responses["semantic_verifier"] = []
         result = self.pipeline(model, search, fetcher).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("lacks source/direct claim refs", result.reason)
         self.assertEqual(2, len([role for role, _ in model.calls if role == "writer"]))
         self.assertNotIn("semantic_verifier", [role for role, _ in model.calls])
@@ -2189,6 +2329,7 @@ class ResearchPipelineTests(unittest.TestCase):
             {
                 "decision",
                 "reason",
+                "findings",
                 "claim_reviews",
                 "edge_reviews",
                 "unit_reviews",
@@ -2214,7 +2355,7 @@ class ResearchPipelineTests(unittest.TestCase):
 
         result = self.pipeline(model, search, fetcher).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("claim_reviews item is malformed", result.reason)
         reviewer_calls = [
             payload
@@ -2224,6 +2365,66 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertEqual(2, len(reviewer_calls))
         self.assertEqual(1, len(self.last_review_model.responses["semantic_verifier"]))
         self.assertEqual((), result.semantic_reviews)
+
+    def test_semantic_escalate_requires_a_concrete_external_resume_condition(self) -> None:
+        model, search, fetcher = self.accepted_fixture()
+        invalid = semantic_escalate(
+            owner="writer",
+            remediation="Rewrite the answer.",
+        )
+        model.responses["semantic_verifier"] = [invalid, invalid]
+
+        result = self.pipeline(model, search, fetcher).run(self.spec())
+
+        self.assertEqual("needs_revision", result.outcome)
+        self.assertIn("owner to be operator or infrastructure", result.reason)
+        self.assertTrue(result.review_findings[0]["retryable"])
+
+    def test_semantic_escalate_is_revision_and_never_terminal_block(self) -> None:
+        model, search, fetcher = self.accepted_fixture()
+        model.responses["semantic_verifier"] = [semantic_escalate()]
+
+        result = self.pipeline(model, search, fetcher).run(self.spec())
+
+        self.assertEqual("needs_revision", result.outcome)
+        self.assertNotEqual("blocked", result.outcome)
+        self.assertEqual("escalate", result.semantic_reviews[0].decision)
+        self.assertTrue(result.review_findings[0]["retryable"])
+        self.assertEqual("governor", result.review_findings[0]["revision_owner"])
+        self.assertEqual(
+            "semantic_escalation_requires_application_verification",
+            result.review_findings[0]["code"],
+        )
+        self.assertIn("cannot authorize a terminal block", result.reason)
+
+    def test_failure_classification_and_production_failed_envelope(self) -> None:
+        cases = (
+            (SchemaError("model-authored evidence schema is invalid"), "needs_revision"),
+            (ResearchPipelineError("internal scheduler invariant broke"), "failed"),
+            (ResearchIntegrityError("attested model identity changed"), "blocked"),
+        )
+        results = {}
+        for error, expected in cases:
+            with self.subTest(error=type(error).__name__):
+                model, search, fetcher = self.accepted_fixture()
+                pipeline = self.pipeline(model, search, fetcher)
+
+                def raise_error(_spec, _state, *, selected=error):
+                    raise selected
+
+                pipeline._run = raise_error
+                result = pipeline.run(self.spec())
+                results[expected] = result
+                self.assertEqual(expected, result.outcome)
+                self.assertTrue(result.review_findings)
+
+        external = build_external_evaluator_result(
+            results["failed"],
+            mission_id="mission-1",
+            snapshot_store=self.store,
+        )
+        self.assertEqual("failed", external["status"])
+        self.assertFalse(external["accepted"])
 
     def test_incomplete_accepted_semantic_review_repairs_before_attestation(self) -> None:
         model, search, fetcher = self.accepted_fixture()
@@ -2274,7 +2475,7 @@ class ResearchPipelineTests(unittest.TestCase):
         ]
         blocked = self.pipeline(model, search, fetcher).run(self.spec())
 
-        self.assertEqual("blocked", blocked.outcome)
+        self.assertEqual("needs_revision", blocked.outcome)
         self.assertIn("gateway envelope is invalid", blocked.reason)
         self.assertEqual(
             1,
@@ -2314,7 +2515,7 @@ class ResearchPipelineTests(unittest.TestCase):
             FakeFetch({url: fetched(url, "The actual source text.")}),
         ).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("segment_index is outside the current chunk", result.reason)
         self.assertEqual(2, len([role for role, _ in model.calls if role == "reader"]))
         self.assertNotIn("analyst", [role for role, _ in model.calls])
@@ -2376,7 +2577,7 @@ class ResearchPipelineTests(unittest.TestCase):
             FakeFetch({url: fetched(url, "Alpha")}),
         ).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("gateway response was not strict JSON", result.reason)
         self.assertEqual(1, len([role for role, _ in model.calls if role == "reader"]))
         self.assertFalse(any("reader_repair[" in item for item in result.diagnostics))
@@ -2450,7 +2651,7 @@ class ResearchPipelineTests(unittest.TestCase):
             FakeFetch({url: fetched(url, "Alpha")}),
         ).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("segment_index is outside the current chunk", result.reason)
         self.assertNotIn("analyst", [role for role, _ in model.calls])
         self.assertNotIn("writer", [role for role, _ in model.calls])
@@ -2489,7 +2690,7 @@ class ResearchPipelineTests(unittest.TestCase):
             budgets=ResearchBudgets(max_rounds=2, max_search_queries=2),
         ).run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertEqual(["query one", "query two"], [item[0] for item in search.calls])
         self.assertEqual(2, result.rounds_used)
         self.assertEqual("scoped_not_found", result.draft_units[0].classification)

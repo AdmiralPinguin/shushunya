@@ -41,6 +41,17 @@ WORKER_REPORT_STATUSES = {"done", "blocked", "needs_revision", "failed"}
 GOVERNOR_REPORT_STATUSES = {"ready", "needs_revision", "blocked", "failed"}
 ACCEPTANCE_STATUSES = {"accepted", "revision_required", "blocked", "failed"}
 
+REVIEW_REVISION_OWNERS = {
+    "scout",
+    "reader",
+    "analyst",
+    "writer",
+    "fighter",
+    "governor",
+    "infrastructure",
+    "operator",
+}
+
 
 def utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -57,6 +68,58 @@ def protocol_envelope(payload_type: str, mission_id: str) -> dict[str, Any]:
 
 def _strings(values: list[str] | None) -> list[str]:
     return [item.strip() for item in values or [] if isinstance(item, str) and item.strip()]
+
+
+def _bounded_utf8_text(value: str, limit: int = 2_000) -> str:
+    text = value.strip()
+    raw = text.encode("utf-8")
+    if len(raw) <= limit:
+        return text
+    return raw[:limit].decode("utf-8", errors="ignore").rstrip()
+
+
+def review_finding(
+    code: str,
+    what_failed: str,
+    evidence: str,
+    expected: str,
+    remediation: str,
+    revision_owner: str,
+    retryable: bool,
+    *,
+    entity_kind: str = "mission",
+    entity_id: str = "mission",
+) -> dict[str, Any]:
+    """Build one actionable review finding shared by every warband.
+
+    A negative check is never just a boolean.  It must identify the failed
+    subject, the observed evidence, the required state, who can repair it, and
+    whether an automatic bounded retry is meaningful.
+    """
+
+    text_fields = {
+        "code": code,
+        "what_failed": what_failed,
+        "evidence": evidence,
+        "expected": expected,
+        "remediation": remediation,
+        "entity_kind": entity_kind,
+        "entity_id": entity_id,
+    }
+    normalized: dict[str, str] = {}
+    for name, value in text_fields.items():
+        if type(value) is not str or not value.strip():
+            raise ValueError(f"review finding {name} must be a non-empty string")
+        normalized[name] = _bounded_utf8_text(value)
+    if revision_owner not in REVIEW_REVISION_OWNERS:
+        raise ValueError("review finding revision_owner is unsupported")
+    if type(retryable) is not bool:
+        raise TypeError("review finding retryable must be a boolean")
+    return {
+        **normalized,
+        "revision_owner": revision_owner,
+        "retryable": retryable,
+    }
 
 
 def mission_intake(

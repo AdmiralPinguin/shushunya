@@ -269,7 +269,7 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec(objective))
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertEqual(
             [russian_query, english_query],
             [query for query, _limit in search.calls],
@@ -471,7 +471,7 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertEqual(["repaired exact query"], [query for query, _ in search.calls])
         self.assertEqual(3, result.model_calls)
         planner_calls = [payload for role, payload in author.calls if role == "planner"]
@@ -505,7 +505,7 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec(russian_question))
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertEqual(
             [russian_query, english_query],
             [query for query, _limit in search.calls],
@@ -543,7 +543,7 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec(russian_question))
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertEqual(
             [russian_query, english_query],
             [query for query, _limit in search.calls],
@@ -602,7 +602,7 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertEqual(3, result.model_calls)
         self.assertEqual("gap-unanswered-source", result.ledger.gaps[0].id)
         self.assertEqual(("exact query",), result.ledger.gaps[0].search_attempts)
@@ -661,7 +661,7 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         analyst_calls = [payload for role, payload in author.calls if role == "analyst"]
         self.assertEqual(3, len(analyst_calls))
         self.assertEqual(1, analyst_calls[1]["repair_request"]["attempt"])
@@ -691,7 +691,7 @@ class RoleRepairTests(unittest.TestCase):
 
         repaired = pipeline.run(self.spec())
 
-        self.assertEqual("blocked", repaired.outcome)
+        self.assertEqual("needs_revision", repaired.outcome)
         self.assertEqual(2, len(author.calls))
         self.assertIn("planner_repair[1/1]", repaired.diagnostics[1])
         self.assertEqual([], search.calls)
@@ -709,7 +709,7 @@ class RoleRepairTests(unittest.TestCase):
 
         failed = gateway_pipeline.run(self.spec())
 
-        self.assertEqual("blocked", failed.outcome)
+        self.assertEqual("needs_revision", failed.outcome)
         self.assertIn("gateway envelope is invalid", failed.reason)
         self.assertEqual(1, len(gateway_author.calls))
         self.assertEqual(1, len(gateway_author.responses["planner"]))
@@ -733,8 +733,11 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("unknown fields", result.reason)
+        self.assertEqual("research_role_contract_revision", result.review_findings[0]["code"])
+        self.assertTrue(result.review_findings[0]["retryable"])
+        self.assertIn("replacement response", result.review_findings[0]["remediation"])
         self.assertEqual(
             3,
             len([role for role, _payload in author.calls if role == "analyst"]),
@@ -767,7 +770,7 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec(depth="standard"))
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertEqual(
             ["archival code", "archive record code"],
             [query for query, _limit in search.calls],
@@ -811,7 +814,7 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec(depth="standard"))
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertEqual(
             ["archival code", "archive record code"],
             [query for query, _limit in search.calls],
@@ -846,7 +849,7 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec(depth="standard"))
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertEqual(
             ["archival code", "archive record code"],
             [query for query, _limit in search.calls],
@@ -888,7 +891,7 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec(depth="standard"))
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertEqual(
             ["archival code", "archive record code"],
             [query for query, _limit in search.calls],
@@ -929,7 +932,7 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec(depth="standard"))
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertEqual(
             ["archival code", "archive record code"],
             [query for query, _limit in search.calls],
@@ -952,7 +955,7 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("clarification_question", result.reason)
         self.assertEqual(2, result.model_calls)
         self.assertEqual(2, len(author.calls))
@@ -970,7 +973,7 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         planner_calls = [payload for role, payload in author.calls if role == "planner"]
         self.assertEqual(2, len(planner_calls))
         error = planner_calls[1]["repair_request"]["validator_error"]
@@ -988,7 +991,7 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("preflight unavailable", result.reason)
         self.assertEqual(1, result.model_calls)
         self.assertEqual(1, len(author.preflight_calls))
@@ -1005,7 +1008,7 @@ class RoleRepairTests(unittest.TestCase):
 
         result = pipeline.run(self.spec())
 
-        self.assertEqual("blocked", result.outcome)
+        self.assertEqual("needs_revision", result.outcome)
         self.assertIn("transport unavailable", result.reason)
         self.assertEqual(1, result.model_calls)
         self.assertEqual(1, len(author.preflight_calls))

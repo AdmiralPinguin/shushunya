@@ -13,12 +13,20 @@ import urllib.error
 import urllib.request
 from urllib.parse import quote, urlsplit
 
+from EyeOfTerror.common_protocol import review_finding
+from EyeOfTerror.common_protocol.validation import (
+    ProtocolValidationError,
+    validate_review_findings,
+)
+
 
 DEFAULT_RESEARCH_WARBAND_URL = "http://127.0.0.1:7201"
 MAX_RESPONSE_BYTES = 64_000_000
 POLL_INTERVAL_SECONDS = 0.5
 ERROR_CLEANUP_TIMEOUT_SECONDS = 60.0
-TERMINAL_SERVICE_STATUSES = frozenset({"done", "blocked", "failed", "cancelled"})
+TERMINAL_SERVICE_STATUSES = frozenset(
+    {"done", "needs_revision", "blocked", "failed", "cancelled"}
+)
 ACTIVE_SERVICE_STATUSES = frozenset({"queued", "running", "needs_user", "cancelling"})
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 _SERVICE_MISSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
@@ -39,6 +47,48 @@ _PRIVATE_OPENER = urllib.request.build_opener(
 
 class ResearchWarbandBridgeError(RuntimeError):
     """The native research service boundary could not be proved safe."""
+
+
+def _exception_chain_contains(error: BaseException, expected: type[BaseException]) -> bool:
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, expected):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _bridge_exception_is_external_blocker(
+    error: BaseException,
+    *,
+    preflight: bool,
+) -> bool:
+    """Reserve blocked for external authority, availability, safety, or integrity."""
+
+    if preflight or _exception_chain_contains(error, urllib.error.URLError):
+        return True
+    message = str(error).lower()
+    return any(
+        marker in message
+        for marker in (
+            "bearer token",
+            "url is malformed",
+            "url must be exactly",
+            "response url does not match",
+            "attempted an http redirect",
+            "mission identity",
+            "request identity",
+            "request hash",
+            "authority root",
+            "queue remained full",
+            "bridge timed out",
+            "connection lost",
+            "request failed",
+            "researchwarband http 5",
+        )
+    )
 
 
 def _validate_service_mission_id(value: Any) -> str:
@@ -395,6 +445,33 @@ def _warmaster_result(
     return result
 
 
+def _bridge_failure_finding(error: BaseException, *, blocked: bool) -> dict[str, Any]:
+    evidence = f"{type(error).__name__}: {str(error)[:1_800]}"
+    if blocked:
+        return review_finding(
+            "research_bridge_external_impasse",
+            "The research bridge could not safely continue across an external boundary.",
+            evidence,
+            "The configured authority, service, and mission identity are available and intact.",
+            "Restore the reported external dependency or authority condition, then resume the same mission.",
+            "operator",
+            True,
+            entity_kind="research_bridge",
+            entity_id="iskandar-research-warband",
+        )
+    return review_finding(
+        "research_bridge_internal_failure",
+        "The research bridge failed after remote process cleanup was proven.",
+        evidence,
+        "The bridge consumes the service result and finalizes the linked mission contract.",
+        "Repair the reported bridge or service-contract defect, then resume the persisted mission.",
+        "infrastructure",
+        True,
+        entity_kind="research_bridge",
+        entity_id="iskandar-research-warband",
+    )
+
+
 def _external_answer(raw_result: dict[str, Any]) -> str:
     external = raw_result.get("external_evaluator_result")
     if isinstance(external, dict):
@@ -414,6 +491,39 @@ def _verification_passed(raw_result: dict[str, Any]) -> bool:
         and report.get("integrity_ok") is True
         and not report.get("issues")
     )
+
+
+def _research_revision_findings(raw_result: dict[str, Any]) -> list[dict[str, Any]]:
+    audit = raw_result.get("pipeline_audit")
+    findings = audit.get("review_findings") if isinstance(audit, dict) else None
+    try:
+        return validate_review_findings(
+            findings,
+            require_nonempty=True,
+            context="ResearchWarband pipeline_audit.review_findings",
+        )
+    except ProtocolValidationError as exc:
+        raise ResearchWarbandBridgeError(
+            f"ResearchWarband revision findings are invalid: {exc}"
+        ) from exc
+
+
+def _research_revision_action(raw_result: dict[str, Any]) -> dict[str, Any]:
+    findings = _research_revision_findings(raw_result)
+    first = findings[0] if findings else {}
+    remediation = str(
+        first.get("remediation")
+        or "Iskandar must select a different bounded research strategy and redispatch the warband."
+    )
+    return {
+        "kind": "revise_research_mission",
+        "reason": str(first.get("what_failed") or raw_result.get("reason") or "revision required"),
+        "remediation": remediation,
+        "revision_owner": str(first.get("revision_owner") or "governor"),
+        "retryable": bool(first.get("retryable", True)),
+        "findings": findings,
+        "resume_condition": remediation,
+    }
 
 
 def _append_protocol_progress(
@@ -516,10 +626,145 @@ def _finalize_protocol(
             body=summary,
         )
         return
-    public_status = "cancelled" if status == "cancelled" else "blocked"
+    if status == "revision":
+        action = (
+            result.get("next_action")
+            if isinstance(result.get("next_action"), dict)
+            else {}
+        )
+        findings = (
+            result.get("review_findings")
+            if isinstance(result.get("review_findings"), list)
+            else []
+        )
+        remediation = str(
+            action.get("remediation")
+            or "Select a different bounded research strategy and redispatch ResearchWarband."
+        )
+        report = mc.governor_report(
+            mission_id,
+            governor="IskandarKhayon",
+            status="needs_revision",
+            summary=summary,
+            deliverables=[],
+            quality_review={
+                "passed": False,
+                "checks": findings,
+                "findings": findings,
+            },
+            revision_plan={
+                "required": True,
+                "reason": summary,
+                "steps": [{
+                    "step_id": "research_warband",
+                    "worker": "ResearchWarband",
+                    "order": remediation,
+                    "findings": findings,
+                }],
+            },
+            user_facing_answer="",
+        )
+        review = mc.acceptance_review(
+            mission_id,
+            accepted=False,
+            reason=summary,
+            required_revision={
+                "to": "IskandarKhayon",
+                "order": remediation,
+                "findings": findings,
+            },
+            escalate_to_user=False,
+        )
+        order = mc.revision_order(
+            mission_id,
+            to="IskandarKhayon",
+            reason=summary,
+            order=remediation,
+            required_steps=["Choose the next bounded approach", "Redispatch ResearchWarband"],
+        )
+        mc.validate_protocol_payload(report, expected_type="governor_report")
+        mc.validate_protocol_payload(review, expected_type="acceptance_review")
+        mc.validate_protocol_payload(order, expected_type="revision_order")
+        mc._write_json(mission_dir / "governor_report.json", report)
+        mc._write_json(
+            mc._next_numbered_path(
+                mission_dir / "governor_reports", "governor_report"
+            ),
+            report,
+        )
+        mc._write_json(mission_dir / "acceptance_review.json", review)
+        mc._write_json(
+            mc._next_numbered_path(
+                mission_dir / "acceptance_reviews", "acceptance_review"
+            ),
+            review,
+        )
+        mc._write_json(mission_dir / "revision_order.json", order)
+        mc.record_mission_state(
+            mission_dir, "revision", run_status="revision", phase="revision"
+        )
+        _append_protocol_progress(
+            mission_dir,
+            mission_id,
+            phase="revising",
+            status="running",
+            title="Искандар получил конкретную ревизию",
+            body=remediation,
+        )
+        return
+    if status == "cancelled":
+        public_status = "cancelled"
+    elif status == "failed":
+        public_status = "failed"
+    else:
+        public_status = "blocked"
+    raw_result = (
+        result.get("research_result")
+        if isinstance(result.get("research_result"), dict)
+        else {}
+    )
+    audit = raw_result.get("pipeline_audit") if isinstance(raw_result, dict) else None
+    raw_findings = audit.get("review_findings") if isinstance(audit, dict) else []
+    try:
+        findings = validate_review_findings(
+            raw_findings if isinstance(raw_findings, list) else [],
+            context="ResearchWarband terminal review_findings",
+        )
+    except ProtocolValidationError:
+        findings = []
+    if public_status == "failed":
+        report = mc.governor_report(
+            mission_id,
+            governor="IskandarKhayon",
+            status="failed",
+            summary=summary,
+            deliverables=[],
+            quality_review={
+                "passed": False,
+                "checks": findings,
+                "findings": findings,
+                "autonomous_revision_exhausted": bool(
+                    raw_result.get("revision_exhausted")
+                ),
+            },
+            revision_plan={"required": False, "steps": []},
+            user_facing_answer=summary,
+        )
+        mc.validate_protocol_payload(report, expected_type="governor_report")
+        mc._write_json(mission_dir / "governor_report.json", report)
+        mc._write_json(
+            mc._next_numbered_path(
+                mission_dir / "governor_reports", "governor_report"
+            ),
+            report,
+        )
     final = mc.final_response(mission_id, public_status, summary, artifacts=[])
     final["phase"] = status
     final["needs_user"] = bool(result.get("needs_user"))
+    if findings:
+        final["review_findings"] = findings
+    if raw_result.get("revision_exhausted") is True:
+        final["autonomous_revision_exhausted"] = True
     if result.get("question"):
         final["question"] = result["question"]
     if result.get("next_action"):
@@ -534,8 +779,8 @@ def _finalize_protocol(
     _append_protocol_progress(
         mission_dir,
         mission_id,
-        phase="cancelled" if status == "cancelled" else "blocked",
-        status="cancelled" if status == "cancelled" else "blocked",
+        phase=public_status,
+        status=public_status,
         title=(
             "Исследовательская миссия отменена"
             if status == "cancelled"
@@ -868,6 +1113,21 @@ def _terminal_result(
             summary="ResearchWarband mission was cancelled.",
             raw_result=raw_result,
         )
+    if service_status == "needs_revision":
+        action = _research_revision_action(raw_result)
+        reason = str(raw_result.get("reason") or "ResearchWarband requires revision.").strip()
+        result = _warmaster_result(
+            run_dir,
+            task_id,
+            mission_id,
+            ok=False,
+            status="revision",
+            summary=reason,
+            raw_result=raw_result,
+        )
+        result["review_findings"] = action["findings"]
+        result["next_action"] = action
+        return result
     reason = str(raw_result.get("reason") or "").strip()
     if not reason:
         reason = f"ResearchWarband mission ended with status {service_status}."
@@ -915,8 +1175,8 @@ def _record_waiting(
             _append_protocol_progress(
                 mission_dir,
                 mission_id,
-                phase="blocked",
-                status="blocked",
+                phase="needs_user",
+                status="waiting",
                 title="Искандару требуется уточнение",
                 body=question,
             )
@@ -939,8 +1199,10 @@ def run_via_research_warband(
     request_hash = ""
     remote_identity_bound = False
     remote_operation_ambiguous = False
+    preflight = True
     try:
         envelope = load_research_warband_envelope(target, task_id)
+        preflight = False
         mission_id = _validate_service_mission_id(envelope.get("mission_id"))
         request_hash = _request_sha256(envelope)
         old_meta = (
@@ -1148,6 +1410,7 @@ def run_via_research_warband(
                 terminal = {
                     "completed": "completed",
                     "cancelled": "cancelled",
+                    "revision": "revision",
                     "blocked": "blocked",
                     "failed": "failed",
                 }[result["status"]]
@@ -1191,7 +1454,19 @@ def run_via_research_warband(
                     "error": str(cleanup_error),
                 }
         cleanup_pending = bool(cleanup.get("required")) and cleanup.get("proven") is not True
-        message = f"ResearchWarband bridge blocked: {exc}"
+        externally_blocked = _bridge_exception_is_external_blocker(
+            exc, preflight=preflight,
+        )
+        terminal_status = (
+            "interrupted" if cleanup_pending
+            else ("blocked" if externally_blocked else "failed")
+        )
+        label = {
+            "interrupted": "interrupted pending cleanup",
+            "blocked": "blocked by an external boundary",
+            "failed": "failed after safe cleanup",
+        }[terminal_status]
+        message = f"ResearchWarband bridge {label}: {exc}"
         if cleanup.get("required"):
             if cleanup.get("proven") is True:
                 message += (
@@ -1204,15 +1479,39 @@ def run_via_research_warband(
                     " REMOTE PROCESS CLEANUP IS PENDING AND UNPROVEN; "
                     f"the run remains recoverable: {cleanup_error}"
                 )
+        finding = _bridge_failure_finding(
+            exc, blocked=terminal_status != "failed",
+        )
+        diagnostic_result = {
+            "outcome": "blocked" if terminal_status != "failed" else "failed",
+            "reason": message,
+            "pipeline_audit": {
+                "review_findings": [finding],
+                "diagnostics": [f"{type(exc).__name__}: {str(exc)[:2_000]}"],
+            },
+        }
         failure = _warmaster_result(
             target,
             task_id,
             mission_id,
             ok=False,
-            status="interrupted" if cleanup_pending else "blocked",
+            status=terminal_status,
             summary=message,
+            raw_result=diagnostic_result,
             error=str(exc),
         )
+        failure["review_findings"] = [finding]
+        failure["next_action"] = {
+            "kind": (
+                "restore_external_dependency"
+                if terminal_status != "failed"
+                else "repair_internal_contract"
+            ),
+            "reason": finding["what_failed"],
+            "remediation": finding["remediation"],
+            "retryable": finding["retryable"],
+            "findings": [finding],
+        }
         failure["research_warband_cleanup"] = cleanup
         ledger = TaskLedger.load(target / "task_ledger.json")
         if mission_id and _SHA256_RE.fullmatch(request_hash):
@@ -1228,6 +1527,9 @@ def run_via_research_warband(
                 failure["summary"] += (
                     " Cleanup proof could not be durably persisted."
                 )
+                cleanup_pending = True
+                failure["status"] = "interrupted"
+                failure["phase"] = "interrupted"
         ledger.set_result(failure)
         ledger.record_event(
             "research_warband_bridge_cleanup",
@@ -1241,7 +1543,7 @@ def run_via_research_warband(
             },
         )
         ledger.force_status(
-            "interrupted" if cleanup_pending else "blocked",
+            "interrupted" if cleanup_pending else terminal_status,
             reason=failure["summary"],
         )
         if mission_id and not cleanup_pending:

@@ -9,12 +9,98 @@ from .protocol import (
     PROGRESS_PHASES,
     PROGRESS_STATUSES,
     PROTOCOL_VERSION,
+    REVIEW_REVISION_OWNERS,
     WORKER_REPORT_STATUSES,
 )
 
 
 class ProtocolValidationError(ValueError):
     pass
+
+
+REVIEW_FINDING_FIELDS = frozenset({
+    "code",
+    "entity_kind",
+    "entity_id",
+    "what_failed",
+    "evidence",
+    "expected",
+    "remediation",
+    "revision_owner",
+    "retryable",
+})
+_REVIEW_FINDING_TEXT_FIELDS = REVIEW_FINDING_FIELDS - {"retryable"}
+MAX_REVIEW_FINDINGS = 20
+MAX_REVIEW_FINDING_TEXT_BYTES = 2_000
+
+
+def validate_review_finding(
+    value: Any,
+    *,
+    context: str = "review finding",
+) -> dict[str, Any]:
+    """Validate one diagnostic at a service boundary and return a clean copy."""
+
+    if type(value) is not dict:
+        raise ProtocolValidationError(f"{context} must be an object")
+    fields = set(value)
+    if fields != REVIEW_FINDING_FIELDS:
+        missing = sorted(REVIEW_FINDING_FIELDS - fields)
+        unknown = sorted(fields - REVIEW_FINDING_FIELDS)
+        raise ProtocolValidationError(
+            f"{context} fields mismatch; missing={missing}, unknown={unknown}"
+        )
+    normalized: dict[str, Any] = {}
+    for field in sorted(_REVIEW_FINDING_TEXT_FIELDS):
+        raw = value[field]
+        if type(raw) is not str or not raw.strip():
+            raise ProtocolValidationError(
+                f"{context}.{field} must be a non-empty string"
+            )
+        try:
+            size = len(raw.encode("utf-8"))
+        except UnicodeEncodeError as exc:
+            raise ProtocolValidationError(
+                f"{context}.{field} is not valid UTF-8 text"
+            ) from exc
+        if size > MAX_REVIEW_FINDING_TEXT_BYTES:
+            raise ProtocolValidationError(
+                f"{context}.{field} exceeds {MAX_REVIEW_FINDING_TEXT_BYTES} bytes"
+            )
+        normalized[field] = raw.strip()
+    if normalized["revision_owner"] not in REVIEW_REVISION_OWNERS:
+        raise ProtocolValidationError(
+            f"{context}.revision_owner is unsupported"
+        )
+    if type(value["retryable"]) is not bool:
+        raise ProtocolValidationError(f"{context}.retryable must be boolean")
+    normalized["retryable"] = value["retryable"]
+    return normalized
+
+
+def validate_review_findings(
+    value: Any,
+    *,
+    require_nonempty: bool = False,
+    max_items: int = MAX_REVIEW_FINDINGS,
+    context: str = "review findings",
+) -> list[dict[str, Any]]:
+    """Validate a bounded diagnostics array without accepting partial objects."""
+
+    if type(value) is not list:
+        raise ProtocolValidationError(f"{context} must be an array")
+    if require_nonempty and not value:
+        raise ProtocolValidationError(f"{context} must not be empty")
+    if type(max_items) is not int or max_items < 1:
+        raise ValueError("max_items must be a positive integer")
+    if len(value) > max_items:
+        raise ProtocolValidationError(
+            f"{context} exceeds the {max_items}-finding limit"
+        )
+    return [
+        validate_review_finding(item, context=f"{context}[{index}]")
+        for index, item in enumerate(value)
+    ]
 
 
 REQUIRED_FIELDS: dict[str, set[str]] = {

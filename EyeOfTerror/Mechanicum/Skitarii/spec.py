@@ -229,7 +229,7 @@ _STDOUT_LITERAL_CONTEXT_RE = re.compile(
     r"(?:is|must\s+be|should\s+be|equals?)(?:\s+exact(?:ly)?)?|"
     r"(?:print|prints|printed|output|outputs|return|returns|yield|yields)"
     r"(?:\s+exact(?:ly)?)?|"
-    r"точн(?:ый|ое)\s+вывод|"
+    r"точн\w*\s+вывод\w*|"
     r"(?:вывод\w*|печат\w*|возвращ\w*|выда\w*)(?:\s+(?:ровно|точно))?"
     r")\s*(?::|=)?\s*$",
     re.I,
@@ -272,6 +272,7 @@ _PATH_STDOUT_RELATION_RE = re.compile(
     + _EN_STDOUT_PREDICATE_SRC
     + r"|whose\s+(?:exact\s+)?(?:output|stdout|return\s+value)\s+"
     r"(?:is|must\s+be|should\s+be|equals?)(?:\s+exact(?:ly)?)?|"
+    r"с\s+точн\w*\s+(?:вывод\w*|результат\w*)|"
     r"(?:(?:и(?:\s+затем)?|затем|чтобы)\s+)?"
     r"(?:(?:он|она|оно|программ\w*|скрипт)\s+)?"
     r"(?:(?:долж\w*|буд(?:ет|ут))\s+)?"
@@ -331,7 +332,7 @@ _UNQUOTED_FILE_LITERAL_RE = re.compile(
 _UNQUOTED_STDOUT_LITERAL_RE = re.compile(
     r"(?<!\w)(?:exact(?:\s+)?(?:output|stdout|return\s+value)|"
     r"(?:output|stdout|return\s+value)\s+(?:is\s+)?exact(?:ly)?|"
-    r"(?:точн(?:ое|ый)|ровно)\s+вывод)"
+    r"(?:точн\w*|ровно)\s+вывод\w*)"
     r"\s*(?::|=|is|must\s+be|долж(?:но|ен)\s+быть)?\s*"
     r"(?P<value>[^\s,;.!?]+)",
     re.I,
@@ -375,12 +376,13 @@ _POSITIVE_TARGET_PREFIX_RE = re.compile(
     r"(?:[\w./-]+\.[A-Za-z][A-Za-z0-9_-]{0,15})"
     r"(?:\s*(?:,|and)\s*[\w./-]+\.[A-Za-z][A-Za-z0-9_-]{0,15})*"
     r"\s*,\s*)?"
-    r"(?:create|write|generate|produce|make|add|implement|"
+    r"(?:create|write|generate|produce|deliver|make|add|implement|"
     r"fix|update|modify|build|develop|repair|run)\s+"
     r"(?:(?:(?:one|a|an|the|new|single|requested|target|output|"
     r"repository[- ]root|root(?:[- ]level)?|plain[- ]text|text|marker|file|"
     r"artifact|script|module|program|code|bug|issue|support|feature|behavior|"
     r"behaviour|in|at|named|called|and)\s+)|"
+    r"(?:[A-Za-z][A-Za-z0-9_+.-]{0,31}[- ](?:script|program)\s+)|"
     r"(?:[\w./-]+\.[A-Za-z][A-Za-z0-9_-]{0,15}\s+))*"
     r"|\s*(?:[-*]\s*)?(?:(?:пожалуйста|можешь|можете)\s+)?"
     r"(?:(?:используя|на\s+основе)\s+"
@@ -391,9 +393,10 @@ _POSITIVE_TARGET_PREFIX_RE = re.compile(
     r"сгенерир\w*|добав\w*|реализ\w*|исправ\w*|обнов\w*|измен\w*|"
     r"разработ\w*|запуст\w*)\s+"
     r"(?:(?:(?:один|одну|новый|новую|новое|единственный|запрошенный|"
-    r"целевой|выходной|корневой|текстовый|маркер|файл|артефакт|скрипт|"
-    r"модуль|программу|код|ошибку|поддержку|функцию|в|с|именем|названием|и)"
-    r"\s+)|(?:[\w./-]+\.[A-Za-z][A-Za-z0-9_-]{0,15}\s+))*"
+    r"целев\w*|выходн\w*|корнев\w*|текстов\w*|маркер\w*|файл\w*|артефакт\w*|скрипт\w*|"
+    r"модул\w*|программ\w*|код\w*|ошибк\w*|поддержк\w*|функци\w*|в|с|именем|названием|и)"
+    r"\s+)|(?:[A-Za-z][A-Za-z0-9_+.-]{0,31}[- ]?(?:скрипт|программ)\w*\s+)|"
+    r"(?:[\w./-]+\.[A-Za-z][A-Za-z0-9_-]{0,15}\s+))*"
     r"|\s*explorer\s+(?:found|identified|located)\s+"
     r"(?:(?:the\s+)?(?:implementation|target|code|module)\s+)?(?:in|at)\s+"
     r")$",
@@ -1464,14 +1467,48 @@ def _canonical_private_candidate(command: str) -> str:
     return shlex.join(tokens)
 
 
-def _structured_checks(
+def _check_rejection(
+    index: int,
+    code: str,
+    what_failed: str,
+    evidence: str,
+    expected: str,
+    remediation: str,
+) -> dict[str, Any]:
+    return {
+        "code": code,
+        "what_failed": what_failed,
+        "evidence": evidence,
+        "expected": expected,
+        "remediation": remediation,
+        "revision_owner": "infrastructure",
+        "retryable": True,
+        "entity_kind": "private_check",
+        "entity_id": f"candidate-{index}",
+    }
+
+
+def _structured_checks_with_diagnostics(
     raw_checks: Any, *, allow_bare: bool, goal: str = "",
     file_evidence_goal: str | None = None,
     primary_evidence_goals: tuple[str, ...] = (),
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Validate checks while preserving why every rejected candidate failed."""
+
     checks: list[dict[str, Any]] = []
-    for candidate in raw_checks if isinstance(raw_checks, list) else []:
-        authoritative_goal = file_evidence_goal if file_evidence_goal is not None else goal
+    rejections: list[dict[str, Any]] = []
+    if not isinstance(raw_checks, list):
+        return checks, [_check_rejection(
+            1,
+            "checks_not_array",
+            "The verifier response did not contain a checks array.",
+            f"Observed {type(raw_checks).__name__} instead of a JSON array.",
+            "A JSON array of structured check objects.",
+            "Return checks as an array and keep each command or file assertion in its own object.",
+        )]
+
+    authoritative_goal = file_evidence_goal if file_evidence_goal is not None else goal
+    for index, candidate in enumerate(raw_checks, 1):
         file_check = (
             _private_file_bytes_check(
                 candidate,
@@ -1483,10 +1520,21 @@ def _structured_checks(
         if file_check is not None:
             checks.append(file_check)
             continue
+        if isinstance(candidate, dict) and candidate.get("kind") == "file_bytes":
+            rejections.append(_check_rejection(
+                index,
+                "file_evidence_not_authorized",
+                "The exact-file assertion is not linked to an authoritative task path and literal.",
+                "The path, bytes, or newline policy could not be proven from the commander request.",
+                "A task-named relative file and exact task-authored UTF-8 bytes.",
+                "Copy the exact path and literal from the task; do not infer content or a trailing newline.",
+            ))
+            continue
         if isinstance(candidate, dict) and str(candidate.get("cmd") or "").strip():
             check = {"cmd": str(candidate["cmd"])}
             candidate_target = _private_candidate_target(check["cmd"], goal)
-            if isinstance(candidate.get("expect_stdout"), (str, int, float)):
+            supplied_literal = isinstance(candidate.get("expect_stdout"), (str, int, float))
+            if supplied_literal:
                 check["expect_stdout"] = str(candidate["expect_stdout"])
             if str(candidate.get("oracle") or "").strip():
                 check["oracle"] = str(candidate["oracle"])
@@ -1499,34 +1547,90 @@ def _structured_checks(
                 )
             )
             if not allow_bare and "expect_stdout" in check and not literal_authorized:
-                # A valid independent oracle may still carry the check.  Otherwise
-                # removing this value makes output_evidence false and rejects it.
-                # In either case the model's unauthoritative literal cannot decide.
                 check.pop("expect_stdout", None)
             expected_output = str(check.get("expect_stdout") or "").strip()
             oracle_command = str(check.get("oracle") or "").strip()
             output_evidence = bool(expected_output or oracle_command)
-            # Public checks are advisory inputs to the fighter. Private acceptance
-            # uses a positive grammar: a direct goal-linked runtime probe plus an
-            # independent literal/computational oracle, never a wrapper blacklist.
-            if allow_bare or (
-                output_evidence
-                and _private_candidate_probe(str(check["cmd"]), goal)
-                and (
-                    not oracle_command
-                    or _private_oracle_for_check(
-                        oracle_command, str(check["cmd"]), authoritative_goal,
-                        precedence_goals=primary_evidence_goals,
-                    )
+            candidate_linked = allow_bare or _private_candidate_probe(
+                str(check["cmd"]), goal
+            )
+            oracle_authorized = (
+                not oracle_command
+                or allow_bare
+                or _private_oracle_for_check(
+                    oracle_command, str(check["cmd"]), authoritative_goal,
+                    precedence_goals=primary_evidence_goals,
                 )
-            ):
+            )
+            if allow_bare or (output_evidence and candidate_linked and oracle_authorized):
                 if not allow_bare:
                     check["cmd"] = _canonical_private_candidate(str(check["cmd"]))
                 if not allow_bare and oracle_command:
                     check["oracle"] = _canonical_private_oracle(oracle_command)
                 checks.append(check)
+                continue
+            if not candidate_linked:
+                rejections.append(_check_rejection(
+                    index,
+                    "candidate_not_task_linked",
+                    "The command does not directly execute a positively requested deliverable.",
+                    "No safe runtime/path binding was found in the authoritative task wording.",
+                    "A direct python3/node/php invocation of a task-named relative code file.",
+                    "Run the exact deliverable path named by the task without shell wrappers.",
+                ))
+            elif supplied_literal and not literal_authorized and not oracle_command:
+                rejections.append(_check_rejection(
+                    index,
+                    "expected_output_not_authorized",
+                    "The expected stdout was not stated as authoritative task output.",
+                    "The proposed literal could not be bound to the candidate target.",
+                    "A literal copied exactly from the task or an independent computational oracle.",
+                    "Copy an explicit expected value from the task, otherwise replace it with a pure oracle.",
+                ))
+            elif not output_evidence:
+                rejections.append(_check_rejection(
+                    index,
+                    "behavioural_evidence_missing",
+                    "The check only proves that the candidate exits successfully.",
+                    "No authorized expected stdout or independent oracle remained after validation.",
+                    "At least one immutable behavioural output assertion.",
+                    "Add task-authored expect_stdout or a pure independently computed oracle.",
+                ))
+            else:
+                rejections.append(_check_rejection(
+                    index,
+                    "oracle_not_authorized",
+                    "The proposed oracle is not independent and inside the positive grammar.",
+                    "The oracle shape or its operands could not be derived safely from the task.",
+                    "A pure interpreter expression using only task-authored operands.",
+                    "Return a single pure print(expression) oracle with no candidate imports or filesystem access.",
+                ))
         elif allow_bare and isinstance(candidate, str) and candidate.strip():
             checks.append({"cmd": candidate})
+        else:
+            rejections.append(_check_rejection(
+                index,
+                "check_shape_invalid",
+                "The check is not a supported structured command or file assertion.",
+                "The candidate lacks a non-empty cmd or a valid file_bytes shape.",
+                "A JSON object with cmd plus output evidence, or a file_bytes assertion.",
+                "Return one supported structured check object and no shell pipeline string.",
+            ))
+    return checks, rejections
+
+
+def _structured_checks(
+    raw_checks: Any, *, allow_bare: bool, goal: str = "",
+    file_evidence_goal: str | None = None,
+    primary_evidence_goals: tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
+    checks, _rejections = _structured_checks_with_diagnostics(
+        raw_checks,
+        allow_bare=allow_bare,
+        goal=goal,
+        file_evidence_goal=file_evidence_goal,
+        primary_evidence_goals=primary_evidence_goals,
+    )
     return checks
 
 
@@ -1563,6 +1667,7 @@ def build_held_out_plan(
     )
     generator_error = ""
     saw_payload = False
+    rejections: list[dict[str, Any]] = []
     for attempt in range(2):
         try:
             payload = _held_out_chat_json(prompt)
@@ -1570,17 +1675,23 @@ def build_held_out_plan(
         except Exception as exc:
             generator_error = f"{type(exc).__name__}: {str(exc)[:300]}"
             payload = {}
-        checks = _structured_checks(
+        checks, rejections = _structured_checks_with_diagnostics(
             payload.get("checks"), allow_bare=False, goal=goal,
             file_evidence_goal=evidence_goal,
             primary_evidence_goals=primary_task_goals,
-        )[:3]
+        )
+        checks = checks[:3]
         if checks:
             return {"status": "ok", "checks": checks, "error": ""}
         if attempt == 0:
+            rejection_feedback = json.dumps(
+                rejections[:8], ensure_ascii=False, separators=(",", ":"),
+            )
             prompt += (
                 "\n\nREPAIR: your previous reply was rejected by the strict verifier grammar. Return only "
-                "corrected JSON. A Python oracle shell command has exactly three argv: python3, -c, and one "
+                "corrected JSON. Here are the exact validator findings; repair them rather than guessing:\n"
+                + rejection_feedback
+                + "\nA Python oracle shell command has exactly three argv: python3, -c, and one "
                 "balanced quoted program containing exactly print(expression). Do not place an extra parenthesis "
                 "outside the quoted -c program. For an exact static artifact, use ONLY "
                 '{"kind":"file_bytes","path":"the exact relative path from TASK",'
@@ -1592,10 +1703,26 @@ def build_held_out_plan(
         return {
             "status": "generator_unavailable", "checks": [],
             "error": generator_error,
+            "findings": [_check_rejection(
+                1,
+                "private_verifier_unavailable",
+                "The private-check generator could not return a response.",
+                generator_error,
+                "A valid structured private verification plan.",
+                "Retry the verifier generator; until it recovers, use independent public behavioural replay with degraded assurance.",
+            )],
         }
     return {
         "status": "invalid_spec", "checks": [],
         "error": "private verifier produced no candidate-linked behavioural checks",
+        "findings": rejections or [_check_rejection(
+            1,
+            "private_verifier_no_valid_checks",
+            "The private verifier could not produce a candidate-linked behavioural check.",
+            "Both bounded generator responses were rejected by the positive grammar.",
+            "At least one safe task-linked check with immutable output evidence.",
+            "Regenerate the checks from the exact commander wording or continue with public behavioural replay at degraded assurance.",
+        )],
     }
 
 

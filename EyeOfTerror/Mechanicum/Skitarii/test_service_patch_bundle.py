@@ -614,6 +614,10 @@ class TestHealthRoute(unittest.TestCase):
         self.assertEqual(len(identity["source_sha256"]), 64)
         self.assertTrue(identity["instance_id"])
         self.assertTrue(identity["held_out_required"])
+        self.assertTrue(identity["autonomous_revision"]["enabled"])
+        self.assertFalse(
+            identity["autonomous_revision"]["ordinary_check_failure_is_blocked"]
+        )
         authorization = identity["execution_authorization"]
         self.assertTrue(authorization["ceraxia_leadership_directive_required"])
         self.assertTrue(authorization["acceptance_source_required"])
@@ -1630,6 +1634,33 @@ class TestBoundaryHelperContract(unittest.TestCase):
 
 
 class TestHeldOutLifecycle(unittest.TestCase):
+    def test_revision_guidance_keeps_private_evidence_out_of_fighter_prompt(self):
+        mission = Mock()
+        mission._lock = threading.RLock()
+        mission.revision_turns = [{
+            "attempt": 1,
+            "result_sha256": "a" * 64,
+            "decision_owner": "SkitariiWarband",
+            "leader_order": "Change the implementation approach.",
+            "findings": [{
+                "code": "hidden_candidate_failure",
+                "entity_kind": "behavioural_check",
+                "entity_id": "private-1",
+                "what_failed": "An undisclosed behaviour failed.",
+                "evidence": "SECRET_PRIVATE_ORACLE_COMMAND",
+                "expected": "The behaviour succeeds.",
+                "remediation": "Repair the behaviour without guessing the hidden check.",
+                "revision_owner": "fighter",
+                "retryable": True,
+            }],
+        }]
+
+        guidance = service._mission_revision_guidance(mission)
+
+        self.assertIn("hidden_candidate_failure", guidance)
+        self.assertIn("Repair the behaviour", guidance)
+        self.assertNotIn("SECRET_PRIVATE_ORACLE_COMMAND", guidance)
+
     @staticmethod
     def _fighter(goal, ex, **kwargs):
         ex.write_file("app.py", "print('candidate')\n")
@@ -1664,6 +1695,65 @@ class TestHeldOutLifecycle(unittest.TestCase):
                 "checks": [{"cmd": "python3 app.py", "expect_stdout": "candidate"}],
                 "workspace_files": baseline or {"app.py": "print('baseline')\n"},
             })
+
+    def test_invalid_private_plan_degrades_to_independent_public_replay(self):
+        def hidden_must_not_run(*_args, **_kwargs):
+            raise AssertionError("private acceptance must not run without validated checks")
+
+        verdict = self._run(
+            hidden_must_not_run,
+            hidden_plan_override={
+                "status": "invalid_spec",
+                "checks": [],
+                "error": "candidate command was not linked to the task deliverable",
+                "findings": [{
+                    "code": "candidate_not_task_linked",
+                    "what_failed": "The proposed command was not task-linked.",
+                    "evidence": "No positive deliverable binding was found.",
+                    "expected": "A direct command for the task-named deliverable.",
+                    "remediation": "Regenerate the private check from the exact task wording.",
+                    "revision_owner": "infrastructure",
+                    "retryable": True,
+                    "entity_kind": "private_check",
+                    "entity_id": "candidate-1",
+                }],
+            },
+        )
+
+        self.assertTrue(verdict["accepted"])
+        self.assertTrue(verdict["verification_degraded"])
+        self.assertEqual("public_behavioral_fallback", verdict["verification_mode"])
+        self.assertEqual("degraded_invalid_spec", verdict["held_out_status"])
+        self.assertTrue(verdict["public_replay_acceptance"]["accepted"])
+        self.assertEqual(
+            "candidate_not_task_linked",
+            verdict["verification_findings"][0]["code"],
+        )
+
+    def test_hidden_candidate_failure_gets_one_sanitized_revision_round(self):
+        calls = 0
+
+        def hidden_accept(_ex, _deliverables, _checks):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {
+                    "accepted": False,
+                    "results": [{
+                        "kind": "check", "ok": False,
+                        "exit": 0,
+                        "why": "got candidate output instead of hidden expected output",
+                    }],
+                }
+            return {"accepted": True, "results": [{"ok": True, "exit": 0}]}
+
+        verdict = self._run(hidden_accept)
+
+        self.assertTrue(verdict["accepted"])
+        self.assertTrue(verdict["hidden_revision_attempted"])
+        self.assertEqual("passed", verdict["held_out_status"])
+        self.assertEqual(2, calls)
+        self.assertEqual([], verdict["verification_findings"])
 
     def test_user_clarification_is_authoritative_but_explorer_brief_is_not(self):
         root = Path(tempfile.mkdtemp(prefix="heldout-clarification-authority-"))
@@ -1700,6 +1790,10 @@ class TestHeldOutLifecycle(unittest.TestCase):
             patch.object(service, "explore", return_value={"files": ["app.py"]}),
             patch.object(service, "brief_for_fighter", return_value="\nExplorer predicts 'BAD'."),
             patch.object(service, "build_held_out_plan", side_effect=capture_plan),
+            patch.object(service, "plan_and_run", return_value={
+                "status": "failed", "accepted": False, "summary": "fixture stop",
+                "artifacts": [], "checks": [], "rounds": [],
+            }),
             patch.object(service, "_memory"),
         ):
             verdict = service._execute_mission_body(
@@ -1710,7 +1804,7 @@ class TestHeldOutLifecycle(unittest.TestCase):
                 mission=AnsweringMission(),
             )
 
-        self.assertEqual(verdict["held_out_status"], "invalid_spec")
+        self.assertFalse(verdict["accepted"])
         self.assertIn("Output exactly 'USER_OK'.", captured["task_goal"])
         self.assertNotIn("Explorer predicts", captured["task_goal"])
         self.assertIn("Explorer predicts 'BAD'.", captured["full_goal"])
@@ -1742,6 +1836,10 @@ class TestHeldOutLifecycle(unittest.TestCase):
             patch.object(service, "explore", side_effect=capture_explore),
             patch.object(service, "brief_for_fighter", return_value="\nExplorer brief."),
             patch.object(service, "build_held_out_plan", side_effect=capture_plan),
+            patch.object(service, "plan_and_run", return_value={
+                "status": "failed", "accepted": False, "summary": "fixture stop",
+                "artifacts": [], "checks": [], "rounds": [],
+            }),
             patch.object(service, "_memory"),
         ):
             verdict = service._execute_mission_body({
@@ -1754,7 +1852,7 @@ class TestHeldOutLifecycle(unittest.TestCase):
                 "workspace_files": {"marker.txt": "old\n"},
             })
 
-        self.assertEqual(verdict["held_out_status"], "invalid_spec")
+        self.assertFalse(verdict["accepted"])
         self.assertNotIn(source_text, captured["explorer_goal"])
         self.assertIn(source_text, captured["held_out_prompt"])
         self.assertIn(source_text, captured["task_goal"])
@@ -1821,14 +1919,162 @@ class TestHeldOutLifecycle(unittest.TestCase):
         self.assertEqual(status, "invalid_spec")
         self.assertEqual(error, plan["error"])
 
-    def test_hidden_timeout_is_infrastructure_block_not_candidate_failure(self):
+    def test_hidden_candidate_timeout_requests_revision_instead_of_blocking(self):
         verdict = self._run(lambda ex, deliverables, checks: {
             "accepted": False,
-            "results": [{"ok": False, "exit": 124, "why": "timeout"}],
+            "results": [{
+                "kind": "check", "ok": False, "exit": 124,
+                "why": "exit 124: timeout",
+            }],
         })
+        self.assertFalse(verdict["accepted"])
+        self.assertEqual(verdict["status"], "failed")
+        self.assertEqual(verdict["held_out_failure_class"], "candidate_failure")
+        self.assertTrue(verdict["revision_required"])
+
+    def test_candidate_exit_codes_do_not_claim_verifier_infrastructure_failure(self):
+        for exit_code in (124, 125, 126, 127, 255):
+            with self.subTest(exit_code=exit_code):
+                self.assertEqual(
+                    service._held_out_failure_class({"results": [{
+                        "kind": "check", "ok": False, "exit": exit_code,
+                        "why": f"exit {exit_code}: candidate command failed",
+                    }]}),
+                    "candidate_failure",
+                )
+
+    def test_trusted_verifier_failures_are_not_blame_assigned_to_candidate(self):
+        failures = (
+            ({"kind": "check", "ok": False, "exit": 0,
+              "why": "oracle failed: trusted oracle timed out"}, "verifier_internal"),
+            ({"kind": "file_bytes", "ok": False, "exit": 127,
+              "why": "atomic regular-file reader unavailable"}, "verifier_internal"),
+            ({"kind": "file_bytes", "ok": False, "exit": 255,
+              "why": "atomic frozen artifact read failed: transport error"}, "verifier_internal"),
+            ({"kind": "unexpected", "ok": False, "exit": 1,
+              "why": "unknown private result"}, "verifier_protocol"),
+        )
+        for result, expected in failures:
+            with self.subTest(result=result):
+                self.assertEqual(
+                    service._held_out_failure_class({"results": [result]}),
+                    expected,
+                )
+        self.assertEqual(
+            service._held_out_failure_class({"results": []}),
+            "verifier_protocol",
+        )
+
+    def test_initial_private_acceptor_exception_fails_after_proven_cleanup(self):
+        verdict = self._run(Mock(side_effect=RuntimeError(
+            "injected private acceptor crash",
+        )))
+
+        self.assertFalse(verdict["accepted"])
+        self.assertEqual(verdict["status"], "failed")
+        self.assertEqual(verdict["held_out_failure_class"], "verifier_internal")
+        self.assertTrue(verdict["revision_required"])
+        self.assertEqual(
+            verdict["verification_findings"][0]["revision_owner"],
+            "infrastructure",
+        )
+
+    def test_acceptor_exception_with_unproven_primary_fingerprint_stays_blocked(self):
+        primary = AliveLocalExecutor(Path(tempfile.mkdtemp(prefix="fingerprint-audit-")))
+        original_fingerprint = service._workspace_fingerprint
+        primary_fingerprints = 0
+
+        def fail_post_error_primary_audit(target):
+            nonlocal primary_fingerprints
+            if target is primary:
+                primary_fingerprints += 1
+                if primary_fingerprints == 3:
+                    raise RuntimeError("injected post-error fingerprint failure")
+            return original_fingerprint(target)
+
+        with patch.object(
+            service, "_workspace_fingerprint", side_effect=fail_post_error_primary_audit,
+        ):
+            verdict = self._run(
+                Mock(side_effect=RuntimeError("injected private acceptor crash")),
+                executor_override=primary,
+            )
+
         self.assertFalse(verdict["accepted"])
         self.assertEqual(verdict["status"], "blocked")
         self.assertEqual(verdict["held_out_failure_class"], "verifier_infra")
+        self.assertIn("fingerprint could not be proven", verdict["held_out_error"])
+
+    def test_oracle_runtime_failure_is_internal_failed_not_candidate_or_blocked(self):
+        verdict = self._run(lambda ex, deliverables, checks: {
+            "accepted": False,
+            "results": [{
+                "kind": "check", "ok": False, "exit": 0,
+                "why": "oracle failed: injected trusted oracle crash",
+            }],
+        })
+
+        self.assertFalse(verdict["accepted"])
+        self.assertEqual(verdict["status"], "failed")
+        self.assertEqual(verdict["held_out_failure_class"], "verifier_internal")
+        self.assertTrue(verdict["revision_required"])
+        self.assertEqual(
+            verdict["verification_findings"][0]["code"],
+            "verifier_internal_failure",
+        )
+
+    def test_revision_replay_protocol_exception_fails_after_proven_cleanup(self):
+        calls = 0
+
+        def hidden_accept(ex, deliverables, checks):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {
+                    "accepted": False,
+                    "results": [{
+                        "kind": "check", "ok": False, "exit": 1,
+                        "why": "exit 1: candidate behaviour failed",
+                    }],
+                }
+            raise ValueError("injected malformed revision evidence")
+
+        verdict = self._run(hidden_accept)
+
+        self.assertEqual(calls, 2)
+        self.assertFalse(verdict["accepted"])
+        self.assertEqual(verdict["status"], "failed")
+        self.assertEqual(verdict["held_out_failure_class"], "verifier_protocol")
+        self.assertTrue(verdict["revision_required"])
+        self.assertEqual(
+            verdict["verification_findings"][0]["revision_owner"],
+            "infrastructure",
+        )
+
+    def test_revision_replay_mutation_remains_integrity_blocked(self):
+        calls = 0
+
+        def hidden_accept(ex, deliverables, checks):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {
+                    "accepted": False,
+                    "results": [{
+                        "kind": "check", "ok": False, "exit": 1,
+                        "why": "exit 1: candidate behaviour failed",
+                    }],
+                }
+            ex.write_file("app.py", "print('verifier mutation')\n")
+            return {"accepted": True, "results": [{"kind": "check", "ok": True}]}
+
+        verdict = self._run(hidden_accept)
+
+        self.assertEqual(calls, 2)
+        self.assertFalse(verdict["accepted"])
+        self.assertEqual(verdict["status"], "blocked")
+        self.assertEqual(verdict["held_out_failure_class"], "verifier_infra")
+        self.assertIn("mutated", verdict["held_out_error"])
 
     def test_runner_control_candidate_is_blocked_before_private_checks(self):
         hidden = Mock(side_effect=AssertionError("private checks must not execute"))
@@ -2004,9 +2250,9 @@ class TestHeldOutLifecycle(unittest.TestCase):
         verdict = self._run(hidden, baseline=baseline)
         self.assertTrue(verdict["accepted"], verdict.get("held_out_error"))
 
-    def test_service_rejects_bare_npm_and_mutable_test_runner_evidence(self):
+    def test_service_degrades_bare_private_runner_to_public_behavioural_replay(self):
         hidden = Mock(side_effect=AssertionError("bare private runner must not execute"))
-        fighter = Mock(side_effect=AssertionError("invalid private plan must stop before fighter"))
+        fighter = Mock(side_effect=self._fighter)
         plan = {
             "status": "ok",
             "checks": [
@@ -2019,11 +2265,11 @@ class TestHeldOutLifecycle(unittest.TestCase):
         verdict = self._run(
             hidden, fighter=fighter, hidden_plan_override=plan,
         )
-        self.assertFalse(verdict["accepted"])
-        self.assertEqual(verdict["status"], "blocked")
-        self.assertEqual(verdict["held_out_status"], "invalid_evidence")
+        self.assertTrue(verdict["accepted"])
+        self.assertTrue(verdict["verification_degraded"])
+        self.assertEqual(verdict["held_out_status"], "degraded_invalid_evidence")
         self.assertIn("immutable output evidence", verdict["held_out_error"])
-        fighter.assert_not_called()
+        fighter.assert_called_once()
         hidden.assert_not_called()
 
     def test_empty_oracle_comparison_is_verifier_infrastructure_failure(self):

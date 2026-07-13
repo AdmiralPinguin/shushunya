@@ -17,6 +17,7 @@ import json
 import multiprocessing
 import os
 from pathlib import Path
+import re
 import signal
 import shutil
 import stat
@@ -75,11 +76,33 @@ class AttemptContext:
     attempt: int
     clarification_turns: tuple[dict[str, str], ...]
     cancelled: Any
+    revision_turns: tuple[dict[str, Any], ...] = ()
 
 
 MAX_CLARIFICATION_TURNS = 16
 MAX_CLARIFICATION_FIELD_BYTES = 8_000
 MAX_CLARIFICATION_TOTAL_BYTES = 16_000
+MAX_REVISION_TURNS = 16
+MAX_REVISION_FINDINGS = 20
+MAX_REVISION_FIELD_BYTES = 2_000
+MAX_REVISION_REASON_BYTES = 4_096
+MAX_REVISION_TOTAL_BYTES = 256_000
+_REVISION_TURN_FIELDS = frozenset(
+    {"attempt", "result_sha256", "reason", "findings"}
+)
+_REVIEW_FINDING_FIELDS = frozenset(
+    {
+        "code",
+        "entity_kind",
+        "entity_id",
+        "what_failed",
+        "evidence",
+        "expected",
+        "remediation",
+        "revision_owner",
+        "retryable",
+    }
+)
 
 
 def _clarification_turns(value: Any) -> tuple[dict[str, str], ...]:
@@ -103,6 +126,87 @@ def _clarification_turns(value: Any) -> tuple[dict[str, str], ...]:
         if total > MAX_CLARIFICATION_TOTAL_BYTES:
             raise ValueError("clarification turns exceed aggregate byte limit")
         restored.append({"question": question, "answer": answer})
+    return tuple(restored)
+
+
+def validate_revision_turns(value: Any) -> tuple[dict[str, Any], ...]:
+    """Validate bounded, result-bound internal feedback for a later attempt."""
+
+    if not isinstance(value, (list, tuple)) or len(value) > MAX_REVISION_TURNS:
+        raise TypeError("revision_turns must be a bounded ordered sequence")
+    restored: list[dict[str, Any]] = []
+    previous_attempt = 0
+    for turn_index, raw_turn in enumerate(value):
+        if not isinstance(raw_turn, dict) or set(raw_turn) != _REVISION_TURN_FIELDS:
+            raise TypeError(
+                f"revision_turns[{turn_index}] must contain exactly the revision turn fields"
+            )
+        attempt = raw_turn.get("attempt")
+        result_sha256 = raw_turn.get("result_sha256")
+        reason = raw_turn.get("reason")
+        raw_findings = raw_turn.get("findings")
+        if (
+            type(attempt) is not int
+            or attempt < 1
+            or attempt > MAX_REVISION_TURNS
+            or attempt <= previous_attempt
+        ):
+            raise ValueError(f"revision_turns[{turn_index}].attempt is invalid")
+        if (
+            type(result_sha256) is not str
+            or not re.fullmatch(r"[0-9a-f]{64}", result_sha256)
+        ):
+            raise ValueError(
+                f"revision_turns[{turn_index}].result_sha256 is invalid"
+            )
+        if type(reason) is not str or not reason.strip():
+            raise ValueError(f"revision_turns[{turn_index}].reason must not be empty")
+        if len(reason.encode("utf-8")) > MAX_REVISION_REASON_BYTES:
+            raise ValueError(f"revision_turns[{turn_index}].reason exceeds byte limit")
+        if (
+            type(raw_findings) is not list
+            or not raw_findings
+            or len(raw_findings) > MAX_REVISION_FINDINGS
+        ):
+            raise ValueError(
+                f"revision_turns[{turn_index}].findings must be a bounded non-empty array"
+            )
+        findings: list[dict[str, Any]] = []
+        for finding_index, raw_finding in enumerate(raw_findings):
+            if (
+                not isinstance(raw_finding, dict)
+                or set(raw_finding) != _REVIEW_FINDING_FIELDS
+            ):
+                raise TypeError(
+                    "revision finding must contain exactly the shared diagnostic fields"
+                )
+            finding: dict[str, Any] = {}
+            for field in _REVIEW_FINDING_FIELDS - {"retryable"}:
+                item = raw_finding.get(field)
+                if type(item) is not str or not item.strip():
+                    raise ValueError(
+                        f"revision finding {turn_index}:{finding_index}.{field} must not be empty"
+                    )
+                if len(item.encode("utf-8")) > MAX_REVISION_FIELD_BYTES:
+                    raise ValueError(
+                        f"revision finding {turn_index}:{finding_index}.{field} exceeds byte limit"
+                    )
+                finding[field] = item.strip()
+            if type(raw_finding.get("retryable")) is not bool:
+                raise TypeError("revision finding retryable must be boolean")
+            finding["retryable"] = raw_finding["retryable"]
+            findings.append(finding)
+        previous_attempt = attempt
+        restored.append(
+            {
+                "attempt": attempt,
+                "result_sha256": result_sha256,
+                "reason": reason.strip(),
+                "findings": findings,
+            }
+        )
+    if len(_json_bytes(restored)) > MAX_REVISION_TOTAL_BYTES:
+        raise ValueError("revision_turns exceed aggregate byte limit")
     return tuple(restored)
 
 
@@ -557,6 +661,9 @@ def _child_main(
                 context_data.get("clarification_turns") or ()
             ),
             cancelled=cancelled,
+            revision_turns=validate_revision_turns(
+                context_data.get("revision_turns") or ()
+            ),
         )
         produced = runner(payload, context)
         if deployment_manifest is not None:
@@ -983,6 +1090,7 @@ class ProcessSupervisor:
         clarification_turns: tuple[dict[str, str], ...],
         cancelled: Any,
         hard_timeout_seconds: float,
+        revision_turns: tuple[dict[str, Any], ...] = (),
         deployment_manifest: DeploymentManifest | None = None,
         readiness_spec: RunnerSpec | None = None,
         require_readiness_attestation: bool = False,
@@ -1005,6 +1113,7 @@ class ProcessSupervisor:
         if deployment_manifest is not None:
             verify_manifest(deployment_manifest)
         turns = _clarification_turns(clarification_turns)
+        revisions = validate_revision_turns(revision_turns)
         payload = json.loads(payload_bytes)
         if not isinstance(payload, dict):
             raise RunnerExecutionError("canonical attempt payload is not an object")
@@ -1033,6 +1142,7 @@ class ProcessSupervisor:
                     "id": mission_id,
                     "attempt": attempt,
                     "clarification_turns": turns,
+                    "revision_turns": revisions,
                 },
                 child_cancelled,
                 start_gate,
@@ -1194,4 +1304,5 @@ __all__ = [
     "read_runtime_readiness",
     "verify_runtime_readiness",
     "verify_linux_cgroup_delegation",
+    "validate_revision_turns",
 ]

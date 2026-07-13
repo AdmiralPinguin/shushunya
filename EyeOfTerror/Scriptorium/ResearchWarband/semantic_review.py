@@ -33,6 +33,8 @@ from .verifier import (
 
 _ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._:-]{0,127}$")
 _ALIGNMENTS = frozenset({"entailed", "not_entailed", "uncertain"})
+_EXTERNAL_ESCALATION_OWNERS = frozenset({"infrastructure", "operator"})
+_EXTERNAL_RESUME_PREFIX = "Resume when "
 _PROJECTION_SCHEMA = "research-semantic-review-projection-v1"
 _MODEL_REQUEST_DIGEST_CONTEXT = "model-visible semantic review request"
 
@@ -366,6 +368,7 @@ class SemanticReviewRecord:
     review_request_sha256: str
     review_response_sha256: str
     final_base_sha256: str
+    findings: tuple[dict[str, Any], ...]
     next_queries: tuple[str, ...]
     attestations: tuple[ReviewAttestation, ...]
 
@@ -385,6 +388,7 @@ class SemanticReviewRecord:
             "review_request_sha256": self.review_request_sha256,
             "review_response_sha256": self.review_response_sha256,
             "final_base_sha256": self.final_base_sha256,
+            "findings": [dict(item) for item in self.findings],
             "next_queries": list(self.next_queries),
             "attestations": [
                 {
@@ -583,6 +587,7 @@ def build_semantic_review_payload(
             "exact_fields": [
                 "decision",
                 "reason",
+                "findings",
                 "claim_reviews",
                 "edge_reviews",
                 "unit_reviews",
@@ -592,7 +597,34 @@ def build_semantic_review_payload(
                 "next_queries",
             ],
             "unknown_fields_forbidden": True,
-            "decision_enum": ["accepted", "search_more", "blocked"],
+            "decision_enum": ["accepted", "search_more", "revise", "escalate"],
+            "finding_schema": {
+                "exact_fields": [
+                    "code",
+                    "entity_kind",
+                    "entity_id",
+                    "what_failed",
+                    "evidence",
+                    "expected",
+                    "remediation",
+                    "revision_owner",
+                    "retryable",
+                ],
+                "revision_owner_enum": [
+                    "scout", "reader", "analyst", "writer",
+                    "infrastructure", "operator",
+                ],
+                "rule": (
+                    "accepted requires []; every other decision requires at least one "
+                    "finding tied to the failed entity. escalate is only an advisory claim "
+                    "of a non-retryable external impasse and never authorizes terminal "
+                    "blocked: the application always normalizes it to revision unless an "
+                    "application-owned boundary independently raises an external, security, "
+                    "or integrity exception. Every escalate finding must use revision_owner "
+                    "operator or infrastructure, retryable=false, and remediation must begin "
+                    "exactly with 'Resume when ' followed by the concrete external condition"
+                ),
+            },
             "review_items": {
                 "claim_reviews": {
                     "exact_fields": ["claim_id", "status"],
@@ -621,7 +653,7 @@ def build_semantic_review_payload(
                 "scope, and policy alignments all entailed"
             ),
             "next_queries_rule": (
-                "non-empty only for search_more; [] for accepted or blocked"
+                "non-empty only for search_more; [] for accepted, revise, or escalate"
             ),
         },
         "trusted_review_context": trusted_context,
@@ -655,6 +687,101 @@ def _parse_review_items(
             data["status"], statuses, f"{entity} review status"
         )
     return result
+
+
+def _parse_findings(value: Any, decision: str) -> tuple[dict[str, Any], ...]:
+    if value is None:
+        if decision == "accepted":
+            return ()
+        raise SemanticReviewError(
+            "non-accepted semantic review requires actionable findings"
+        )
+    result: list[dict[str, Any]] = []
+    for index, raw_item in enumerate(_array(value, "semantic findings"), 1):
+        data = _mapping(
+            raw_item,
+            f"semantic findings[{index}]",
+            required=frozenset({
+                "code",
+                "entity_kind",
+                "entity_id",
+                "what_failed",
+                "evidence",
+                "expected",
+                "remediation",
+                "revision_owner",
+                "retryable",
+            }),
+        )
+        retryable = data["retryable"]
+        if type(retryable) is not bool:
+            raise SemanticReviewError(
+                f"semantic findings[{index}].retryable must be a boolean"
+            )
+        result.append({
+            "code": _identifier(data["code"], f"semantic findings[{index}].code"),
+            "entity_kind": _identifier(
+                data["entity_kind"], f"semantic findings[{index}].entity_kind"
+            ),
+            "entity_id": _identifier(
+                data["entity_id"], f"semantic findings[{index}].entity_id"
+            ),
+            "what_failed": _nonempty(
+                data["what_failed"], f"semantic findings[{index}].what_failed"
+            ),
+            "evidence": _nonempty(
+                data["evidence"], f"semantic findings[{index}].evidence"
+            ),
+            "expected": _nonempty(
+                data["expected"], f"semantic findings[{index}].expected"
+            ),
+            "remediation": _nonempty(
+                data["remediation"], f"semantic findings[{index}].remediation"
+            ),
+            "revision_owner": _choice(
+                data["revision_owner"],
+                frozenset({
+                    "scout", "reader", "analyst", "writer",
+                    "infrastructure", "operator",
+                }),
+                f"semantic findings[{index}].revision_owner",
+            ),
+            "retryable": retryable,
+        })
+    if decision == "accepted" and result:
+        raise SemanticReviewError("accepted semantic review requires findings=[]")
+    if decision != "accepted" and not result:
+        raise SemanticReviewError(
+            "non-accepted semantic review requires at least one actionable finding"
+        )
+    if decision in {"search_more", "revise"} and not any(
+        item["retryable"] for item in result
+    ):
+        raise SemanticReviewError(
+            f"semantic {decision} requires at least one retryable finding"
+        )
+    if decision == "escalate":
+        for index, item in enumerate(result, 1):
+            if item["retryable"]:
+                raise SemanticReviewError(
+                    "semantic advisory escalate requires every claimed external finding retryable=false"
+                )
+            if item["revision_owner"] not in _EXTERNAL_ESCALATION_OWNERS:
+                raise SemanticReviewError(
+                    "semantic advisory escalate requires every finding owner to be operator or infrastructure"
+                )
+            remediation = item["remediation"]
+            if not remediation.startswith(_EXTERNAL_RESUME_PREFIX):
+                raise SemanticReviewError(
+                    "semantic advisory escalate remediation must begin exactly with 'Resume when '"
+                )
+            condition = remediation[len(_EXTERNAL_RESUME_PREFIX):].strip()
+            condition_terms = re.findall(r"[^\W_]+", condition, flags=re.UNICODE)
+            if len(condition.encode("utf-8")) < 24 or len(condition_terms) < 4:
+                raise SemanticReviewError(
+                    f"semantic findings[{index}].remediation lacks a concrete external resume condition"
+                )
+    return tuple(result)
 
 
 def apply_semantic_review(
@@ -700,10 +827,11 @@ def apply_semantic_review(
                 "next_queries",
             }
         ),
+        optional=frozenset({"findings"}),
     )
     decision = _choice(
         data["decision"],
-        frozenset({"accepted", "search_more", "blocked"}),
+        frozenset({"accepted", "search_more", "revise", "escalate"}),
         "semantic verifier decision",
     )
     reason = _nonempty(data["reason"], "semantic verifier reason")
@@ -714,8 +842,9 @@ def apply_semantic_review(
         )
     if decision != "search_more" and next_queries:
         raise SemanticReviewError(
-            "semantic accepted/blocked decisions require next_queries=[]"
+            "semantic accepted/revise/escalate decisions require next_queries=[]"
         )
+    findings = _parse_findings(data.get("findings"), decision)
     mission_alignment = _choice(
         data["mission_alignment"], _ALIGNMENTS, "mission_alignment"
     )
@@ -874,6 +1003,7 @@ def apply_semantic_review(
         review_request_sha256=session.request_sha256,
         review_response_sha256=session.response_sha256,
         final_base_sha256=final_base_sha256,
+        findings=findings,
         next_queries=next_queries,
         attestations=attestations,
     )

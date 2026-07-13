@@ -6,6 +6,7 @@ from .protocol import (
     GOVERNOR_REPORT_STATUSES,
     LIFECYCLE_STATUSES,
     PROTOCOL_VERSION,
+    REVIEW_REVISION_OWNERS,
     TERMINAL_LIFECYCLE_STATUSES,
     WORKER_REPORT_STATUSES,
     acceptance_review,
@@ -16,16 +17,23 @@ from .protocol import (
     governor_report,
     mission_intake,
     revision_order,
+    review_finding,
     worker_order,
     worker_report,
 )
-from .validation import ProtocolValidationError, validate_protocol_payload
+from .validation import (
+    ProtocolValidationError,
+    validate_protocol_payload,
+    validate_review_finding,
+    validate_review_findings,
+)
 
 __all__ = [
     "ACCEPTANCE_STATUSES",
     "GOVERNOR_REPORT_STATUSES",
     "LIFECYCLE_STATUSES",
     "PROTOCOL_VERSION",
+    "REVIEW_REVISION_OWNERS",
     "TERMINAL_LIFECYCLE_STATUSES",
     "WORKER_REPORT_STATUSES",
     "ProtocolValidationError",
@@ -39,7 +47,10 @@ __all__ = [
     "mission_intake",
     "progress_event",
     "revision_order",
+    "review_finding",
     "validate_protocol_payload",
+    "validate_review_finding",
+    "validate_review_findings",
     "worker_order",
     "worker_report",
 ]

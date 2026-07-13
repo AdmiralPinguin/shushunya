@@ -31,13 +31,17 @@ MAX_CLARIFICATION_TOTAL_BYTES = 16_000
 MISSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 WORK_STATUSES = frozenset({"queued", "running", "cancelling"})
 ACTIVE_STATUSES = frozenset({*WORK_STATUSES, "needs_user"})
-TERMINAL_STATUSES = frozenset({"done", "blocked", "failed", "cancelled"})
+TERMINAL_STATUSES = frozenset(
+    {"done", "needs_revision", "blocked", "failed", "cancelled"}
+)
 ALL_STATUSES = ACTIVE_STATUSES | TERMINAL_STATUSES
 OUTCOME_STATUS = {
     "accepted": "done",
     "accepted_with_uncertainty": "done",
     "clarify": "needs_user",
+    "needs_revision": "needs_revision",
     "blocked": "blocked",
+    "failed": "failed",
 }
 
 
@@ -135,6 +139,7 @@ class UnsafeStoreError(MissionStoreError, ValueError):
 try:
     from .process_supervisor import (
         AttemptContext,
+        MAX_REVISION_TURNS,
         ProcessSupervisor,
         RunnerCleanupError,
         RunnerReadinessError,
@@ -143,11 +148,13 @@ try:
         read_runtime_readiness,
         verify_linux_cgroup_delegation,
         verify_runtime_readiness,
+        validate_revision_turns,
     )
     from .deployment_guard import DeploymentGuard, DeploymentIntegrityError
 except ImportError:
     from process_supervisor import (  # type: ignore[no-redef]
         AttemptContext,
+        MAX_REVISION_TURNS,
         ProcessSupervisor,
         RunnerCleanupError,
         RunnerReadinessError,
@@ -156,11 +163,111 @@ except ImportError:
         read_runtime_readiness,
         verify_linux_cgroup_delegation,
         verify_runtime_readiness,
+        validate_revision_turns,
     )
     from deployment_guard import (  # type: ignore[no-redef]
         DeploymentGuard,
         DeploymentIntegrityError,
     )
+
+
+def _revision_turn_for_result(
+    attempt: int,
+    result: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Extract one safe internal retry instruction from an exact attempt result."""
+
+    audit = result.get("pipeline_audit")
+    source = audit if isinstance(audit, Mapping) else result
+    findings = source.get("review_findings")
+    reason = result.get("reason")
+    if type(findings) is not list or not findings or type(reason) is not str:
+        return None
+    try:
+        turn = validate_revision_turns(
+            (
+                {
+                    "attempt": attempt,
+                    "result_sha256": hashlib.sha256(
+                        _json_bytes(dict(result))
+                    ).hexdigest(),
+                    "reason": _error_text(reason.strip(), 4096),
+                    "findings": findings,
+                },
+            )
+        )[0]
+    except (TypeError, ValueError, UnicodeError):
+        return None
+    if not any(item["retryable"] for item in turn["findings"]):
+        return None
+    return turn
+
+
+def _terminal_failure_result(
+    result: Mapping[str, Any],
+    reason: str,
+    **metadata: Any,
+) -> dict[str, Any]:
+    """Convert a runner result into one coherent terminal failure contract.
+
+    Production results carry a second, evaluator-facing status envelope.  A
+    lifecycle-only conversion would otherwise leave that envelope claiming
+    ``needs_revision`` while the mission store reports ``failed``.  Preserve
+    immutable identities and evidence, but never publish an unaccepted draft
+    as a terminal answer.
+    """
+
+    failed = {**dict(result), **metadata, "outcome": "failed", "reason": reason}
+    if "answer" in failed:
+        failed["answer"] = ""
+    external = failed.get("external_evaluator_result")
+    if isinstance(external, Mapping):
+        failed["external_evaluator_result"] = {
+            **dict(external),
+            "status": "failed",
+            "accepted": False,
+            "final_text": "",
+            "question": "",
+        }
+    return failed
+
+
+def _pipeline_contract_failure_result(
+    result: Mapping[str, Any],
+    *,
+    code: str,
+    what_failed: str,
+    evidence: str,
+    expected: str,
+    remediation: str,
+) -> dict[str, Any]:
+    """Turn an invalid runner result into an explained, clean terminal failure."""
+
+    failed = _terminal_failure_result(result, what_failed, runner_contract_error=True)
+    audit = failed.get("pipeline_audit")
+    preserved_audit = dict(audit) if isinstance(audit, Mapping) else {}
+    diagnostics = preserved_audit.get("diagnostics")
+    safe_diagnostics = (
+        [str(item)[:2_000] for item in diagnostics if str(item).strip()]
+        if isinstance(diagnostics, list)
+        else []
+    )
+    failed["pipeline_audit"] = {
+        **preserved_audit,
+        "review_findings": [{
+            "code": code,
+            "entity_kind": "runner_contract",
+            "entity_id": "isolated-research-runner",
+            "what_failed": what_failed,
+            "evidence": evidence,
+            "expected": expected,
+            "remediation": remediation,
+            "revision_owner": "infrastructure",
+            "retryable": True,
+        }],
+        "diagnostics": [*safe_diagnostics, evidence][:20],
+    }
+    return failed
 
 
 class Mission:
@@ -185,6 +292,7 @@ class Mission:
         self.attempt = 0
         self.question: str | None = None
         self.clarification_turns: list[dict[str, str]] = []
+        self.revision_turns: list[dict[str, Any]] = []
         self.events: list[dict[str, Any]] = []
         self.result: dict[str, Any] | None = None
         self.result_refs: list[dict[str, Any]] = []
@@ -210,6 +318,7 @@ class Mission:
                 "question": self.question,
                 "answer_count": len(self.clarification_turns),
                 "clarification_turn_count": len(self.clarification_turns),
+                "revision_turn_count": len(self.revision_turns),
                 "result": self.result,
                 "inflight": self.inflight,
                 "cleanup_complete": self.cleanup_complete,
@@ -243,6 +352,7 @@ class MissionStore:
         max_event_bytes: int | None = None,
         max_state_bytes: int | None = None,
         max_attempts: int | None = None,
+        max_auto_revisions: int | None = None,
         max_question_bytes: int | None = None,
         max_answer_bytes: int | None = None,
         max_terminal: int | None = None,
@@ -273,7 +383,17 @@ class MissionStore:
         self.max_state_bytes = max_state_bytes or _env_int(
             "RESEARCH_WARBAND_STATE_MAX_BYTES", 1_000_000, 4096
         )
-        self.max_attempts = max_attempts or _env_int("RESEARCH_WARBAND_MAX_ATTEMPTS", 16)
+        self.max_attempts = max_attempts or _env_int(
+            "RESEARCH_WARBAND_MAX_ATTEMPTS", 16
+        )
+        self.max_auto_revisions = min(
+            (
+                max_auto_revisions
+                if max_auto_revisions is not None
+                else _env_int("RESEARCH_WARBAND_MAX_AUTO_REVISIONS", 2, 0)
+            ),
+            MAX_REVISION_TURNS,
+        )
         self.max_question_bytes = min(
             max_question_bytes or _env_int(
                 "RESEARCH_WARBAND_QUESTION_MAX_BYTES", MAX_CLARIFICATION_FIELD_BYTES, 1
@@ -315,6 +435,8 @@ class MissionStore:
         )
         if self.attempt_timeout_seconds <= 0:
             raise ValueError("attempt_timeout_seconds must be positive")
+        if self.max_auto_revisions < 0:
+            raise ValueError("max_auto_revisions must not be negative")
         if self.cancel_grace_seconds < 0 or self.terminate_grace_seconds < 0:
             raise ValueError("runner grace periods must not be negative")
         self.instance_id = uuid.uuid4().hex
@@ -566,6 +688,7 @@ class MissionStore:
             "attempt": mission.attempt,
             "question": mission.question,
             "clarification_turns": [dict(turn) for turn in mission.clarification_turns],
+            "revision_turns": [dict(turn) for turn in mission.revision_turns],
             "storage_error": mission.storage_error,
             "inflight": mission.inflight,
             "cleanup_complete": mission.cleanup_complete,
@@ -648,6 +771,7 @@ class MissionStore:
                 len(mission.events),
                 mission.result,
                 list(mission.result_refs),
+                list(mission.revision_turns),
             )
             mission.status = status
             self._append_event(mission, event_type, {"status": status, **dict(data or {})})
@@ -662,9 +786,11 @@ class MissionStore:
                     event_count,
                     mission.result,
                     result_refs,
+                    revision_turns,
                 ) = previous
                 mission.events = mission.events[:event_count]
                 mission.result_refs = result_refs
+                mission.revision_turns = revision_turns
                 raise
 
     @staticmethod
@@ -901,6 +1027,9 @@ class MissionStore:
             clarification_turns=tuple(
                 dict(turn) for turn in mission.clarification_turns
             ),
+            revision_turns=tuple(
+                dict(turn) for turn in mission.revision_turns
+            ),
             cancelled=mission.cancelled,
             hard_timeout_seconds=hard_timeout,
             deployment_manifest=(
@@ -930,7 +1059,7 @@ class MissionStore:
                 self._block_deployment_integrity_locked(mission, exc)
                 return False
             if mission.attempt >= self.max_attempts:
-                self._transition(mission, "blocked", "attempt_limit")
+                self._transition(mission, "failed", "attempt_limit")
                 return False
             if len(self._worker_registry) >= self.max_active:
                 return False
@@ -1013,40 +1142,91 @@ class MissionStore:
                     mission.storage_error = _error_text(
                         f"pipeline returned unsupported outcome: {outcome!r}"
                     )
+                    failed_result = _pipeline_contract_failure_result(
+                        result,
+                        code="invalid_pipeline_outcome",
+                        what_failed="The isolated runner returned an unsupported terminal outcome.",
+                        evidence=mission.storage_error,
+                        expected=(
+                            "The runner returns accepted, accepted_with_uncertainty, "
+                            "clarify, needs_revision, blocked, or failed."
+                        ),
+                        remediation=(
+                            "Repair the runner outcome mapping, then resume this persisted "
+                            "mission without discarding its attempt history."
+                        ),
+                    )
                     self._transition(
                         mission,
-                        "blocked",
+                        "failed",
                         "invalid_pipeline_outcome",
                         {"outcome": outcome_event},
-                        new_result=result,
+                        new_result=failed_result,
                     )
                 elif mapped == "needs_user":
                     reason = result.get("reason")
                     if type(reason) is not str or not reason.strip():
                         mission.storage_error = "clarify outcome omitted a usable question"
+                        failed_result = _pipeline_contract_failure_result(
+                            result,
+                            code="invalid_clarification",
+                            what_failed="The runner requested clarification without a usable question.",
+                            evidence=mission.storage_error,
+                            expected="A clarify result contains one non-empty, bounded user question.",
+                            remediation=(
+                                "Repair clarification serialization in the runner, then resume "
+                                "this persisted mission."
+                            ),
+                        )
                         self._transition(
                             mission,
-                            "blocked",
+                            "failed",
                             "invalid_clarification",
-                            new_result=result,
+                            new_result=failed_result,
                         )
                     elif len(reason.strip().encode("utf-8")) > self.max_question_bytes:
                         mission.storage_error = (
                             f"clarification question exceeds {self.max_question_bytes} bytes"
                         )
+                        failed_result = _pipeline_contract_failure_result(
+                            result,
+                            code="oversized_clarification",
+                            what_failed="The runner produced a clarification question above the byte limit.",
+                            evidence=mission.storage_error,
+                            expected=(
+                                f"A clarification question is at most {self.max_question_bytes} UTF-8 bytes."
+                            ),
+                            remediation=(
+                                "Make the runner ask one concise question within the contract "
+                                "limit, then resume this persisted mission."
+                            ),
+                        )
                         self._transition(
                             mission,
-                            "blocked",
+                            "failed",
                             "invalid_clarification",
-                            new_result=result,
+                            new_result=failed_result,
                         )
                     elif len(mission.clarification_turns) >= MAX_CLARIFICATION_TURNS:
                         mission.storage_error = "clarification turn limit is exhausted"
+                        failed_result = _pipeline_contract_failure_result(
+                            result,
+                            code="clarification_limit_exhausted",
+                            what_failed="The runner exhausted the bounded clarification dialogue.",
+                            evidence=mission.storage_error,
+                            expected=(
+                                "The runner resolves the mission or reports an explained failure "
+                                "within the clarification-turn limit."
+                            ),
+                            remediation=(
+                                "Repair the repeated-question strategy before resuming the mission."
+                            ),
+                        )
                         self._transition(
                             mission,
-                            "blocked",
+                            "failed",
                             "clarification_limit",
-                            new_result=result,
+                            new_result=failed_result,
                         )
                     else:
                         mission.question = reason.strip()
@@ -1057,6 +1237,66 @@ class MissionStore:
                             {"question": mission.question},
                             new_result=result,
                         )
+                elif mapped == "needs_revision":
+                    turn = _revision_turn_for_result(mission.attempt, result)
+                    if turn is None:
+                        failed_result = _terminal_failure_result(
+                            result,
+                            "ResearchWarband returned needs_revision without a valid "
+                            "retryable diagnostic; automatic correction cannot safely continue.",
+                            revision_protocol_error=True,
+                        )
+                        self._transition(
+                            mission,
+                            "failed",
+                            "invalid_revision_result",
+                            {"attempt": mission.attempt},
+                            new_result=failed_result,
+                        )
+                    elif (
+                        mission.attempt >= self.max_attempts
+                        or len(mission.revision_turns) >= self.max_auto_revisions
+                    ):
+                        failed_result = _terminal_failure_result(
+                            result,
+                            (
+                                "ResearchWarband exhausted its bounded automatic "
+                                f"correction budget after {mission.attempt} attempt(s). "
+                                + str(result.get("reason") or "")
+                            ).strip(),
+                            revision_exhausted=True,
+                            auto_revision_limit=self.max_auto_revisions,
+                        )
+                        self._transition(
+                            mission,
+                            "failed",
+                            "revision_attempts_exhausted",
+                            {
+                                "attempt": mission.attempt,
+                                "finding_count": len(turn["findings"]),
+                            },
+                            new_result=failed_result,
+                        )
+                    else:
+                        previous_revisions = list(mission.revision_turns)
+                        mission.revision_turns.append(turn)
+                        mission.question = None
+                        try:
+                            self._transition(
+                                mission,
+                                "queued",
+                                "revision_auto_queued",
+                                {
+                                    "attempt": mission.attempt,
+                                    "next_attempt": mission.attempt + 1,
+                                    "finding_count": len(turn["findings"]),
+                                    "result_sha256": turn["result_sha256"],
+                                },
+                                new_result=result,
+                            )
+                        except Exception:
+                            mission.revision_turns = previous_revisions
+                            raise
                 else:
                     mission.question = None
                     self._transition(
@@ -1081,6 +1321,11 @@ class MissionStore:
                     )
                 except Exception as persist_exc:
                     self._mark_storage_failure(mission, persist_exc)
+        except (DeploymentIntegrityError, RunnerReadinessError) as exc:
+            with mission._lock:
+                mission.inflight = False
+                mission.cleanup_complete = True
+                self._block_deployment_integrity_locked(mission, exc)
         except Exception as exc:  # fail closed; never synthesize a successful result
             with mission._lock:
                 mission.inflight = False
@@ -1092,12 +1337,36 @@ class MissionStore:
                         self._mark_storage_failure(mission, persist_exc)
                 else:
                     mission.storage_error = _error_text(f"{type(exc).__name__}: {exc}")
+                    failure_result = {
+                        "outcome": "failed",
+                        "reason": (
+                            "The isolated ResearchWarband runner failed safely. "
+                            "Resume condition: repair the reported runtime defect, then "
+                            "resume this same persisted mission."
+                        ),
+                        "runner_error": mission.storage_error,
+                        "pipeline_audit": {
+                            "review_findings": [{
+                                "code": "research_runner_failure",
+                                "entity_kind": "research_runtime",
+                                "entity_id": "isolated-runner",
+                                "what_failed": "The isolated research runner did not complete its attempt.",
+                                "evidence": mission.storage_error,
+                                "expected": "The attested runner returns one complete finite result and exits cleanly.",
+                                "remediation": "Repair the runner/model/runtime defect and resume the same mission; do not discard its attempt history.",
+                                "revision_owner": "infrastructure",
+                                "retryable": True,
+                            }],
+                            "diagnostics": [mission.storage_error],
+                        },
+                    }
                     try:
                         self._transition(
                             mission,
-                            "blocked",
+                            "failed",
                             "runner_error",
                             {"error": mission.storage_error},
+                            new_result=failure_result,
                         )
                     except Exception as persist_exc:
                         self._mark_storage_failure(mission, persist_exc)
@@ -1121,6 +1390,15 @@ class MissionStore:
                 mission._thread = None
                 mission._worker_token = None
                 self._worker_registry.pop(worker_token, None)
+                if (
+                    mission.status == "queued"
+                    and not mission._resume_disabled
+                    and len(self._worker_registry) < self.max_active
+                ):
+                    # An explicitly supplied attested runner is mission-scoped and
+                    # may not also be installed as the store default. Preserve that
+                    # exact identity across an automatic correction attempt.
+                    self.launch(mission, runner)
                 self._launch_waiting_locked()
 
     def _launch_waiting_locked(self) -> None:
@@ -1272,7 +1550,9 @@ class MissionStore:
                 return False
             with mission._lock:
                 if (
-                    mission.status not in {"blocked", "failed", "cancelled"}
+                    mission.status not in {
+                        "needs_revision", "blocked", "failed", "cancelled"
+                    }
                     or mission._resume_disabled
                     or not mission.cleanup_complete
                     or mission.attempt >= self.max_attempts
@@ -1280,12 +1560,25 @@ class MissionStore:
                     return False
                 if self._work_count_locked(exclude=mission) >= self.max_active:
                     raise MissionCapacityError("mission active capacity is exhausted")
+                previous_revisions = list(mission.revision_turns)
+                if mission.status == "needs_revision":
+                    turn = _revision_turn_for_result(
+                        mission.attempt, mission.result or {}
+                    )
+                    if turn is None:
+                        return False
+                    if not any(
+                        existing["attempt"] == turn["attempt"]
+                        for existing in mission.revision_turns
+                    ):
+                        mission.revision_turns.append(turn)
                 mission.cancelled = threading.Event()
                 mission.question = None
                 mission.storage_error = None
                 try:
                     self._transition(mission, "queued", "resume_requested")
                 except Exception as exc:
+                    mission.revision_turns = previous_revisions
                     self._mark_storage_failure(mission, exc)
                     raise MissionPersistenceError(str(mission.storage_error)) from exc
         return self.launch(mission, selected)
@@ -1420,6 +1713,17 @@ class MissionStore:
             mission.clarification_turns.append(
                 {"question": question, "answer": answer}
             )
+        try:
+            mission.revision_turns = [
+                dict(turn)
+                for turn in validate_revision_turns(
+                    state.get("revision_turns") or ()
+                )
+            ]
+        except (TypeError, ValueError, UnicodeError) as exc:
+            raise MissionPersistenceError(
+                f"persisted revision turns are invalid: {exc}"
+            ) from exc
         mission.events = list(events)
         mission.storage_error = state.get("storage_error")
         mission.inflight = False  # no worker from the previous process survives recovery
@@ -1449,6 +1753,15 @@ class MissionStore:
         expected_current = mission.result_refs[-1]["path"] if mission.result_refs else None
         if current != expected_current:
             raise MissionPersistenceError("current result reference is inconsistent")
+        result_hashes = {
+            int(str(reference["path"])[7:13]): str(reference["sha256"])
+            for reference in mission.result_refs
+        }
+        for turn in mission.revision_turns:
+            if result_hashes.get(turn["attempt"]) != turn["result_sha256"]:
+                raise MissionPersistenceError(
+                    "persisted revision turn is not bound to its exact attempt result"
+                )
 
         allowed = {"mission.json", "payload.json", "events.json", *result_files}
         actual: set[str] = set()

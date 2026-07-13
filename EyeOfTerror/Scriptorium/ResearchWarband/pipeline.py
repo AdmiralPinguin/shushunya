@@ -17,6 +17,8 @@ import unicodedata
 from typing import Any, Callable, Mapping, Sequence, TypeVar
 from urllib.parse import urlsplit
 
+from EyeOfTerror.common_protocol.protocol import review_finding
+
 from .execution_policy import ExecutionPolicy
 from .model_client import (
     ModelClientError,
@@ -28,6 +30,7 @@ from .model_client import (
     TrustedReviewBoundary,
     canonical_json_sha256,
 )
+from .process_supervisor import validate_revision_turns
 from .reader import (
     READER_CHUNK_OVERLAP,
     ReaderCandidate,
@@ -72,7 +75,15 @@ from .semantic_review import (
     build_semantic_review_repair_payload,
     require_complete_semantic_acceptance,
 )
-from .snapshot_store import SnapshotStore, SnapshotStoreError
+from .snapshot_store import (
+    SnapshotByteLimitError,
+    SnapshotIntegrityError,
+    SnapshotNormalizationError,
+    SnapshotSecurityError,
+    SnapshotStore,
+    SnapshotStoreError,
+    UnknownNormalizerError,
+)
 from .verifier import (
     EvidenceVerifier,
     VerificationReport,
@@ -84,7 +95,14 @@ RESEARCH_MODES = frozenset(
 )
 HYPOTHESIS_MODES = frozenset({"investigation", "interpretation"})
 PIPELINE_OUTCOMES = frozenset(
-    {"accepted", "accepted_with_uncertainty", "clarify", "blocked"}
+    {
+        "accepted",
+        "accepted_with_uncertainty",
+        "clarify",
+        "needs_revision",
+        "blocked",
+        "failed",
+    }
 )
 _DISCLOSABLE_VERIFIER_ISSUES = frozenset(
     {"unresolved_claim_conflict", "unresolved_research_gap"}
@@ -101,6 +119,169 @@ _MAX_ANALYST_REPAIR_ATTEMPTS = 2
 _MAX_REPAIR_VALIDATOR_ERROR_CHARS = 512
 _MAX_SOURCE_POLICY_SKIP_DIAGNOSTICS = 32
 _ValidatedAuthorResponse = TypeVar("_ValidatedAuthorResponse")
+
+
+def _pipeline_failure_outcome(exc: Exception) -> str:
+    """Classify why this attempt stopped without turning ordinary work into a block."""
+
+    if isinstance(
+        exc,
+        (
+            ResearchExternalImpassError,
+            ResearchIntegrityError,
+            SnapshotIntegrityError,
+            SnapshotSecurityError,
+            UnknownNormalizerError,
+        ),
+    ):
+        return "blocked"
+    if isinstance(
+        exc,
+        (
+            AcquisitionError,
+            ModelClientError,
+            ResearchBudgetExhausted,
+            ResearchProtocolError,
+            ResearchRevisionRequired,
+            SchemaError,
+            SnapshotByteLimitError,
+            SnapshotNormalizationError,
+        ),
+    ):
+        return "needs_revision"
+    return "failed"
+
+
+def _pipeline_failure_finding(exc: Exception) -> dict[str, Any]:
+    outcome = _pipeline_failure_outcome(exc)
+    if outcome == "blocked":
+        integrity = isinstance(
+            exc,
+            (ResearchIntegrityError, SnapshotIntegrityError, SnapshotSecurityError),
+        )
+        return review_finding(
+            "research_integrity_impasse" if integrity else "research_external_impasse",
+            (
+                "The trusted research boundary cannot be used safely."
+                if integrity else
+                "A required external research capability is not installed or available."
+            ),
+            f"{type(exc).__name__}: {exc}",
+            (
+                "The exact model, storage, and evidence boundary remains attested."
+                if integrity else
+                "The named external capability is available under the immutable directive."
+            ),
+            (
+                "Resume when an operator has restored and re-attested the exact trusted boundary."
+                if integrity else
+                "Resume when an operator has configured the specifically missing external capability."
+            ),
+            "operator",
+            False,
+            entity_kind="research_mission",
+            entity_id="pipeline",
+        )
+    if outcome == "failed":
+        return review_finding(
+            "research_internal_invariant",
+            "The research implementation violated an internal execution invariant.",
+            f"{type(exc).__name__}: {exc}",
+            "The invariant holds throughout one bounded run without fabricating progress.",
+            "Inspect this diagnostic, repair the internal invariant, and launch a new mission.",
+            "infrastructure",
+            False,
+            entity_kind="research_mission",
+            entity_id="pipeline",
+        )
+
+    if isinstance(exc, ResearchBudgetExhausted):
+        code = "research_approach_budget_exhausted"
+        what_failed = "The current bounded research approach exhausted its action budget."
+        remediation = (
+            "Choose a materially different bounded search/analysis approach or issue a new depth decision."
+        )
+        owner = "governor"
+    elif isinstance(exc, (AcquisitionError, SnapshotByteLimitError)):
+        code = "research_source_acquisition_revision"
+        what_failed = "The current source acquisition route could not yield usable bounded evidence."
+        remediation = (
+            "Choose another allowed source route or narrow the requested source before reacquisition."
+        )
+        owner = "scout"
+    elif isinstance(exc, (ModelClientError, SchemaError, ResearchProtocolError)):
+        code = "research_role_contract_revision"
+        what_failed = "A research role or model response failed its executable contract."
+        remediation = (
+            "Start the next bounded attempt with this validator diagnostic and require a complete replacement response."
+        )
+        owner = "governor"
+    elif isinstance(exc, SnapshotNormalizationError):
+        code = "research_source_normalization_revision"
+        what_failed = "The selected source could not be normalized into verified Reader material."
+        remediation = (
+            "Reacquire the source through a compatible trusted normalizer or choose another allowed source."
+        )
+        owner = "reader"
+    else:
+        code = "research_approach_revision"
+        what_failed = "The current research approach cannot continue without revision."
+        remediation = (
+            "Choose a different bounded search, reading, or analysis route using this diagnostic."
+        )
+        owner = "governor"
+    return review_finding(
+        code,
+        what_failed,
+        f"{type(exc).__name__}: {exc}",
+        "A complete bounded research run with preserved evidence and explicit diagnostics.",
+        remediation,
+        owner,
+        True,
+        entity_kind="research_mission",
+        entity_id="pipeline",
+    )
+
+
+def _verification_review_findings(report: VerificationReport) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    for issue in report.issues:
+        infrastructure = issue.code in {
+            "snapshot_integrity", "locator_out_of_range", "quote_mismatch"
+        }
+        findings.append(review_finding(
+            f"deterministic_{issue.code}",
+            "Deterministic evidence verification rejected a recorded entity.",
+            issue.message,
+            "The entity, its immutable source bytes, locator, and semantic attestation agree.",
+            (
+                "Reacquire and re-read the immutable source snapshot before rebuilding the ledger."
+                if infrastructure else
+                "Rebuild the claim/edge from verified Reader material, then rewrite and review the answer."
+            ),
+            "infrastructure" if infrastructure else "analyst",
+            True,
+            entity_kind="verification_issue",
+            entity_id=issue.entity_id or issue.code,
+        ))
+    return findings
+
+
+def _disclosure_review_findings(failures: Sequence[str]) -> list[dict[str, Any]]:
+    return [
+        review_finding(
+            "uncertainty_disclosure_incomplete",
+            "The draft omitted or weakened a known uncertainty, conflict, or qualification.",
+            failure,
+            "Every recorded uncertainty is explicitly disclosed in a grounded draft unit.",
+            "Rewrite the affected draft unit with the exact claim/gap references and searched scope, then review again.",
+            "writer",
+            True,
+            entity_kind="draft",
+            entity_id=f"disclosure-{index}",
+        )
+        for index, failure in enumerate(failures, 1)
+    ]
 
 
 def caller_source_urls_from_text(value: str) -> tuple[str, ...]:
@@ -313,6 +494,18 @@ def _objective_names_discoverable_artifact_and_value(value: str) -> bool:
 
 class ResearchPipelineError(RuntimeError):
     """Base error for a fail-closed pipeline decision."""
+
+
+class ResearchRevisionRequired(ResearchPipelineError):
+    """The current bounded approach must change, but no external unblock is needed."""
+
+
+class ResearchExternalImpassError(ResearchPipelineError):
+    """Execution needs a specifically named capability outside the Warband."""
+
+
+class ResearchIntegrityError(ResearchPipelineError):
+    """The live execution boundary no longer matches its attested setup."""
 
 
 class ResearchProtocolError(ResearchPipelineError):
@@ -530,6 +723,7 @@ class ResearchSpec:
     success_conditions: tuple[str, ...] = ()
     uncertainty_policy: tuple[str, ...] = ()
     clarification_turns: tuple[ClarificationTurn, ...] = ()
+    revision_context: tuple[dict[str, Any], ...] = ()
     hypotheses: tuple[HypothesisSpec, ...] = ()
 
     def __post_init__(self) -> None:
@@ -595,6 +789,14 @@ class ResearchSpec:
             raise ValueError(
                 "ResearchSpec.clarification_turns exceeds the UTF-8 byte budget"
             )
+        try:
+            normalized_revisions = validate_revision_turns(self.revision_context)
+        except (TypeError, ValueError, UnicodeError) as exc:
+            raise ValueError(f"ResearchSpec.revision_context is invalid: {exc}") from exc
+        if normalized_revisions != self.revision_context:
+            raise ValueError(
+                "ResearchSpec.revision_context must already be normalized and immutable"
+            )
         if self.priorities and self.priorities != self.execution_policy.priorities:
             raise ValueError("ResearchSpec.priorities may not rewrite directive priorities")
         if self.success_conditions and (
@@ -629,6 +831,7 @@ class ResearchSpec:
         language_policy: tuple[str, ...] = (),
         uncertainty_policy: tuple[str, ...] = (),
         clarification_turns: tuple[ClarificationTurn, ...] = (),
+        revision_context: tuple[dict[str, Any], ...] = (),
     ) -> "ResearchSpec":
         policy = ExecutionPolicy.from_directive(directive)
         return cls(
@@ -645,6 +848,7 @@ class ResearchSpec:
             success_conditions=policy.success_conditions,
             uncertainty_policy=uncertainty_policy,
             clarification_turns=clarification_turns,
+            revision_context=revision_context,
             hypotheses=hypotheses,
         )
 
@@ -668,6 +872,7 @@ class ResearchSpec:
             "clarification_turns": [
                 item.to_dict() for item in self.clarification_turns
             ],
+            "revision_context": [dict(item) for item in self.revision_context],
             "hypotheses": [item.to_dict() for item in self.hypotheses],
         }
 
@@ -854,6 +1059,7 @@ class ResearchResult:
     rounds_used: int
     model_calls: int
     diagnostics: tuple[str, ...]
+    review_findings: tuple[dict[str, Any], ...] = ()
     persistent_graph_written: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
@@ -876,6 +1082,7 @@ class ResearchResult:
             "rounds_used": self.rounds_used,
             "model_calls": self.model_calls,
             "diagnostics": list(self.diagnostics),
+            "review_findings": [dict(item) for item in self.review_findings],
             "persistent_graph_written": self.persistent_graph_written,
         }
 
@@ -903,6 +1110,7 @@ class _RunState:
     acquired_uris: list[str] = field(default_factory=list)
     semantic_reviews: list[SemanticReviewRecord] = field(default_factory=list)
     diagnostics: list[str] = field(default_factory=list)
+    revision_findings: list[dict[str, Any]] = field(default_factory=list)
     model_calls: int = 0
     rounds_used: int = 0
     latest_ledger: EvidenceLedger | None = None
@@ -1009,7 +1217,9 @@ class ResearchPipeline:
             live_contract != self.author_identity
             or live_authority != self.author_model_authority_identity
         ):
-            raise ModelProtocolError("author model identity changed after pipeline setup")
+            raise ResearchIntegrityError(
+                "author model identity changed after pipeline setup"
+            )
 
     def _call_model(
         self, state: _RunState, role: str, payload: Mapping[str, Any]
@@ -1126,6 +1336,7 @@ class ResearchPipeline:
         ledger: EvidenceLedger | None = None,
         units: tuple[DraftUnit, ...] | None = None,
         verification: VerificationReport | None = None,
+        findings: Sequence[Mapping[str, Any]] | None = None,
     ) -> ResearchResult:
         selected_ledger = ledger or state.latest_ledger or _empty_ledger(state.snapshots)
         selected_units = state.latest_units if units is None else units
@@ -1143,6 +1354,12 @@ class ResearchPipeline:
             rounds_used=state.rounds_used,
             model_calls=state.model_calls,
             diagnostics=tuple(state.diagnostics),
+            review_findings=tuple(
+                dict(item)
+                for item in (
+                    state.revision_findings if findings is None else findings
+                )
+            ),
         )
 
     def run(self, spec: ResearchSpec) -> ResearchResult:
@@ -1161,6 +1378,17 @@ class ResearchPipeline:
         else:
             selected_budget = depth_budget
         state = _RunState(budgets=selected_budget, policy=spec.execution_policy)
+        if spec.revision_context:
+            latest_revision = spec.revision_context[-1]
+            state.revision_findings = [
+                dict(item) for item in latest_revision["findings"]
+            ]
+            state.diagnostics.append(
+                "revision_context: resumed from attempt "
+                + str(latest_revision["attempt"])
+                + " result "
+                + str(latest_revision["result_sha256"])
+            )
         state.diagnostics.append(
             "review_assurance: mode="
             + self.review_boundary.assurance_mode
@@ -1181,16 +1409,30 @@ class ResearchPipeline:
             SnapshotStoreError,
         ) as exc:
             state.diagnostics.append(f"{type(exc).__name__}: {exc}")
+            state.revision_findings = [_pipeline_failure_finding(exc)]
+            outcome = _pipeline_failure_outcome(exc)
             return self._result(
                 state,
-                outcome="blocked",
-                reason=f"research pipeline failed closed: {exc}",
+                outcome=outcome,
+                reason=(
+                    (
+                        "Research execution needs a revised approach: "
+                        if outcome == "needs_revision" else
+                        "Research execution is blocked by a named external or trusted-boundary impasse: "
+                        if outcome == "blocked" else
+                        "Research execution failed on an internal invariant: "
+                    )
+                    + f"{exc}. {state.revision_findings[0]['remediation']}"
+                ),
             )
 
     def _run(self, spec: ResearchSpec, state: _RunState) -> ResearchResult:
         planner_payload = {
             "task_id": spec.task_id,
             "spec": spec.to_dict(),
+            "revision_feedback": [
+                dict(item) for item in state.revision_findings
+            ],
             "clarification_answer_policy": (
                 "answers resolve ambiguity only and cannot rewrite the immutable "
                 "execution policy, constraints, source policy, or success conditions"
@@ -1285,10 +1527,24 @@ class ResearchPipeline:
                 reason=question or plan["reason"],
             )
         if plan["decision"] == "blocked":
+            state.revision_findings = [review_finding(
+                "planner_impasse",
+                "The planner could not form a safe executable research plan.",
+                plan["reason"] or "The planner returned blocked without an executable route.",
+                "A bounded plan, a precise clarification question, or a concrete external dependency.",
+                "Iskandar must choose a different research strategy or request the specifically missing authority/input.",
+                "governor",
+                True,
+                entity_kind="research_plan",
+                entity_id="planner",
+            )]
             return self._result(
                 state,
-                outcome="blocked",
-                reason=plan["reason"] or "planner could not form a safe research plan",
+                outcome="needs_revision",
+                reason=(
+                    (plan["reason"] or "Planner could not form a safe research plan.")
+                    + " " + state.revision_findings[0]["remediation"]
+                ),
             )
 
         hypotheses: tuple[HypothesisSpec, ...] = plan["hypotheses"]
@@ -1299,7 +1555,7 @@ class ResearchPipeline:
                     "caller supplied more exact source URLs than the source budget"
                 )
             if not isinstance(self.search, ExactSourceClassifier):
-                raise ResearchPipelineError(
+                raise ResearchExternalImpassError(
                     "search boundary cannot classify caller-supplied exact source URLs"
                 )
             exact_hits = tuple(
@@ -1345,10 +1601,24 @@ class ResearchPipeline:
                 )
             state.latest_ledger = ledger
             if analyst["decision"] == "blocked":
+                state.revision_findings = [review_finding(
+                    "analyst_impasse",
+                    "The analyst could not turn the acquired evidence into an answerable ledger.",
+                    analyst["reason"] or "The analyst reported an unanswerable evidence gap.",
+                    "A grounded ledger, a novel search route, or a precisely identified missing external input.",
+                    "Iskandar must select a new evidence strategy or request the exact missing input; do not silently terminate the mission.",
+                    "governor",
+                    True,
+                    entity_kind="evidence_ledger",
+                    entity_id="analyst",
+                )]
                 return self._result(
                     state,
-                    outcome="blocked",
-                    reason=analyst["reason"] or "analyst reported an unanswerable gap",
+                    outcome="needs_revision",
+                    reason=(
+                        (analyst["reason"] or "Analyst reported an unanswerable gap.")
+                        + " " + state.revision_findings[0]["remediation"]
+                    ),
                     ledger=ledger,
                 )
             if analyst["decision"] == "search_more":
@@ -1364,6 +1634,7 @@ class ResearchPipeline:
                 "task_id": spec.task_id,
                 "spec": spec.to_dict(),
                 "ledger": ledger.to_dict(),
+                "revision_feedback": [dict(item) for item in state.revision_findings],
                 "writer_policy": {
                     "all_units_structured": True,
                     "all_factual_units_require_claim_refs": True,
@@ -1568,6 +1839,7 @@ class ResearchPipeline:
             state.latest_ledger = reviewed_ledger
 
             if review.decision == "search_more":
+                state.revision_findings = [dict(item) for item in review.findings]
                 pending_queries = self._require_novel_queries(
                     state,
                     spec,
@@ -1575,11 +1847,53 @@ class ResearchPipeline:
                     "semantic verifier search_more",
                 )
                 continue
-            if review.decision == "blocked":
+            if review.decision == "revise":
+                state.revision_findings = [dict(item) for item in review.findings]
+                state.diagnostics.append(
+                    "semantic_revision: "
+                    + "; ".join(
+                        f"{item['entity_kind']}:{item['entity_id']} -> {item['what_failed']}"
+                        for item in state.revision_findings[:8]
+                    )
+                )
+                pending_queries = ()
+                continue
+            if review.decision == "escalate":
+                state.revision_findings = [
+                    review_finding(
+                        "semantic_escalation_requires_application_verification",
+                        (
+                            "The semantic reviewer reported a possible external impasse, "
+                            "but model output has no authority to block the mission."
+                        ),
+                        (
+                            f"Reviewer finding {item['code']}: {item['what_failed']} "
+                            f"Evidence: {item['evidence']}"
+                        ),
+                        (
+                            "A deterministic application boundary either proves a named "
+                            "external/security/integrity impasse or the Warband uses another route."
+                        ),
+                        (
+                            "Try a materially different evidence route and verify the named "
+                            "dependency through an application-owned boundary; only a deterministic "
+                            "boundary exception may produce blocked."
+                        ),
+                        "governor",
+                        True,
+                        entity_kind=item["entity_kind"],
+                        entity_id=item["entity_id"],
+                    )
+                    for item in review.findings
+                ]
                 return self._result(
                     state,
-                    outcome="blocked",
-                    reason=review.reason or "context-isolated semantic review blocked acceptance",
+                    outcome="needs_revision",
+                    reason=(
+                        "The semantic reviewer requested escalation, but model review "
+                        "cannot authorize a terminal block. "
+                        + state.revision_findings[0]["remediation"]
+                    ),
                     ledger=reviewed_ledger,
                 )
 
@@ -1590,6 +1904,7 @@ class ResearchPipeline:
                 review=review,
                 reviewer_identity=self.reviewer_identity,
             )
+            state.revision_findings = []
             report = EvidenceVerifier(
                 self.snapshot_store,
                 trusted_reviewer_ids=(self.reviewer_identity,),
@@ -1605,6 +1920,7 @@ class ResearchPipeline:
                     and issue_codes <= _DISCLOSABLE_VERIFIER_ISSUES
                     and disclosed
                 ):
+                    state.revision_findings = []
                     return self._result(
                         state,
                         outcome="accepted_with_uncertainty",
@@ -1618,13 +1934,13 @@ class ResearchPipeline:
                     f"uncertainty_disclosure: {failure}"
                     for failure in disclosure_failures
                 )
-                return self._result(
-                    state,
-                    outcome="blocked",
-                    reason="deterministic evidence verification rejected the draft",
-                    ledger=reviewed_ledger,
-                    verification=report,
-                )
+                state.revision_findings = _verification_review_findings(report)
+                if disclosure_failures:
+                    state.revision_findings.extend(
+                        _disclosure_review_findings(disclosure_failures)
+                    )
+                pending_queries = ()
+                continue
             uncertain = self._has_material_uncertainty(reviewed_ledger, units)
             if uncertain:
                 disclosed, disclosure_failures = self._uncertainty_disclosures_complete(
@@ -1635,13 +1951,11 @@ class ResearchPipeline:
                         f"uncertainty_disclosure: {failure}"
                         for failure in disclosure_failures
                     )
-                    return self._result(
-                        state,
-                        outcome="blocked",
-                        reason="known uncertainty was not completely disclosed in the draft",
-                        ledger=reviewed_ledger,
-                        verification=report,
+                    state.revision_findings = _disclosure_review_findings(
+                        disclosure_failures
                     )
+                    pending_queries = ()
+                    continue
             scoped_not_found_units = tuple(
                 unit for unit in units if unit.classification == "scoped_not_found"
             )
@@ -1660,16 +1974,40 @@ class ResearchPipeline:
                 )
             )
             if scoped_not_found_units and not non_not_found_material:
+                if not state.closed_world_catalog_scanned:
+                    state.revision_findings = [review_finding(
+                        "open_world_absence_not_proven",
+                        "The draft treats an open-world search as proof that the requested record is absent.",
+                        "The recorded searches did not completely scan a trusted closed-world catalog.",
+                        "Either find the requested record or prove absence across one complete trusted catalog.",
+                        "Search a genuinely new source route or use a complete trusted catalog; keep the result explicitly scoped until absence is proven.",
+                        "scout",
+                        True,
+                        entity_kind="research_scope",
+                        entity_id="scoped-not-found",
+                    )]
+                    return self._result(
+                        state,
+                        outcome="needs_revision",
+                        reason=(
+                            "The current search cannot prove absence in an open world. "
+                            + state.revision_findings[0]["remediation"]
+                        ),
+                        ledger=reviewed_ledger,
+                        verification=report,
+                    )
+                state.revision_findings = []
                 return self._result(
                     state,
-                    outcome="blocked",
+                    outcome="accepted_with_uncertainty",
                     reason=(
                         "bounded evidence established a scoped not-found result; "
-                        "the requested record cannot be supplied"
+                        "the requested record is absent within the proven searched scope"
                     ),
                     ledger=reviewed_ledger,
                     verification=report,
                 )
+            state.revision_findings = []
             return self._result(
                 state,
                 outcome="accepted_with_uncertainty" if uncertain else "accepted",
@@ -1684,10 +2022,25 @@ class ResearchPipeline:
 
         state.diagnostics.append("bounded_search: maximum rounds exhausted")
         self._add_scoped_not_found(state, spec.question)
+        if not state.revision_findings:
+            state.revision_findings = [review_finding(
+                "bounded_revision_exhausted",
+                "The bounded research and revision rounds ended before acceptance.",
+                f"Used all {state.budgets.max_rounds} allowed round(s) without a green final review.",
+                "A revised research approach that resolves the remaining evidence or draft findings.",
+                "Iskandar must choose a new search angle, increase the bounded depth, or request the missing external input.",
+                "governor",
+                True,
+                entity_kind="research_mission",
+                entity_id="round-budget",
+            )]
         return self._result(
             state,
-            outcome="blocked",
-            reason="bounded research rounds exhausted before acceptance",
+            outcome="needs_revision",
+            reason=(
+                "The current bounded approach is exhausted; Iskandar must choose the next "
+                "revision strategy. " + state.revision_findings[0]["remediation"]
+            ),
         )
 
     def _parse_plan(self, raw: Mapping[str, Any], spec: ResearchSpec) -> dict[str, Any]:
@@ -1995,7 +2348,7 @@ class ResearchPipeline:
             if query.casefold() in {
                 searched.casefold() for searched in state.searched_queries
             }:
-                raise ResearchPipelineError(
+                raise ResearchRevisionRequired(
                     "internal scheduler attempted to repeat an executed search query"
                 )
             if len(state.searched_queries) >= state.budgets.max_search_queries:
@@ -2052,7 +2405,7 @@ class ResearchPipeline:
             ]
             best_score = max((score for score, _index, _hit in ranked), default=0)
             if best_score <= 0:
-                raise ResearchPipelineError(
+                raise ResearchRevisionRequired(
                     "closed-world catalog metadata has no lexical overlap with the "
                     "objective or executed queries; guessing a source is forbidden"
                 )
@@ -2107,7 +2460,9 @@ class ResearchPipeline:
         # Read it back immediately; later roles receive only bytes proven to be in CAS.
         normalized = self.snapshot_store.read_normalized(snapshot)
         if normalized != fetched.normalized:
-            raise ResearchPipelineError("snapshot normalization changed during persistence")
+            raise ResearchIntegrityError(
+                "snapshot normalization changed during persistence"
+            )
         state.snapshots.append(snapshot)
         state.normalized_by_snapshot[snapshot.id] = normalized
         state.acquired_uris.append(fetched.final_uri)
@@ -2399,6 +2754,7 @@ class ResearchPipeline:
             "task_id": spec.task_id,
             "round": round_number,
             "spec": spec.to_dict(),
+            "revision_feedback": [dict(item) for item in state.revision_findings],
             "hypotheses": [
                 {"id": f"hypothesis-{index}", **item.to_dict()}
                 for index, item in enumerate(hypotheses, 1)

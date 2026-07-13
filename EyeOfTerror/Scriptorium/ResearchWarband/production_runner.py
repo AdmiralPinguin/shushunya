@@ -35,6 +35,7 @@ from .pipeline import (
     ResearchSpec,
     caller_source_urls_from_text,
 )
+from .process_supervisor import validate_revision_turns
 from .research_tools import (
     AcquisitionError,
     ConfiguredDomainSourceClassifier,
@@ -361,6 +362,15 @@ def _validate_context(
     return tuple(turns)
 
 
+def _validate_revision_context(context: Any) -> tuple[dict[str, Any], ...]:
+    try:
+        return validate_revision_turns(getattr(context, "revision_turns", ()))
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise ProductionRunnerError(
+            f"attempt revision_turns are invalid: {exc}"
+        ) from exc
+
+
 def _validate_production_directive(
     payload: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any], tuple[str, ...]]:
@@ -610,7 +620,7 @@ def validate_external_evaluator_result(value: Any) -> dict[str, Any]:
         raise ProductionRunnerError("external evaluator mission_id is invalid")
     status = value.get("status")
     accepted = value.get("accepted")
-    if status not in {"accepted", "needs_user", "blocked", "failed"}:
+    if status not in {"accepted", "needs_user", "needs_revision", "blocked", "failed"}:
         raise ProductionRunnerError("external evaluator status is invalid")
     if type(accepted) is not bool or accepted is not (status == "accepted"):
         raise ProductionRunnerError("external evaluator accepted flag is inconsistent")
@@ -655,7 +665,9 @@ def build_external_evaluator_result(
         "accepted": "accepted",
         "accepted_with_uncertainty": "accepted",
         "clarify": "needs_user",
+        "needs_revision": "needs_revision",
         "blocked": "blocked",
+        "failed": "failed",
     }[result.outcome]
     final_text, _refs = _final_text_and_refs(result)
     value = {
@@ -1043,10 +1055,12 @@ def run_mission(payload: dict[str, Any], context: Any) -> dict[str, Any]:
     else:
         raise ProductionRunnerError("RESEARCH_WARBAND_PROFILE is unsupported")
     clarification_turns = _validate_context(payload, context)
+    revision_turns = _validate_revision_context(context)
     spec = ResearchSpec.from_directive(
         directive,
         caller_source_urls=caller_source_urls,
         clarification_turns=clarification_turns,
+        revision_context=revision_turns,
     )
     pipeline, snapshot_store, runtime_attestation = _build_pipeline(profile, payload)
     result = pipeline.run(spec)
@@ -1075,6 +1089,7 @@ def run_mission(payload: dict[str, Any], context: Any) -> dict[str, Any]:
         "rounds_used",
         "model_calls",
         "diagnostics",
+        "review_findings",
         "persistent_graph_written",
     )
     return {

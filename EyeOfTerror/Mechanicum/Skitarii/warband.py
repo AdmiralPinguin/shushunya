@@ -65,11 +65,33 @@ def run_mission(goal: str, executor: Any, *, checks: list[str] | None = None,
 
     # 4) Exhausted rounds without acceptance -> honest escalation with the real failures.
     fails = [r for r in rounds[-1]["acceptance"]["results"] if not r["ok"]]
+    diagnostics = [
+        {
+            "code": "public_candidate_failure",
+            "what_failed": "The candidate still fails a public executable acceptance check.",
+            "evidence": (
+                f"{item.get('target') or 'public check'}: "
+                f"{item.get('why') or item.get('stderr') or item.get('stdout') or 'failed'}"
+            )[:2_000],
+            "expected": "Every public behavioural check passes without regressing earlier green checks.",
+            "remediation": "Fix the reported behaviour and rerun the complete acceptance set.",
+            "revision_owner": "fighter",
+            "retryable": True,
+            "entity_kind": "behavioural_check",
+            "entity_id": f"public-{index}",
+        }
+        for index, item in enumerate(fails, 1)
+    ]
     return {"status": "failed", "accepted": False, "rounds": rounds,
             "summary": last_fighter.get("summary", ""),
             "artifacts": last_fighter.get("artifacts", []),
             "checks": checks,
-            "blockers": [f"{f['target']} -> {f.get('stderr','') or f.get('stdout','') or 'failed'}" for f in fails]}
+            "revision_required": True,
+            "verification_findings": diagnostics,
+            "blockers": [
+                f"{f['target']} -> {f.get('why') or f.get('stderr','') or f.get('stdout','') or 'failed'}"
+                for f in fails
+            ]}
 
 
 if __name__ == "__main__":  # manual driver

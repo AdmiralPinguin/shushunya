@@ -30,10 +30,13 @@ _PAYLOAD_FIELDS = frozenset(
     }
 )
 _QUIESCENT_STATUSES = frozenset(
-    {"done", "needs_user", "blocked", "failed", "cancelled"}
+    {"done", "needs_user", "needs_revision", "blocked", "failed", "cancelled"}
 )
 _SERVICE_STATUSES = frozenset(
-    {"queued", "running", "cancelling", "done", "needs_user", "blocked", "failed", "cancelled"}
+    {
+        "queued", "running", "cancelling", "done", "needs_user",
+        "needs_revision", "blocked", "failed", "cancelled",
+    }
 )
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -232,6 +235,7 @@ class HTTPExternalEvalSubject(SubjectAdapter):
         expected = {
             "done": "accepted",
             "needs_user": "needs_user",
+            "needs_revision": "needs_revision",
             "blocked": "blocked",
             "failed": "failed",
         }.get(str(lifecycle))

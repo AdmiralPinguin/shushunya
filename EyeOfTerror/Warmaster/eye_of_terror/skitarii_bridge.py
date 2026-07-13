@@ -37,7 +37,12 @@ from EyeOfTerror.common_protocol.ceraxia_directive import (
     validate_directive_for_commander,
     validate_ceraxia_directive,
 )
-from EyeOfTerror.common_protocol.validation import validate_protocol_payload
+from EyeOfTerror.common_protocol import review_finding
+from EyeOfTerror.common_protocol.validation import (
+    ProtocolValidationError,
+    validate_protocol_payload,
+    validate_review_findings,
+)
 
 SKITARII_URL = os.environ.get(
     "SKITARII_URL", os.environ.get("SKITARII_WARBAND_URL", "http://127.0.0.1:7200"),
@@ -4292,6 +4297,184 @@ def _finalize_linked_blocked(
     ledger.record_event("skitarii_protocol_blocked_recorded", {"mission_id": mission_id, "phase": phase})
 
 
+def _finalize_linked_revision(
+    run_dir: Path,
+    ledger: Any,
+    summary: str,
+    *,
+    artifacts: list[str] | None = None,
+    findings: list[dict[str, Any]] | None = None,
+    next_action: dict[str, Any] | None = None,
+) -> None:
+    """Return an exhausted worker approach to Ceraxia without killing the mission."""
+
+    mission_dir = _mission_dir(run_dir)
+    if not mission_dir or not mission_dir.exists():
+        raise RuntimeError("native run is missing its linked mission directory")
+    from . import mission_control as mc
+
+    mission_id = str(
+        _read_json(mission_dir / "mission.json").get("mission_id") or mission_dir.name
+    )
+    actionable = [dict(item) for item in findings or [] if isinstance(item, dict)]
+    remediation = str(
+        (next_action or {}).get("remediation")
+        or (actionable[0].get("remediation") if actionable else "")
+        or "Ceraxia must select another repair approach and redispatch Skitarii."
+    )
+    report = mc.governor_report(
+        mission_id,
+        governor="Ceraxia",
+        status="needs_revision",
+        summary=summary,
+        deliverables=artifacts or [],
+        quality_review={
+            "passed": False,
+            "checks": actionable,
+            "findings": actionable,
+        },
+        revision_plan={
+            "required": True,
+            "reason": summary,
+            "steps": [{
+                "step_id": "skitarii_mission",
+                "worker": "Skitarii",
+                "order": remediation,
+                "findings": actionable,
+            }],
+        },
+        user_facing_answer="",
+    )
+    review = mc.acceptance_review(
+        mission_id,
+        accepted=False,
+        reason=summary,
+        required_revision={
+            "to": "Ceraxia",
+            "order": remediation,
+            "findings": actionable,
+        },
+        escalate_to_user=False,
+    )
+    order = mc.revision_order(
+        mission_id,
+        to="Ceraxia",
+        reason=summary,
+        order=remediation,
+        required_steps=["Choose another repair approach", "Redispatch Skitarii"],
+    )
+    mc.validate_protocol_payload(report, expected_type="governor_report")
+    mc.validate_protocol_payload(review, expected_type="acceptance_review")
+    mc.validate_protocol_payload(order, expected_type="revision_order")
+    mc._write_json(mission_dir / "governor_report.json", report)
+    mc._write_json(
+        mc._next_numbered_path(mission_dir / "governor_reports", "governor_report"),
+        report,
+    )
+    mc._write_json(mission_dir / "acceptance_review.json", review)
+    mc._write_json(
+        mc._next_numbered_path(mission_dir / "acceptance_reviews", "acceptance_review"),
+        review,
+    )
+    mc._write_json(mission_dir / "revision_order.json", order)
+    mc.record_mission_state(
+        mission_dir, "revision", run_status="revision", phase="revision",
+    )
+    mc.append_progress_event(
+        mission_dir / "progress_events.jsonl",
+        mc.progress_event(
+            mission_id,
+            "Ceraxia",
+            "governor",
+            "revising",
+            "running",
+            "Цераксия получила конкретную ревизию",
+            remediation[:400],
+        ),
+    )
+    ledger.record_event(
+        "skitarii_protocol_revision_recorded", {"mission_id": mission_id}
+    )
+
+
+def _finalize_linked_failed(
+    run_dir: Path,
+    ledger: Any,
+    summary: str,
+    *,
+    artifacts: list[str] | None = None,
+    findings: list[dict[str, Any]] | None = None,
+    revision_exhausted: bool = True,
+) -> None:
+    """Persist an exhausted autonomous effort as explained failure, never block."""
+
+    mission_dir = _mission_dir(run_dir)
+    if not mission_dir or not mission_dir.exists():
+        raise RuntimeError("native run is missing its linked mission directory")
+    from . import mission_control as mc
+
+    mission_id = str(
+        _read_json(mission_dir / "mission.json").get("mission_id") or mission_dir.name
+    )
+    actionable = [dict(item) for item in findings or [] if isinstance(item, dict)]
+    report = mc.governor_report(
+        mission_id,
+        governor="Ceraxia",
+        status="failed",
+        summary=summary,
+        deliverables=artifacts or [],
+        quality_review={
+            "passed": False,
+            "checks": actionable,
+            "findings": actionable,
+            "autonomous_revision_exhausted": revision_exhausted,
+        },
+        revision_plan={
+            "required": False,
+            "reason": (
+                "autonomous approaches exhausted"
+                if revision_exhausted else "internal contract failure"
+            ),
+            "steps": [],
+        },
+        user_facing_answer=summary,
+    )
+    mc.validate_protocol_payload(report, expected_type="governor_report")
+    mc._write_json(mission_dir / "governor_report.json", report)
+    mc._write_json(
+        mc._next_numbered_path(mission_dir / "governor_reports", "governor_report"),
+        report,
+    )
+    final = mc.final_response(
+        mission_id, "failed", summary, artifacts=artifacts or [],
+    )
+    final["review_findings"] = actionable
+    if revision_exhausted:
+        final["autonomous_revision_exhausted"] = True
+    mc._write_json(mission_dir / "final_response.json", final)
+    mc.record_mission_state(
+        mission_dir, "failed", run_status="failed", phase="failed",
+    )
+    mc.append_progress_event(
+        mission_dir / "progress_events.jsonl",
+        mc.progress_event(
+            mission_id,
+            "Ceraxia",
+            "governor",
+            "failed",
+            "failed",
+            (
+                "Автономные подходы исчерпаны"
+                if revision_exhausted else "Внутренний контракт Skitarii нарушен"
+            ),
+            summary[:400],
+        ),
+    )
+    ledger.record_event(
+        "skitarii_protocol_failure_recorded", {"mission_id": mission_id}
+    )
+
+
 def _finalize_linked_cancelled(
     run_dir: Path,
     ledger: Any,
@@ -4351,6 +4534,95 @@ def _bridge_failure(
     if error:
         payload["error"] = error
     return payload
+
+
+def _skitarii_terminal_cleanup_proven(ledger: Any) -> bool:
+    data = ledger.to_dict()
+    meta = data.get("skitarii_mission")
+    return bool(
+        isinstance(meta, dict)
+        and meta.get("inflight") is False
+        and meta.get("cleanup_complete") is True
+    )
+
+
+def _skitarii_exception_is_external_blocker(error: BaseException) -> bool:
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, urllib.error.URLError):
+            return True
+        current = current.__cause__ or current.__context__
+    message = str(error).lower()
+    return any(
+        marker in message
+        for marker in (
+            "identity",
+            "different service endpoint",
+            "bearer token",
+            "cleanup is unresolved",
+            "cleanup was not proven",
+            "request failed",
+            "bridge timeout",
+        )
+    )
+
+
+def _record_skitarii_internal_contract_failure(
+    run_dir: Path,
+    task_id: str,
+    ledger: Any,
+    *,
+    summary: str,
+    error: str,
+) -> dict[str, Any]:
+    finding = review_finding(
+        "skitarii_bridge_internal_contract_failure",
+        "Skitarii returned a result that the bridge could not validate.",
+        error,
+        "A terminal Skitarii result satisfies the shared verdict contract.",
+        "Repair the Skitarii result serialization or bridge contract, then resume the persisted mission.",
+        "infrastructure",
+        True,
+        entity_kind="skitarii_verdict",
+        entity_id="terminal-verdict",
+    )
+    failure = _bridge_failure(
+        run_dir,
+        task_id,
+        summary,
+        phase="failed",
+        status="failed",
+        error=error,
+    )
+    failure["verification_findings"] = [finding]
+    failure["review_findings"] = [finding]
+    failure["next_action"] = {
+        "kind": "repair_internal_contract",
+        "reason": finding["what_failed"],
+        "remediation": finding["remediation"],
+        "retryable": True,
+        "findings": [finding],
+    }
+    ledger.set_result(failure)
+    ledger.force_status("failed", reason=summary)
+    ledger.record_event(
+        "skitarii_internal_contract_failure", {"error": error[:500]}
+    )
+    try:
+        _finalize_linked_failed(
+            run_dir,
+            ledger,
+            summary,
+            findings=[finding],
+            revision_exhausted=False,
+        )
+    except Exception as finalize_exc:  # noqa: BLE001 - failure is already durable
+        ledger.record_event(
+            "skitarii_finalize_error", {"error": str(finalize_exc)[:300]}
+        )
+    return failure
 
 
 def _ceraxia_reprepare_action(message: str = "") -> dict[str, Any]:
@@ -5140,6 +5412,18 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
             cancelled = None
         if cancelled is not None:
             return cancelled
+        ledger = TaskLedger.load(run_dir / "task_ledger.json")
+        if (
+            _skitarii_terminal_cleanup_proven(ledger)
+            and not _skitarii_exception_is_external_blocker(exc)
+        ):
+            return _record_skitarii_internal_contract_failure(
+                run_dir,
+                task_id,
+                ledger,
+                summary=f"Skitarii terminal contract failed: {exc}",
+                error=f"{type(exc).__name__}: {exc}",
+            )
         ledger.record_event("skitarii_error", {"error": str(exc)})
         failure = _bridge_failure(
             run_dir,
@@ -5162,19 +5446,32 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
 
     if not isinstance(verdict, dict):
         msg = "Skitarii returned a malformed non-object verdict."
-        failure = _bridge_failure(run_dir, task_id, msg, phase="skitarii_error", error="invalid verdict shape")
-        ledger.set_result(failure)
-        ledger.force_status("blocked", reason="invalid Skitarii verdict shape")
-        try:
-            _finalize_linked_blocked(run_dir, ledger, msg, phase="skitarii_error")
-        except Exception as finalize_exc:  # noqa: BLE001
-            ledger.record_event("skitarii_finalize_error", {"error": str(finalize_exc)[:300]})
-        return failure
+        return _record_skitarii_internal_contract_failure(
+            run_dir,
+            task_id,
+            ledger,
+            summary=msg,
+            error="invalid verdict shape",
+        )
 
     accepted_value = verdict.get("accepted")
     needs_user_value = verdict.get("needs_user", False)
     verdict_schema_error = ""
-    if not isinstance(accepted_value, bool):
+    try:
+        verification_findings = validate_review_findings(
+            verdict.get("verification_findings", []),
+            require_nonempty=(
+                verdict.get("verification_degraded") is True
+                or verdict.get("revision_required") is True
+            ),
+            context="Skitarii verdict verification_findings",
+        )
+    except ProtocolValidationError as exc:
+        verification_findings = []
+        verdict_schema_error = str(exc)
+    if verdict_schema_error:
+        pass
+    elif not isinstance(accepted_value, bool):
         verdict_schema_error = "accepted must be a boolean"
     elif not isinstance(needs_user_value, bool):
         verdict_schema_error = "needs_user must be a boolean"
@@ -5187,6 +5484,11 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
     elif accepted_value:
         checks_value = verdict.get("checks")
         held_out_count = verdict.get("held_out_check_count")
+        verification_degraded = verdict.get("verification_degraded") is True
+        public_replay_acceptance = (
+            verdict.get("public_replay_acceptance")
+            if isinstance(verdict.get("public_replay_acceptance"), dict) else {}
+        )
         held_out_acceptance = (
             verdict.get("held_out_acceptance")
             if isinstance(verdict.get("held_out_acceptance"), dict) else {}
@@ -5201,26 +5503,39 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
             verdict_schema_error = "accepted verdict must have a completed service status"
         elif verdict.get("held_out_required") is not True:
             verdict_schema_error = "accepted verdict must require the private verifier"
-        elif type(held_out_count) is not int or held_out_count <= 0:
+        elif verification_degraded and (
+            type(held_out_count) is not int or held_out_count != 0
+        ):
+            verdict_schema_error = "degraded verdict must report zero private checks"
+        elif verification_degraded and not str(
+            verdict.get("held_out_status") or ""
+        ).startswith("degraded_"):
+            verdict_schema_error = "degraded verdict must identify the private-verifier failure"
+        elif verification_degraded and public_replay_acceptance.get("accepted") is not True:
+            verdict_schema_error = "degraded verdict requires successful independent public replay"
+        elif verification_degraded and (
+            not isinstance(verification_findings, list) or not verification_findings
+        ):
+            verdict_schema_error = "degraded verdict requires actionable verification findings"
+        elif not verification_degraded and (
+            type(held_out_count) is not int or held_out_count <= 0
+        ):
             verdict_schema_error = "accepted verdict must report private verifier checks"
-        elif str(verdict.get("held_out_status") or "") != "passed":
+        elif not verification_degraded and str(verdict.get("held_out_status") or "") != "passed":
             verdict_schema_error = "accepted verdict private verifier status must be passed"
-        elif held_out_acceptance.get("accepted") is not True:
+        elif not verification_degraded and held_out_acceptance.get("accepted") is not True:
             verdict_schema_error = "accepted verdict must include successful private verifier evidence"
         elif patch_bundle_value.get("apply_gate") != "accepted":
             verdict_schema_error = "accepted verdict patch bundle apply gate must be accepted"
     if verdict_schema_error:
         msg = f"Skitarii returned a malformed verdict: {verdict_schema_error}."
-        failure = _bridge_failure(
-            run_dir, task_id, msg, phase="skitarii_error", error=verdict_schema_error,
+        return _record_skitarii_internal_contract_failure(
+            run_dir,
+            task_id,
+            ledger,
+            summary=msg,
+            error=verdict_schema_error,
         )
-        ledger.set_result(failure)
-        ledger.force_status("blocked", reason="invalid Skitarii verdict contract")
-        try:
-            _finalize_linked_blocked(run_dir, ledger, msg, phase="skitarii_error")
-        except Exception as finalize_exc:  # noqa: BLE001
-            ledger.record_event("skitarii_finalize_error", {"error": str(finalize_exc)[:300]})
-        return failure
 
     ledger = TaskLedger.load(run_dir / "task_ledger.json")
     accepted = accepted_value
@@ -5229,6 +5544,7 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
     artifacts = [str(a) for a in raw_artifacts]
     rounds = verdict.get("rounds") if isinstance(verdict.get("rounds"), list) else []
     files = verdict.get("files") if isinstance(verdict.get("files"), dict) else {}
+    verification_degraded = verdict.get("verification_degraded") is True
 
     # persist the deliverable files next to the run and in the mission dir
     saved: list[str] = []
@@ -5327,20 +5643,51 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
             "Patch verified and ready to apply, but the live repository is unchanged "
             "because SKITARII_AUTOAPPLY is not enabled."
         )
+    service_verdict_status = str(verdict.get("status") or "").strip().lower()
+    revision_exhausted = verdict.get("revision_exhausted") is True
+    worker_failed = bool(
+        not accepted
+        and not ready_to_apply
+        and not publish_pending
+        and (revision_exhausted or service_verdict_status == "failed")
+    )
     if not accepted:
         verdict["accepted"] = False
         verdict["status"] = (
             "ready_to_apply" if ready_to_apply
-            else ("push_pending" if publish_pending else "blocked")
+            else (
+                "push_pending" if publish_pending
+                else (
+                    "failed" if worker_failed
+                    else ("revision" if verdict.get("revision_required") is True else "blocked")
+                )
+            )
         )
 
     needs_user = bool(verdict.get("needs_user"))
     question = str(verdict.get("question") or "")
+    revision_required = bool(
+        not accepted
+        and verdict.get("revision_required") is True
+        and not ready_to_apply
+        and not publish_pending
+        and not needs_user
+        and not worker_failed
+    )
     status = (
         "completed" if accepted
         else (
             "ready_to_apply" if ready_to_apply
-            else ("push_pending" if publish_pending else ("needs_user" if needs_user else "blocked"))
+            else (
+                "push_pending" if publish_pending
+                else (
+                    "needs_user" if needs_user
+                    else (
+                        "failed" if worker_failed
+                        else ("revision" if revision_required else "blocked")
+                    )
+                )
+            )
         )
     )
     next_action = {}
@@ -5367,6 +5714,26 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
         next_action = _publication_next_action(patch_stage or {}, summary)
     elif needs_user:
         next_action = _expired_clarification_action(question)
+    elif revision_required:
+        first_finding = verification_findings[0] if verification_findings else {}
+        next_action = {
+            "kind": "revise_code_mission",
+            "reason": str(first_finding.get("what_failed") or summary),
+            "remediation": str(
+                first_finding.get("remediation")
+                or "Ceraxia must select another repair approach and redispatch Skitarii."
+            ),
+            "revision_owner": str(first_finding.get("revision_owner") or "governor"),
+            "retryable": bool(first_finding.get("retryable", True)),
+            "findings": verification_findings,
+        }
+    elif worker_failed:
+        next_action = {
+            "kind": "inspect_exhausted_attempts",
+            "reason": summary,
+            "retryable": False,
+            "findings": verification_findings,
+        }
     ledger.record_event("skitarii_verdict", {"accepted": accepted, "status": status,
                                              "rounds": len(rounds),
                                              "seconds": int(time.monotonic() - started),
@@ -5380,6 +5747,11 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
         "next_action": next_action,
         "needs_user": needs_user,
         "question": question,
+        "verification_degraded": verification_degraded,
+        "verification_mode": str(verdict.get("verification_mode") or "private_held_out"),
+        "verification_findings": verification_findings,
+        "revision_required": revision_required,
+        "revision_exhausted": revision_exhausted,
     }
     if accepted:
         reconcile_action = {
@@ -5430,8 +5802,39 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
             ledger.force_status("completed", reason="repository publication and mission protocol completed")
     else:
         ledger.set_result(result_payload)
-        ledger.force_status("push_pending" if publish_pending else "blocked", reason=status)
-        if not publish_pending:
+        ledger.force_status(
+            "push_pending" if publish_pending
+            else ("revision" if revision_required else ("failed" if worker_failed else "blocked")),
+            reason=status,
+        )
+        if revision_required:
+            try:
+                _finalize_linked_revision(
+                    run_dir,
+                    ledger,
+                    summary,
+                    artifacts=saved,
+                    findings=verification_findings,
+                    next_action=next_action,
+                )
+            except Exception as exc:  # noqa: BLE001 - revision finalization is best-effort
+                ledger.record_event(
+                    "skitarii_finalize_error", {"error": f"{type(exc).__name__}: {str(exc)[:240]}"},
+                )
+        elif worker_failed:
+            try:
+                _finalize_linked_failed(
+                    run_dir,
+                    ledger,
+                    summary,
+                    artifacts=saved,
+                    findings=verification_findings,
+                )
+            except Exception as exc:  # noqa: BLE001 - failure finalization is best-effort
+                ledger.record_event(
+                    "skitarii_finalize_error", {"error": f"{type(exc).__name__}: {str(exc)[:240]}"},
+                )
+        elif not publish_pending:
             try:
                 _finalize_linked_blocked(
                     run_dir,
@@ -5454,4 +5857,9 @@ def run_via_skitarii(run_dir: Path, task_id: str, timeout_sec: int = 5400) -> di
             "artifact_root": str(run_dir.resolve()), "final_step": "skitarii",
             "patch_stage": patch_stage, "ready_to_apply": ready_to_apply,
             "next_action": next_action, "needs_user": needs_user,
-            "question": question}
+            "question": question,
+            "verification_degraded": verification_degraded,
+            "verification_mode": str(verdict.get("verification_mode") or "private_held_out"),
+            "verification_findings": verification_findings,
+            "revision_required": revision_required,
+            "revision_exhausted": revision_exhausted}

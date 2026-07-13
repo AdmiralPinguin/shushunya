@@ -56,6 +56,103 @@ MAX_TERMINAL_DURABLE_BYTES = _env_int(
 MAX_STORE_DURABLE_BYTES = _env_int("SKITARII_MISSION_STORE_MAX_BYTES", 4_000_000_000, 4096)
 MAX_STORE_MISSIONS = _env_int("SKITARII_MISSION_STORE_MAX_COUNT", 128, 1)
 MAX_ACTIVE_MISSIONS = _env_int("SKITARII_MISSION_ACTIVE_MAX_COUNT", 1, 1)
+MAX_AUTO_REVISION_ATTEMPTS = _env_int(
+    "SKITARII_MISSION_AUTO_REVISION_ATTEMPTS", 3, 1
+)
+MAX_REVISION_TURNS = _env_int("SKITARII_MISSION_REVISION_TURNS", 8, 1)
+MAX_REVISION_FINDINGS = 20
+MAX_REVISION_CONTEXT_BYTES = _env_int(
+    "SKITARII_MISSION_REVISION_CONTEXT_BYTES", 128_000, 4096
+)
+
+_REVIEW_FINDING_FIELDS = frozenset({
+    "code",
+    "entity_kind",
+    "entity_id",
+    "what_failed",
+    "evidence",
+    "expected",
+    "remediation",
+    "revision_owner",
+    "retryable",
+})
+_REVIEW_REVISION_OWNERS = frozenset({
+    "scout",
+    "reader",
+    "analyst",
+    "writer",
+    "fighter",
+    "governor",
+    "infrastructure",
+    "operator",
+})
+
+
+def _revision_findings(value: Any) -> list[dict[str, Any]]:
+    """Return bounded actionable findings safe to persist as retry context."""
+
+    if not isinstance(value, list) or not 1 <= len(value) <= MAX_REVISION_FINDINGS:
+        return []
+    normalized: list[dict[str, Any]] = []
+    for raw in value:
+        if not isinstance(raw, dict) or set(raw) != _REVIEW_FINDING_FIELDS:
+            return []
+        item: dict[str, Any] = {}
+        for field in _REVIEW_FINDING_FIELDS - {"retryable"}:
+            field_value = raw.get(field)
+            if type(field_value) is not str or not field_value.strip():
+                return []
+            encoded = field_value.strip().encode("utf-8", errors="strict")
+            if len(encoded) > 2_000:
+                return []
+            item[field] = field_value.strip()
+        if item["revision_owner"] not in _REVIEW_REVISION_OWNERS:
+            return []
+        if type(raw.get("retryable")) is not bool:
+            return []
+        item["retryable"] = raw["retryable"]
+        normalized.append(item)
+    if len(_json_bytes(normalized)) > MAX_REVISION_CONTEXT_BYTES:
+        return []
+    return normalized
+
+
+def _revision_turn(verdict: dict[str, Any], attempt: int) -> dict[str, Any] | None:
+    if (
+        verdict.get("accepted") is not False
+        or verdict.get("revision_required") is not True
+        or verdict.get("needs_user") is True
+        or verdict.get("cleanup_complete") is False
+    ):
+        return None
+    findings = _revision_findings(verdict.get("verification_findings"))
+    retryable = [item for item in findings if item["retryable"]]
+    if not retryable:
+        return None
+    order = " ".join(item["remediation"] for item in retryable[:5]).strip()
+    order = _bounded_text(order, 8_000)
+    raw = _json_bytes(verdict, sort_keys=True)
+    turn = {
+        "attempt": int(attempt),
+        "result_sha256": hashlib.sha256(raw).hexdigest(),
+        "decision_owner": (
+            "Ceraxia"
+            if any(item["revision_owner"] == "governor" for item in retryable)
+            else "SkitariiWarband"
+        ),
+        "leader_order": order,
+        "findings": findings,
+    }
+    return turn if len(_json_bytes(turn)) <= MAX_REVISION_CONTEXT_BYTES else None
+
+
+def _revision_time_available(mission: "Mission") -> bool:
+    payload = mission.payload or {}
+    try:
+        max_wall = max(1, int(payload.get("max_wall_sec") or 3600))
+    except (TypeError, ValueError):
+        max_wall = 3600
+    return time.time() - mission.created < max(1, max_wall - 30)
 
 
 class MissionExistsError(RuntimeError):
@@ -279,6 +376,8 @@ class Mission:
         self.request_sha256: str | None = None
         self.created = time.time()
         self.updated = time.time()
+        self.attempt = 0
+        self.revision_turns: list[dict[str, Any]] = []
         self.question: str | None = None
         self.answer: str | None = None
         self.storage_error: str | None = None
@@ -478,6 +577,8 @@ class Mission:
             "payload": None,
             "payload_ref": payload_ref,
             "request_sha256": self.request_sha256,
+            "attempt": self.attempt,
+            "revision_turns": self.revision_turns,
             "storage_error": self.storage_error,
             "inflight": self.inflight,
             "cleanup_complete": self.cleanup_complete,
@@ -769,6 +870,8 @@ class Mission:
                 "status": self.status,
                 "question": self.question,
                 "request_sha256": self.request_sha256,
+                "attempt": self.attempt,
+                "revision_turns": [dict(turn) for turn in self.revision_turns],
                 "inflight": self.inflight,
                 "cleanup_complete": self.cleanup_complete,
                 "events": events,
@@ -939,7 +1042,7 @@ def get(mission_id: str) -> Mission | None:
 
 
 def run_async(mission: Mission, fn: Callable[[Mission], dict[str, Any]]) -> None:
-    """Run ``fn`` in a background thread and persist its bounded verdict."""
+    """Run ``fn`` and automatically feed actionable failures into a new attempt."""
 
     with mission._lock:
         if mission.inflight:
@@ -948,6 +1051,7 @@ def run_async(mission: Mission, fn: Callable[[Mission], dict[str, Any]]) -> None
         # the interval before the new thread starts.
         mission.inflight = True
         mission.cleanup_complete = False
+        mission.attempt += 1
         try:
             mission._persist(raise_errors=True)
         except Exception as exc:
@@ -963,23 +1067,70 @@ def run_async(mission: Mission, fn: Callable[[Mission], dict[str, Any]]) -> None
                     mission.result = {"status": "cancelled", "accepted": False}
                     return
                 mission.set_status("running")
-            verdict = fn(mission)
-            if not isinstance(verdict, dict):
-                raise TypeError("mission worker returned a non-object verdict")
-            if verdict.get("cleanup_complete") is False:
-                cleanup_proven = False
-                verdict = {
-                    **verdict,
-                    "status": "blocked",
-                    "accepted": False,
-                    "cleanup_complete": False,
-                }
-            if mission.cancelled.is_set() and cleanup_proven:
+            while True:
+                verdict = fn(mission)
+                if not isinstance(verdict, dict):
+                    raise TypeError("mission worker returned a non-object verdict")
+                if verdict.get("cleanup_complete") is False:
+                    cleanup_proven = False
+                    verdict = {
+                        **verdict,
+                        "status": "blocked",
+                        "accepted": False,
+                        "cleanup_complete": False,
+                    }
+                if mission.cancelled.is_set() and cleanup_proven:
+                    with mission._lock:
+                        mission.result = {"status": "cancelled", "accepted": False}
+                    return
+
+                turn = _revision_turn(verdict, mission.attempt)
+                can_retry = bool(
+                    turn
+                    and cleanup_proven
+                    and mission.attempt < MAX_AUTO_REVISION_ATTEMPTS
+                    and len(mission.revision_turns) < MAX_REVISION_TURNS
+                    and _revision_time_available(mission)
+                )
+                if not can_retry:
+                    if verdict.get("revision_required") is True and not verdict.get("accepted"):
+                        verdict = {
+                            **verdict,
+                            "status": "failed",
+                            "accepted": False,
+                            "revision_exhausted": True,
+                            "revision_attempts": mission.attempt,
+                            "summary": _bounded_text(
+                                str(verdict.get("summary") or "Code verification failed.")
+                                + " Autonomous repair approaches were exhausted; "
+                                "the actionable findings are preserved in this result.",
+                                8_000,
+                            ),
+                        }
+                    with mission._lock:
+                        mission.complete_result(verdict)
+                    break
+
+                assert turn is not None
                 with mission._lock:
-                    mission.result = {"status": "cancelled", "accepted": False}
-                return
-            with mission._lock:
-                mission.complete_result(verdict)
+                    mission.revision_turns.append(turn)
+                    mission.result = verdict
+                    mission.status = "queued"
+                    mission.record(
+                        "revision_scheduled",
+                        {
+                            "attempt": mission.attempt,
+                            "next_attempt": mission.attempt + 1,
+                            "decision_owner": turn["decision_owner"],
+                            "result_sha256": turn["result_sha256"],
+                            "finding_codes": [
+                                item["code"] for item in turn["findings"]
+                            ],
+                        },
+                    )
+                    mission.attempt += 1
+                    mission._persist(raise_errors=True)
+                    mission.set_status("running")
         except Exception as exc:  # noqa: BLE001
             with mission._lock:
                 if mission.cancelled.is_set() and cleanup_proven:
@@ -1309,7 +1460,47 @@ def _rehydrate() -> None:
                 _bounded_text(state.get("storage_error"), 4096) if state.get("storage_error") else None
             )
 
-            storage_problem: str | None = None
+            revision_problem: str | None = None
+            stored_attempt = state.get("attempt", 0)
+            if type(stored_attempt) is not int or stored_attempt < 0:
+                revision_problem = "persisted mission attempt is invalid"
+            else:
+                mission.attempt = stored_attempt
+            stored_turns = state.get("revision_turns", [])
+            if not isinstance(stored_turns, list) or len(stored_turns) > MAX_REVISION_TURNS:
+                revision_problem = revision_problem or "persisted revision history is invalid"
+            else:
+                restored_turns: list[dict[str, Any]] = []
+                for raw_turn in stored_turns:
+                    if (
+                        not isinstance(raw_turn, dict)
+                        or set(raw_turn) != {
+                            "attempt", "result_sha256", "decision_owner",
+                            "leader_order", "findings",
+                        }
+                        or type(raw_turn.get("attempt")) is not int
+                        or raw_turn["attempt"] < 1
+                        or not re.fullmatch(
+                            r"[0-9a-f]{64}", str(raw_turn.get("result_sha256") or "")
+                        )
+                        or raw_turn.get("decision_owner") not in {
+                            "Ceraxia", "SkitariiWarband",
+                        }
+                        or type(raw_turn.get("leader_order")) is not str
+                        or not raw_turn["leader_order"].strip()
+                        or len(raw_turn["leader_order"].encode("utf-8")) > 8_000
+                    ):
+                        revision_problem = "persisted revision turn is invalid"
+                        break
+                    findings = _revision_findings(raw_turn.get("findings"))
+                    if not findings:
+                        revision_problem = "persisted revision findings are invalid"
+                        break
+                    restored_turns.append({**raw_turn, "findings": findings})
+                if revision_problem is None:
+                    mission.revision_turns = restored_turns
+
+            storage_problem: str | None = revision_problem
             payload_size = 0
             result_size = 0
             stored_payload: Any = state.get("payload")

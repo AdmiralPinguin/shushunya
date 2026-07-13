@@ -13,9 +13,10 @@ import unittest
 from unittest import mock
 
 try:
-    from . import mission_store
+    from . import mission_store, production_runner
 except ImportError:
     import mission_store  # type: ignore[no-redef]
+    import production_runner  # type: ignore[no-redef]
 
 
 def accepted(answer: str = "ok") -> dict:
@@ -56,6 +57,108 @@ def runner_cancel_wait(_payload, mission):
 
 def runner_unknown(_payload, _mission):
     return {"outcome": "search_more", "reason": "leaked internal state", "x": [1]}
+
+
+def runner_invalid_clarification(_payload, _mission):
+    return {"outcome": "clarify", "reason": "   ", "answer": ""}
+
+
+def runner_oversized_clarification(_payload, _mission):
+    return {"outcome": "clarify", "reason": "x" * 128, "answer": ""}
+
+
+def retryable_finding() -> dict:
+    return {
+        "code": "source_strategy_incomplete",
+        "entity_kind": "research_mission",
+        "entity_id": "source-strategy",
+        "what_failed": "The first source strategy did not establish the answer.",
+        "evidence": "The bounded first attempt ended without accepted evidence.",
+        "expected": "A grounded answer or a proven scoped absence.",
+        "remediation": "Broaden the source strategy without repeating the failed query.",
+        "revision_owner": "scout",
+        "retryable": True,
+    }
+
+
+def runner_needs_revision(_payload, mission):
+    if mission.revision_turns:
+        return {
+            **accepted("revised"),
+            "revision_turns_seen": [dict(turn) for turn in mission.revision_turns],
+        }
+    return {
+        "outcome": "needs_revision",
+        "reason": "choose another bounded approach",
+        "review_findings": [retryable_finding()],
+    }
+
+
+def runner_always_needs_revision(_payload, _mission):
+    return {
+        "outcome": "needs_revision",
+        "reason": "the current bounded approach still needs correction",
+        "review_findings": [retryable_finding()],
+    }
+
+
+def production_revision_result(*, valid_finding: bool = True) -> dict:
+    finding = retryable_finding()
+    ledger = {field: [] for field in production_runner.EXTERNAL_LEDGER_FIELDS}
+    ledger["claims"] = [{"id": "claim-preserved"}]
+    ledger["final_claim_refs"] = [{"claim_id": "claim-preserved"}]
+    return {
+        "runner_contract_version": production_runner.RUNNER_CONTRACT_VERSION,
+        "outcome": "needs_revision",
+        "reason": "the evidence pass needs a different source strategy",
+        "external_evaluator_result": {
+            "contract_version": production_runner.EXTERNAL_CONTRACT_VERSION,
+            "mission_id": "external-mission-preserved",
+            "status": "needs_revision",
+            "accepted": False,
+            "final_text": "unaccepted draft must not escape",
+            "question": "",
+            "ledger": ledger,
+            "search_log": [{"query": "preserved query"}],
+        },
+        "pipeline_audit": {
+            "review_findings": [finding] if valid_finding else [],
+        },
+    }
+
+
+def runner_production_needs_revision(_payload, _mission):
+    return production_revision_result(valid_finding=True)
+
+
+def runner_production_invalid_revision(_payload, _mission):
+    return production_revision_result(valid_finding=False)
+
+
+def runner_production_failed(_payload, _mission):
+    ledger = {field: [] for field in production_runner.EXTERNAL_LEDGER_FIELDS}
+    return {
+        "runner_contract_version": production_runner.RUNNER_CONTRACT_VERSION,
+        "outcome": "failed",
+        "reason": "A non-retryable internal invariant rejected the research result.",
+        "external_evaluator_result": {
+            "contract_version": production_runner.EXTERNAL_CONTRACT_VERSION,
+            "mission_id": "external-failed-mission",
+            "status": "failed",
+            "accepted": False,
+            "final_text": "",
+            "question": "",
+            "ledger": ledger,
+            "search_log": [],
+        },
+        "pipeline_audit": {
+            "review_findings": [{
+                **retryable_finding(),
+                "code": "non_retryable_internal_invariant",
+                "retryable": False,
+            }],
+        },
+    }
 
 
 def runner_non_object(_payload, _mission):
@@ -165,6 +268,99 @@ class MissionStoreTests(unittest.TestCase):
         self.assertEqual(loaded.status, "done")
         result_path = self.root / "exact-1" / "result-000001.json"
         self.assertEqual(json.loads(result_path.read_text(encoding="utf-8")), accepted("точно"))
+
+    def test_needs_revision_is_automatically_requeued_with_bound_feedback(self) -> None:
+        store = self.store()
+        mission, _created = store.create_or_get(
+            "revision-1", {"mission_id": "revision-1", "task_id": "t"}
+        )
+        self.assertTrue(store.launch(mission, runner_needs_revision))
+        self.assertTrue(store.wait_for_idle())
+        self.assertEqual("done", mission.status)
+        self.assertEqual(2, mission.attempt)
+        self.assertEqual("accepted", mission.result["outcome"])
+        self.assertEqual(1, len(mission.revision_turns))
+        self.assertEqual(
+            "Broaden the source strategy without repeating the failed query.",
+            mission.revision_turns[0]["findings"][0]["remediation"],
+        )
+        self.assertEqual(2, len(mission.result_refs))
+        recovered = self.store().get("revision-1")
+        self.assertIsNotNone(recovered)
+        assert recovered is not None
+        self.assertEqual("done", recovered.status)
+        self.assertEqual(2, recovered.attempt)
+        self.assertEqual(1, len(recovered.revision_turns))
+        self.assertEqual(
+            recovered.revision_turns[0]["result_sha256"],
+            recovered.result_refs[0]["sha256"],
+        )
+
+    def test_revision_attempt_exhaustion_fails_with_findings_not_blocked(self) -> None:
+        store = self.store(max_attempts=1)
+        mission, _created = store.create_or_get(
+            "revision-exhausted", {"mission_id": "revision-exhausted", "task_id": "t"}
+        )
+        self.assertTrue(store.launch(mission, runner_needs_revision))
+        self.assertTrue(store.wait_for_idle())
+        self.assertEqual("failed", mission.status)
+        self.assertTrue(mission.result["revision_exhausted"])
+        self.assertEqual(
+            "Broaden the source strategy without repeating the failed query.",
+            mission.result["review_findings"][0]["remediation"],
+        )
+
+    def test_auto_revision_cap_is_two_without_consuming_sixteen_full_runs(self) -> None:
+        store = self.store(max_attempts=16, max_auto_revisions=2)
+        mission, _created = store.create_or_get(
+            "revision-cap", {"mission_id": "revision-cap", "task_id": "t"}
+        )
+        self.assertTrue(store.launch(mission, runner_always_needs_revision))
+        self.assertTrue(store.wait_for_idle())
+        self.assertEqual("failed", mission.status)
+        self.assertEqual(3, mission.attempt)
+        self.assertEqual(2, len(mission.revision_turns))
+        self.assertEqual(2, mission.result["auto_revision_limit"])
+
+    def test_terminal_revision_conversion_keeps_production_contract_coherent(self) -> None:
+        original_external = production_revision_result()["external_evaluator_result"]
+        for mission_id, runner, expected_marker in (
+            (
+                "production-revision-exhausted",
+                runner_production_needs_revision,
+                "revision_exhausted",
+            ),
+            (
+                "production-revision-invalid",
+                runner_production_invalid_revision,
+                "revision_protocol_error",
+            ),
+        ):
+            with self.subTest(mission_id=mission_id):
+                store = self.store(max_attempts=1)
+                mission, _created = store.create_or_get(
+                    mission_id, {"mission_id": mission_id, "task_id": "t"}
+                )
+                self.assertTrue(store.launch(mission, runner))
+                self.assertTrue(store.wait_for_idle())
+                self.assertEqual("failed", mission.status)
+                self.assertEqual("failed", mission.result["outcome"])
+                self.assertTrue(mission.result[expected_marker])
+                self.assertTrue(mission.result["reason"].strip())
+                external = production_runner.validate_external_evaluator_result(
+                    mission.result["external_evaluator_result"]
+                )
+                self.assertEqual("failed", external["status"])
+                self.assertFalse(external["accepted"])
+                self.assertEqual("", external["final_text"])
+                self.assertEqual("", external["question"])
+                self.assertEqual(
+                    original_external["mission_id"], external["mission_id"]
+                )
+                self.assertEqual(original_external["ledger"], external["ledger"])
+                self.assertEqual(
+                    original_external["search_log"], external["search_log"]
+                )
 
     def test_same_id_same_request_is_idempotent_and_different_request_conflicts(self) -> None:
         store = self.store()
@@ -336,16 +532,49 @@ class MissionStoreTests(unittest.TestCase):
         self.assertIn("persistence failed", mission.storage_error or "")
         self.assertFalse(mission.cleanup_complete)
 
-    def test_unknown_outcome_is_exactly_persisted_but_status_is_blocked(self) -> None:
+    def test_unknown_outcome_fails_with_actionable_contract_diagnostic(self) -> None:
         store = self.store()
-        result = {"outcome": "search_more", "reason": "leaked internal state", "x": [1]}
         mission, _ = store.create_or_get("bad-outcome", {"mission_id": "bad-outcome", "task_id": "t"})
         store.launch(mission, runner_unknown)
         self.assertTrue(store.wait_for_idle())
-        self.assertEqual(mission.status, "blocked")
-        self.assertEqual(mission.result, result)
+        self.assertEqual(mission.status, "failed")
+        self.assertEqual(mission.result["outcome"], "failed")
+        finding = mission.result["pipeline_audit"]["review_findings"][0]
+        self.assertEqual(finding["code"], "invalid_pipeline_outcome")
+        self.assertIn("search_more", finding["evidence"])
 
-    def test_non_object_and_exception_fail_closed_without_synthetic_success(self) -> None:
+    def test_invalid_clarification_contract_fails_instead_of_blocking(self) -> None:
+        for name, runner, limit, code in (
+            ("missing-question", runner_invalid_clarification, 128, "invalid_clarification"),
+            ("oversized-question", runner_oversized_clarification, 32, "oversized_clarification"),
+        ):
+            with self.subTest(name=name):
+                store = self.store(max_question_bytes=limit)
+                mission, _ = store.create_or_get(name, {"mission_id": name, "task_id": "t"})
+                store.launch(mission, runner)
+                self.assertTrue(store.wait_for_idle())
+                self.assertEqual(mission.status, "failed")
+                self.assertTrue(mission.cleanup_complete)
+                self.assertEqual(
+                    mission.result["pipeline_audit"]["review_findings"][0]["code"],
+                    code,
+                )
+
+    def test_production_shaped_failed_outcome_is_terminal_failed(self) -> None:
+        store = self.store()
+        mission, _ = store.create_or_get(
+            "production-failed", {"mission_id": "production-failed", "task_id": "t"}
+        )
+        store.launch(mission, runner_production_failed)
+        self.assertTrue(store.wait_for_idle())
+        self.assertEqual(mission.status, "failed")
+        self.assertEqual(mission.result["outcome"], "failed")
+        self.assertEqual(
+            mission.result["external_evaluator_result"]["status"], "failed"
+        )
+        self.assertFalse(mission.result["external_evaluator_result"]["accepted"])
+
+    def test_runner_defects_fail_with_diagnostics_without_becoming_blocked(self) -> None:
         for name, runner in (
             ("non-object", runner_non_object),
             ("exception", runner_raise),
@@ -355,8 +584,12 @@ class MissionStoreTests(unittest.TestCase):
                 mission, _ = store.create_or_get(name, {"mission_id": name, "task_id": "t"})
                 store.launch(mission, runner)
                 self.assertTrue(store.wait_for_idle())
-                self.assertEqual(mission.status, "blocked")
-                self.assertIsNone(mission.result)
+                self.assertEqual(mission.status, "failed")
+                self.assertEqual("failed", mission.result["outcome"])
+                self.assertIn("runner_error", mission.result)
+                self.assertTrue(
+                    mission.result["pipeline_audit"]["review_findings"][0]["retryable"]
+                )
 
     def test_symlink_root_and_mission_path_are_rejected(self) -> None:
         outside = Path(self.temp.name) / "outside"
@@ -408,7 +641,7 @@ class MissionStoreTests(unittest.TestCase):
         self.assertTrue(store.launch(mission, runner_hung))
         self.assertTrue(store.wait_for_idle(timeout=5))
         self.assertLess(time.monotonic() - started, 4)
-        self.assertEqual(mission.status, "blocked")
+        self.assertEqual(mission.status, "failed")
         self.assertTrue(mission.cleanup_complete)
         self.assertIn("hard deadline", mission.storage_error or "")
         self.assertEqual(store.active_worker_count(), 0)

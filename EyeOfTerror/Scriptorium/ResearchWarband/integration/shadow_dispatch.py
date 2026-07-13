@@ -106,7 +106,9 @@ def wait_for_shadow(
             "GET", path, timeout_sec=min(10.0, max(0.05, deadline - time.monotonic()))
         )
         if (
-            snapshot.get("status") in {"done", "needs_user", "blocked", "failed", "cancelled"}
+            snapshot.get("status") in {
+                "done", "needs_user", "needs_revision", "blocked", "failed", "cancelled"
+            }
             and snapshot.get("inflight") is False
             and snapshot.get("cleanup_complete") is True
         ):

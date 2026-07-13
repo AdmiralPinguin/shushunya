@@ -41,10 +41,26 @@ class MissionStoreRetentionTests(unittest.TestCase):
                 "MAX_STORE_DURABLE_BYTES",
                 "MAX_STORE_MISSIONS",
                 "MAX_ACTIVE_MISSIONS",
+                "MAX_AUTO_REVISION_ATTEMPTS",
+                "MAX_REVISION_TURNS",
             )
         }
         mission_store.STORE_ROOT = Path(self._temporary.name)
         mission_store._MISSIONS = {}
+
+    @staticmethod
+    def _retryable_finding(code: str = "acceptance_failed") -> dict[str, object]:
+        return {
+            "code": code,
+            "entity_kind": "check",
+            "entity_id": "public-acceptance",
+            "what_failed": "A required behavioural check failed.",
+            "evidence": "Observed output differed from the expected output.",
+            "expected": "All behavioural checks pass.",
+            "remediation": "Change the implementation approach and replay all checks.",
+            "revision_owner": "fighter",
+            "retryable": True,
+        }
 
     def tearDown(self) -> None:
         mission_store.STORE_ROOT = self._old_root
@@ -86,6 +102,79 @@ class MissionStoreRetentionTests(unittest.TestCase):
 
         changed_transport_id = dict(payload, task_id="another-id")
         self.assertEqual(mission_store.request_sha256(changed_transport_id), expected)
+
+    def test_actionable_failure_is_retried_inside_the_same_mission(self) -> None:
+        mission_store.MAX_AUTO_REVISION_ATTEMPTS = 3
+        attempts: list[int] = []
+
+        def worker(mission: mission_store.Mission) -> dict[str, object]:
+            attempts.append(mission.attempt)
+            if mission.attempt < 3:
+                return {
+                    "status": "failed",
+                    "accepted": False,
+                    "revision_required": True,
+                    "verification_findings": [self._retryable_finding()],
+                    "cleanup_complete": True,
+                    "summary": "Behavioural acceptance failed.",
+                }
+            return {"status": "done", "accepted": True, "cleanup_complete": True}
+
+        mission = mission_store.create_and_run(
+            "auto-revision-success",
+            "goal",
+            {"goal": "goal", "max_wall_sec": 60},
+            worker,
+        )
+        deadline = time.time() + 5
+        while mission.inflight and time.time() < deadline:
+            time.sleep(0.01)
+
+        snapshot = mission.snapshot()
+        self.assertEqual(attempts, [1, 2, 3])
+        self.assertEqual(snapshot["status"], "done")
+        self.assertTrue(snapshot["result"]["accepted"])
+        self.assertEqual(snapshot["attempt"], 3)
+        self.assertEqual(len(snapshot["revision_turns"]), 2)
+        self.assertEqual(
+            snapshot["revision_turns"][0]["decision_owner"], "SkitariiWarband"
+        )
+        mission_store._MISSIONS = {}
+        mission_store._rehydrate()
+        restored = mission_store.get("auto-revision-success")
+        self.assertEqual(restored.attempt, 3)
+        self.assertEqual(len(restored.revision_turns), 2)
+        self.assertEqual(restored.status, "done")
+
+    def test_exhausted_repairs_fail_with_findings_instead_of_blocking(self) -> None:
+        mission_store.MAX_AUTO_REVISION_ATTEMPTS = 2
+
+        def worker(_mission: mission_store.Mission) -> dict[str, object]:
+            return {
+                "status": "failed",
+                "accepted": False,
+                "revision_required": True,
+                "verification_findings": [self._retryable_finding("still-failing")],
+                "cleanup_complete": True,
+                "summary": "The candidate still fails acceptance.",
+            }
+
+        mission = mission_store.create_and_run(
+            "auto-revision-exhausted",
+            "goal",
+            {"goal": "goal", "max_wall_sec": 60},
+            worker,
+        )
+        deadline = time.time() + 5
+        while mission.inflight and time.time() < deadline:
+            time.sleep(0.01)
+
+        result = mission.snapshot()["result"]
+        self.assertEqual(mission.status, "failed")
+        self.assertNotEqual(mission.status, "blocked")
+        self.assertTrue(result["revision_exhausted"])
+        self.assertEqual(result["revision_attempts"], 2)
+        self.assertEqual(result["verification_findings"][0]["code"], "still-failing")
 
     def test_active_and_still_executing_missions_are_never_pruned(self) -> None:
         mission_store.MAX_ACTIVE_MISSIONS = len(mission_store.ACTIVE_STATUSES) + 1

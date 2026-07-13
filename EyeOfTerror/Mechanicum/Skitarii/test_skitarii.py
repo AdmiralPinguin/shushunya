@@ -1301,6 +1301,25 @@ class TestSpecFallback(unittest.TestCase):
         })
         self.assertEqual(chat.call_count, 2)
         self.assertIn("REPAIR:", chat.call_args_list[1].args[0])
+        self.assertIn("candidate_not_task_linked", chat.call_args_list[1].args[0])
+
+    def test_russian_python_script_exact_stdout_is_a_valid_private_check(self):
+        import spec
+
+        goal = "Напиши python-скрипт primes.py с точным выводом '2 3 5 7 11'."
+        check = {"cmd": "python3 primes.py", "expect_stdout": "2 3 5 7 11"}
+        self.assertEqual(
+            spec._structured_checks([check], allow_bare=False, goal=goal),
+            [{"cmd": "/usr/bin/python3 primes.py", "expect_stdout": "2 3 5 7 11"}],
+        )
+        rejected, findings = spec._structured_checks_with_diagnostics(
+            [{"cmd": "python3 other.py", "expect_stdout": "2 3 5 7 11"}],
+            allow_bare=False,
+            goal=goal,
+        )
+        self.assertEqual([], rejected)
+        self.assertEqual("candidate_not_task_linked", findings[0]["code"])
+        self.assertTrue(findings[0]["remediation"])
 
 
 class TestPathPreservation(unittest.TestCase):
@@ -1354,8 +1373,9 @@ class TestBridge(unittest.TestCase):
         root = Path(__file__).resolve().parents[3]  # repo root
         sys.path.insert(0, str(root))
         sys.path.insert(0, str(root / "EyeOfTerror" / "Warmaster"))
-        from eye_of_terror import skitarii_bridge
+        from eye_of_terror import research_warband_bridge, skitarii_bridge
         cls.b = skitarii_bridge
+        cls.rb = research_warband_bridge
 
     def _publication_repo(self, files: dict[str, str]) -> tuple[Path, Path, str]:
         base = Path(tempfile.mkdtemp(prefix="skitarii-publish-test-"))
@@ -3706,6 +3726,213 @@ new file mode 100644
         self.assertTrue(body["confirm_apply"])
         self.assertEqual(body["expected_patch_sha256"], ledger["result"]["patch_stage"]["patch_sha256"])
         self.assertEqual(body["expected_checks_sha256"], ledger["result"]["patch_stage"]["checks_sha256"])
+
+    def test_bridge_accepts_explicit_degraded_public_replay_contract(self):
+        patch_text = """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1 +1 @@
+-print(1)
++print(2)
+"""
+        verdict = {
+            "accepted": True,
+            "status": "done",
+            "summary": "fixed with degraded private-verifier assurance",
+            "artifacts": ["a.py"],
+            "files": {"a.py": "print(2)\n"},
+            "checks": [{"cmd": "python3 a.py", "expect_stdout": "2"}],
+            "rounds": [],
+            "held_out_required": True,
+            "held_out_check_count": 0,
+            "held_out_status": "degraded_invalid_spec",
+            "held_out_acceptance": {"accepted": False, "results": []},
+            "public_replay_acceptance": {"accepted": True, "results": [{"ok": True}]},
+            "verification_degraded": True,
+            "verification_mode": "public_behavioral_fallback",
+            "verification_findings": [{
+                "code": "private_verifier_no_valid_checks",
+                "entity_kind": "verification_plan",
+                "entity_id": "held-out-plan",
+                "what_failed": "Private check generation failed.",
+                "evidence": "No safe hidden check was produced.",
+                "expected": "A task-linked private behavioural check.",
+                "remediation": "Repair the generator and rerun private verification later.",
+                "revision_owner": "infrastructure",
+                "retryable": True,
+            }],
+            "patch_bundle": {"unified_diff": patch_text, "apply_gate": "accepted"},
+        }
+        _root, _run_dir, result = self._run_bridge_fixture(
+            autoapply=False, verdict_override=verdict,
+        )
+        self.assertEqual("ready_to_apply", result["status"])
+        self.assertTrue(result["verification_degraded"])
+        self.assertEqual("public_behavioral_fallback", result["verification_mode"])
+        self.assertEqual(
+            "private_verifier_no_valid_checks",
+            result["verification_findings"][0]["code"],
+        )
+
+    def test_bridge_records_exhausted_autonomous_repairs_as_explained_failure(self):
+        finding = {
+            "code": "hidden_candidate_failure",
+            "entity_kind": "behavioural_check",
+            "entity_id": "held-out-1",
+            "what_failed": "An undisclosed behavioural edge case still fails.",
+            "evidence": "The candidate output mismatched the hidden oracle.",
+            "expected": "All behavioural edge cases pass.",
+            "remediation": "Choose another implementation approach and redispatch Skitarii.",
+            "revision_owner": "fighter",
+            "retryable": True,
+        }
+        verdict = {
+            "accepted": False,
+            "status": "failed",
+            "summary": "Automatic worker repair was not enough.",
+            "artifacts": [],
+            "files": {},
+            "checks": [{"cmd": "python3 a.py", "expect_stdout": "2"}],
+            "rounds": [],
+            "held_out_required": True,
+            "held_out_check_count": 1,
+            "held_out_status": "candidate_failure",
+            "held_out_acceptance": {"accepted": False, "results": [{"ok": False}]},
+            "revision_required": True,
+            "revision_exhausted": True,
+            "revision_attempts": 3,
+            "verification_findings": [finding],
+        }
+        _root, run_dir, result = self._run_bridge_fixture(
+            autoapply=False, verdict_override=verdict,
+        )
+        self.assertEqual("failed", result["status"])
+        self.assertFalse(result["revision_required"])
+        self.assertTrue(result["revision_exhausted"])
+        self.assertEqual("inspect_exhausted_attempts", result["next_action"]["kind"])
+        ledger = json.loads((run_dir / "task_ledger.json").read_text(encoding="utf-8"))
+        self.assertEqual("failed", ledger["status"])
+        mission_dir = next(self.b.WARMMASTER_MISSIONS_ROOT.iterdir())
+        final = json.loads((mission_dir / "final_response.json").read_text(encoding="utf-8"))
+        self.assertEqual("failed", final["status"])
+        self.assertTrue(final["autonomous_revision_exhausted"])
+        self.assertEqual("hidden_candidate_failure", final["review_findings"][0]["code"])
+        report = json.loads((mission_dir / "governor_report.json").read_text(encoding="utf-8"))
+        self.assertEqual("failed", report["status"])
+        self.assertEqual("hidden_candidate_failure", report["quality_review"]["findings"][0]["code"])
+
+    def test_bridge_rejects_partial_degraded_verification_finding(self):
+        _root, run_dir, result = self._run_bridge_fixture(
+            autoapply=False,
+            verdict_override={
+                "accepted": True,
+                "verification_degraded": True,
+                "verification_findings": [{}],
+            },
+        )
+        self.assertEqual("failed", result["phase"])
+        self.assertIn("fields mismatch", result["error"])
+        self.assertFalse(result["ok"])
+        self.assertEqual("failed", result["status"])
+        self.assertEqual(
+            "skitarii_bridge_internal_contract_failure",
+            result["verification_findings"][0]["code"],
+        )
+        ledger = json.loads((run_dir / "task_ledger.json").read_text(encoding="utf-8"))
+        self.assertEqual("failed", ledger["status"])
+
+    def test_bridge_non_object_verdict_is_explained_failure_not_block(self):
+        _root, run_dir, result = self._run_bridge_fixture(
+            autoapply=False,
+            verdict_override="not-a-verdict",
+        )
+        self.assertEqual("failed", result["status"])
+        self.assertEqual("failed", result["phase"])
+        self.assertEqual(
+            "skitarii_bridge_internal_contract_failure",
+            result["review_findings"][0]["code"],
+        )
+        mission_dir = next(self.b.WARMMASTER_MISSIONS_ROOT.iterdir())
+        final = json.loads((mission_dir / "final_response.json").read_text(encoding="utf-8"))
+        self.assertEqual("failed", final["status"])
+        self.assertNotIn("autonomous_revision_exhausted", final)
+        ledger = json.loads((run_dir / "task_ledger.json").read_text(encoding="utf-8"))
+        self.assertEqual("failed", ledger["status"])
+
+    def test_research_bridge_requires_complete_revision_findings(self):
+        valid = {
+            "code": "bounded_revision_exhausted",
+            "entity_kind": "research_mission",
+            "entity_id": "round-budget",
+            "what_failed": "The bounded approach ended before acceptance.",
+            "evidence": "All two allowed rounds were used.",
+            "expected": "A green final review.",
+            "remediation": "Choose a new bounded search angle and redispatch.",
+            "revision_owner": "governor",
+            "retryable": True,
+        }
+        action = self.rb._research_revision_action({
+            "reason": "revision required",
+            "pipeline_audit": {"review_findings": [valid]},
+        })
+        self.assertEqual(valid, action["findings"][0])
+        self.assertEqual(valid["remediation"], action["resume_condition"])
+
+        with self.assertRaisesRegex(
+            self.rb.ResearchWarbandBridgeError,
+            "revision findings are invalid",
+        ):
+            self.rb._research_revision_findings({
+                "pipeline_audit": {"review_findings": [{}]},
+            })
+
+    def test_research_exhaustion_finalizes_as_failed_not_blocked(self):
+        finding = {
+            "code": "bounded_revision_exhausted",
+            "entity_kind": "research_mission",
+            "entity_id": "round-budget",
+            "what_failed": "The bounded approaches ended before acceptance.",
+            "evidence": "All autonomous attempts were used.",
+            "expected": "A green evidence and semantic review.",
+            "remediation": "Choose a new bounded mission later if more work is warranted.",
+            "revision_owner": "governor",
+            "retryable": False,
+        }
+        base = Path(tempfile.mkdtemp(prefix="research-failed-protocol-"))
+        missions_root = base / "missions"
+        mission_id = "research-failed"
+        mission_dir = missions_root / mission_id
+        run_dir = base / "run"
+        mission_dir.mkdir(parents=True)
+        run_dir.mkdir()
+        (mission_dir / "mission.json").write_text(
+            json.dumps({"mission_id": mission_id, "status": "executing"}),
+            encoding="utf-8",
+        )
+        (run_dir / "mission_ref.json").write_text(
+            json.dumps({"mission_id": mission_id, "mission_dir": str(mission_dir)}),
+            encoding="utf-8",
+        )
+        result = {
+            "status": "failed",
+            "summary": "Autonomous research approaches were exhausted.",
+            "research_result": {
+                "revision_exhausted": True,
+                "pipeline_audit": {"review_findings": [finding]},
+            },
+        }
+
+        with patch.dict(os.environ, {"WARMMASTER_MISSIONS_ROOT": str(missions_root)}):
+            self.rb._finalize_protocol(run_dir, mission_id, result)
+
+        final = json.loads((mission_dir / "final_response.json").read_text(encoding="utf-8"))
+        state = json.loads((mission_dir / "mission_state.json").read_text(encoding="utf-8"))
+        report = json.loads((mission_dir / "governor_report.json").read_text(encoding="utf-8"))
+        self.assertEqual("failed", final["status"])
+        self.assertTrue(final["autonomous_revision_exhausted"])
+        self.assertEqual("bounded_revision_exhausted", final["review_findings"][0]["code"])
+        self.assertEqual("failed", state["status"])
+        self.assertEqual("failed", report["status"])
 
     def test_bridge_blocks_before_snapshot_when_ceraxia_directive_is_missing(self):
         from eye_of_terror.ledger import TaskLedger

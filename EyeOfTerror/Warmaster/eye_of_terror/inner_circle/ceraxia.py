@@ -102,14 +102,20 @@ def patch_contract_capabilities() -> dict[str, Any]:
         ],
         "completion_gates": [
             "executable acceptance passed",
-            "private held-out verification passed when required",
+            (
+                "private held-out verification passed, or an explicitly degraded "
+                "independent public behavioural replay passed with actionable diagnostics"
+            ),
             "repository mutations are staged or applied through the controlled patch gate",
         ],
         "safety_gates": [
             "Ceraxia directive is validated before repository access",
             "Skitarii owns file and command selection inside its sandbox",
             "unrelated user changes are preserved",
-            "completion is blocked when verification or cleanup evidence is incomplete",
+            (
+                "incomplete candidate evidence creates an internal revision; only an "
+                "unproven safety/cleanup boundary pauses execution"
+            ),
         ],
     }
 
@@ -160,11 +166,16 @@ def oversight_plan(contract: Any) -> dict[str, Any]:
             "execution_step": "skitarii",
             "detailed_revision_plan_owner": "SkitariiWarband",
             "preserve_task_and_mission_identity": True,
+            "ordinary_check_failure_is_terminal": False,
+            "actionable_findings_required": True,
+            "automatic_worker_revision_required": True,
+            "blocked_only_for_external_impasse": True,
         },
         "reporting_policy": {
             "requires_executable_evidence": True,
             "requires_patch_gate_evidence": True,
-            "requires_blocker_visibility": True,
+            "requires_actionable_revision_findings": True,
+            "requires_resume_condition_for_external_impasse": True,
         },
     }
 
@@ -218,7 +229,7 @@ def payload_with_plan_view(payload: dict[str, Any]) -> dict[str, Any]:
     enriched = dict(payload)
     enriched.update(
         {
-            "phase": "plan_ready" if ok else "plan_blocked",
+            "phase": "plan_ready" if ok else "plan_needs_input",
             "decision": {
                 "can_prepare_run": bool(actions.get("can_prepare_run")),
                 "can_inspect_capabilities": bool(actions.get("can_inspect_capabilities")),

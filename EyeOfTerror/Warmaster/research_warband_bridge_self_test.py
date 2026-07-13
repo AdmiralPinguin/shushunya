@@ -255,7 +255,7 @@ class ResearchWarbandBridgeTest(unittest.TestCase):
                 1,
             )
 
-    def test_exception_after_start_cancels_exact_mission_and_proves_cleanup(self) -> None:
+    def test_internal_contract_error_fails_after_exact_cleanup_is_proven(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             run_dir = self.make_run(Path(raw))
             request_hash = bridge._request_sha256(ENVELOPE)
@@ -322,7 +322,11 @@ class ResearchWarbandBridgeTest(unittest.TestCase):
                     run_dir, TASK_ID, timeout_sec=5
                 )
             self.assertFalse(result["ok"])
-            self.assertEqual(result["status"], "blocked")
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(
+                result["review_findings"][0]["code"],
+                "research_bridge_internal_failure",
+            )
             self.assertTrue(cancelled)
             self.assertEqual(
                 result["research_warband_cleanup"],
@@ -339,7 +343,22 @@ class ResearchWarbandBridgeTest(unittest.TestCase):
             self.assertTrue(
                 durable["research_warband_mission"]["bridge_cleanup_proven"]
             )
-            self.assertEqual(durable["status"], "blocked")
+            self.assertEqual(durable["status"], "failed")
+
+    def test_needs_user_progress_is_waiting_not_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            run_dir = self.make_run(Path(raw))
+            with (
+                patch.object(bridge, "_mission_dir", return_value=run_dir),
+                patch.object(bridge, "_append_protocol_progress") as progress,
+            ):
+                result = bridge._record_waiting(
+                    run_dir, TASK_ID, MISSION_ID, "Which period?"
+                )
+            self.assertEqual(result["status"], "needs_user")
+            self.assertTrue(result["needs_user"])
+            self.assertEqual(progress.call_args.kwargs["phase"], "needs_user")
+            self.assertEqual(progress.call_args.kwargs["status"], "waiting")
 
     def test_lost_create_response_is_adopted_by_hash_then_cancelled(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

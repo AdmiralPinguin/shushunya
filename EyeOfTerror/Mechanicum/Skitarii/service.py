@@ -43,7 +43,10 @@ from EyeOfTerror.common_protocol.ceraxia_directive import (  # noqa: E402
     leadership_context_text,
     validate_ceraxia_directive,
 )
-from EyeOfTerror.common_protocol.protocol import PROTOCOL_VERSION  # noqa: E402
+from EyeOfTerror.common_protocol.protocol import (  # noqa: E402
+    PROTOCOL_VERSION,
+    review_finding,
+)
 from warband import run_mission  # noqa: E402
 from planner import plan_and_run  # noqa: E402
 from executor import (  # noqa: E402
@@ -92,6 +95,7 @@ SERVICE_SOURCE_FILES = (
 )
 SHARED_SOURCE_FILES = (
     "EyeOfTerror/common_protocol/ceraxia_directive.py",
+    "EyeOfTerror/common_protocol/protocol.py",
 )
 
 
@@ -125,6 +129,12 @@ def service_identity() -> dict:
         "process_boundary_helper": BOUNDARY_HELPER_VERSION,
         "process_boundary_helper_sha256": BOUNDARY_HELPER_SHA256,
         "bearer_auth_required": bool(BEARER_TOKEN),
+        "autonomous_revision": {
+            "enabled": True,
+            "max_attempts": mission_store.MAX_AUTO_REVISION_ATTEMPTS,
+            "actionable_findings_required": True,
+            "ordinary_check_failure_is_blocked": False,
+        },
         "execution_authorization": {
             "ceraxia_leadership_directive_required": True,
             "acceptance_source_required": True,
@@ -426,14 +436,100 @@ def _scrub_interstage_temp(ex: VmExecutor) -> None:
 
 
 def _held_out_failure_class(acceptance: dict) -> str:
-    for result in acceptance.get("results") or []:
-        if result.get("ok"):
+    """Distinguish candidate outcomes from failures of trusted verification.
+
+    Exit codes belong to the candidate command and are not verifier provenance:
+    a candidate may legitimately time out, be non-executable, miss a dependency,
+    or return any byte-sized status.  Trusted failures are identified by the
+    phase that produced the result.  Unknown/malformed evidence stays fail-closed.
+    """
+    if not isinstance(acceptance, dict):
+        return "verifier_protocol"
+    results = acceptance.get("results")
+    if not isinstance(results, list) or not results:
+        return "verifier_protocol"
+    failed = False
+    for result in results:
+        if not isinstance(result, dict) or not isinstance(result.get("ok"), bool):
+            return "verifier_protocol"
+        if result["ok"]:
             continue
-        if result.get("exit") in {124, 125, 126, 127, 255}:
-            return "verifier_infra"
-        if str(result.get("why") or "").startswith("oracle failed"):
-            return "verifier_infra"
-    return "candidate_failure"
+        failed = True
+        why = str(result.get("why") or "")
+        if why.startswith("oracle failed"):
+            return "verifier_internal"
+        kind = result.get("kind")
+        if kind == "check":
+            # The command ran in the candidate snapshot.  Its exit status is a
+            # repairable behavioural outcome, including 124/125/126/127/255.
+            continue
+        if kind == "file_bytes":
+            if why in {
+                "atomic regular-file reader unavailable",
+                "atomic reader violated its byte contract",
+            } or why.startswith("atomic frozen artifact read failed:"):
+                return "verifier_internal"
+            # Missing, non-regular, symlinked, or differing candidate output is
+            # an ordinary candidate failure produced by the trusted reader.
+            continue
+        # Private acceptance currently emits only check/file_bytes records.
+        # Treat new or malformed result kinds as verifier protocol failures.
+        return "verifier_protocol"
+    return "candidate_failure" if failed else "verifier_protocol"
+
+
+def _verifier_internal_finding(
+    failure_class: str,
+    detail: str,
+    *,
+    entity_id: str,
+) -> dict:
+    protocol_failure = failure_class == "verifier_protocol"
+    return review_finding(
+        "verifier_protocol_failure" if protocol_failure else "verifier_internal_failure",
+        (
+            "The verifier returned malformed or incomplete acceptance evidence."
+            if protocol_failure else
+            "A trusted verifier component failed before it could judge the candidate."
+        ),
+        detail[:500] or failure_class,
+        "A complete structured acceptance result produced in an isolated replay.",
+        (
+            "Repair the verifier protocol or trusted oracle, then rerun the unchanged candidate; "
+            "do not treat this internal failure as a candidate defect."
+        ),
+        "infrastructure",
+        True,
+        entity_kind="verification_runtime",
+        entity_id=entity_id,
+    )
+
+
+def _verifier_failure_detail(acceptance: dict, fallback: str) -> str:
+    if isinstance(acceptance, dict):
+        for result in acceptance.get("results") or []:
+            if not isinstance(result, dict) or result.get("ok") is True:
+                continue
+            detail = str(result.get("why") or result.get("stderr") or "").strip()
+            if detail:
+                return detail[:500]
+        reason = str(acceptance.get("reason") or "").strip()
+        if reason:
+            return reason[:500]
+    return fallback[:500]
+
+
+class _ReplayIntegrityError(RuntimeError):
+    """A replay proved byte-identity loss, rather than merely failing internally."""
+
+
+def _replay_fingerprint(ex: VmExecutor, label: str) -> str:
+    try:
+        return _workspace_fingerprint(ex)
+    except Exception as exc:
+        raise _ReplayIntegrityError(
+            f"{label} fingerprint could not be proven: {type(exc).__name__}: {str(exc)[:400]}"
+        ) from exc
 
 
 def _held_out_evidence_violation(checks: list[dict]) -> str:
@@ -474,6 +570,414 @@ def _held_out_plan_failure(plan: dict, evidence_violation: str) -> tuple[str, st
     if evidence_violation:
         return "invalid_evidence", str(evidence_violation)
     return "", ""
+
+
+def _held_out_plan_findings(plan: dict, status: str, error: str) -> list[dict]:
+    findings = plan.get("findings") if isinstance(plan, dict) else None
+    if isinstance(findings, list):
+        usable = [dict(item) for item in findings if isinstance(item, dict)]
+        if usable:
+            return usable[:20]
+    return [review_finding(
+        f"held_out_{status or 'invalid'}",
+        "Private verification could not produce a safe behavioural check plan.",
+        error or "No accepted private check was available.",
+        "At least one task-linked private check with immutable output evidence.",
+        "Repair or retry the private verifier generator; meanwhile require an independent public behavioural replay.",
+        "infrastructure",
+        True,
+        entity_kind="verification_plan",
+        entity_id="held-out-plan",
+    )]
+
+
+def _acceptance_findings(
+    acceptance: dict,
+    *,
+    hidden: bool,
+    owner: str = "fighter",
+) -> list[dict]:
+    """Turn executable failures into repair instructions without leaking hidden oracles."""
+
+    findings: list[dict] = []
+    for index, result in enumerate(acceptance.get("results") or [], 1):
+        if not isinstance(result, dict) or result.get("ok"):
+            continue
+        why = str(result.get("why") or result.get("stderr") or "check failed")[:500]
+        if hidden:
+            evidence = (
+                "The undisclosed behavioural check exited non-zero."
+                if result.get("exit") not in {None, 0}
+                else "The candidate output did not match the undisclosed behavioural oracle."
+            )
+            remediation = (
+                "Re-check the requested behaviour and edge cases for the task-named deliverable; "
+                "do not rely only on the visible examples."
+            )
+            entity_id = f"held-out-{index}"
+        else:
+            target = str(result.get("target") or f"public-check-{index}")[:300]
+            evidence = f"{target}: {why}"
+            remediation = "Fix the reported behaviour, preserve already passing checks, and rerun the full public acceptance set."
+            entity_id = f"public-{index}"
+        findings.append(review_finding(
+            "hidden_candidate_failure" if hidden else "public_candidate_failure",
+            "The candidate failed an executable behavioural acceptance check.",
+            evidence,
+            "Every independent behavioural check passes in a fresh reconstructed workspace.",
+            remediation,
+            owner,
+            True,
+            entity_kind="behavioural_check",
+            entity_id=entity_id,
+        ))
+    if not findings and not acceptance.get("accepted"):
+        findings.append(review_finding(
+            "acceptance_rejected_without_result",
+            "Acceptance rejected the candidate without a per-check result.",
+            str(acceptance.get("reason") or "No executable result was recorded.")[:500],
+            "A non-empty behavioural acceptance set with explicit results.",
+            "Repair the acceptance specification and rerun it before applying the patch.",
+            "infrastructure",
+            True,
+            entity_kind="acceptance",
+            entity_id="acceptance",
+        ))
+    return findings
+
+
+def _run_hidden_revision_round(
+    ex: VmExecutor,
+    *,
+    goal: str,
+    public_checks: list[dict],
+    held_out_checks: list[dict],
+    base_commit: str,
+    task_id: str,
+    ask_fn: object,
+    cancel_fn: object,
+    max_steps: int,
+    max_wall_sec: int,
+) -> tuple[dict, dict]:
+    """Give a hidden candidate failure one sanitized repair round and recheck it."""
+
+    feedback = (
+        "\n\nINDEPENDENT REVISION FEEDBACK: an undisclosed behavioural check found "
+        "a defect. Re-read the requested behaviour and task-named deliverables, cover "
+        "edge cases beyond the visible examples, preserve every passing public check, "
+        "and rerun the complete public acceptance set. The hidden command and oracle "
+        "are intentionally not disclosed."
+    )
+    revised = run_mission(
+        goal + feedback,
+        ex,
+        checks=public_checks,
+        task_id=task_id,
+        ask_fn=ask_fn,
+        cancel_fn=cancel_fn,
+        max_fighter_rounds=1,
+        max_steps=max_steps,
+        max_wall_sec=max_wall_sec,
+    )
+    revised["hidden_revision_attempted"] = True
+    revised["held_out_required"] = True
+    revised["held_out_check_count"] = len(held_out_checks)
+    try:
+        _stop_workspace_processes(ex, strict=True)
+    except RuntimeError as exc:
+        revised.update({
+            "accepted": False,
+            "status": "blocked",
+            "summary": (
+                "Verification stopped safely after revision because fighter process "
+                f"cleanup was not proven: {exc}"
+            ),
+            "held_out_status": "not_run_revision_freeze_failed",
+            "verification_findings": [review_finding(
+                "revision_freeze_failure",
+                "The revised candidate could not be frozen safely for verification.",
+                str(exc),
+                "All fighter descendants are stopped before snapshot replay.",
+                "Repair process-boundary cleanup and rerun the revision from a clean workspace.",
+                "infrastructure",
+                True,
+                entity_kind="verification_runtime",
+                entity_id="revision-freeze",
+            )],
+        })
+        return revised, {
+            "base_commit": base_commit,
+            "changed_files": [],
+            "unified_diff": "",
+            "apply_gate": "blocked",
+        }
+
+    revised["files"] = _collect_files(ex, revised.get("artifacts") or [])
+    try:
+        patch_bundle = _build_patch_bundle(ex, base_commit, accepted=False)
+    except (OSError, RuntimeError, ValueError) as exc:
+        revised.update({
+            "accepted": False,
+            "status": "failed",
+            "summary": f"Revision patch could not be reproduced: {exc}",
+            "held_out_status": "not_run_revision_patch_failed",
+            "verification_findings": [review_finding(
+                "revision_patch_not_reproducible",
+                "The revised workspace could not be represented as a complete patch.",
+                str(exc),
+                "A complete patch against the immutable baseline.",
+                "Rebuild the candidate from the baseline and capture every changed path.",
+                "fighter",
+                True,
+                entity_kind="patch",
+                entity_id="revision-patch",
+            )],
+            "revision_required": True,
+        })
+        return revised, {
+            "base_commit": base_commit,
+            "changed_files": [],
+            "unified_diff": "",
+            "apply_gate": "blocked",
+        }
+
+    runner_violation = _runner_control_violation(
+        list(patch_bundle.get("changed_files") or [])
+    )
+    symlink_violation = _workspace_symlink_violation(ex)
+    if runner_violation or symlink_violation:
+        reason = runner_violation or symlink_violation
+        revised.update({
+            "accepted": False,
+            "status": "failed",
+            "summary": f"Unsafe revised candidate rejected: {reason}",
+            "held_out_status": "not_run_revision_safety_violation",
+            "verification_findings": [review_finding(
+                "revision_safety_violation",
+                "The revised candidate crossed a protected verification boundary.",
+                str(reason),
+                "Candidate changes remain inside task deliverables and never control the verifier.",
+                "Remove the runner-control or escaping-symlink change and rebuild the patch.",
+                "fighter",
+                True,
+                entity_kind="patch",
+                entity_id="revision-safety",
+            )],
+            "revision_required": True,
+        })
+        patch_bundle["apply_gate"] = "blocked"
+        return revised, patch_bundle
+
+    if not revised.get("accepted"):
+        patch_bundle["apply_gate"] = "blocked"
+        revised.setdefault("revision_required", True)
+        return revised, patch_bundle
+
+    public_child = None
+    held_out_child = None
+    primary_before = ""
+    primary_after = ""
+    public_before = ""
+    public_after = ""
+    held_out_before = ""
+    held_out_after = ""
+    public_acceptance: dict = {
+        "accepted": False, "results": [], "reason": "public replay did not run",
+    }
+    hidden_acceptance: dict = {
+        "accepted": False, "results": [], "reason": "private replay did not run",
+    }
+    verifier_error = ""
+    verifier_failure_class = "verifier_internal"
+    integrity_error = ""
+    cleanup_error = ""
+    cleanup_phase = False
+    try:
+        _scrub_interstage_temp(ex)
+        primary_before = _replay_fingerprint(ex, "revision primary before replay")
+        public_child = _copy_candidate_for_verification(ex, base_commit)
+        public_before = _replay_fingerprint(public_child, "revision public reconstruction")
+        if primary_before != public_before:
+            raise _ReplayIntegrityError(
+                "revised patch reconstruction changed candidate bytes"
+            )
+        deliverables, replay_checks = _public_replay_inputs(revised)
+        public_acceptance = _PUBLIC_ACCEPT(public_child, deliverables, replay_checks)
+        _stop_workspace_processes(public_child, strict=True)
+        _scrub_runtime_debris(public_child)
+        public_after = _replay_fingerprint(public_child, "revision public after replay")
+        primary_after_public = _replay_fingerprint(ex, "revision primary after public replay")
+        if public_before != public_after or primary_before != primary_after_public:
+            raise _ReplayIntegrityError(
+                "revised public replay mutated a frozen snapshot"
+            )
+        completed_public_child = public_child
+        cleanup_phase = True
+        _cleanup_workspace_processes(completed_public_child)
+        public_child = None
+        cleanup_phase = False
+        if public_acceptance.get("accepted"):
+            _scrub_interstage_temp(ex)
+            held_out_child = _copy_candidate_for_verification(ex, base_commit)
+            held_out_before = _replay_fingerprint(
+                held_out_child, "revision private reconstruction",
+            )
+            if primary_before != held_out_before:
+                raise _ReplayIntegrityError(
+                    "revised private reconstruction changed candidate bytes"
+                )
+            hidden_acceptance = accept(held_out_child, [], held_out_checks)
+            runtime_violation = _held_out_runtime_evidence_violation(
+                held_out_checks, hidden_acceptance,
+            )
+            if runtime_violation:
+                raise ValueError(runtime_violation)
+            _stop_workspace_processes(held_out_child, strict=True)
+            _scrub_runtime_debris(held_out_child)
+            held_out_after = _replay_fingerprint(
+                held_out_child, "revision private after replay",
+            )
+            primary_after = _replay_fingerprint(ex, "revision primary after private replay")
+        else:
+            primary_after = primary_after_public
+    except _ReplayIntegrityError as exc:
+        integrity_error = f"{type(exc).__name__}: {str(exc)[:500]}"
+    except Exception as exc:
+        detail = f"{type(exc).__name__}: {str(exc)[:500]}"
+        if cleanup_phase:
+            cleanup_error = detail
+        else:
+            verifier_error = detail
+            if isinstance(exc, (AttributeError, KeyError, TypeError, ValueError)):
+                verifier_failure_class = "verifier_protocol"
+    finally:
+        for label, child in (("public revision replay", public_child), ("private revision replay", held_out_child)):
+            if child is None:
+                continue
+            try:
+                _cleanup_workspace_processes(child)
+            except Exception as cleanup_exc:
+                detail = f"{label} cleanup failed: {type(cleanup_exc).__name__}: {cleanup_exc}"
+                cleanup_error = (
+                    f"{cleanup_error}; {detail}" if cleanup_error else detail
+                )[:1000]
+
+    if verifier_error and not cleanup_error and not integrity_error and primary_before:
+        try:
+            primary_after = _replay_fingerprint(
+                ex, "revision primary after verifier error",
+            )
+        except _ReplayIntegrityError as audit_exc:
+            integrity_error = str(audit_exc)[:1000]
+
+    mutated = bool(
+        primary_before and primary_after and primary_before != primary_after
+        or public_before and public_after and public_before != public_after
+        or held_out_before and held_out_after and held_out_before != held_out_after
+    )
+    if mutated and not integrity_error:
+        integrity_error = "revision replay mutated the frozen snapshot"
+    revised["public_replay_acceptance"] = public_acceptance
+    revised["held_out_acceptance"] = hidden_acceptance
+    if cleanup_error or integrity_error:
+        revised.update({
+            "accepted": False,
+            "status": "blocked",
+            "held_out_status": "verifier_infra",
+            "held_out_failure_class": "verifier_infra",
+            "held_out_error": cleanup_error or integrity_error,
+        })
+        revised["verification_findings"] = [review_finding(
+            "revision_verifier_infrastructure",
+            "The revised candidate could not be verified in an isolated reproducible replay.",
+            revised["held_out_error"],
+            "Both replay workspaces remain byte-identical and cleanup is proven.",
+            "Repair verifier isolation/cleanup, then resume the same revision.",
+            "infrastructure",
+            True,
+            entity_kind="verification_runtime",
+            entity_id="revision-replay",
+        )]
+        revised["summary"] = (
+            "Verification stopped safely after revision: isolation or cleanup was not proven. "
+            + revised["verification_findings"][0]["remediation"]
+        )
+    elif verifier_error:
+        revised.update({
+            "accepted": False,
+            "status": "failed",
+            "held_out_status": verifier_failure_class,
+            "held_out_failure_class": verifier_failure_class,
+            "held_out_error": verifier_error,
+            "revision_required": True,
+        })
+        revised["verification_findings"] = [_verifier_internal_finding(
+            verifier_failure_class,
+            verifier_error,
+            entity_id="revision-replay",
+        )]
+        revised["summary"] = (
+            "The revised candidate was not judged because verification failed internally, "
+            "but snapshot cleanup and primary byte identity were proven. "
+            + revised["verification_findings"][0]["remediation"]
+        )
+    elif not public_acceptance.get("accepted"):
+        revised.update({
+            "accepted": False,
+            "status": "failed",
+            "held_out_status": "reconstructed_public_failure",
+            "held_out_failure_class": "candidate_failure",
+            "revision_required": True,
+        })
+        revised["verification_findings"] = _acceptance_findings(
+            public_acceptance, hidden=False,
+        )
+        revised["summary"] = (
+            "Revision still fails reconstructed public acceptance. "
+            + revised["verification_findings"][0]["remediation"]
+        )
+    elif not hidden_acceptance.get("accepted"):
+        failure_class = _held_out_failure_class(hidden_acceptance)
+        revised.update({
+            "accepted": False,
+            "status": "failed",
+            "held_out_status": failure_class,
+            "held_out_failure_class": failure_class,
+            "revision_required": True,
+        })
+        revised["verification_findings"] = (
+            _acceptance_findings(hidden_acceptance, hidden=True)
+            if failure_class == "candidate_failure" else
+            [_verifier_internal_finding(
+                failure_class,
+                _verifier_failure_detail(hidden_acceptance, failure_class),
+                entity_id="revision-private",
+            )]
+        )
+        revised["summary"] = (
+            (
+                "The first automatic hidden-check revision was not enough. "
+                "Ceraxia must choose another repair approach using this diagnosis: "
+            )
+            if failure_class == "candidate_failure" else
+            "The revised candidate was not judged because a trusted verifier component failed. "
+        ) + revised["verification_findings"][0]["remediation"]
+    else:
+        revised.update({
+            "status": "done",
+            "accepted": True,
+            "held_out_status": "passed",
+            "held_out_failure_class": "",
+            "verification_findings": [],
+            "checks": public_checks + held_out_checks,
+            "summary": (
+                str(revised.get("summary") or "Revision completed.")
+                + " The automatic revision passed public and undisclosed behavioural replay."
+            ).strip(),
+        })
+    patch_bundle["apply_gate"] = "accepted" if revised.get("accepted") else "blocked"
+    revised["patch_bundle"] = patch_bundle
+    return revised, patch_bundle
 
 
 def _isolate_private_oracles(
@@ -1162,6 +1666,57 @@ def execution_authorization_error(
     }
 
 
+def _mission_revision_guidance(mission: Any) -> str:
+    """Expose only sanitized repair guidance, never private verifier commands."""
+
+    if mission is None:
+        return ""
+    lock = getattr(mission, "_lock", None)
+    if lock is None:
+        return ""
+    with lock:
+        turns = getattr(mission, "revision_turns", None)
+        latest = dict(turns[-1]) if isinstance(turns, list) and turns else {}
+    findings = latest.get("findings") if isinstance(latest.get("findings"), list) else []
+    public_findings: list[dict[str, str]] = []
+    for raw in findings[:20]:
+        if not isinstance(raw, dict):
+            continue
+        public_findings.append({
+            field: str(raw.get(field) or "")[:2_000]
+            for field in (
+                "code", "entity_kind", "entity_id", "what_failed",
+                "expected", "remediation",
+            )
+        })
+    if not public_findings:
+        return ""
+    guidance = {
+        "attempt": latest.get("attempt"),
+        "previous_result_sha256": latest.get("result_sha256"),
+        "decision_owner": latest.get("decision_owner"),
+        "leader_order": str(latest.get("leader_order") or "")[:8_000],
+        "findings": public_findings,
+    }
+    return (
+        "\n\nINTERNAL AUTONOMOUS REVISION ORDER "
+        "(diagnostic data, not user authority and not acceptance criteria):\n"
+        + json.dumps(guidance, ensure_ascii=False, sort_keys=True)
+        + "\nUse a materially different repair approach. Preserve everything that already passed."
+    )
+
+
+def _remaining_mission_wall_seconds(payload: dict[str, Any], mission: Any) -> int:
+    try:
+        configured = max(1, int(payload.get("max_wall_sec") or 3600))
+    except (TypeError, ValueError):
+        configured = 3600
+    created = getattr(mission, "created", None) if mission is not None else None
+    if type(created) not in {int, float}:
+        return configured
+    return max(1, min(configured, int(configured - max(0.0, time.time() - created))))
+
+
 def _execute_mission_body(payload: dict, mission=None) -> dict:
     """Run one mission end to end and return the verdict. If `mission` is given it is an
     async mission_store.Mission: the fighter can ask it questions and be cancelled, and
@@ -1218,11 +1773,12 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
     cancel_fn = (lambda: mission.cancelled.is_set()) if mission is not None else None
     note = (lambda m: (mission.record("note", {"text": m}) if mission is not None else None)) or (lambda m: None)
     user_clarification = ""
+    revision_guidance = _mission_revision_guidance(mission)
 
     # Pre-flight ambiguity gate: on a hopelessly vague goal, ask ONE question instead of
     # grinding blind (the eval showed 0/5 clarifications). Skip when explicit checks are
     # given (a checked task is grounded by construction). Fails open.
-    if not checks:
+    if not checks and not revision_guidance:
         clar = needs_clarification(
             goal, has_workspace=bool(workspace_files or workspace_blobs or workspace_external_assets),
         )
@@ -1248,6 +1804,9 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
         item for item in (user_clarification, acceptance_user_request or original_goal)
         if item
     )
+    if revision_guidance:
+        goal += revision_guidance
+        note("Previous verification findings were fed into an autonomous repair attempt.")
 
     try:
         ex = _mission_executor(task_id)
@@ -1336,6 +1895,10 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
         "status": "not_required", "checks": [], "error": "",
     }
     held_out_checks = list(held_out_plan.get("checks") or [])
+    held_out_degraded = False
+    held_out_degraded_status = ""
+    held_out_degraded_error = ""
+    verification_findings: list[dict] = []
     if held_out_required:
         note(f"Private verifier prepared {len(held_out_checks)} undisclosed behavioural check(s).")
         try:
@@ -1350,25 +1913,27 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
             held_out_plan, evidence_violation,
         )
         if held_out_failure_status:
-            return {
-                "status": "blocked", "accepted": False, "task_id": task_id,
-                "summary": "Blocked: private verifier infrastructure could not produce valid checks.",
-                "held_out_required": True,
-                "held_out_check_count": 0,
-                "held_out_status": held_out_failure_status,
-                "held_out_error": held_out_failure_error[:500],
-                "files": {},
-            }
+            held_out_degraded = True
+            held_out_degraded_status = held_out_failure_status
+            held_out_degraded_error = held_out_failure_error[:500]
+            verification_findings = _held_out_plan_findings(
+                held_out_plan, held_out_failure_status, held_out_failure_error,
+            )
+            held_out_checks = []
+            note(
+                "Private verification is degraded; continuing only through fresh "
+                "public behavioural replay. " + held_out_failure_error[:240]
+            )
 
     try:
         if checks:
             verdict = run_mission(goal, ex, checks=checks, task_id=task_id, ask_fn=ask_fn, cancel_fn=cancel_fn,
                                   max_fighter_rounds=int(payload.get("max_rounds") or 3),
                                   max_steps=int(payload.get("max_steps") or 40),
-                                  max_wall_sec=int(payload.get("max_wall_sec") or 3600))
+                                  max_wall_sec=_remaining_mission_wall_seconds(payload, mission))
         else:
             verdict = plan_and_run(goal, ex, task_id=task_id, ask_fn=ask_fn, cancel_fn=cancel_fn,
-                                   max_wall_sec=int(payload.get("max_wall_sec") or 3600),
+                                   max_wall_sec=_remaining_mission_wall_seconds(payload, mission),
                                    memory=lambda m: (note(m), _memory(task_id, m)))
     except BaseException:
         raise
@@ -1422,9 +1987,21 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
             verdict.update({
                 "accepted": False,
                 "status": "failed",
-                "summary": "Blocked: candidate symlink escaped the reproducible workspace.",
+                "summary": "Revision required: a candidate symlink escaped the reproducible workspace.",
                 "workspace_symlink_violation": symlink_violation,
                 "held_out_status": "not_run_workspace_symlink_violation",
+                "revision_required": True,
+                "verification_findings": [review_finding(
+                    "workspace_symlink_escape",
+                    "A candidate symlink escapes the reproducible workspace.",
+                    symlink_violation,
+                    "Every deliverable resolves inside the mission workspace without escaping symlinks.",
+                    "Remove or replace the escaping symlink, then rebuild and rerun all checks.",
+                    "fighter",
+                    True,
+                    entity_kind="workspace",
+                    entity_id="symlink-boundary",
+                )],
             })
             patch_bundle["apply_gate"] = "blocked"
             verdict["patch_bundle"] = patch_bundle
@@ -1433,9 +2010,21 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
             verdict.update({
                 "accepted": False,
                 "status": "failed",
-                "summary": "Blocked: candidate attempted to control the verification runner.",
+                "summary": "Revision required: candidate changes crossed the verification-runner boundary.",
                 "runner_control_violation": runner_violation,
                 "held_out_status": "not_run_runner_control_violation",
+                "revision_required": True,
+                "verification_findings": [review_finding(
+                    "runner_control_boundary",
+                    "Candidate changes include a protected verification-runner path.",
+                    runner_violation,
+                    "The candidate modifies only task deliverables and cannot influence its verifier.",
+                    "Remove all runner-control changes and implement the behaviour only in task-owned files.",
+                    "fighter",
+                    True,
+                    entity_kind="patch",
+                    entity_id="runner-boundary",
+                )],
             })
             patch_bundle["apply_gate"] = "blocked"
             verdict["patch_bundle"] = patch_bundle
@@ -1457,13 +2046,17 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
                 "accepted": False, "results": [], "reason": "public replay did not run",
             }
             verifier_error = ""
+            verifier_failure_class = "verifier_internal"
+            integrity_error = ""
+            cleanup_error = ""
+            cleanup_phase = False
             try:
                 _scrub_interstage_temp(ex)
-                primary_before = _workspace_fingerprint(ex)
+                primary_before = _replay_fingerprint(ex, "primary before replay")
                 public_child = _copy_candidate_for_verification(ex, base_commit)
-                public_before = _workspace_fingerprint(public_child)
+                public_before = _replay_fingerprint(public_child, "public reconstruction")
                 if primary_before != public_before:
-                    raise RuntimeError(
+                    raise _ReplayIntegrityError(
                         "clean baseline plus captured patch does not reproduce candidate tree"
                     )
                 public_deliverables, public_checks = _public_replay_inputs(verdict)
@@ -1472,21 +2065,31 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
                 )
                 _stop_workspace_processes(public_child, strict=True)
                 _scrub_runtime_debris(public_child)
-                public_after = _workspace_fingerprint(public_child)
-                primary_after_public = _workspace_fingerprint(ex)
+                public_after = _replay_fingerprint(public_child, "public after replay")
+                primary_after_public = _replay_fingerprint(ex, "primary after public replay")
                 if public_before != public_after or primary_before != primary_after_public:
-                    raise RuntimeError("public replay mutated a frozen candidate snapshot")
+                    raise _ReplayIntegrityError(
+                        "public replay mutated a frozen candidate snapshot"
+                    )
                 completed_public_child = public_child
-                public_child = None
+                cleanup_phase = True
                 _cleanup_workspace_processes(completed_public_child)
-                if public_replay_acceptance.get("accepted") and held_out_required:
+                public_child = None
+                cleanup_phase = False
+                if (
+                    public_replay_acceptance.get("accepted")
+                    and held_out_required
+                    and not held_out_degraded
+                ):
                     # Public replay is candidate-visible. Discard it completely,
                     # scrub shared temp, and give private checks a fresh reconstruction.
                     _scrub_interstage_temp(ex)
                     held_out_child = _copy_candidate_for_verification(ex, base_commit)
-                    held_out_before = _workspace_fingerprint(held_out_child)
+                    held_out_before = _replay_fingerprint(
+                        held_out_child, "private reconstruction",
+                    )
                     if primary_before != held_out_before:
-                        raise RuntimeError(
+                        raise _ReplayIntegrityError(
                             "fresh private reconstruction does not match the frozen candidate tree"
                         )
                     held_out_acceptance = accept(held_out_child, [], held_out_checks)
@@ -1494,20 +2097,39 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
                         held_out_checks, held_out_acceptance,
                     )
                     if runtime_evidence_violation:
-                        raise RuntimeError(runtime_evidence_violation)
+                        raise ValueError(runtime_evidence_violation)
                     _stop_workspace_processes(held_out_child, strict=True)
                     _scrub_runtime_debris(held_out_child)
-                    held_out_after = _workspace_fingerprint(held_out_child)
-                    primary_after = _workspace_fingerprint(ex)
+                    held_out_after = _replay_fingerprint(
+                        held_out_child, "private after replay",
+                    )
+                    primary_after = _replay_fingerprint(ex, "primary after private replay")
                 elif public_replay_acceptance.get("accepted"):
-                    held_out_acceptance = {
-                        "accepted": True, "results": [], "reason": "not required",
-                    }
+                    held_out_acceptance = (
+                        {
+                            "accepted": False,
+                            "results": [],
+                            "reason": (
+                                "private checks were not run; public behavioural replay "
+                                "is the explicit degraded fallback"
+                            ),
+                        }
+                        if held_out_degraded else
+                        {"accepted": True, "results": [], "reason": "not required"}
+                    )
                     primary_after = primary_after_public
                 else:
                     primary_after = primary_after_public
+            except _ReplayIntegrityError as exc:
+                integrity_error = f"{type(exc).__name__}: {str(exc)[:500]}"
             except Exception as exc:
-                verifier_error = f"{type(exc).__name__}: {str(exc)[:500]}"
+                detail = f"{type(exc).__name__}: {str(exc)[:500]}"
+                if cleanup_phase:
+                    cleanup_error = detail
+                else:
+                    verifier_error = detail
+                    if isinstance(exc, (AttributeError, KeyError, TypeError, ValueError)):
+                        verifier_failure_class = "verifier_protocol"
             finally:
                 for cleanup_label, cleanup_child in (
                     ("public replay", public_child),
@@ -1522,50 +2144,154 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
                             f"{cleanup_label} cleanup failed: "
                             f"{type(cleanup_exc).__name__}: {str(cleanup_exc)[:500]}"
                         )
-                        verifier_error = (
-                            f"{verifier_error}; {detail}" if verifier_error else detail
+                        cleanup_error = (
+                            f"{cleanup_error}; {detail}" if cleanup_error else detail
                         )[:1000]
+
+            if verifier_error and not cleanup_error and not integrity_error and primary_before:
+                try:
+                    primary_after = _replay_fingerprint(
+                        ex, "primary after verifier error",
+                    )
+                except _ReplayIntegrityError as audit_exc:
+                    integrity_error = str(audit_exc)[:1000]
 
             mutated = bool(
                 primary_before and primary_after and primary_before != primary_after
                 or public_before and public_after and public_before != public_after
                 or held_out_before and held_out_after and held_out_before != held_out_after
             )
+            if mutated and not integrity_error:
+                integrity_error = "private verifier mutated the frozen candidate snapshot"
             verdict["held_out_acceptance"] = held_out_acceptance
             verdict["public_replay_acceptance"] = public_replay_acceptance
-            if verifier_error or mutated:
+            if cleanup_error or integrity_error:
                 verdict["accepted"] = False
                 verdict["status"] = "blocked"
                 verdict["held_out_status"] = "verifier_infra"
                 verdict["held_out_failure_class"] = "verifier_infra"
-                verdict["held_out_error"] = (
-                    verifier_error or "private verifier mutated the frozen candidate snapshot"
+                verdict["held_out_error"] = cleanup_error or integrity_error
+                verification_findings = [review_finding(
+                    "verification_isolation_failure",
+                    "The verifier workspace was not proven isolated and reproducible.",
+                    verdict["held_out_error"],
+                    "Public and private replay leave the frozen candidate fingerprint unchanged and cleanup is proven.",
+                    "Repair verifier isolation or cleanup, then rerun the mission from a clean workspace.",
+                    "infrastructure",
+                    True,
+                    entity_kind="verification_runtime",
+                    entity_id="isolation",
+                )]
+                verdict["summary"] = (
+                    "Verification stopped safely: isolation or cleanup was not proven. "
+                    + verdict["held_out_error"][:240]
                 )
-                verdict["summary"] = "Blocked: private held-out verifier was not isolated and reproducible."
+            elif verifier_error:
+                verdict["accepted"] = False
+                verdict["status"] = "failed"
+                verdict["held_out_status"] = verifier_failure_class
+                verdict["held_out_failure_class"] = verifier_failure_class
+                verdict["held_out_error"] = verifier_error
+                verdict["revision_required"] = True
+                verification_findings = [_verifier_internal_finding(
+                    verifier_failure_class,
+                    verifier_error,
+                    entity_id="initial-replay",
+                )]
+                verdict["summary"] = (
+                    "The candidate was not judged because verification failed internally, "
+                    "but replay cleanup and primary byte identity were proven. "
+                    + verification_findings[0]["remediation"]
+                )
             elif not public_replay_acceptance.get("accepted"):
                 verdict["accepted"] = False
                 verdict["status"] = "failed"
                 verdict["held_out_status"] = "reconstructed_public_failure"
                 verdict["held_out_failure_class"] = "candidate_failure"
-                verdict["summary"] = (
-                    "Blocked: the captured patch no longer passes the public acceptance that produced it."
+                verification_findings = _acceptance_findings(
+                    public_replay_acceptance, hidden=False,
                 )
+                verdict["summary"] = (
+                    "Revision required: the reconstructed patch failed public behavioural acceptance. "
+                    + verification_findings[0]["remediation"]
+                )
+                verdict["revision_required"] = True
+            elif held_out_degraded:
+                verdict["held_out_status"] = (
+                    "degraded_" + (held_out_degraded_status or "private_verifier")
+                )
+                verdict["held_out_failure_class"] = "verification_degraded"
+                verdict["held_out_error"] = held_out_degraded_error
+                verdict["verification_degraded"] = True
+                verdict["verification_mode"] = "public_behavioral_fallback"
+                verdict["summary"] = (
+                    str(verdict.get("summary") or "Work completed.")
+                    + " Verification assurance is degraded: private checks were unavailable, "
+                    "but the patch passed an independent public behavioural replay."
+                ).strip()
             elif not held_out_acceptance.get("accepted"):
                 failure_class = _held_out_failure_class(held_out_acceptance)
                 verdict["accepted"] = False
                 verdict["held_out_failure_class"] = failure_class
                 verdict["held_out_status"] = failure_class
-                if failure_class == "verifier_infra":
-                    verdict["status"] = "blocked"
-                    verdict["summary"] = "Blocked: private held-out verifier infrastructure failed."
-                else:
+                verdict["status"] = "failed"
+                if failure_class == "candidate_failure":
                     verdict["status"] = "failed"
-                    verdict["summary"] = "Blocked: private held-out verification rejected the candidate."
+                    verification_findings = _acceptance_findings(
+                        held_out_acceptance, hidden=True,
+                    )
+                    verdict["summary"] = (
+                        "Revision required: an undisclosed behavioural check rejected the candidate. "
+                        + verification_findings[0]["remediation"]
+                    )
+                    verdict["revision_required"] = True
+                    public_revision_checks = [
+                        dict(item)
+                        for item in (verdict.get("checks") or [])
+                        if isinstance(item, dict)
+                    ]
+                    leadership_copy = (
+                        dict(verdict["leadership"])
+                        if isinstance(verdict.get("leadership"), dict)
+                        else None
+                    )
+                    verdict, patch_bundle = _run_hidden_revision_round(
+                        ex,
+                        goal=goal,
+                        public_checks=public_revision_checks,
+                        held_out_checks=held_out_checks,
+                        base_commit=base_commit,
+                        task_id=task_id,
+                        ask_fn=ask_fn,
+                        cancel_fn=cancel_fn,
+                        max_steps=int(payload.get("max_steps") or 40),
+                        max_wall_sec=_remaining_mission_wall_seconds(payload, mission),
+                    )
+                    verdict["task_id"] = task_id
+                    verdict["held_out_required"] = True
+                    verdict["held_out_check_count"] = len(held_out_checks)
+                    if leadership_copy is not None:
+                        verdict["leadership"] = leadership_copy
+                    verification_findings = list(
+                        verdict.get("verification_findings") or []
+                    )
+                else:
+                    verdict["revision_required"] = True
+                    verification_findings = [_verifier_internal_finding(
+                        failure_class,
+                        _verifier_failure_detail(held_out_acceptance, failure_class),
+                        entity_id="private-runtime",
+                    )]
+                    verdict["summary"] = (
+                        "The candidate was not judged because a trusted verifier component failed. "
+                        + verification_findings[0]["remediation"]
+                    )
             else:
                 verdict["held_out_status"] = "passed" if held_out_required else "not_required"
                 verdict["held_out_failure_class"] = ""
                 public_checks = verdict.get("checks") if isinstance(verdict.get("checks"), list) else []
                 verdict["checks"] = public_checks + (held_out_checks if held_out_required else [])
+            verdict["verification_findings"] = verification_findings
         elif held_out_required:
             verdict["held_out_status"] = "not_run_candidate_rejected"
         else:
@@ -1581,6 +2307,18 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
             verdict["accepted"] = False
             verdict["status"] = "failed"
             verdict["protected_path_violation"] = violation
+            verdict["revision_required"] = True
+            verdict["verification_findings"] = [review_finding(
+                "protected_path_violation",
+                "The candidate changed a path protected by the mission boundary.",
+                violation,
+                "Only explicitly authorized task paths are changed.",
+                "Revert the protected-path edits and implement the task inside its authorized scope.",
+                "fighter",
+                True,
+                entity_kind="patch",
+                entity_id="protected-paths",
+            )]
             patch_bundle["apply_gate"] = "blocked"
             _memory(task_id, "Protected files were changed: " + violation[:300])
         last_acc = {}
@@ -1684,7 +2422,7 @@ def execute_mission(payload: dict, mission=None) -> dict:
         }
     if pipeline_error is not None:
         return {
-            "status": "blocked", "accepted": False, "task_id": task_id,
+            "status": "failed", "accepted": False, "task_id": task_id,
             "summary": "Mission pipeline failed before a trustworthy verdict was produced.",
             "error": f"{type(pipeline_error).__name__}: {pipeline_error}"[:500],
             "cleanup_complete": True, "files": {},
@@ -1693,7 +2431,7 @@ def execute_mission(payload: dict, mission=None) -> dict:
         verdict.setdefault("cleanup_complete", True)
         return verdict
     return {
-        "status": "blocked", "accepted": False, "task_id": task_id,
+        "status": "failed", "accepted": False, "task_id": task_id,
         "summary": "Mission pipeline returned no verdict.",
         "cleanup_complete": True, "files": {},
     }
