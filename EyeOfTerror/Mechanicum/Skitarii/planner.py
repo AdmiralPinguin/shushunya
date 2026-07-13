@@ -82,6 +82,8 @@ def reconsider(top_goal: str, stuck_goal: str, failed: dict[str, Any]) -> str:
     acc = failed.get("acceptance") or {}
     if isinstance(acc, dict):
         fails = "; ".join(str(r.get("why") or r.get("target")) for r in acc.get("results", []) if not r.get("ok"))
+        if not fails:
+            fails = str(acc.get("reason") or "")
     prompt = (
         "A coder got STUCK on a subtask: it exhausted its attempts and the checks are still failing. "
         "Do not repeat the same approach. Rewrite the subtask instruction with a DIFFERENT, simpler, more "
@@ -256,9 +258,18 @@ def plan_and_run(goal: str, executor: Any, *, task_id: str = "", ask_fn=None, ca
                         "summary": "cancelled", "artifacts": [], "checks": top_spec["checks"]}
             if not res.get("accepted"):
                 note(f"Планировщик: подзадача '{sub['title']}' не сдалась — эскалирую.")
-                return {"status": "failed", "accepted": False, "subtasks": sub_results,
-                        "summary": f"Subtask '{sub['title']}' failed: {res.get('summary','')}",
-                        "artifacts": res.get("artifacts", []), "checks": top_spec["checks"]}
+                # Preserve the fighter's executable evidence and structured repair
+                # findings.  Rebuilding a small summary dict here used to discard
+                # them, preventing the mission store from scheduling attempt 2.
+                failed_result = dict(res)
+                failed_result.update({
+                    "status": "failed",
+                    "accepted": False,
+                    "subtasks": sub_results,
+                    "failed_subtask": sub["title"],
+                    "summary": f"Subtask '{sub['title']}' failed: {res.get('summary','')}",
+                })
+                return failed_result
 
     # whole-task acceptance: re-run the top-level checks against the combined project
     acceptance = accept(executor, top_spec["deliverables"], top_spec["checks"])

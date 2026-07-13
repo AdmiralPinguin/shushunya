@@ -64,7 +64,8 @@ def run_mission(goal: str, executor: Any, *, checks: list[str] | None = None,
                     "artifacts": artifacts, "checks": checks}
 
     # 4) Exhausted rounds without acceptance -> honest escalation with the real failures.
-    fails = [r for r in rounds[-1]["acceptance"]["results"] if not r["ok"]]
+    last_acceptance = rounds[-1]["acceptance"]
+    fails = [r for r in last_acceptance["results"] if not r["ok"]]
     diagnostics = [
         {
             "code": "public_candidate_failure",
@@ -82,16 +83,40 @@ def run_mission(goal: str, executor: Any, *, checks: list[str] | None = None,
         }
         for index, item in enumerate(fails, 1)
     ]
+    acceptance_reason = str(last_acceptance.get("reason") or "").strip()
+    if not diagnostics:
+        # Individual commands can all exit zero while the structural gate still
+        # rejects a weak acceptance set (for example, grep/run-only checks).  That
+        # is an acceptance-spec defect, not proof that the candidate succeeded.
+        diagnostics = [{
+            "code": "acceptance_spec_failure",
+            "what_failed": "The public acceptance specification did not prove the requested behaviour.",
+            "evidence": (
+                acceptance_reason
+                or "Acceptance rejected without a failing per-check result."
+            )[:2_000],
+            "expected": "At least one task-linked behavioural oracle or real test proves the requested outcome.",
+            "remediation": "Regenerate a behavioural/test acceptance check, then rerun the candidate against the complete set.",
+            "revision_owner": "infrastructure",
+            "retryable": True,
+            "entity_kind": "acceptance",
+            "entity_id": "public-acceptance-spec",
+        }]
+    truthful_summary = (
+        f"Acceptance rejected: {acceptance_reason}"
+        if acceptance_reason
+        else f"Acceptance failed: {diagnostics[0]['evidence']}"
+    )
     return {"status": "failed", "accepted": False, "rounds": rounds,
-            "summary": last_fighter.get("summary", ""),
+            "summary": truthful_summary,
             "artifacts": last_fighter.get("artifacts", []),
-            "checks": checks,
+            "checks": checks, "acceptance": last_acceptance,
             "revision_required": True,
             "verification_findings": diagnostics,
             "blockers": [
                 f"{f['target']} -> {f.get('why') or f.get('stderr','') or f.get('stdout','') or 'failed'}"
                 for f in fails
-            ]}
+            ] or [diagnostics[0]["evidence"]]}
 
 
 if __name__ == "__main__":  # manual driver
