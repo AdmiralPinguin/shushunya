@@ -95,6 +95,53 @@ def task_roster_note():
     }
 
 
+def continuable_tasks(limit=5):
+    """Trusted failed/blocked mission identities exposed to Core for one turn.
+
+    Vox owns the live roster, so a model cannot grant itself authority by
+    printing a plausible task id.  ``needs_user`` is deliberately excluded:
+    those runs must use the typed decision path instead of a generic retry.
+    """
+    try:
+        roster = _get("/roster")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Vox continuation roster failed: {exc}", flush=True)
+        return []
+    try:
+        safe_limit = max(1, min(int(limit or 5), 12))
+    except (TypeError, ValueError):
+        safe_limit = 5
+    result = []
+    for item in roster.get("tasks") or []:
+        if (
+            not isinstance(item, dict)
+            or item.get("active") is True
+            or item.get("needs_user") is True
+            or str(item.get("user_visible_state") or "").strip().lower()
+            == "needs_user_decision"
+        ):
+            continue
+        state = str(item.get("state") or "").strip().lower()
+        if state == "needs_user" or state not in {"failed", "blocked", "quarantined"}:
+            continue
+        task_id = str(item.get("task_id") or "").strip()[:240]
+        goal = str(item.get("goal") or "").strip()[:1_200]
+        if not task_id or not goal:
+            continue
+        result.append(
+            {
+                "parent_task_id": task_id,
+                "goal": goal,
+                "state": state,
+                "state_label": str(item.get("state_label") or state).strip()[:300],
+                "failure_summary": str(item.get("state_label") or state).strip()[:1_200],
+            }
+        )
+        if len(result) >= safe_limit:
+            break
+    return result
+
+
 def register_push_token(token):
     """Forward the device's FCM token to Vox, which sends the real push."""
     try:

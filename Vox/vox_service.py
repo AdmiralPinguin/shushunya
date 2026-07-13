@@ -794,9 +794,21 @@ def task_roster(limit: int = 10) -> dict:
     for run in runs:
         if not isinstance(run, dict):
             continue
-        # mission_status carries the protocol phase (executing/plan_review/...),
-        # which is far more truthful than the coarse run status ("created").
-        status = str(run.get("mission_status") or run.get("lifecycle_status") or run.get("status") or "").lower()
+        # Warmaster's nested mission_state is the canonical lifecycle view.
+        # In particular, a blocked mission may either need an internal repair
+        # or a concrete user decision; flattening both to "blocked" makes the
+        # conversation layer treat a pending question as autonomous work.
+        mission_state = run.get("mission_state") if isinstance(run.get("mission_state"), dict) else {}
+        needs_user = mission_state.get("needs_user") is True
+        status = str(
+            mission_state.get("status")
+            or run.get("mission_status")
+            or run.get("lifecycle_status")
+            or run.get("status")
+            or ""
+        ).lower()
+        if needs_user:
+            status = "needs_user"
         tasks.append(
             {
                 "task_id": str(run.get("task_id") or ""),
@@ -804,6 +816,9 @@ def task_roster(limit: int = 10) -> dict:
                 "governor": str(run.get("governor") or ""),
                 "state": status,
                 "state_label": STATE_LABELS.get(status, status or "неизвестно"),
+                "needs_user": needs_user,
+                "user_visible_state": str(mission_state.get("user_visible_state") or ""),
+                "next_owner": str(mission_state.get("next_owner") or ""),
                 "active": str(run.get("task_id") or "") in active_ids or status in {"running", "queued", "executing"},
             }
         )

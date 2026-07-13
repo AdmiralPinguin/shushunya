@@ -10,6 +10,7 @@ ALLOWED_ACTIONS = {
     "answer_in_chat",
     "ask_clarification",
     "request_warmaster_mission",
+    "continue_warmaster_mission",
     "create_administratum_task",
     "deliver_pending_reports",
     "deliver_artifact",
@@ -75,6 +76,41 @@ def pending_decision_ids(manifest: dict[str, Any]) -> list[str]:
                 result.append(task_id)
         break
     return result[:12]
+
+
+def continuable_task_catalog(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return only continuation candidates published by trusted Archive state."""
+    result: list[dict[str, Any]] = []
+    for capability in manifest.get("capabilities", []):
+        if not (
+            isinstance(capability, dict)
+            and capability.get("action") == "continue_warmaster_mission"
+            and capability.get("available") is True
+        ):
+            continue
+        items = capability.get("continuable_tasks")
+        for item in items if isinstance(items, list) else []:
+            if not isinstance(item, dict):
+                continue
+            parent_task_id = str(item.get("parent_task_id") or "").strip()[:240]
+            goal = str(item.get("goal") or "").strip()[:1_200]
+            if parent_task_id and goal and all(
+                existing.get("parent_task_id") != parent_task_id for existing in result
+            ):
+                result.append(
+                    {
+                        "parent_task_id": parent_task_id,
+                        "goal": goal,
+                        "state": str(item.get("state") or "").strip()[:80],
+                        "failure_summary": str(item.get("failure_summary") or "").strip()[:1_200],
+                    }
+                )
+        break
+    return result[:12]
+
+
+def continuable_task_ids(manifest: dict[str, Any]) -> list[str]:
+    return [item["parent_task_id"] for item in continuable_task_catalog(manifest)]
 
 
 @dataclass(frozen=True)
@@ -154,6 +190,21 @@ class Authority:
                 "explicit_pending_decision_answer",
                 "Текущий текст будет передан только подтверждённой ожидающей миссии.",
             )
+        if action == "continue_warmaster_mission":
+            trusted_task_ids = continuable_task_ids(manifest)
+            parent_task_id = str(decision.get("continue_parent_task_id") or "").strip()
+            if not trusted_task_ids:
+                return Authorization(
+                    "deny",
+                    "continuation_unavailable",
+                    "В текущем живом состоянии нет остановившейся задачи, которую можно честно продолжить.",
+                )
+            if parent_task_id not in trusted_task_ids:
+                return Authorization(
+                    "deny",
+                    "continuation_task_mismatch",
+                    "Я не смог однозначно связать команду продолжить с подтверждённой задачей.",
+                )
         if action == "request_warmaster_mission":
             request = decision.get("warmaster_request") if isinstance(decision.get("warmaster_request"), dict) else {}
             if not str(request.get("user_request") or "").strip() or not str(request.get("expected_outcome") or "").strip():
@@ -193,6 +244,8 @@ class Authority:
         if action == "request_warmaster_mission":
             request = decision.get("warmaster_request") if isinstance(decision.get("warmaster_request"), dict) else {}
             target_scope = str(request.get("capability_area") or "unknown").strip().lower() or "unknown"
+        elif action == "continue_warmaster_mission":
+            target_scope = "existing_abaddon_mission"
         elif action == "create_administratum_task":
             target_scope = "administratum"
         elif action == "deliver_artifact":

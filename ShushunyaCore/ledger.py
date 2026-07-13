@@ -359,6 +359,126 @@ class Ledger:
         )
         return db.execute("SELECT * FROM events WHERE seq=?", (cur.lastrowid,)).fetchone()
 
+    def enqueue_quarantine_notification(
+        self,
+        db: sqlite3.Connection,
+        *,
+        commitment_row: sqlite3.Row,
+        previous_state: str,
+        diagnostic: dict[str, Any],
+        event_seq: int,
+        delegate_ref: str = "",
+    ) -> str | None:
+        """Atomically enqueue one owner notice for one new quarantine event.
+
+        Callers pass their already-open write transaction and the exact event
+        which established quarantine.  Existing quarantines are deliberately
+        not scanned or backfilled; repairing one historical case is an explicit
+        operation, not a startup side effect.
+        """
+        if str(previous_state or "") == "quarantined" or str(commitment_row["state"] or "") != "quarantined":
+            return None
+        diagnostic = diagnostic if isinstance(diagnostic, dict) else {}
+        code = str(diagnostic.get("code") or "commitment_quarantined").strip()
+        if "continuation" in code or code in {"abaddon_rejected", "abaddon_repair_required"}:
+            explanation = (
+                "Я попытался автоматически продолжить остановившуюся работу, но опубликованная "
+                "команда продолжения оказалась неисполнимой. Без новой стратегии безопасно "
+                "повторять её нельзя."
+            )
+            required_action = (
+                "Сформировать новую стратегию и запустить свежую проверяемую попытку, "
+                "а не повторять прежнюю команду."
+            )
+        elif code in {"abaddon_status_unavailable", "unknown_abaddon_status"}:
+            explanation = (
+                "После нескольких проверок я так и не получил однозначного подтверждаемого "
+                "состояния работы, поэтому перестал выдавать её за живую."
+            )
+            required_action = (
+                "Восстановить однозначный статус работы или запустить свежую проверяемую попытку."
+            )
+        elif "ack" in code or "unreachable" in code:
+            explanation = (
+                "Я не получил однозначного подтверждения, было ли действие выполнено. "
+                "Безопасные повторы исчерпаны: считать его выполненным или повторять вслепую нельзя."
+            )
+            required_action = str(
+                diagnostic.get("required_action")
+                or "Сверить результат по стабильному идентификатору и выбрать доказуемый следующий шаг."
+            )
+        else:
+            explanation = (
+                "Безопасные автоматические попытки продолжить остановившуюся работу исчерпаны, "
+                "а подтверждаемого пути продолжения нет."
+            )
+            required_action = str(
+                diagnostic.get("required_action")
+                or "Сформировать новую проверяемую стратегию продолжения."
+            )
+        payload = {
+            "kind": "commitment_stalled",
+            "commitment_id": str(commitment_row["id"]),
+            "task_id": str(delegate_ref or commitment_row["delegate_ref"] or ""),
+            "goal": str(commitment_row["goal"] or "эта задача"),
+            "state": "quarantined",
+            "diagnostic_code": code,
+            "explanation": explanation,
+            "required_action": required_action,
+            "needs_user": False,
+        }
+        commitment_id = str(commitment_row["id"])
+        effect_id = "effect-stall-" + hashlib.sha256(
+            f"{commitment_id}:{int(event_seq)}:quarantined".encode("utf-8")
+        ).hexdigest()[:32]
+        now = utc_now()
+        encoded_payload = canonical_json(payload)
+        payload_sha256 = sha256_json(payload)
+        db.execute(
+            """
+            INSERT OR IGNORE INTO effects(
+                id,turn_id,commitment_id,kind,destination,payload_json,
+                payload_sha256,state,created_at,updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                effect_id,
+                commitment_id,
+                # Delivery of the notice must not advance or reopen the work
+                # whose terminal evidence the notice describes.
+                None,
+                "notify_commitment_stalled",
+                "archive_notification_adapter",
+                encoded_payload,
+                payload_sha256,
+                "pending",
+                now,
+                now,
+            ),
+        )
+        db.execute(
+            """
+            INSERT OR IGNORE INTO outbox(
+                message_id,event_seq,destination,operation,idempotency_key,
+                payload_json,payload_sha256,state,attempt_count,max_attempts,created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                effect_id,
+                int(event_seq),
+                "archive_notification_adapter",
+                "notify_commitment_stalled",
+                effect_id,
+                encoded_payload,
+                payload_sha256,
+                "pending",
+                0,
+                10,
+                now,
+            ),
+        )
+        return effect_id
+
     def accept_turn(self, idempotency_key: str, request: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
         digest = sha256_json(request)
         with self.write() as db:
@@ -731,6 +851,7 @@ class Ledger:
             if commitment_id:
                 row = db.execute("SELECT * FROM commitments WHERE id=?", (commitment_id,)).fetchone()
                 if row and row["state"] not in {"succeeded", "failed", "cancelled"}:
+                    previous_state = str(row["state"] or "")
                     effect_payload = json.loads(effect["payload_json"] or "{}")
                     stable_ref = effect_payload.get("task_id") if effect["destination"] == "abaddon" else None
                     delegate_ref = str(result.get("delegate_ref") or row["delegate_ref"] or stable_ref or "") or None
@@ -763,6 +884,18 @@ class Ledger:
                             commitment_id,
                         ),
                     )
+                    updated_commitment = db.execute(
+                        "SELECT * FROM commitments WHERE id=?",
+                        (commitment_id,),
+                    ).fetchone()
+                    self.enqueue_quarantine_notification(
+                        db,
+                        commitment_row=updated_commitment,
+                        previous_state=previous_state,
+                        diagnostic=diagnostic or {},
+                        event_seq=int(commit_event["seq"]),
+                        delegate_ref=str(delegate_ref or ""),
+                    )
             updated = db.execute("SELECT * FROM effects WHERE id=?", (effect_id,)).fetchone()
             return self._effect_row(updated)
 
@@ -783,6 +916,79 @@ class Ledger:
             item["result"] = json.loads(item.pop("result_json")) if item.get("result_json") else None
             result.append(item)
         return result
+
+    def find_commitment_by_delegate_ref(self, delegate_ref: str) -> dict[str, Any] | None:
+        """Return the newest durable commitment bound to an exact organ task id."""
+        delegate_ref = str(delegate_ref or "").strip()
+        if not delegate_ref:
+            return None
+        with self.connect() as db:
+            row = db.execute(
+                """
+                SELECT * FROM commitments
+                WHERE delegate_ref=?
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (delegate_ref,),
+            ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["spec"] = json.loads(item.pop("spec_json"))
+        item["diagnostic"] = json.loads(item.pop("diagnostic_json")) if item.get("diagnostic_json") else None
+        item["result"] = json.loads(item.pop("result_json")) if item.get("result_json") else None
+        return item
+
+    def find_open_continuation(self, parent_task_id: str) -> dict[str, Any] | None:
+        """Find the one newest nonterminal child already linked to a parent."""
+        parent_task_id = str(parent_task_id or "").strip()
+        if not parent_task_id:
+            return None
+        with self.connect() as db:
+            row = db.execute(
+                """
+                SELECT * FROM commitments
+                WHERE kind='abaddon_mission'
+                  AND state IN (
+                    'queued','working','revising','waiting_user',
+                    'waiting_external','retry_wait'
+                  )
+                  AND json_extract(spec_json, '$.parent_task_id')=?
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (parent_task_id,),
+            ).fetchone()
+            if not row:
+                return None
+            effect_row = db.execute(
+                """
+                SELECT * FROM effects
+                WHERE commitment_id=?
+                  AND kind='continue_warmaster_mission'
+                  AND destination='abaddon'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (str(row["id"]),),
+            ).fetchone()
+        commitment = dict(row)
+        commitment["spec"] = json.loads(commitment.pop("spec_json"))
+        commitment["diagnostic"] = (
+            json.loads(commitment.pop("diagnostic_json"))
+            if commitment.get("diagnostic_json")
+            else None
+        )
+        commitment["result"] = (
+            json.loads(commitment.pop("result_json"))
+            if commitment.get("result_json")
+            else None
+        )
+        return {
+            "commitment": commitment,
+            "effect": self._effect_row(effect_row) if effect_row else None,
+        }
 
     def list_events(self, after: int = 0, limit: int = 100) -> list[dict[str, Any]]:
         with self.connect() as db:

@@ -21,6 +21,7 @@ class FakeResponse:
 class FakeClient:
     def __init__(self, response: FakeResponse):
         self.response = response
+        self.last_json = None
 
     async def __aenter__(self):
         return self
@@ -29,6 +30,7 @@ class FakeClient:
         return None
 
     async def post(self, *_args, **_kwargs):
+        self.last_json = _kwargs.get("json")
         return self.response
 
 
@@ -154,6 +156,37 @@ class AbaddonOutcomeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(error.retryable)
         self.assertEqual(error.evidence["outcome_type"], "transient_failure")
         self.assertNotIn("response", error.evidence)
+
+    async def test_continuation_creates_new_run_linked_to_immutable_parent(self):
+        payload = self.payload()
+        payload["task_id"] = "core-galaga-continuation"
+        payload["parent_task_id"] = "core-galaga-failed"
+        payload["continuation_of"] = "core-galaga-failed"
+        response = FakeResponse(
+            202,
+            {
+                "ok": True,
+                "task_id": "core-galaga-continuation",
+                "phase": "started",
+                "next_action": {"kind": "poll"},
+            },
+        )
+        client = FakeClient(response)
+        with patch("ShushunyaCore.organs.httpx.AsyncClient", return_value=client):
+            result = await self.organs().dispatch_abaddon(payload)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["delegate_ref"], "core-galaga-continuation")
+        self.assertNotEqual(client.last_json["task_id"], client.last_json["parent_task_id"])
+        self.assertEqual(client.last_json["parent_task_id"], "core-galaga-failed")
+        self.assertEqual(client.last_json["continuation_of"], "core-galaga-failed")
+
+    async def test_continuation_cannot_reuse_terminal_parent_identity(self):
+        payload = self.payload()
+        payload["parent_task_id"] = payload["task_id"]
+        with self.assertRaises(OrganError) as caught:
+            await self.organs().dispatch_abaddon(payload)
+        self.assertEqual(caught.exception.code, "invalid_abaddon_continuation")
 
 
 if __name__ == "__main__":

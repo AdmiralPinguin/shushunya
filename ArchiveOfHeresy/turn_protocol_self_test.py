@@ -2,9 +2,16 @@
 from __future__ import annotations
 
 import inspect
+from unittest.mock import patch
 
 from archive_handler import ArchiveHandler
-from archive_ops import decide_chat_turn_action, prompt_diagnostics, run_mobile_chat_payload
+from archive_ops import (
+    CORE_DEGRADED_SAFE_REPLY,
+    continuation_candidates_for_history,
+    decide_chat_turn_action,
+    prompt_diagnostics,
+    run_mobile_chat_payload,
+)
 from ShushunyaCore.decide import normalize_decision
 from ShushunyaCore.ledger import MIGRATION_1
 from turn_protocol import (
@@ -24,12 +31,104 @@ def main() -> int:
     manifest = turn_capability_manifest()
     actions = {item["action"] for item in manifest["capabilities"]}
     require(
-        {"answer_in_chat", "ask_clarification", "request_warmaster_mission", "create_administratum_task"} <= actions,
+        {
+            "answer_in_chat",
+            "ask_clarification",
+            "request_warmaster_mission",
+            "continue_warmaster_mission",
+            "create_administratum_task",
+        } <= actions,
         f"capability manifest is incomplete: {actions}",
     )
     manifest_text = repr(manifest)
     require("Abaddon" in manifest_text, "public commander must be Abaddon")
     require("target_governor" not in manifest_text, "Shushunya must not choose a brigadier")
+
+    continuation_manifest = turn_capability_manifest(
+        continuable_tasks=[
+            {
+                "parent_task_id": "task-galaga-failed",
+                "goal": "Собрать рабочий APK Galaga",
+                "state": "failed",
+                "failure_summary": "Получился только skeleton без APK.",
+            }
+        ]
+    )
+    continuation = next(
+        item
+        for item in continuation_manifest["capabilities"]
+        if item["action"] == "continue_warmaster_mission"
+    )
+    require(continuation["available"] is True, "trusted failed task did not enable continuation")
+    require(
+        continuation_manifest["continuation_parent_task_id"] == "task-galaga-failed",
+        "continuation root lost the trusted parent identity",
+    )
+    require(
+        continuation["continuable_tasks"][0]["failure_summary"] == "Получился только skeleton без APK.",
+        "continuation failure evidence disappeared",
+    )
+    with patch(
+        "archive_ops.continuable_tasks",
+        return_value=[
+            {"parent_task_id": "task-old", "goal": "Старый отчёт", "state": "failed"},
+            {"parent_task_id": "task-galaga", "goal": "Собрать APK Galaga", "state": "failed"},
+        ],
+    ):
+        ranked = continuation_candidates_for_history(
+            [
+                {"role": "assistant", "content": "Старый отчёт провален", "dedupe_key": "warmaster:task-old:failed"},
+                {"role": "assistant", "content": "Galaga не собрана", "dedupe_key": "warmaster:task-galaga:accepted"},
+                {"role": "user", "content": "Пиздуй доделывай", "dedupe_key": "turn:latest:user"},
+            ]
+        )
+    require(
+        ranked[0]["parent_task_id"] == "task-galaga",
+        "continuation root did not bind to the task most recently mentioned in shared history",
+    )
+    require(
+        ranked[0].get("context_root") is True,
+        "history-ranked continuation was not marked as the trusted root",
+    )
+    with patch(
+        "archive_ops.continuable_tasks",
+        return_value=[
+            {"parent_task_id": "task-galaga", "goal": "Galaga Android приложение", "state": "failed"},
+            {"parent_task_id": "task-calendar", "goal": "Календарь Android", "state": "failed"},
+        ],
+    ):
+        generic = continuation_candidates_for_history(
+            [{"role": "assistant", "content": "Android приложение не работает"}]
+        )
+    require(
+        not any(item.get("context_root") for item in generic),
+        "one generic shared token guessed a continuation root",
+    )
+    ambiguous_manifest = turn_capability_manifest(
+        continuable_tasks=[
+            {"parent_task_id": "task-a", "goal": "Первая задача", "state": "failed"},
+            {"parent_task_id": "task-b", "goal": "Вторая задача", "state": "failed"},
+        ]
+    )
+    require(
+        ambiguous_manifest["continuation_parent_task_id"] == "",
+        "unmatched multiple continuation candidates were guessed instead of left ambiguous",
+    )
+    decision_filtered = turn_capability_manifest(
+        pending_decisions=[{"task_id": "task-a", "question": "Какой вариант?"}],
+        continuable_tasks=[
+            {"parent_task_id": "task-a", "goal": "Первая задача", "state": "blocked"},
+        ],
+    )
+    decision_continuation = next(
+        item
+        for item in decision_filtered["capabilities"]
+        if item["action"] == "continue_warmaster_mission"
+    )
+    require(
+        decision_continuation["available"] is False,
+        "task awaiting a typed decision leaked into generic continuation",
+    )
 
     valid_request = normalize_warmaster_request(
         {
@@ -67,6 +166,30 @@ def main() -> int:
     require("run_core_turn_payload" in start_source, "mobile job does not delegate the complete Core-owned turn")
     core_turn_source = inspect.getsource(ArchiveHandler.run_core_turn_payload)
     require("core_context_bundle" in core_turn_source and "core_effect" in core_turn_source, "queued turn loses Core truth")
+    require(
+        "continue_warmaster_mission" in core_turn_source,
+        "trusted continuation action is not routed through the durable Core effect",
+    )
+    completion_source = inspect.getsource(ArchiveHandler.mobile_chat_completion)
+    require(
+        "continue_warmaster_mission" in completion_source
+        and "continuation_parent_task_id" in completion_source,
+        "foreground chat route drops the linked continuation effect",
+    )
+    require(
+        completion_source.index('dedupe_key=f"core-effect:{effect_id}:user"')
+        < completion_source.index('dedupe_key=f"core-effect:{effect_id}:queued"')
+        < completion_source.index('create_mobile_job("warmaster", payload)'),
+        "Android action route queues before persisting the ordered user turn and factual ack",
+    )
+    require(
+        "Принял. Запускаю работу" not in completion_source,
+        "queued Android ack still claims execution before confirmation",
+    )
+    require(
+        CORE_DEGRADED_SAFE_REPLY and "CORE_DEGRADED_SAFE_REPLY" in decide_source,
+        "Core degradation does not have a deterministic non-empty safe reply",
+    )
     chat_pipeline_source = inspect.getsource(run_mobile_chat_payload)
     require(
         'payload.get("turn_capabilities")' not in chat_pipeline_source

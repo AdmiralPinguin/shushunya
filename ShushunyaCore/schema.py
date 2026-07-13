@@ -9,6 +9,7 @@ TurnAction = Literal[
     "answer_in_chat",
     "ask_clarification",
     "request_warmaster_mission",
+    "continue_warmaster_mission",
     "create_administratum_task",
     "deliver_pending_reports",
     "deliver_artifact",

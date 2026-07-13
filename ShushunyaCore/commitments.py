@@ -132,7 +132,16 @@ class Commitments:
             )
             if updated.rowcount != 1:
                 raise InvariantViolation("stale commitment writer")
-            return self._row(db.execute("SELECT * FROM commitments WHERE id=?", (commitment_id,)).fetchone())
+            updated_row = db.execute("SELECT * FROM commitments WHERE id=?", (commitment_id,)).fetchone()
+            self.ledger.enqueue_quarantine_notification(
+                db,
+                commitment_row=updated_row,
+                previous_state=current,
+                diagnostic=diagnostic or {},
+                event_seq=int(event["seq"]),
+                delegate_ref=delegate_ref,
+            )
+            return self._row(updated_row)
 
     @staticmethod
     def _row(row) -> dict[str, Any]:
@@ -377,6 +386,27 @@ class Commitments:
                 result=snapshot,
             )
 
+        # A terminal failure outranks any stale start/resume affordance left on
+        # the wrapper snapshot. Replaying such an action only produces a 409 and
+        # launders a proven failure into an apparently live retry loop.
+        if status in {"failed", "corrupt", "preflight_failed"}:
+            diagnostic = {
+                "code": f"abaddon_{status}",
+                "explanation": (
+                    "Работа завершилась неуспешно и не опубликовала доказуемый путь ревизии."
+                ),
+                "evidence": snapshot,
+                "required_action": "Сформировать новую стратегию, если цель всё ещё нужна.",
+                "resume_condition": "Новая миссия с исправленной стратегией и явными критериями.",
+            }
+            return self.transition(
+                item["id"],
+                "failed",
+                honest_status=diagnostic["explanation"],
+                diagnostic=diagnostic,
+                result=snapshot,
+            )
+
         continuation = await self._execute_continuation(item, snapshot)
         if continuation is not None:
             return continuation
@@ -398,16 +428,6 @@ class Commitments:
                 "resume_condition": "В orchestration snapshot появится исполнимая revision/resume/apply/reprepare команда.",
             }
             return self._bounded_retry(item, diagnostic=diagnostic, result=snapshot, seconds=30)
-
-        if status in {"failed", "corrupt", "preflight_failed"}:
-            diagnostic = {
-                "code": f"abaddon_{status}",
-                "explanation": "Абаддон завершил миссию неуспешно и не опубликовал путь ревизии; это подтверждённый терминальный факт.",
-                "evidence": snapshot,
-                "required_action": "Сформировать новую стратегию, если цель всё ещё нужна.",
-                "resume_condition": "Новая миссия с исправленной стратегией и явными критериями.",
-            }
-            return self.transition(item["id"], "failed", honest_status=diagnostic["explanation"], diagnostic=diagnostic, result=snapshot)
 
         if status not in WORKING_STATES and phase not in WORKING_STATES:
             diagnostic = {

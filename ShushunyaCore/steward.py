@@ -57,6 +57,11 @@ class Steward:
                 result = await self.organs.dispatch_abaddon(claim["payload"])
             elif claim["destination"] == "archive_adapter":
                 result = await self.organs.dispatch_archive_adapter(str(claim["message_id"]), claim["payload"])
+            elif claim["destination"] == "archive_notification_adapter":
+                result = await self.organs.dispatch_archive_notification_adapter(
+                    str(claim["message_id"]),
+                    claim["payload"],
+                )
             elif claim["destination"] == "archive_artifact_adapter":
                 result = await self.organs.dispatch_archive_artifact_adapter(
                     str(claim["message_id"]), claim["payload"],
@@ -83,6 +88,7 @@ class Steward:
             repair_required = outcome_type == "repair_required"
             organ_name = {
                 "archive_adapter": "Archive/Administratum",
+                "archive_notification_adapter": "Archive/Vox",
                 "archive_artifact_adapter": "Archive/Artifacts",
                 "abaddon": "Абаддон",
             }.get(str(claim["destination"]), str(claim["destination"]))

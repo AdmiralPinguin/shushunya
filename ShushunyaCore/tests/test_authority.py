@@ -194,6 +194,38 @@ class AuthorityTests(unittest.TestCase):
         self.assertEqual(verdict.verdict, "deny")
         self.assertEqual(verdict.code, "pending_decision_unavailable")
 
+    def test_continuation_requires_exact_trusted_parent_task(self):
+        manifest = {
+            "continuation_parent_task_id": "task-real",
+            "capabilities": [
+                {
+                    "action": "continue_warmaster_mission",
+                    "available": True,
+                    "continuable_tasks": [
+                        {
+                            "parent_task_id": "task-real",
+                            "goal": "Собрать рабочий APK",
+                            "state": "failed",
+                        }
+                    ],
+                }
+            ],
+        }
+        accepted = self.authority.authorize(
+            "continue_warmaster_mission",
+            {"continue_parent_task_id": "task-real"},
+            manifest,
+        )
+        self.assertEqual(accepted.verdict, "auto")
+
+        invented = self.authority.authorize(
+            "continue_warmaster_mission",
+            {"continue_parent_task_id": "task-invented"},
+            manifest,
+        )
+        self.assertEqual(invented.verdict, "deny")
+        self.assertEqual(invented.code, "continuation_task_mismatch")
+
 
 if __name__ == "__main__":
     unittest.main()

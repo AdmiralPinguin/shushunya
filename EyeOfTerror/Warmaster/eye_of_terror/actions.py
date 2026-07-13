@@ -165,7 +165,7 @@ def run_actions(
     result_next_action: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     terminal_locked = status in {
-        "blocked", "completed", "running", "apply_intent", "applied_unverified",
+        "blocked", "completed", "failed", "cancelled", "running", "apply_intent", "applied_unverified",
         "publishing", "push_pending",
         "protocol_finalize_pending", "cancelling", "queued", "corrupt",
     }
@@ -198,7 +198,9 @@ def run_actions(
         and not research_loop_blocked
         # A blocked run is restartable only through an explicit, valid revision
         # plan.  Without one it must never fall through to the generic start path.
-        and status not in {"running", "cancelling", "queued", "corrupt"}
+        and status not in {
+            "failed", "cancelled", "running", "cancelling", "queued", "corrupt",
+        }
     )
     loop_runnable = runnable or revision_runnable or (resume_required and package_valid and oversight_valid)
     actions = {
@@ -241,6 +243,14 @@ def run_actions(
         next_action = {"kind": "resume", "method": "POST", "endpoint": "POST /runs/{task_id}/start_resume_http", "body": {}, "reason": "run is interrupted and has pending steps"}
     elif actions["force_required_for_rerun"]:
         next_action = {"kind": "rerun_requires_force", "method": "POST", "endpoint": "POST /runs/{task_id}/start_http", "body": {"force": True}, "reason": "run already completed"}
+    elif status in {"failed", "cancelled"}:
+        next_action = {
+            "kind": "inspect",
+            "method": "GET",
+            "endpoint": "GET /runs/{task_id}/summary",
+            "body": {},
+            "reason": f"terminal {status} evidence is immutable; a fresh mission is required",
+        }
     elif runnable:
         next_action = {"kind": "start", "method": "POST", "endpoint": "POST /runs/{task_id}/start_http", "body": {}, "reason": "run is ready to execute"}
     else:
@@ -285,7 +295,27 @@ def run_preflight_actions(preflight: dict[str, Any], run_action_hints: dict[str,
         }
     elif ok and summary_next_action:
         next_action = action_for_mode(summary_next_action, mode)
-        if body and next_action.get("kind") in {"start", "start_run", "resume", "execute_revision"}:
+        next_kind = str(next_action.get("kind") or "").strip()
+        next_method = str(next_action.get("method") or "").strip().upper()
+        executable_permission = {
+            "start": bool(run_action_hints.get("can_start")),
+            "start_run": bool(run_action_hints.get("can_start")),
+            "resume": bool(run_action_hints.get("can_resume")),
+            "execute_revision": bool(run_action_hints.get("can_execute_revision")),
+            "start_revision": bool(run_action_hints.get("can_start_revision")),
+        }.get(next_kind, True)
+        if next_method == "POST" and not executable_permission:
+            # A successful package preflight proves package health, not run
+            # liveness.  Never let a stale summary POST resurrect a terminal
+            # run whose canonical action flags deny that execution path.
+            next_action = {
+                "kind": "inspect",
+                "method": "GET",
+                "endpoint": "GET /runs/{task_id}/summary",
+                "body": {},
+                "reason": "run summary does not authorize execution; inspect terminal evidence",
+            }
+        elif body and next_kind in {"start", "start_run", "resume", "execute_revision"}:
             next_body = next_action.get("body") if isinstance(next_action.get("body"), dict) else {}
             next_action["body"] = {**next_body, **body}
     elif preflight.get("oversight_errors"):

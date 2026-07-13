@@ -920,6 +920,71 @@ def test_escalation_detail_error_preserves_pending_decision():
     require(result["conversation_deliveries_pending"] == 1, "unreadable escalation was not kept retryable")
 
 
+def test_core_stall_notification_is_durable_explanatory_and_not_a_question():
+    originals = {
+        "path": archive_ops.SQLITE_PATH,
+        "enqueue": archive_ops.enqueue_report,
+        "append": archive_ops.append_chat_message,
+        "mark": archive_ops.mark_delivered,
+    }
+    reports = []
+    messages = []
+
+    def enqueue(source, kind, title, body, **kwargs):
+        reports.append({"source": source, "kind": kind, "title": title, "body": body, **kwargs})
+        return 41
+
+    def append(session_id, role, content, **kwargs):
+        messages.append({"session_id": session_id, "role": role, "content": content, **kwargs})
+        return 91
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_ops.SQLITE_PATH = Path(tmp) / "archive.sqlite3"
+            with sqlite3.connect(archive_ops.SQLITE_PATH) as db:
+                db.execute(
+                    """
+                    CREATE TABLE core_effect_receipts (
+                        effect_id TEXT PRIMARY KEY,
+                        request_sha256 TEXT NOT NULL,
+                        intent_json TEXT,
+                        state TEXT NOT NULL,
+                        result_json TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                    """
+                )
+            archive_ops.enqueue_report = enqueue
+            archive_ops.append_chat_message = append
+            archive_ops.mark_delivered = lambda ids: len(ids)
+            payload = {
+                "commitment_id": "commitment-test",
+                "task_id": "task-test",
+                "goal": "собрать приложение?",
+                "explanation": "старая команда запуска больше не исполнима?",
+                "required_action": "сформировать новую проверяемую стратегию?",
+                "needs_user": False,
+            }
+
+            first = archive_ops.run_core_notification_effect("effect-notify-test", payload)
+            second = archive_ops.run_core_notification_effect("effect-notify-test", payload)
+    finally:
+        archive_ops.SQLITE_PATH = originals["path"]
+        archive_ops.enqueue_report = originals["enqueue"]
+        archive_ops.append_chat_message = originals["append"]
+        archive_ops.mark_delivered = originals["mark"]
+
+    require(first.get("ok") is True and second == first, "durable notification did not replay its receipt")
+    require(len(reports) == 1 and len(messages) == 1, "idempotent retry duplicated chat or Vox delivery")
+    require(reports[0]["kind"] == "task_stalled_internal", "stall used the wrong Vox event kind")
+    content = messages[0]["content"]
+    require("старая команда запуска" in content, "notification lost the concrete failure explanation")
+    require("новую проверяемую стратегию" in content, "notification lost the required repair")
+    require("ничего не требуется" in content, "notification invented owner work")
+    require("?" not in content, "non-interactive lifecycle notice was rendered as a question")
+
+
 def main():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     for test in tests:

@@ -36,6 +36,7 @@ from shushunya_core_client import (
     resolve_turn as core_resolve_turn,
 )
 from pending_reports import (
+    continuable_tasks,
     enqueue_report,
     mark_delivered,
     pending_reports,
@@ -96,6 +97,10 @@ PERSONA_PAGE_ORDER = [
     ("relationship-journal", "Relationship Journal"),
     ("standing-rules", "Standing Rules"),
 ]
+
+CORE_DEGRADED_SAFE_REPLY = (
+    "Я сейчас не смог надёжно определить действие. Ничего не запущено и не изменено."
+)
 
 
 def allow_gateway_namespace(handler, namespace, create=False):
@@ -318,6 +323,7 @@ def run_mobile_chat_payload(payload, on_token=None, *, trusted_turn_context=None
             if isinstance(trusted_turn_context.get("turn_capabilities"), dict)
             else turn_capability_manifest(
                 image_attached=bool(image_data_url),
+                continuable_tasks=continuable_tasks(),
                 artifacts=artifact_catalog_for_query(
                     session_id,
                     audience_source=artifact_audience_source,
@@ -2313,6 +2319,99 @@ def _resume_pending_decision_locked(task_id, answer, *, request_id=""):
     }
 
 
+_CONTINUATION_MATCH_STOPWORDS = {
+    "задача", "задачу", "задачи", "работа", "работу", "сделать", "создать",
+    "продолжить", "доделать", "результат", "внутренней", "проверке", "для",
+    "этой", "этот", "это", "мой", "моей", "нужно", "текущий", "текущую",
+    "приложение", "приложения", "проект", "проекта", "система", "системы",
+}
+
+
+def _history_has_exact_task_id(value, task_id):
+    if not value or not task_id:
+        return False
+    pattern = rf"(?<![A-Za-z0-9_.-]){re.escape(task_id)}(?![A-Za-z0-9_.-])"
+    return re.search(pattern, str(value)) is not None
+
+
+def continuation_candidates_for_history(history, limit=5, excluded_task_ids=None):
+    """Order trusted live candidates by the task most recently mentioned.
+
+    Exact ids come only from the roster. History can rank those identities,
+    but it can neither introduce an id nor turn an active/user-waiting run into
+    a continuation candidate.
+    """
+    excluded = {
+        str(task_id or "").strip()
+        for task_id in (excluded_task_ids or [])
+        if str(task_id or "").strip()
+    }
+    candidates = [
+        dict(item)
+        for item in continuable_tasks(limit=limit)
+        if isinstance(item, dict)
+        and str(item.get("parent_task_id") or "").strip() not in excluded
+    ]
+    if not candidates:
+        return []
+    history = [item for item in (history or []) if isinstance(item, dict)]
+    by_id = {str(item.get("parent_task_id") or ""): item for item in candidates}
+    root_id = ""
+    for message in reversed(history):
+        dedupe_key = str(message.get("dedupe_key") or "")
+        content = str(message.get("content") or "").strip()
+        exact_matches = [
+            parent_task_id
+            for parent_task_id in by_id
+            if _history_has_exact_task_id(dedupe_key, parent_task_id)
+            or _history_has_exact_task_id(content, parent_task_id)
+        ]
+        if len(exact_matches) == 1:
+            root_id = exact_matches[0]
+            if content and str(message.get("role") or "") == "assistant":
+                by_id[root_id]["failure_summary"] = content[:1_200]
+            break
+        if len(exact_matches) > 1:
+            # One journal item explicitly names several candidates. Looking
+            # farther back would replace present ambiguity with an old guess.
+            break
+
+        message_terms = {
+            token
+            for token in memory_tokens(content) - _CONTINUATION_MATCH_STOPWORDS
+            if len(token) >= 3 or "." in token
+        }
+        if not message_terms:
+            continue
+        scores = []
+        for candidate_index, candidate in enumerate(candidates):
+            goal_terms = {
+                token
+                for token in memory_tokens(candidate.get("goal")) - _CONTINUATION_MATCH_STOPWORDS
+                if len(token) >= 3 or "." in token
+            }
+            scores.append(
+                (
+                    len(goal_terms & message_terms),
+                    -candidate_index,
+                    str(candidate.get("parent_task_id") or ""),
+                )
+            )
+        scores.sort(reverse=True)
+        top_score, _order, top_task_id = scores[0]
+        runner_up = scores[1][0] if len(scores) > 1 else 0
+        if top_score >= 2 and top_score - runner_up >= 2:
+            root_id = top_task_id
+            break
+    if not root_id:
+        if len(candidates) == 1:
+            candidates[0]["context_root"] = True
+        return candidates
+    root = by_id[root_id]
+    root["context_root"] = True
+    return [root] + [item for item in candidates if item is not root]
+
+
 def assemble_shushunya_turn_context(session_id, user_text, image_data_url="", model=None, payload=None):
     """Assemble the rich situation once, before action selection.
 
@@ -2395,17 +2494,6 @@ def decide_chat_turn_action(session_id, text, image_data_url="", model=None, pay
         or "app"
     ).strip().lower()[:80] or "app"
     open_decisions = pending_decision_context()
-    manifest = turn_capability_manifest(
-        image_attached=bool(image_data_url),
-        pending_reports=pending_summary(),
-        pending_decisions=open_decisions,
-        artifacts=artifact_catalog_for_query(
-            shared_chat_session_id(session_id),
-            audience_source=source,
-            query=user_text,
-            limit=ARTIFACT_CAPABILITY_LIMIT,
-        ),
-    )
     try:
         context_bundle = assemble_shushunya_turn_context(
             session_id,
@@ -2435,6 +2523,26 @@ def decide_chat_turn_action(session_id, text, image_data_url="", model=None, pay
                 "diagnostics": {"context_assembly_error": str(exc)[:2_000]},
             },
         }
+    continuation_candidates = continuation_candidates_for_history(
+        context_bundle.get("history") or [],
+        excluded_task_ids={
+            str(item.get("task_id") or "").strip()
+            for item in open_decisions
+            if isinstance(item, dict) and str(item.get("task_id") or "").strip()
+        },
+    )
+    manifest = turn_capability_manifest(
+        image_attached=bool(image_data_url),
+        pending_reports=pending_summary(),
+        pending_decisions=open_decisions,
+        continuable_tasks=continuation_candidates,
+        artifacts=artifact_catalog_for_query(
+            shared_chat_session_id(session_id),
+            audience_source=source,
+            query=user_text,
+            limit=ARTIFACT_CAPABILITY_LIMIT,
+        ),
+    )
     idempotency_key = str(payload.get("core_idempotency_key") or f"archive-turn:{context_bundle['turn_id']}")
     try:
         resolution = core_resolve_turn(
@@ -2452,6 +2560,14 @@ def decide_chat_turn_action(session_id, text, image_data_url="", model=None, pay
         decision = resolution.get("decision") if isinstance(resolution.get("decision"), dict) else {}
         if str(decision.get("action") or "") not in TURN_ACTIONS:
             raise ValueError("Core returned an unknown action")
+        core_state = resolution.get("core") if isinstance(resolution.get("core"), dict) else {}
+        if (
+            core_state.get("degraded") is True
+            and decision.get("action") in {"answer_in_chat", "ask_clarification"}
+            and not str(decision.get("reply") or "").strip()
+        ):
+            decision = dict(decision)
+            decision["reply"] = CORE_DEGRADED_SAFE_REPLY
         return {
             "decision": decision,
             "capabilities": manifest,
@@ -2462,12 +2578,12 @@ def decide_chat_turn_action(session_id, text, image_data_url="", model=None, pay
             "effect": resolution.get("effect") if isinstance(resolution.get("effect"), dict) else None,
         }
     except Exception as exc:
-        # Fail open into the existing rich answering pass, never into an
-        # external action. One broken Core process cannot silence Shushunya.
+        # A failed Core decision must not launch a second unvalidated model
+        # whose streamed promise could escape before any truth guard runs.
         return {
             "decision": {
                 "action": "answer_in_chat",
-                "reply": "",
+                "reply": CORE_DEGRADED_SAFE_REPLY,
                 "task": "",
                 "warmaster_request": {},
                 "confidence": 0.0,
@@ -2764,6 +2880,117 @@ def run_core_administratum_effect(effect_id, payload):
         request_sha256,
         intent=intent,
         state="retry_wait" if retryable else "failed",
+        result=result,
+    )
+    return result
+
+
+def run_core_notification_effect(effect_id, payload):
+    """Idempotently publish one Core lifecycle stop to shared chat and Vox."""
+    effect_id = str(effect_id or "").strip()
+    payload = payload if isinstance(payload, dict) else {}
+    if not effect_id or len(effect_id) > 120 or not re.fullmatch(r"[A-Za-z0-9_.:-]+", effect_id):
+        return {
+            "ok": False,
+            "retryable": False,
+            "code": "invalid_notification_effect",
+            "explanation": "В durable-эффекте отсутствует безопасный effect_id.",
+            "evidence": {},
+        }
+    if payload.get("needs_user") is not False:
+        return {
+            "ok": False,
+            "retryable": False,
+            "code": "invalid_notification_authority",
+            "explanation": "Уведомление без typed decision не может запрашивать решение владельца.",
+            "evidence": {},
+        }
+    goal = conversational_text(payload.get("goal"), fallback="эта задача").replace("?", ".").strip().rstrip(" .")
+    explanation = conversational_text(
+        payload.get("explanation"),
+        fallback="безопасные автоматические попытки продолжения исчерпаны",
+    ).replace("?", ".").strip().rstrip(" .")
+    required_action = conversational_text(
+        payload.get("required_action"),
+        fallback="сформировать новую проверяемую стратегию продолжения",
+    ).replace("?", ".").strip().rstrip(" .")
+    request_payload = {
+        "kind": "commitment_stalled",
+        "commitment_id": str(payload.get("commitment_id") or "")[:160],
+        "task_id": str(payload.get("task_id") or "")[:160],
+        "goal": goal[:500],
+        "explanation": explanation[:1200],
+        "required_action": required_action[:1200],
+        "needs_user": False,
+    }
+    request_sha256 = hashlib.sha256(
+        json.dumps(request_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    receipt = _core_effect_receipt(effect_id, request_sha256)
+    if receipt and receipt.get("result") and receipt.get("state") == "delivered":
+        return receipt["result"]
+    _reserve_core_effect_receipt(effect_id, request_sha256)
+
+    message = (
+        f"Я пока не могу продолжить задачу «{goal}». Причина: {explanation}. "
+        f"Что нужно исправить: {required_action}. От тебя сейчас ничего не требуется."
+    )
+    report_id = enqueue_report(
+        "shushunya-core",
+        "task_stalled_internal",
+        "работа остановилась: " + goal[:120],
+        message,
+        dedupe_key=f"core-notification:{effect_id}",
+    )
+    try:
+        message_id = append_chat_message(
+            SHARED_CHAT_SESSION_ID,
+            "assistant",
+            message,
+            source="shushunya-core",
+            dedupe_key=f"core-notification:{effect_id}:chat",
+        )
+    except Exception:
+        message_id = None
+    conveyed = bool(mark_delivered([report_id])) if report_id and message_id else False
+    if report_id and message_id and conveyed:
+        result = {
+            "ok": True,
+            "retryable": False,
+            "delegate_ref": str(message_id),
+            "status": "delivered",
+            "explanation": "Archive сохранил уведомление в чате и Vox.",
+            "evidence": {
+                "message_id": message_id,
+                "report_id": int(report_id),
+                "conveyed": True,
+                "needs_user": False,
+            },
+        }
+        _save_core_effect_receipt(
+            effect_id,
+            request_sha256,
+            state="delivered",
+            result=result,
+        )
+        return result
+    result = {
+        "ok": False,
+        "retryable": True,
+        "code": "notification_delivery_incomplete",
+        "status": "retry_wait",
+        "explanation": "Archive ещё не подтвердил одновременно запись в чат и Vox.",
+        "evidence": {
+            "message_id": message_id,
+            "report_id": int(report_id) if report_id else None,
+            "conveyed": conveyed,
+            "needs_user": False,
+        },
+    }
+    _save_core_effect_receipt(
+        effect_id,
+        request_sha256,
+        state="retry_wait",
         result=result,
     )
     return result

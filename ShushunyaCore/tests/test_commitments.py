@@ -19,6 +19,7 @@ class FakeOrgans:
     def __init__(self, snapshot):
         self.snapshot = snapshot
         self.actions = []
+        self.notifications = []
 
     async def inspect_abaddon(self, task_id):
         return self.snapshot
@@ -26,6 +27,15 @@ class FakeOrgans:
     async def execute_abaddon_action(self, task_id, snapshot):
         self.actions.append((task_id, snapshot))
         return {"ok": True, "task_id": task_id, "status": "started"}
+
+    async def dispatch_archive_notification_adapter(self, effect_id, payload):
+        self.notifications.append((effect_id, payload))
+        return {
+            "ok": True,
+            "delegate_ref": "chat-message-notification",
+            "status": "delivered",
+            "explanation": "Уведомление сохранено.",
+        }
 
 
 class CommitmentTests(unittest.IsolatedAsyncioTestCase):
@@ -79,6 +89,25 @@ class CommitmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second["state"], "revising")
         self.assertEqual(len(organs.actions), 1)
 
+    async def test_terminal_failed_snapshot_ignores_stale_start_action(self):
+        snapshot = {
+            "task_id": "mission-1",
+            "status": "failed",
+            "phase": "ready_to_start",
+            "client_action": {
+                "kind": "start",
+                "method": "POST",
+                "path": "/runs/mission-1/start_http",
+                "body": {},
+            },
+        }
+        organs = FakeOrgans(snapshot)
+        current = await Commitments(self.ledger, organs).reconcile_one(self.item())
+
+        self.assertEqual(current["state"], "failed")
+        self.assertEqual(current["diagnostic"]["code"], "abaddon_failed")
+        self.assertEqual(organs.actions, [])
+
     async def test_nested_question_becomes_waiting_user(self):
         snapshot = {
             "task_id": "mission-1",
@@ -130,7 +159,8 @@ class CommitmentTests(unittest.IsolatedAsyncioTestCase):
             "phase": "inspect",
             "mission_state": {},
         }
-        commitments = Commitments(self.ledger, FakeOrgans(snapshot))
+        organs = FakeOrgans(snapshot)
+        commitments = Commitments(self.ledger, organs)
         current = await commitments.reconcile_one(self.item())
         self.assertEqual(current["state"], "retry_wait")
         for _ in range(2):
@@ -139,6 +169,27 @@ class CommitmentTests(unittest.IsolatedAsyncioTestCase):
             current = await commitments.reconcile_one(self.item())
         self.assertEqual(current["state"], "quarantined")
         self.assertIsNotNone(current["diagnostic"])
+        with self.ledger.connect() as db:
+            rows = db.execute(
+                "SELECT id,destination,payload_json,state FROM effects "
+                "WHERE kind='notify_commitment_stalled'"
+            ).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["destination"], "archive_notification_adapter")
+        payload = __import__("json").loads(rows[0]["payload_json"])
+        self.assertIs(payload["needs_user"], False)
+        self.assertNotIn("question", payload)
+        self.assertIn("продолж", payload["explanation"])
+
+        delivered = await Steward(
+            SimpleNamespace(effect_lease_sec=60),
+            self.ledger,
+            organs,
+            commitments,
+        ).dispatch_effect(str(rows[0]["id"]))
+        self.assertEqual(delivered["state"], "delivered")
+        self.assertEqual(len(organs.notifications), 1)
+        self.assertEqual(self.item()["state"], "quarantined")
 
     async def test_future_retry_is_not_polled_and_publication_stays_working(self):
         snapshot = {

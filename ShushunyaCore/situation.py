@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from .config import Settings
-from .authority import pending_decision_ids
+from .authority import continuable_task_catalog, pending_decision_ids
 from .identity import Identity
 from .ledger import Ledger
 from .organs import Organs
@@ -25,6 +25,22 @@ def _text(value: Any, limit: int) -> str:
 
 def _json_size(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+
+
+def _recalled_facts(value: Any) -> str:
+    """Strip Magos' fixed wrapper while retaining the recalled facts below it."""
+    text = str(value or "").strip()
+    head, separator, tail = text.partition("\n\n")
+    if separator and tail.strip() and len(head) <= 800:
+        return tail.strip()
+    return text
+
+
+def _roster_facts(value: Any) -> str:
+    """Keep live task lines instead of spending the budget on roster prose."""
+    text = str(value or "").strip()
+    task_lines = [line.strip() for line in text.splitlines() if line.lstrip().startswith("- ")]
+    return "\n".join(task_lines) if task_lines else text
 
 
 def _available_artifacts(
@@ -159,10 +175,25 @@ def _compact_capability_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         if isinstance(required, list):
             item["required_fields"] = [str(value)[:80] for value in required[:4]]
         actions.append(item)
-    return {
+    continuations = continuable_task_catalog(manifest)[:3]
+    continuation_ids = {item["parent_task_id"] for item in continuations}
+    root_id = str(manifest.get("continuation_parent_task_id") or "").strip()[:240]
+    compact = {
         "principle": str(manifest.get("principle") or "")[:180],
         "actions": actions[:12],
     }
+    if root_id in continuation_ids:
+        compact["continuation_parent_task_id"] = root_id
+    if continuations:
+        compact["continuable_tasks"] = [
+            {
+                "parent_task_id": item["parent_task_id"],
+                "goal": str(item.get("goal") or "")[:220],
+                "state": str(item.get("state") or "")[:40],
+            }
+            for item in continuations
+        ]
+    return compact
 
 
 def _last_resort_history(history: list[dict[str, Any]], *, limit: int, chars: int) -> list[dict[str, str]]:
@@ -216,6 +247,8 @@ class SituationAssembler:
 
     def assemble(self, envelope: TurnEnvelope) -> dict[str, Any]:
         budget = self.settings.context_char_budget
+        recalled_facts = _recalled_facts(envelope.context.recalled_memory)
+        roster_facts = _roster_facts(envelope.context.live_roster)
         # Explicit quotas prevent a huge memory recall from evicting the actual
         # current request or the capability boundary on the temporary 8k context.
         persona_limit = min(5_000, budget // 4)
@@ -256,8 +289,8 @@ class SituationAssembler:
             "relationship": self.relationship.snapshot(),
             "archive_persona": _text(envelope.context.persona, persona_limit),
             "recent_history": compact_history,
-            "recalled_memory": _text(envelope.context.recalled_memory, memory_limit),
-            "live_roster": _text(envelope.context.live_roster, roster_limit),
+            "recalled_memory": _text(recalled_facts, memory_limit),
+            "live_roster": _text(roster_facts, roster_limit),
             "pending_reports": envelope.context.pending_reports,
             "open_commitments": json.loads(_text(compact_commitments, commitments_limit).replace("[…обрезано Core по бюджету контекста…]", ""))
             if len(json.dumps(compact_commitments, ensure_ascii=False)) <= commitments_limit
@@ -292,8 +325,8 @@ class SituationAssembler:
                 "relationship": _text(self.relationship.snapshot(), max(350, budget // 12)),
                 "archive_persona": _text(envelope.context.persona, max(400, budget // 12)),
                 "recent_history": compact_history,
-                "recalled_memory": _text(envelope.context.recalled_memory, max(500, budget // 10)),
-                "live_roster": _text(envelope.context.live_roster, max(300, budget // 18)),
+                "recalled_memory": _text(recalled_facts, max(500, budget // 10)),
+                "live_roster": _text(roster_facts, max(300, budget // 18)),
                 "pending_reports": _text(envelope.context.pending_reports, max(240, budget // 24)),
                 "open_commitments": compact_commitments[:2],
                 "organ_health": _text(self.organs.health_snapshot(), max(240, budget // 24)),
@@ -327,11 +360,11 @@ class SituationAssembler:
                     chars=min(280, max(180, budget // 12)),
                 ),
                 "recalled_memory": _text(
-                    envelope.context.recalled_memory,
+                    recalled_facts,
                     min(340, max(220, budget // 10)),
                 ),
                 "live_roster": _text(
-                    envelope.context.live_roster,
+                    roster_facts,
                     min(300, max(200, budget // 11)),
                 ),
                 "open_commitments": _last_resort_commitments(
@@ -365,8 +398,8 @@ class SituationAssembler:
                 "persistent_self": _text(self.identity.snapshot(), 100),
                 "relationship": _text(self.relationship.snapshot(), 90),
                 "recent_history": _last_resort_history(compact_history, limit=2, chars=220),
-                "recalled_memory": _text(envelope.context.recalled_memory, 180),
-                "live_roster": _text(envelope.context.live_roster, 180),
+                "recalled_memory": _text(recalled_facts, 180),
+                "live_roster": _text(roster_facts, 180),
                 "open_commitments": _last_resort_commitments(
                     compact_commitments,
                     limit=1,

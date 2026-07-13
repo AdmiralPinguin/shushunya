@@ -271,8 +271,18 @@ class Organs:
     async def dispatch_abaddon(self, payload: dict[str, Any]) -> dict[str, Any]:
         message = str(payload.get("message") or "").strip()
         task_id = str(payload.get("task_id") or "").strip()
+        parent_task_id = str(
+            payload.get("parent_task_id") or payload.get("continuation_of") or ""
+        ).strip()
         if not message or not task_id:
             raise OrganError("invalid_abaddon_effect", "В запросе Абаддону нет message или стабильного task_id.", retryable=False)
+        if parent_task_id and parent_task_id == task_id:
+            raise OrganError(
+                "invalid_abaddon_continuation",
+                "Продолжение терминальной миссии должно иметь новый task_id, отличный от родительского.",
+                retryable=False,
+                evidence={"task_id": task_id, "parent_task_id": parent_task_id},
+            )
         request = {
             "message": message,
             "task_id": task_id,
@@ -284,6 +294,9 @@ class Organs:
             "host": "127.0.0.1",
             "include_brigade_health": False,
         }
+        if parent_task_id:
+            request["parent_task_id"] = parent_task_id
+            request["continuation_of"] = parent_task_id
         try:
             async with httpx.AsyncClient(timeout=240.0) as client:
                 response = await client.post(
@@ -422,6 +435,56 @@ class Organs:
             "delegate_ref": str(body.get("delegate_ref") or ""),
             "status": str(body.get("status") or "created"),
             "explanation": str(body.get("explanation") or "Administratum подтвердил запись задачи."),
+            "evidence": body.get("evidence") if isinstance(body.get("evidence"), dict) else body,
+        }
+
+    async def dispatch_archive_notification_adapter(
+        self,
+        effect_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Persist one proactive Core lifecycle notice in chat and Vox."""
+        headers = self._archive_effect_headers()
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.llm_timeout_sec) as client:
+                response = await client.post(
+                    f"{self.settings.archive_base_url}/archive/internal/core/notification-effect",
+                    json={"effect_id": effect_id, "payload": payload},
+                    headers=headers,
+                )
+            body = response.json() if response.content else {}
+        except Exception as exc:
+            raise OrganError(
+                "archive_notification_adapter_unreachable",
+                f"Archive не подтвердил уведомление владельца: {exc}",
+                retryable=True,
+                evidence={"effect_id": effect_id},
+            ) from exc
+        if not isinstance(body, dict) or response.status_code not in {200, 201} or body.get("ok") is not True:
+            retryable = response.status_code >= 500 or response.status_code in {408, 425, 429}
+            raise OrganError(
+                str(body.get("code") or "notification_not_persisted")
+                if isinstance(body, dict)
+                else "notification_invalid_response",
+                str(body.get("explanation") or "Archive не подтвердил уведомление владельца.")
+                if isinstance(body, dict)
+                else "Archive вернул ответ неверной формы.",
+                retryable=retryable,
+                evidence={"effect_id": effect_id, "response": body},
+            )
+        delegate_ref = str(body.get("delegate_ref") or "").strip()
+        if not delegate_ref:
+            raise OrganError(
+                "notification_identity_missing",
+                "Archive подтвердил уведомление без идентификатора сообщения.",
+                retryable=False,
+                evidence={"effect_id": effect_id, "response": body},
+            )
+        return {
+            "ok": True,
+            "delegate_ref": delegate_ref,
+            "status": str(body.get("status") or "delivered"),
+            "explanation": str(body.get("explanation") or "Archive сохранил уведомление владельца."),
             "evidence": body.get("evidence") if isinstance(body.get("evidence"), dict) else body,
         }
 

@@ -9,6 +9,7 @@ TURN_ACTIONS = {
     "answer_in_chat",
     "ask_clarification",
     "request_warmaster_mission",
+    "continue_warmaster_mission",
     "answer_pending_decision",
     "create_administratum_task",
     "deliver_pending_reports",
@@ -45,6 +46,7 @@ def turn_capability_manifest(
     image_attached: bool = False,
     pending_reports: dict[str, Any] | None = None,
     pending_decisions: list[dict[str, Any]] | None = None,
+    continuable_tasks: list[dict[str, Any]] | None = None,
     artifacts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     available_artifacts = [dict(item) for item in (artifacts or []) if isinstance(item, dict)][:12]
@@ -83,6 +85,47 @@ def turn_capability_manifest(
     # Ordinary replies naturally answer the most recently asked open question.
     # Older questions remain in Core context and can be disambiguated explicitly.
     bound_decision = open_decisions[-1] if open_decisions else {}
+    pending_task_ids = {
+        str(item.get("task_id") or "").strip()
+        for item in open_decisions
+        if str(item.get("task_id") or "").strip()
+    }
+    continuation_candidates = []
+    continuation_context_root_id = ""
+    for item in continuable_tasks or []:
+        if not isinstance(item, dict):
+            continue
+        parent_task_id = str(item.get("parent_task_id") or item.get("task_id") or "").strip()[:240]
+        goal = str(item.get("goal") or "").strip()[:1_200]
+        if not parent_task_id or not goal or parent_task_id in pending_task_ids:
+            continue
+        if item.get("context_root") is True and not continuation_context_root_id:
+            continuation_context_root_id = parent_task_id
+        continuation_candidates.append(
+            {
+                "parent_task_id": parent_task_id,
+                "goal": goal,
+                "state": str(item.get("state") or "").strip()[:80],
+                "failure_summary": str(
+                    item.get("failure_summary") or item.get("state_label") or ""
+                ).strip()[:1_200],
+            }
+        )
+        if len(continuation_candidates) >= 5:
+            break
+    # Archive marks the exact task matched to recent shared-chat history. With
+    # one candidate it is unambiguous; with several unmatched candidates there
+    # is deliberately no root, so Core must clarify instead of guessing.
+    if not continuation_context_root_id and len(continuation_candidates) == 1:
+        continuation_context_root_id = continuation_candidates[0]["parent_task_id"]
+    bound_continuation = next(
+        (
+            item
+            for item in continuation_candidates
+            if item.get("parent_task_id") == continuation_context_root_id
+        ),
+        {},
+    )
     manifest = {
         "version": 1,
         "principle": (
@@ -93,6 +136,7 @@ def turn_capability_manifest(
             "image_attached": bool(image_attached),
         },
         "pending_decision_task_id": str(bound_decision.get("task_id") or ""),
+        "continuation_parent_task_id": str(bound_continuation.get("parent_task_id") or ""),
         "capabilities": [
             {
                 "action": "answer_in_chat",
@@ -135,6 +179,31 @@ def turn_capability_manifest(
                     "Select only when the current message actually answers the pending question.",
                     "pending_decision_task_id must be copied exactly from pending_decisions; never invent an id.",
                     "If the message appears to answer an older open question instead of this most recent one, use ask_clarification.",
+                ],
+            },
+            {
+                "action": "continue_warmaster_mission",
+                "available": bool(continuation_candidates),
+                "description": (
+                    "Continue work after an existing failed, blocked, or quarantined Abaddon mission. "
+                    "The old terminal run is immutable: the server creates a new linked mission from "
+                    "the trusted parent goal and failure summary."
+                ),
+                "server_effect": (
+                    "Archive and Core create a new durable Abaddon mission linked to the selected "
+                    "parent_task_id; they never pretend to reopen the terminal run."
+                ),
+                "continuation_parent_task_id": str(
+                    bound_continuation.get("parent_task_id") or ""
+                ),
+                "continuable_tasks": continuation_candidates,
+                "required_fields": ["continue_parent_task_id"],
+                "limits": [
+                    "Use only when the current message actually orders continuation, retry, repair, or completion of existing work.",
+                    "continue_parent_task_id must be copied exactly from continuable_tasks; never invent an id.",
+                    "Recover vague follow-ups such as 'доделывай' or 'продолжай' from recent shared-chat history.",
+                    "If more than one candidate fits and the intended parent is not clear, ask one clarification question.",
+                    "This creates a new linked mission. It never reopens or mutates an immutable terminal run.",
                 ],
             },
             {
@@ -224,6 +293,7 @@ def capability_contract_message(manifest: dict[str, Any] | None = None, decision
             "Внешние действия исполняет сервер, а не текст: не обещай и не описывай фоновую работу, поиск, файлы, бригады или напоминания, если selected_action этого не выбрал.",
             "answer_in_chat / ask_clarification: просто ответь или уточни, никакая работа не запускалась.",
             "answer_pending_decision: сервер возобновляет ту же задачу; скажи коротко от первого лица, без внутренних имён и идентификаторов.",
+            "continue_warmaster_mission: сервер создаёт новую связанную миссию из доверенной остановившейся задачи; подтверждай продолжение только после фактического запуска.",
         ],
     }
     return {

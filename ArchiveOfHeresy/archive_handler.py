@@ -683,6 +683,50 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             write_json(self, status, result)
             return
 
+        if self.path == "/archive/internal/core/notification-effect":
+            if not require_internal_core_auth(self):
+                return
+            try:
+                content_length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                content_length = -1
+            if content_length < 0 or content_length > 262_144:
+                write_json(self, 413, {"ok": False, "error": "invalid internal effect size"})
+                return
+            try:
+                request = read_json(self)
+                result = run_core_notification_effect(
+                    request.get("effect_id"),
+                    request.get("payload"),
+                )
+            except (json.JSONDecodeError, ValueError) as exc:
+                write_json(
+                    self,
+                    400,
+                    {
+                        "ok": False,
+                        "retryable": False,
+                        "code": "invalid_effect",
+                        "explanation": str(exc),
+                    },
+                )
+                return
+            except Exception as exc:
+                write_json(
+                    self,
+                    503,
+                    {
+                        "ok": False,
+                        "retryable": True,
+                        "code": "notification_store_unavailable",
+                        "explanation": f"Archive не смог надёжно записать уведомление: {exc}",
+                    },
+                )
+                return
+            status = 200 if result.get("ok") else 503 if result.get("retryable") else 422
+            write_json(self, status, result)
+            return
+
         if self.path == "/archive/internal/core/artifact-effect":
             if not require_internal_core_auth(self):
                 return
@@ -1906,11 +1950,22 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             payload["core_context_bundle"] = turn.get("context_bundle") if isinstance(turn.get("context_bundle"), dict) else {}
             payload["core_resolution"] = turn.get("core_resolution") if isinstance(turn.get("core_resolution"), dict) else {}
             payload["core_effect"] = turn.get("effect") if isinstance(turn.get("effect"), dict) else None
-            if decision.get("action") == "request_warmaster_mission":
-                payload["warmaster_task"] = warmaster_request_to_message(
-                    decision.get("warmaster_request") if isinstance(decision.get("warmaster_request"), dict) else {}
-                )
+            if decision.get("action") in {
+                "request_warmaster_mission",
+                "continue_warmaster_mission",
+            }:
                 effect_payload = payload["core_effect"].get("payload") if isinstance(payload.get("core_effect"), dict) else {}
+                if decision.get("action") == "continue_warmaster_mission":
+                    # Goal, parent identity and failure summary come only from
+                    # Core's trusted effect. Never rebuild them from model text.
+                    payload["warmaster_task"] = str((effect_payload or {}).get("message") or "").strip()
+                    payload["continuation_parent_task_id"] = str(
+                        (effect_payload or {}).get("parent_task_id") or ""
+                    ).strip()
+                else:
+                    payload["warmaster_task"] = warmaster_request_to_message(
+                        decision.get("warmaster_request") if isinstance(decision.get("warmaster_request"), dict) else {}
+                    )
                 payload["task_id"] = str((effect_payload or {}).get("task_id") or payload.get("task_id") or "")
                 return self.run_mobile_warmaster_payload(payload)
             if decision.get("action") == "answer_pending_decision":
@@ -2379,26 +2434,77 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 return
             decision = turn.get("decision") if isinstance(turn.get("decision"), dict) else {"action": "answer_in_chat"}
             turn_capabilities = turn.get("capabilities") if isinstance(turn.get("capabilities"), dict) else {}
-            if decision.get("action") == "request_warmaster_mission":
+            if decision.get("action") in {
+                "request_warmaster_mission",
+                "continue_warmaster_mission",
+            }:
                 task_id = str(payload.get("task_id") or f"client-{uuid.uuid4().hex[:12]}").strip()
                 payload["stream"] = False
                 payload["session_id"] = session_id
                 payload["memory_namespace"] = memory_namespace
                 payload["client_source"] = client_source
                 payload["task_id"] = task_id
-                payload["warmaster_task"] = warmaster_request_to_message(decision.get("warmaster_request") if isinstance(decision.get("warmaster_request"), dict) else {})
                 payload["turn_decision"] = decision
                 payload["turn_capabilities"] = turn_capabilities
                 payload["turn_protocol"] = {"request": turn.get("request"), "response": turn.get("response")}
                 payload["core_context_bundle"] = turn.get("context_bundle") if isinstance(turn.get("context_bundle"), dict) else {}
                 payload["core_resolution"] = turn.get("core_resolution") if isinstance(turn.get("core_resolution"), dict) else {}
                 payload["core_effect"] = turn.get("effect") if isinstance(turn.get("effect"), dict) else None
+                effect_id = str(
+                    payload["core_effect"].get("id")
+                    if isinstance(payload.get("core_effect"), dict)
+                    else ""
+                ).strip()
+                if not effect_id:
+                    write_json(
+                        self,
+                        502,
+                        {
+                            "error": "Core selected an external action without a durable effect",
+                            "session_id": session_id,
+                        },
+                    )
+                    return
                 effect_payload = payload["core_effect"].get("payload") if isinstance(payload.get("core_effect"), dict) else {}
+                if decision.get("action") == "continue_warmaster_mission":
+                    payload["warmaster_task"] = str((effect_payload or {}).get("message") or "").strip()
+                    payload["continuation_parent_task_id"] = str(
+                        (effect_payload or {}).get("parent_task_id") or ""
+                    ).strip()
+                else:
+                    payload["warmaster_task"] = warmaster_request_to_message(
+                        decision.get("warmaster_request") if isinstance(decision.get("warmaster_request"), dict) else {}
+                    )
                 task_id = str((effect_payload or {}).get("task_id") or task_id).strip()
                 payload["task_id"] = task_id
+                message = (
+                    "Принял. Команда продолжения сохранена; подтвержу запуск новой связанной миссии по факту."
+                    if decision.get("action") == "continue_warmaster_mission"
+                    else "Принял. Команда сохранена; подтвержу запуск работы по факту."
+                )
+                current_user_content = (
+                    text
+                    if not image_data_url
+                    else f"{text}\n[image attached server-side]".strip()
+                )
+                append_chat_message(
+                    session_id,
+                    "user",
+                    current_user_content,
+                    client_request_id=request_id,
+                    created_at=created_at,
+                    source=client_source,
+                    dedupe_key=f"core-effect:{effect_id}:user",
+                )
+                append_chat_message(
+                    session_id,
+                    "assistant",
+                    message,
+                    source="shushunya-core",
+                    dedupe_key=f"core-effect:{effect_id}:queued",
+                )
                 job_id = create_mobile_job("warmaster", payload)
                 run_mobile_job(job_id, lambda payload=payload: self.run_mobile_warmaster_payload(payload))
-                message = "Принял. Запускаю работу и сам прослежу за ней. Если понадобится именно твой выбор — спрошу отдельно."
                 extra = {"warmaster": {"ok": True, "task_id": task_id, "job_id": job_id, "status": "queued"}}
                 if stream:
                     self.stream_static_mobile_chat_completion(message, finish_reason="warmaster_queued", extra=extra)

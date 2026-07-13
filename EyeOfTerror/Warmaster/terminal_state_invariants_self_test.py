@@ -18,7 +18,7 @@ for import_root in (REPO_ROOT, WARM_ROOT, ARCHIVE_ROOT):
         sys.path.insert(0, str(import_root))
 
 from archive_handler import ArchiveHandler
-from eye_of_terror.actions import run_actions
+from eye_of_terror.actions import run_actions, run_preflight_actions
 from eye_of_terror.run_state import governor_activity_report
 
 
@@ -55,6 +55,63 @@ def main() -> int:
     assert revision["can_start"] is False
     assert revision["can_start_revision"] is True
     assert revision["next_action"]["kind"] == "execute_revision"
+
+    stale_start = {
+        "kind": "start",
+        "method": "POST",
+        "endpoint": "POST /runs/{task_id}/start_http",
+        "body": {},
+        "reason": "stale pre-terminal hint",
+    }
+    failed = run_actions(
+        "failed",
+        {"required": False, "steps": []},
+        result_next_action=stale_start,
+    )
+    assert failed["can_start"] is False
+    assert failed["can_execute"] is False
+    assert failed["next_action"]["kind"] == "inspect"
+    assert failed["next_action"]["method"] == "GET"
+    assert "start" not in failed["next_action"]["endpoint"]
+
+    failed_preflight = run_preflight_actions(
+        {"ok": True, "mode": "http", "step_ids": ["skitarii"]},
+        {
+            "can_start": False,
+            "can_resume": False,
+            "can_execute_revision": False,
+            "can_start_revision": False,
+            "next_action": stale_start,
+        },
+    )
+    assert failed_preflight["can_start_run"] is False
+    assert failed_preflight["next_action"]["kind"] == "inspect"
+    assert failed_preflight["next_action"]["method"] == "GET"
+    assert "start" not in failed_preflight["next_action"]["endpoint"]
+
+    cancelled = run_actions("cancelled", {"required": False, "steps": []})
+    assert cancelled["can_start"] is False
+    assert cancelled["next_action"]["kind"] == "inspect"
+
+    stale_revision_start = {
+        "kind": "execute_revision",
+        "method": "POST",
+        "endpoint": "POST /runs/{task_id}/start_revision_http",
+        "body": {"step_ids": ["review"]},
+        "reason": "stale revision plan survived the terminal transition",
+    }
+    for terminal_status in ("failed", "cancelled"):
+        terminal_revision = run_actions(
+            terminal_status,
+            {"required": True, "steps": [{"step_id": "review"}]},
+            result_next_action=stale_revision_start,
+        )
+        assert terminal_revision["can_execute"] is False
+        assert terminal_revision["can_start"] is False
+        assert terminal_revision["can_execute_revision"] is False
+        assert terminal_revision["can_start_revision"] is False
+        assert terminal_revision["next_action"]["kind"] == "inspect"
+        assert terminal_revision["next_action"]["method"] == "GET"
 
     stale_event = {
         "type": "progress_event",

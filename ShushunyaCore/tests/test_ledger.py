@@ -156,6 +156,47 @@ class LedgerTests(unittest.TestCase):
         commitment = self.ledger.list_commitments()[0]
         self.assertEqual(commitment["state"], "quarantined")
         self.assertEqual(commitment["delegate_ref"], "core-1")
+        with self.ledger.connect() as db:
+            notices = db.execute(
+                "SELECT id,payload_json,state FROM effects "
+                "WHERE kind='notify_commitment_stalled'"
+            ).fetchall()
+            outbox = db.execute(
+                "SELECT message_id,state FROM outbox "
+                "WHERE operation='notify_commitment_stalled'"
+            ).fetchall()
+        self.assertEqual(len(notices), 1)
+        self.assertEqual(len(outbox), 1)
+        self.assertEqual(outbox[0]["message_id"], notices[0]["id"])
+        payload = __import__("json").loads(notices[0]["payload_json"])
+        self.assertIs(payload["needs_user"], False)
+        self.assertNotIn("question", payload)
+
+        # Initialization is not a migration/backfill pass. The event-owned
+        # notification remains exactly once after a restart.
+        self.ledger.initialize()
+        with self.ledger.connect() as db:
+            count = db.execute(
+                "SELECT COUNT(*) FROM effects WHERE kind='notify_commitment_stalled'"
+            ).fetchone()[0]
+        self.assertEqual(count, 1)
+
+    def test_preexisting_quarantine_is_not_backfilled_at_startup(self):
+        self.create_effect()
+        with self.ledger.write() as db:
+            db.execute(
+                "UPDATE commitments SET state='quarantined',diagnostic_json=? "
+                "WHERE id='commitment-1'",
+                ('{"code":"historical_quarantine"}',),
+            )
+
+        self.ledger.initialize()
+
+        with self.ledger.connect() as db:
+            count = db.execute(
+                "SELECT COUNT(*) FROM effects WHERE kind='notify_commitment_stalled'"
+            ).fetchone()[0]
+        self.assertEqual(count, 0)
 
 
 if __name__ == "__main__":
