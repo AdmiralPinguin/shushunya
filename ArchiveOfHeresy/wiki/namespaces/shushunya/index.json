@@ -37,8 +37,8 @@
       "kind": "persona",
       "path": "pages/relationship-journal.md",
       "title": "Relationship Journal",
-      "turn_id": "manual-persona-bootstrap",
-      "updated_at": "2026-07-07T00:00:00+09:00"
+      "turn_id": "codex-personality-autonomy",
+      "updated_at": "2026-07-14T02:30:00+09:00"
     },
     {
       "created_at": "2026-07-07T00:00:00+09:00",
@@ -49,6 +49,36 @@
       "title": "Standing Rules",
       "turn_id": "manual-persona-bootstrap",
       "updated_at": "2026-07-07T00:00:00+09:00"
+    },
+    {
+      "created_at": "2026-07-11T22:54:43+09:00",
+      "id": "5d015238-d66a-4a1d-bb81-d64fb70daf1a",
+      "importance": 3,
+      "kind": "note",
+      "path": "pages/hardware-context-5d015238.md",
+      "title": "Hardware Context",
+      "turn_id": "fe84cd6c-ad54-4736-9a85-6752d2cabd7c",
+      "updated_at": "2026-07-11T22:55:43+09:00"
+    },
+    {
+      "created_at": "2026-07-12T02:15:24+09:00",
+      "id": "4ec69420-afe7-4140-b295-1509a7effa02",
+      "importance": 3,
+      "kind": "journal",
+      "path": "pages/brigade-task-journal-4ec69420.md",
+      "title": "Brigade Task Journal",
+      "turn_id": "taskjournal-core-5ec27c1f8ddf4aa8a1d3-blocked",
+      "updated_at": "2026-07-13T21:19:54+09:00"
+    },
+    {
+      "created_at": "2026-07-13T18:51:41+09:00",
+      "id": "50685d6f-c333-4c84-af9a-fe1d5e0de2c9",
+      "importance": 2,
+      "kind": "note",
+      "path": "pages/unsorted-conversation-notes-50685d6f.md",
+      "title": "Unsorted Conversation Notes",
+      "turn_id": "android-c1679d76-b85f-4d9f-a441-bdef1d21a933",
+      "updated_at": "2026-07-13T23:57:58+09:00"
     }
   ],
   "version": 1
