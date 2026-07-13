@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from ShushunyaCore.authority import Authority
 from ShushunyaCore.config import Settings
@@ -384,6 +385,70 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertLessEqual(len(json.dumps(situation, ensure_ascii=False, separators=(",", ":"))), 2_800)
         self.assertEqual(situation["pending_decisions"][0]["task_id"], "task-pending")
+
+    def test_galaga_follow_up_context_survives_last_resort_compaction(self):
+        compact_settings = replace(self.settings, context_char_budget=2_800)
+        assembler = SituationAssembler(
+            compact_settings,
+            self.ledger,
+            self.identity,
+            self.relationship,
+            self.preferences,
+            self.organs,
+        )
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        for capability in manifest["capabilities"]:
+            capability["description"] = "подробное описание возможности " * 300
+            capability["limits"] = ["ограничение " * 300]
+        failed_message = (
+            "Я не смог довести задачу «Создать игру Galaga для платформы Android» до результата. "
+            "Причина: внутренняя проверка не пропустила текущий результат. Твой выбор сейчас не нужен."
+        )
+        follow_up = "Так если мой выбор не нужен. Пиздуй доделывай"
+        recalled_memory = (
+            "Недавнее в этом разговоре: задача Galaga для Android провалена; "
+            "пользователь велел продолжить без дополнительного выбора."
+        )
+        live_roster = "Создать игру Galaga для Android — провалена"
+        envelope = TurnEnvelope(
+            idempotency_key="compact-galaga-follow-up",
+            text=follow_up,
+            source="app",
+            recent_history=[
+                {"role": "user", "content": "Тогда сделай мне галагу на андроид"},
+                {"role": "assistant", "content": "Принял. Работа запущена."},
+                {"role": "assistant", "content": failed_message},
+            ],
+            capability_manifest=manifest,
+            context=TurnContext(
+                persona="личность " * 500,
+                recalled_memory=recalled_memory,
+                live_roster=live_roster,
+            ),
+        )
+        commitments = [
+            {
+                "id": "commitment-galaga",
+                "goal": "Создать игру Galaga для Android",
+                "state": "quarantined",
+                "honest_status": "Текущая попытка остановлена внутренней проверкой.",
+                "delegate_ref": "task-galaga",
+            }
+        ]
+
+        with patch.object(self.ledger, "list_commitments", return_value=commitments):
+            situation = assembler.assemble(envelope)
+
+        encoded = json.dumps(situation, ensure_ascii=False, separators=(",", ":"))
+        self.assertLessEqual(len(encoded), 2_800)
+        self.assertTrue(situation["context_compacted"])
+        self.assertIsInstance(situation["capability_manifest"], dict)
+        self.assertEqual(situation["current_turn"]["text"], follow_up)
+        self.assertEqual(situation["recent_history"][-1]["content"], failed_message)
+        self.assertEqual(situation["recalled_memory"], recalled_memory)
+        self.assertEqual(situation["live_roster"], live_roster)
+        self.assertEqual(situation["open_commitments"][0]["id"], "commitment-galaga")
+        self.assertIn("Galaga", situation["open_commitments"][0]["goal"])
 
     def test_relationship_migrates_legacy_contract_without_losing_corrections(self):
         ledger = Ledger(self.root / "legacy-relationship.sqlite3")

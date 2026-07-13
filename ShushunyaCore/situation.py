@@ -138,6 +138,65 @@ def _trusted_pending_decisions(manifest: dict[str, Any]) -> list[dict[str, Any]]
     return result
 
 
+def _compact_capability_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Keep every available action visible without carrying verbose prose.
+
+    The full manifest is still used by Authority.  This is only the bounded
+    model-facing summary used after the rich situation exceeds its budget.
+    """
+    actions = []
+    for raw in manifest.get("capabilities", []):
+        if not isinstance(raw, dict):
+            continue
+        action = str(raw.get("action") or "").strip()[:80]
+        if not action:
+            continue
+        item: dict[str, Any] = {
+            "action": action,
+            "available": raw.get("available") is True,
+        }
+        required = raw.get("required_fields")
+        if isinstance(required, list):
+            item["required_fields"] = [str(value)[:80] for value in required[:4]]
+        actions.append(item)
+    return {
+        "principle": str(manifest.get("principle") or "")[:180],
+        "actions": actions[:12],
+    }
+
+
+def _last_resort_history(history: list[dict[str, Any]], *, limit: int, chars: int) -> list[dict[str, str]]:
+    return [
+        {
+            "role": str(item.get("role") or "user")[:24],
+            "content": _text(item.get("content") or "", chars),
+        }
+        for item in history[-limit:]
+        if isinstance(item, dict) and str(item.get("content") or "").strip()
+    ]
+
+
+def _last_resort_commitments(
+    commitments: list[dict[str, Any]],
+    *,
+    limit: int,
+    goal_chars: int,
+    status_chars: int,
+) -> list[dict[str, Any]]:
+    result = []
+    for raw in commitments[:limit]:
+        item = {
+            "id": str(raw.get("id") or "")[:160],
+            "goal": _text(raw.get("goal") or "", goal_chars),
+            "state": str(raw.get("state") or "")[:40],
+            "honest_status": _text(raw.get("honest_status") or "", status_chars),
+        }
+        if raw.get("delegate_ref"):
+            item["delegate_ref"] = str(raw["delegate_ref"])[:120]
+        result.append(item)
+    return result
+
+
 class SituationAssembler:
     def __init__(
         self,
@@ -251,24 +310,82 @@ class SituationAssembler:
                 ],
             }
         if _json_size(situation) > budget:
-            # Last-resort deterministic core. This still preserves the user
-            # request, identity, relationship and capability boundary.
+            # Last-resort deterministic core. Conversation continuity is an
+            # essential capability, not optional decoration: never discard the
+            # recent thread, recalled memory, live task truth, or commitments.
             situation = {
                 "current_turn": {
                     "source": envelope.source,
-                    "text": _text(envelope.text, max(700, budget // 3)),
+                    "text": _text(envelope.text, min(600, max(320, budget // 5))),
                     "image_attached": envelope.image_attached,
                 },
-                "persistent_self": _text(self.identity.snapshot(), max(400, budget // 7)),
-                "relationship": _text(self.relationship.snapshot(), max(300, budget // 10)),
+                "persistent_self": _text(self.identity.snapshot(), min(220, max(120, budget // 14))),
+                "relationship": _text(self.relationship.snapshot(), min(180, max(100, budget // 16))),
+                "recent_history": _last_resort_history(
+                    compact_history,
+                    limit=3,
+                    chars=min(280, max(180, budget // 12)),
+                ),
+                "recalled_memory": _text(
+                    envelope.context.recalled_memory,
+                    min(340, max(220, budget // 10)),
+                ),
+                "live_roster": _text(
+                    envelope.context.live_roster,
+                    min(300, max(200, budget // 11)),
+                ),
+                "open_commitments": _last_resort_commitments(
+                    compact_commitments,
+                    limit=1,
+                    goal_chars=180,
+                    status_chars=100,
+                ),
                 "available_artifacts": _available_artifacts(
-                    envelope.capability_manifest, max_items=3, max_chars=600,
+                    envelope.capability_manifest, max_items=3, max_chars=320,
                 ),
                 "pending_decisions": [
-                    {"task_id": item.get("task_id"), "question": str(item.get("question") or "")[:300]}
+                    {"task_id": item.get("task_id"), "question": str(item.get("question") or "")[:140]}
                     for item in pending_decisions
                 ],
-                "capability_manifest": _text(envelope.capability_manifest, max(500, budget // 6)),
+                "capability_manifest": _compact_capability_manifest(envelope.capability_manifest),
+                "context_compacted": True,
+                "rules": ["Never claim an unconfirmed external effect."],
+            }
+        if _json_size(situation) > budget:
+            # Pathological ids/manifests may still exhaust a 2.8k character
+            # envelope. Shrink every field again, but retain the four continuity
+            # layers structurally and keep the newest exchange verbatim when it
+            # fits the per-message bound.
+            situation = {
+                "current_turn": {
+                    "source": envelope.source,
+                    "text": _text(envelope.text, 300),
+                    "image_attached": envelope.image_attached,
+                },
+                "persistent_self": _text(self.identity.snapshot(), 100),
+                "relationship": _text(self.relationship.snapshot(), 90),
+                "recent_history": _last_resort_history(compact_history, limit=2, chars=220),
+                "recalled_memory": _text(envelope.context.recalled_memory, 180),
+                "live_roster": _text(envelope.context.live_roster, 180),
+                "open_commitments": _last_resort_commitments(
+                    compact_commitments,
+                    limit=1,
+                    goal_chars=120,
+                    status_chars=60,
+                ),
+                "available_artifacts": [
+                    {"artifact_id": item["artifact_id"]}
+                    for item in _available_artifacts(
+                        envelope.capability_manifest,
+                        max_items=3,
+                        max_chars=800,
+                    )
+                ],
+                "pending_decisions": [
+                    {"task_id": item.get("task_id")}
+                    for item in pending_decisions
+                ],
+                "capability_manifest": _compact_capability_manifest(envelope.capability_manifest),
                 "context_compacted": True,
                 "rules": ["Never claim an unconfirmed external effect."],
             }
