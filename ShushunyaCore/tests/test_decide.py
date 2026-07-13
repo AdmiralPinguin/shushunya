@@ -328,7 +328,7 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
             *self.args,
             replies=[{
                 "action": "answer_in_chat",
-                "reply": "Сам дожму, жди результат.",
+                "reply": "Не понял, что именно продолжать.",
                 "confidence": 1.0,
             }],
         )
@@ -344,7 +344,9 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
 
         result = await engine.resolve(envelope)
 
-        self.assertEqual(engine.calls, 1)
+        # The trusted parent plus a real imperative is complete intent. The
+        # model must not get a chance to erase it with a harmless chat reply.
+        self.assertEqual(engine.calls, 0)
         self.assertEqual(result["decision"]["action"], "continue_warmaster_mission")
         self.assertEqual(
             result["decision"]["continue_parent_task_id"],
@@ -661,9 +663,10 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
 
         result = await engine.resolve(envelope)
 
-        self.assertEqual(result["decision"]["action"], "ask_clarification")
-        self.assertEqual(result["decision"]["reason"], "continuation_task_mismatch")
-        self.assertIsNone(result["effect"])
+        self.assertEqual(engine.calls, 0)
+        self.assertEqual(result["decision"]["action"], "continue_warmaster_mission")
+        self.assertEqual(result["decision"]["continue_parent_task_id"], "task-real")
+        self.assertEqual(result["effect"]["payload"]["parent_task_id"], "task-real")
 
     async def test_pending_decision_binds_trusted_task_and_exact_user_text(self):
         manifest = json.loads(json.dumps(CAPABILITIES))

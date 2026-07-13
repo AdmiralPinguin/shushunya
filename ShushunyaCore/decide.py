@@ -522,6 +522,17 @@ class DecisionEngine:
             if envelope.forced_action:
                 decision = self._forced(envelope)
                 model_trace = {"forced_action": envelope.forced_action}
+            elif guarded := _truth_guard_continuation_decision(envelope):
+                # An explicit continuation imperative plus an exact parent
+                # identity from the trusted capability manifest is already a
+                # complete, authorized intent. Do not let a conversational
+                # model answer (even a harmless "не понял") erase the action.
+                decision = guarded
+                model_trace = {
+                    "deterministic_continuation": {
+                        "bound_parent_task_id": guarded["continue_parent_task_id"],
+                    }
+                }
             else:
                 raw, model_trace = await self._model_call(envelope, situation)
                 try:
