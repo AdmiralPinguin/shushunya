@@ -95,6 +95,7 @@ coverage/
 
 # Android/Gradle local caches, generated APKs, and bundled toolchains
 .gradle-home/
+.gradle-user-home/
 .gradle/
 **/.gradle/
 **/app/build/
@@ -201,6 +202,7 @@ CoreOfMadness/vm-sandbox/*.log
 
 # Local archive payloads and task runtime state
 ArchiveOfHeresy/archive/assets/
+ArchiveOfHeresy/archive/artifacts/
 ArchiveOfHeresy/archive/task_journal_state.json
 
 # Local voice references and generated audio previews

@@ -16,6 +16,11 @@ the priority dispatcher. Its canonical state lives in SQLite WAL under
 - Events are append-only; SQLite triggers reject update/delete.
 - External delivery is at-least-once with stable idempotency keys.
 - A model proposes actions but cannot extend the capability manifest.
+- File delivery accepts only an opaque `artifact_id` that Archive registered
+  in the current turn's capability catalog; model-produced host paths have no
+  authority. The model cannot supply delivery speech: the effect contains only
+  that trusted id and transport identity/scope, while Archive writes the
+  factual caption after persistence succeeds.
 - `blocked` is not a Core state. Waiting/failure states require an explanation,
   evidence, required action and resume condition.
 - One broken organ degrades only its action. Foreground conversation remains
@@ -29,7 +34,7 @@ the priority dispatcher. Its canonical state lives in SQLite WAL under
 
 - `POST /v1/turns/resolve` — one identity/context/decision pass.
 - `POST /v1/effects/{id}/dispatch` — ask the fenced Core steward to dispatch a
-  Core-owned Abaddon or Archive/Administratum effect.
+  Core-owned Abaddon, Archive/Administratum or Archive/artifact effect.
 - `GET /v1/commitments`, `GET /v1/events`, `GET /v1/self` — inspect truth.
 - `POST/GET /v1/agenda` — finite background work with value, risk, budget and
   an explicit stop condition.
@@ -44,6 +49,18 @@ systemctl --user daemon-reload
 systemctl --user enable --now shushunya-core.service
 curl -fsS http://127.0.0.1:7600/health/ready
 ```
+
+Core's two Archive effect adapters require a dedicated credential. Put the
+same random value (at least 32 characters) in `ArchiveOfHeresy/.env` and in the
+systemd-only `.secrets/shushunya-core.env`:
+
+```text
+SHUSHUNYA_CORE_ARCHIVE_KEY=<random secret>
+```
+
+This key is separate from every public Archive/mobile credential. Core
+preflight refuses to start without it; Archive's internal endpoints fail
+closed when it is missing or wrong.
 
 The current migration seam keeps Archive as the authenticated HTTP/SSE/chat
 transport and memory owner. Archive assembles persona + Magos + live roster

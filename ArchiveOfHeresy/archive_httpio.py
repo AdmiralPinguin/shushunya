@@ -1,6 +1,8 @@
 """HTTP request/response and upstream-proxy helpers for ArchiveOfHeresy."""
 import contextvars
+import hmac
 import json
+import re
 from datetime import datetime
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -51,24 +53,66 @@ def write_json(handler, status, payload):
     handler.wfile.write(body)
 
 
-def authorized(handler, allow_mobile=False, allow_client=False):
+def _matches_secret(presented, expected):
+    if not expected:
+        return False
+    try:
+        presented_bytes = str(presented or "").encode("utf-8")
+        expected_bytes = str(expected).encode("utf-8")
+    except UnicodeError:
+        return False
+    return hmac.compare_digest(presented_bytes, expected_bytes)
+
+
+def _authentication_context(handler, allow_mobile=False, allow_client=False):
     if not ARCHIVE_API_KEY and not ARCHIVE_CLIENT_API_KEY and not ARCHIVE_MOBILE_API_KEY:
-        return True
+        default_source = ARCHIVE_CLIENT_AUDIENCE_SOURCE if (allow_client or allow_mobile) else ARCHIVE_API_AUDIENCE_SOURCE
+        return True, default_source
 
     auth = handler.headers.get("Authorization", "").strip()
-    if ARCHIVE_API_KEY and auth == f"Bearer {ARCHIVE_API_KEY}":
-        return True
+    bearer = auth[7:] if auth.startswith("Bearer ") else ""
+    if _matches_secret(bearer, ARCHIVE_API_KEY):
+        return True, ARCHIVE_API_AUDIENCE_SOURCE
     client_key = handler.headers.get("X-Shushunya-Client-Key", "").strip()
-    if (allow_client or allow_mobile) and ARCHIVE_CLIENT_API_KEY and (
-        auth == f"Bearer {ARCHIVE_CLIENT_API_KEY}" or client_key == ARCHIVE_CLIENT_API_KEY
+    if (allow_client or allow_mobile) and (
+        _matches_secret(bearer, ARCHIVE_CLIENT_API_KEY)
+        or _matches_secret(client_key, ARCHIVE_CLIENT_API_KEY)
     ):
-        return True
+        return True, ARCHIVE_CLIENT_AUDIENCE_SOURCE
     mobile_key = handler.headers.get("X-Shushunya-Mobile-Key", "").strip()
-    if allow_mobile and ARCHIVE_MOBILE_API_KEY and (
-        auth == f"Bearer {ARCHIVE_MOBILE_API_KEY}" or mobile_key == ARCHIVE_MOBILE_API_KEY
+    if allow_mobile and (
+        _matches_secret(bearer, ARCHIVE_MOBILE_API_KEY)
+        or _matches_secret(mobile_key, ARCHIVE_MOBILE_API_KEY)
     ):
-        return True
-    return False
+        return True, ARCHIVE_MOBILE_AUDIENCE_SOURCE
+    return False, None
+
+
+def authorized(handler, allow_mobile=False, allow_client=False):
+    ok, audience_source = _authentication_context(
+        handler,
+        allow_mobile=allow_mobile,
+        allow_client=allow_client,
+    )
+    if ok:
+        handler.archive_audience_source = audience_source
+    return ok
+
+
+def authenticated_audience_source(handler, *, fallback="app"):
+    return str(getattr(handler, "archive_audience_source", "") or fallback).strip().lower()
+
+
+def authenticated_artifact_audience(handler, payload=None, *, fallback="app"):
+    """Only the privileged generic key may make a scoped transport claim."""
+    audience = authenticated_audience_source(handler, fallback=fallback)
+    if audience != "*":
+        return audience
+    payload = payload if isinstance(payload, dict) else {}
+    claimed = str(payload.get("client_source") or payload.get("source") or "").strip().lower()
+    if re.fullmatch(r"[a-z0-9][a-z0-9_.:-]{0,127}", claimed):
+        return claimed
+    return "*"
 
 
 def require_auth(handler, allow_mobile=False, allow_client=False):
@@ -85,6 +129,59 @@ def require_auth(handler, allow_mobile=False, allow_client=False):
         },
     )
     return False
+
+
+def require_artifact_auth(handler, *, head_only=False):
+    """Artifact bytes never inherit Archive's legacy no-key/fail-open mode."""
+    configured = bool(ARCHIVE_API_KEY or ARCHIVE_CLIENT_API_KEY or ARCHIVE_MOBILE_API_KEY)
+    if configured and authorized(handler, allow_mobile=True, allow_client=True):
+        return True
+    status = 401 if configured else 503
+    if head_only:
+        handler.send_response(status)
+        handler.send_header("Content-Length", "0")
+        handler.send_header("Cache-Control", "no-store")
+        handler.end_headers()
+    else:
+        write_json(
+            handler,
+            status,
+            {
+                "ok": False,
+                "error": (
+                    "Missing or invalid artifact API key"
+                    if configured
+                    else "Artifact downloads are disabled until an Archive API key is configured"
+                ),
+            },
+        )
+    return False
+
+
+def require_internal_core_auth(handler):
+    """Authenticate the private Core effect adapters, fail closed.
+
+    A peer-address check remains useful as defense in depth, but is not enough:
+    Cloudflare terminates locally and public requests can also appear to come
+    from loopback.  The separate credential is deliberately not one of the
+    public Archive/client keys.
+    """
+    peer = str((getattr(handler, "client_address", None) or ("",))[0] or "")
+    if peer not in {"127.0.0.1", "::1"}:
+        write_json(handler, 403, {"ok": False, "error": "internal Core adapter is loopback only"})
+        return False
+    if not SHUSHUNYA_CORE_ARCHIVE_KEY:
+        write_json(
+            handler,
+            503,
+            {"ok": False, "error": "internal Core adapter credential is not configured"},
+        )
+        return False
+    presented = handler.headers.get("X-Shushunya-Core-Key", "").strip()
+    if not _matches_secret(presented, SHUSHUNYA_CORE_ARCHIVE_KEY):
+        write_json(handler, 401, {"ok": False, "error": "invalid internal Core credential"})
+        return False
+    return True
 
 
 def proxy_json(method, path, payload=None, timeout=180):

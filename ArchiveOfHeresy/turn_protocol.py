@@ -11,6 +11,7 @@ TURN_ACTIONS = {
     "request_warmaster_mission",
     "create_administratum_task",
     "deliver_pending_reports",
+    "deliver_artifact",
 }
 
 
@@ -38,7 +39,13 @@ WARMASTER_CAPABILITY_AREAS = [
 ]
 
 
-def turn_capability_manifest(*, image_attached: bool = False, pending_reports: dict[str, Any] | None = None) -> dict[str, Any]:
+def turn_capability_manifest(
+    *,
+    image_attached: bool = False,
+    pending_reports: dict[str, Any] | None = None,
+    artifacts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    available_artifacts = [dict(item) for item in (artifacts or []) if isinstance(item, dict)][:12]
     manifest = {
         "version": 1,
         "principle": (
@@ -92,6 +99,19 @@ def turn_capability_manifest(*, image_attached: bool = False, pending_reports: d
                 "limits": [
                     "Use only for time-based duties, reminders, routines, todos, or watch requests.",
                     "If date/time/condition is ambiguous, use ask_clarification.",
+                ],
+            },
+            {
+                "action": "deliver_artifact",
+                "available": bool(available_artifacts),
+                "description": "Attach one already registered Archive artifact to the owner's current chat.",
+                "server_effect": "Core asks Archive to persist exactly one artifact-bearing chat message.",
+                "required_fields": ["artifact_delivery.artifact_id"],
+                "artifacts": available_artifacts,
+                "limits": [
+                    "Choose only an exact artifact_id from this turn's catalog; filenames and host paths are never authority.",
+                    "Use only when the owner asks to receive an existing file. Creating or changing a file requires a real brigade mission.",
+                    "The catalog is limited to recent artifacts visible to this chat session and client source.",
                 ],
             },
         ],

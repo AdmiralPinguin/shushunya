@@ -47,6 +47,14 @@ from pending_reports import (
     pending_topics_note,
     reports_event_text,
 )
+from artifact_store import (
+    ArtifactError,
+    artifact_catalog_for_query,
+    artifact_metadata,
+    artifact_store_stats,
+    attach_artifact_to_chat,
+    init_artifact_storage,
+)
 
 try:
     from EyeOfTerror.Administratum.intent_parser import (
@@ -234,14 +242,32 @@ def memory_search(memory_namespace, query, limit=5, include_content=False, layer
     }
 
 
-def run_mobile_chat_payload(payload, on_token=None):
+def run_mobile_chat_payload(payload, on_token=None, *, trusted_turn_context=None):
     LLM_PRIORITY.set("chat")  # the owner's live answer jumps ahead of brigade work
     maintenance_record = None
     payload = dict(payload)
+    # HTTP JSON is never authority for Core decisions/capabilities/effects.
+    # Only a handler that has just completed the server-side turn protocol may
+    # pass these fields through the separate Python-only keyword argument.
+    trusted_turn_context = (
+        trusted_turn_context if isinstance(trusted_turn_context, dict) else {}
+    )
     session_id = shared_chat_session_id(payload.get("session_id") or payload.get("user") or "default")
-    core_context_bundle = payload.get("core_context_bundle") if isinstance(payload.get("core_context_bundle"), dict) else {}
-    core_resolution = payload.get("core_resolution") if isinstance(payload.get("core_resolution"), dict) else {}
-    core_effect = payload.get("core_effect") if isinstance(payload.get("core_effect"), dict) else None
+    core_context_bundle = (
+        trusted_turn_context.get("core_context_bundle")
+        if isinstance(trusted_turn_context.get("core_context_bundle"), dict)
+        else {}
+    )
+    core_resolution = (
+        trusted_turn_context.get("core_resolution")
+        if isinstance(trusted_turn_context.get("core_resolution"), dict)
+        else {}
+    )
+    core_effect = (
+        trusted_turn_context.get("core_effect")
+        if isinstance(trusted_turn_context.get("core_effect"), dict)
+        else None
+    )
     # Same-session waiters stay outside the four global pipeline slots, so one
     # noisy conversation cannot head-of-line block unrelated sessions.
     with CHAT_SESSION_LOCKS.hold(session_id), CHAT_QUEUE_LOCK:
@@ -252,6 +278,9 @@ def run_mobile_chat_payload(payload, on_token=None):
         model_route = set_llm_route(payload.get("model_route"))
         payload["stream"] = False
         client_source = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
+        artifact_audience_source = str(
+            payload.get("artifact_audience_source") or client_source
+        ).strip().lower()[:80] or "app"
         client_request_id = ensure_core_transport_identity(payload)
         text = trim_chat_text(payload.get("text") or payload.get("message") or "")
         image_data_url = str(payload.get("image_data_url") or "").strip()
@@ -268,9 +297,25 @@ def run_mobile_chat_payload(payload, on_token=None):
         system_prompt = ""
         max_tokens = int(payload.get("max_tokens") or 2048)
         temperature = float(payload.get("temperature") or 0.4)
-        turn_capabilities = payload.get("turn_capabilities") if isinstance(payload.get("turn_capabilities"), dict) else turn_capability_manifest(image_attached=bool(image_data_url))
-        turn_decision = payload.get("turn_decision") if isinstance(payload.get("turn_decision"), dict) else {"action": "answer_in_chat"}
-        forced_chat_reply = trim_chat_text(payload.get("forced_chat_reply") or "")
+        turn_capabilities = (
+            trusted_turn_context.get("turn_capabilities")
+            if isinstance(trusted_turn_context.get("turn_capabilities"), dict)
+            else turn_capability_manifest(
+                image_attached=bool(image_data_url),
+                artifacts=artifact_catalog_for_query(
+                    session_id,
+                    audience_source=artifact_audience_source,
+                    query=text,
+                    limit=ARTIFACT_CAPABILITY_LIMIT,
+                ),
+            )
+        )
+        turn_decision = (
+            trusted_turn_context.get("turn_decision")
+            if isinstance(trusted_turn_context.get("turn_decision"), dict)
+            else {"action": "answer_in_chat"}
+        )
+        forced_chat_reply = trim_chat_text(trusted_turn_context.get("forced_chat_reply") or "")
 
         request_messages = messages_for_chat_context(session_id, system_prompt, text, image_data_url=image_data_url)
         request_messages.insert(0, capability_contract_message(turn_capabilities, turn_decision))
@@ -286,7 +331,167 @@ def run_mobile_chat_payload(payload, on_token=None):
             created_at=created_at,
             source=client_source,
             dedupe_key=f"turn:{client_request_id}:user",
+            client_request_id=client_request_id,
         )
+        if str(turn_decision.get("action") or "") == "deliver_artifact":
+            if core_effect and core_effect.get("id"):
+                try:
+                    dispatched = core_dispatch_effect(str(core_effect["id"]))
+                except Exception as exc:  # Core's durable steward still owns retry
+                    dispatched = {
+                        "ok": False,
+                        "effect": {
+                            "state": "retry_wait",
+                            "payload": core_effect.get("payload") if isinstance(core_effect.get("payload"), dict) else {},
+                            "result": {
+                                "status": "core_transport_unavailable",
+                                "explanation": (
+                                    "Core сохранил обязательство, но Archive не дождался подтверждения доставки файла: "
+                                    f"{exc}"
+                                ),
+                            },
+                        },
+                    }
+            else:
+                dispatched = {
+                    "ok": False,
+                    "effect": {
+                        "state": "failed",
+                        "payload": {},
+                        "result": {
+                            "status": "missing_durable_effect",
+                            "explanation": "Core не создал durable-эффект доставки файла.",
+                        },
+                    },
+                }
+            delivered_effect = dispatched.get("effect") if isinstance(dispatched.get("effect"), dict) else {}
+            factual = delivered_effect.get("result") if isinstance(delivered_effect.get("result"), dict) else {}
+            effect_payload = delivered_effect.get("payload") if isinstance(delivered_effect.get("payload"), dict) else {}
+            evidence = factual.get("evidence") if isinstance(factual.get("evidence"), dict) else {}
+            artifact = evidence.get("artifact") if isinstance(evidence.get("artifact"), dict) else None
+            artifact_id = str(factual.get("artifact_id") or effect_payload.get("artifact_id") or "").strip()
+            if artifact is None and artifact_id:
+                try:
+                    artifact = artifact_metadata(
+                        artifact_id,
+                        session_id=session_id,
+                        audience_source=artifact_audience_source,
+                    )
+                except ValueError:
+                    artifact = None
+            artifact = chat_artifact_payload(artifact)
+            delivered = bool(
+                delivered_effect.get("state") == "delivered"
+                and factual.get("delegate_ref")
+                and artifact
+                and str((artifact or {}).get("artifact_id") or "") == artifact_id
+            )
+            if delivered and not bind_artifact_message_request_id(
+                factual.get("delegate_ref"),
+                session_id,
+                artifact_id,
+                client_request_id,
+            ):
+                print(
+                    f"artifact delivery correlation was not persisted: artifact_id={artifact_id}",
+                    flush=True,
+                )
+            delivered_artifact = artifact if delivered else None
+            if delivered:
+                factual_message = trim_chat_text(factual.get("caption") or "Файл приложен.") or "Файл приложен."
+            else:
+                factual_message = trim_chat_text(
+                    factual.get("explanation") or "Файл пока не приложен; Core сохранил эффект для безопасного повтора."
+                )
+                append_chat_message(
+                    session_id,
+                    "assistant",
+                    factual_message,
+                    source="shushunya-core",
+                    dedupe_key=f"turn:{client_request_id}:assistant",
+                    client_request_id=client_request_id,
+                )
+            assistant = {"role": "assistant", "content": factual_message}
+            response = {
+                "object": "chat.completion",
+                "model": "shushunya-core",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "artifact_effect",
+                        "message": assistant,
+                    }
+                ],
+                "artifact": delivered_artifact,
+                "action": "deliver_artifact",
+                "artifact_id": artifact_id,
+                "client_request_id": client_request_id,
+            }
+            record = {
+                "turn_id": turn_id,
+                "created_at": created_at,
+                "source": f"{client_source}-chat-session",
+                "conversation_id": session_id,
+                "memory_namespace": memory_namespace,
+                "archive_enabled": archive_enabled,
+                "focus_enabled": focus_enabled,
+                "vector_enabled": vector_enabled,
+                "graph_enabled": graph_enabled,
+                "archive_system_prompt_enabled": archive_system_prompt_enabled,
+                "magos_enabled": bool(precomputed_magos),
+                "magos_result": precomputed_magos_result,
+                "administratum_intent": None,
+                "administratum_result": None,
+                "turn_decision": turn_decision,
+                "turn_capabilities": turn_capabilities,
+                "prompt_diagnostics": {},
+                "core_resolution": core_resolution,
+                "core_effect": delivered_effect,
+                "artifact_delivery": delivered_artifact,
+                "model": "shushunya-core",
+                "request": {
+                    "session_id": session_id,
+                    "client_source": client_source,
+                    "text": text,
+                    "has_image": bool(image_data_url),
+                    "stream": False,
+                },
+                "prepared_messages": prepare_messages(
+                    memory_messages,
+                    include_focus=focus_enabled and precomputed_roster is None,
+                    include_vector=vector_enabled,
+                    include_graph=graph_enabled,
+                    include_system_prompt=archive_system_prompt_enabled,
+                    magos_message=precomputed_magos,
+                    roster_message=precomputed_roster,
+                    query_messages=memory_messages,
+                    memory_namespace=memory_namespace,
+                ),
+                "status": "ok",
+                "http_status": 200,
+                "response": response,
+                "assistant_message": assistant,
+                "error": None,
+            }
+            maybe_write_archives(record)
+            threading.Thread(
+                target=maybe_update_focus_memory,
+                args=(record,),
+                daemon=True,
+                name=f"librarian-{turn_id}",
+            ).start()
+            return {
+                "ok": True,
+                "effect_ok": delivered,
+                "session_id": session_id,
+                "response": response,
+                "message": factual_message,
+                "artifact": delivered_artifact,
+                "core_effect": delivered_effect,
+                "action": "deliver_artifact",
+                "artifact_id": artifact_id,
+                "client_request_id": client_request_id,
+            }
         if forced_chat_reply:
             assistant = {"role": "assistant", "content": forced_chat_reply}
             append_chat_message(
@@ -295,6 +500,7 @@ def run_mobile_chat_payload(payload, on_token=None):
                 forced_chat_reply,
                 source=client_source,
                 dedupe_key=f"turn:{client_request_id}:assistant",
+                client_request_id=client_request_id,
             )
             response = {
                 "object": "chat.completion",
@@ -560,6 +766,7 @@ def run_mobile_chat_payload(payload, on_token=None):
                     assistant.get("content") or "",
                     source=client_source,
                     dedupe_key=f"turn:{client_request_id}:assistant",
+                    client_request_id=client_request_id,
                 )
             record["status"] = "ok"
             record["http_status"] = status
@@ -810,7 +1017,17 @@ def graph_context_message(query, memory_namespace="default"):
     }
 
 
-def chat_history(session_id, limit=CHAT_HISTORY_LIMIT, after_id=0, before_id=0):
+def chat_artifact_payload(metadata):
+    if not isinstance(metadata, dict) or not metadata.get("artifact_id"):
+        return None
+    artifact_id = str(metadata["artifact_id"])
+    return {
+        **metadata,
+        "content_url": f"/archive/client/artifacts/{quote(artifact_id, safe='')}/content",
+    }
+
+
+def chat_history(session_id, limit=CHAT_HISTORY_LIMIT, after_id=0, before_id=0, audience_source=None):
     session_id = shared_chat_session_id(session_id)
     try:
         parsed_limit = int(limit if limit is not None else CHAT_HISTORY_LIMIT)
@@ -832,7 +1049,7 @@ def chat_history(session_id, limit=CHAT_HISTORY_LIMIT, after_id=0, before_id=0):
         if parsed_after_id > 0:
             rows = db.execute(
                 """
-                SELECT id, session_id, role, content, created_at, asset_id, source, dedupe_key
+                SELECT id, session_id, role, content, created_at, asset_id, artifact_id, client_request_id, source, dedupe_key
                 FROM mobile_chat_messages
                 WHERE session_id = ? AND id > ?
                 ORDER BY id ASC
@@ -844,7 +1061,7 @@ def chat_history(session_id, limit=CHAT_HISTORY_LIMIT, after_id=0, before_id=0):
             # Scroll-up pagination: the newest `limit` messages older than before_id.
             rows = db.execute(
                 """
-                SELECT id, session_id, role, content, created_at, asset_id, source, dedupe_key
+                SELECT id, session_id, role, content, created_at, asset_id, artifact_id, client_request_id, source, dedupe_key
                 FROM mobile_chat_messages
                 WHERE session_id = ? AND id < ?
                 ORDER BY id DESC
@@ -856,7 +1073,7 @@ def chat_history(session_id, limit=CHAT_HISTORY_LIMIT, after_id=0, before_id=0):
         else:
             rows = db.execute(
                 """
-                SELECT id, session_id, role, content, created_at, asset_id, source, dedupe_key
+                SELECT id, session_id, role, content, created_at, asset_id, artifact_id, client_request_id, source, dedupe_key
                 FROM mobile_chat_messages
                 WHERE session_id = ?
                 ORDER BY id DESC
@@ -865,19 +1082,36 @@ def chat_history(session_id, limit=CHAT_HISTORY_LIMIT, after_id=0, before_id=0):
                 (session_id, safe_limit),
             ).fetchall()
             rows = list(reversed(rows))
-    return [
-        {
+    artifact_cache = {}
+    for row in rows:
+        artifact_id = row["artifact_id"] if "artifact_id" in row.keys() else None
+        if artifact_id and artifact_id not in artifact_cache:
+            artifact_cache[artifact_id] = chat_artifact_payload(
+                artifact_metadata(
+                    artifact_id,
+                    session_id=session_id,
+                    audience_source=audience_source,
+                )
+            )
+    messages = []
+    for row in rows:
+        raw_artifact_id = row["artifact_id"] if "artifact_id" in row.keys() else None
+        visible_artifact = artifact_cache.get(raw_artifact_id) if raw_artifact_id else None
+        visible_artifact_id = raw_artifact_id if audience_source is None or visible_artifact is not None else None
+        messages.append({
             "id": row["id"],
             "session_id": row["session_id"],
             "role": row["role"],
             "content": row["content"],
             "created_at": row["created_at"],
             "asset_id": row["asset_id"],
+            "artifact_id": visible_artifact_id,
+            "artifact": visible_artifact,
+            "client_request_id": row["client_request_id"] if "client_request_id" in row.keys() else None,
             "source": row["source"] if "source" in row.keys() else "unknown",
             "dedupe_key": row["dedupe_key"] if "dedupe_key" in row.keys() else None,
-        }
-        for row in rows
-    ]
+        })
+    return messages
 
 
 ASSETS_ROOT = Path(os.environ.get("ARCHIVE_ASSETS_ROOT", str(SQLITE_PATH.parent.parent / "assets")))
@@ -942,13 +1176,26 @@ def deliver_image_to_chat(session_id, image, mime="image/png", caption="", sourc
     return asset_id
 
 
-def append_chat_message(session_id, role, content, asset_id=None, created_at=None, source="unknown", dedupe_key=None):
+def append_chat_message(
+    session_id,
+    role,
+    content,
+    asset_id=None,
+    artifact_id=None,
+    client_request_id=None,
+    created_at=None,
+    source="unknown",
+    dedupe_key=None,
+):
     session_id = shared_chat_session_id(session_id)
     role = "assistant" if role == "assistant" else "user"
     content = trim_chat_text(content)
     created_at = created_at or now_iso()
     source = str(source or "unknown").strip()[:80] or "unknown"
     dedupe_key = str(dedupe_key or "").strip()[:160] or None
+    client_request_id = "".join(
+        char for char in str(client_request_id or "").strip() if char.isalnum() or char in "-_.:"
+    )[:160] or None
     with ARCHIVE_LOCK:
         with sqlite3.connect(SQLITE_PATH) as db:
             db.execute(
@@ -959,13 +1206,46 @@ def append_chat_message(session_id, role, content, asset_id=None, created_at=Non
                 """,
                 (session_id, created_at, created_at),
             )
-            db.execute(
+            cursor = db.execute(
                 """
-                INSERT OR IGNORE INTO mobile_chat_messages (session_id, role, content, created_at, asset_id, source, dedupe_key)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO mobile_chat_messages (
+                    session_id, role, content, created_at, asset_id, artifact_id, client_request_id, source, dedupe_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (session_id, role, content, created_at, asset_id, source, dedupe_key),
+                (session_id, role, content, created_at, asset_id, artifact_id, client_request_id, source, dedupe_key),
             )
+            if dedupe_key:
+                row = db.execute("SELECT id FROM mobile_chat_messages WHERE dedupe_key=?", (dedupe_key,)).fetchone()
+                return int(row[0]) if row else None
+            return int(cursor.lastrowid) if cursor.lastrowid else None
+
+
+def bind_artifact_message_request_id(message_id, session_id, artifact_id, client_request_id):
+    """Add transport correlation after Core returns the persisted message id."""
+    try:
+        message_id = int(message_id)
+    except (TypeError, ValueError):
+        return False
+    session_id = shared_chat_session_id(session_id)
+    artifact_id = str(artifact_id or "").strip()
+    request_id = "".join(
+        char for char in str(client_request_id or "").strip() if char.isalnum() or char in "-_.:"
+    )[:160]
+    if message_id < 1 or not artifact_id or not request_id:
+        return False
+    with ARCHIVE_LOCK:
+        with sqlite3.connect(SQLITE_PATH) as db:
+            row = db.execute(
+                "SELECT client_request_id FROM mobile_chat_messages WHERE id=? AND session_id=? AND artifact_id=?",
+                (message_id, session_id, artifact_id),
+            ).fetchone()
+            if not row or (row[0] and row[0] != request_id):
+                return False
+            db.execute(
+                "UPDATE mobile_chat_messages SET client_request_id=? WHERE id=? AND session_id=? AND artifact_id=?",
+                (request_id, message_id, session_id, artifact_id),
+            )
+    return True
 
 
 def create_mobile_job(job_type, request_payload):
@@ -996,6 +1276,7 @@ def create_mobile_turn_job_once(request_payload):
         "text": trim_chat_text(request_payload.get("text") or request_payload.get("message") or ""),
         "image_sha256": hashlib.sha256(str(request_payload.get("image_data_url") or "").encode("utf-8")).hexdigest(),
         "client_source": str(request_payload.get("client_source") or request_payload.get("source") or "app")[:80],
+        "artifact_audience_source": str(request_payload.get("artifact_audience_source") or "app")[:80],
         "model": str(request_payload.get("model") or DEFAULT_MODEL),
         "memory_namespace": shared_memory_namespace(request_payload.get("memory_namespace")),
     }
@@ -1006,6 +1287,7 @@ def create_mobile_turn_job_once(request_payload):
         "client_request_id": request_id,
         "session_id": stable_request["session_id"],
         "client_source": stable_request["client_source"],
+        "artifact_audience_source": stable_request["artifact_audience_source"],
     }
     digest = hashlib.sha256(
         json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -1024,6 +1306,7 @@ def create_mobile_turn_job_once(request_payload):
                 "text": trim_chat_text(stored.get("text") or stored.get("message") or ""),
                 "image_sha256": hashlib.sha256(str(stored.get("image_data_url") or "").encode("utf-8")).hexdigest(),
                 "client_source": str(stored.get("client_source") or stored.get("source") or "app")[:80],
+                "artifact_audience_source": str(stored.get("artifact_audience_source") or "app")[:80],
                 "model": str(stored.get("model") or DEFAULT_MODEL),
                 "memory_namespace": shared_memory_namespace(stored.get("memory_namespace")),
             }
@@ -1398,7 +1681,13 @@ def assemble_shushunya_turn_context(session_id, user_text, image_data_url="", mo
     ensure_core_transport_identity(payload)
     memory_namespace = shared_memory_namespace(payload.get("memory_namespace"))
     turn_id = str(payload.get("core_turn_id") or uuid.uuid4())
-    history = chat_history(session_id, limit=12)
+    artifact_audience_source = str(
+        payload.get("artifact_audience_source")
+        or payload.get("client_source")
+        or payload.get("source")
+        or "app"
+    ).strip().lower()[:80] or "app"
+    history = chat_history(session_id, limit=12, audience_source=artifact_audience_source)
     request_messages = messages_for_chat_context(
         session_id,
         "",
@@ -1453,7 +1742,22 @@ def decide_chat_turn_action(session_id, text, image_data_url="", model=None, pay
     LLM_PRIORITY.set("chat")
     payload = payload if isinstance(payload, dict) else {}
     user_text = trim_chat_text(text)
-    manifest = turn_capability_manifest(image_attached=bool(image_data_url), pending_reports=pending_summary())
+    source = str(
+        payload.get("artifact_audience_source")
+        or payload.get("client_source")
+        or payload.get("source")
+        or "app"
+    ).strip().lower()[:80] or "app"
+    manifest = turn_capability_manifest(
+        image_attached=bool(image_data_url),
+        pending_reports=pending_summary(),
+        artifacts=artifact_catalog_for_query(
+            shared_chat_session_id(session_id),
+            audience_source=source,
+            query=user_text,
+            limit=ARTIFACT_CAPABILITY_LIMIT,
+        ),
+    )
     try:
         context_bundle = assemble_shushunya_turn_context(
             session_id,
@@ -1483,7 +1787,6 @@ def decide_chat_turn_action(session_id, text, image_data_url="", model=None, pay
                 "diagnostics": {"context_assembly_error": str(exc)[:2_000]},
             },
         }
-    source = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
     idempotency_key = str(payload.get("core_idempotency_key") or f"archive-turn:{context_bundle['turn_id']}")
     try:
         resolution = core_resolve_turn(
@@ -1653,16 +1956,62 @@ def _core_effect_receipt(effect_id, request_sha256):
         return None
     item = dict(row)
     if item["request_sha256"] != request_sha256:
-        raise ValueError("effect_id was reused with a different Administratum request")
+        raise ValueError("effect_id was reused with a different request")
     item["intent"] = json.loads(item["intent_json"]) if item.get("intent_json") else None
     item["result"] = json.loads(item["result_json"]) if item.get("result_json") else None
     return item
 
 
+def _reserve_core_effect_receipt(effect_id, request_sha256, *, intent=None):
+    """Atomically claim an effect id before any downstream side effect."""
+    now = now_iso()
+    db = sqlite3.connect(SQLITE_PATH, timeout=30)
+    db.row_factory = sqlite3.Row
+    try:
+        db.execute("PRAGMA busy_timeout=30000")
+        db.execute("BEGIN IMMEDIATE")
+        db.execute(
+            """
+            INSERT OR IGNORE INTO core_effect_receipts(
+                effect_id,request_sha256,intent_json,state,result_json,created_at,updated_at
+            ) VALUES (?,?,?,?,NULL,?,?)
+            """,
+            (
+                effect_id,
+                request_sha256,
+                json.dumps(intent, ensure_ascii=False, sort_keys=True) if intent is not None else None,
+                "reserved",
+                now,
+                now,
+            ),
+        )
+        row = db.execute("SELECT * FROM core_effect_receipts WHERE effect_id=?", (effect_id,)).fetchone()
+        if row is None or row["request_sha256"] != request_sha256:
+            raise ValueError("effect_id was reused with a different request")
+        db.commit()
+        item = dict(row)
+        item["intent"] = json.loads(item["intent_json"]) if item.get("intent_json") else None
+        item["result"] = json.loads(item["result_json"]) if item.get("result_json") else None
+        return item
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def _save_core_effect_receipt(effect_id, request_sha256, *, intent=None, state="classified", result=None):
     now = now_iso()
-    with sqlite3.connect(SQLITE_PATH, timeout=30) as db:
+    db = sqlite3.connect(SQLITE_PATH, timeout=30)
+    try:
         db.execute("PRAGMA busy_timeout=30000")
+        db.execute("BEGIN IMMEDIATE")
+        existing = db.execute(
+            "SELECT request_sha256 FROM core_effect_receipts WHERE effect_id=?",
+            (effect_id,),
+        ).fetchone()
+        if existing is not None and existing[0] != request_sha256:
+            raise ValueError("effect_id was reused with a different request")
         db.execute(
             """
             INSERT INTO core_effect_receipts(
@@ -1673,6 +2022,7 @@ def _save_core_effect_receipt(effect_id, request_sha256, *, intent=None, state="
                 state=excluded.state,
                 result_json=COALESCE(excluded.result_json,core_effect_receipts.result_json),
                 updated_at=excluded.updated_at
+            WHERE core_effect_receipts.request_sha256=excluded.request_sha256
             """,
             (
                 effect_id,
@@ -1684,6 +2034,12 @@ def _save_core_effect_receipt(effect_id, request_sha256, *, intent=None, state="
                 now,
             ),
         )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def run_core_administratum_effect(effect_id, payload):
@@ -1760,6 +2116,121 @@ def run_core_administratum_effect(effect_id, payload):
         request_sha256,
         intent=intent,
         state="retry_wait" if retryable else "failed",
+        result=result,
+    )
+    return result
+
+
+def run_core_artifact_effect(effect_id, payload):
+    """Idempotently attach one catalogued artifact to its scoped chat session."""
+    effect_id = str(effect_id or "").strip()
+    payload = payload if isinstance(payload, dict) else {}
+    artifact_id = str(payload.get("artifact_id") or "").strip().lower()
+    if not effect_id or len(effect_id) > 120 or not re.fullmatch(r"[A-Za-z0-9_.:-]+", effect_id):
+        return {
+            "ok": False,
+            "retryable": False,
+            "code": "invalid_artifact_effect",
+            "explanation": "В durable-эффекте отсутствует безопасный effect_id.",
+            "evidence": {},
+        }
+    session_id = shared_chat_session_id(payload.get("session_id") or SHARED_CHAT_SESSION_ID)
+    client_source = str(payload.get("artifact_audience_source") or payload.get("source") or "app").strip().lower()[:80] or "app"
+    if client_source != "*" and not re.fullmatch(r"[a-z0-9][a-z0-9_.:-]{0,127}", client_source):
+        return {
+            "ok": False,
+            "retryable": False,
+            "code": "invalid_artifact_effect",
+            "explanation": "В durable-эффекте отсутствует безопасный audience source.",
+            "evidence": {},
+        }
+    client_request_id = "".join(
+        char
+        for char in str(payload.get("client_request_id") or "").strip()
+        if char.isalnum() or char in "-_.:"
+    )[:160]
+    request_payload = {
+        "artifact_id": artifact_id,
+        "session_id": session_id,
+        "source": client_source,
+        "client_request_id": client_request_id,
+    }
+    request_sha256 = hashlib.sha256(
+        json.dumps(request_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    receipt = _reserve_core_effect_receipt(
+        effect_id,
+        request_sha256,
+        intent={"kind": "artifact_delivery"},
+    )
+    if receipt and receipt.get("result") and receipt.get("state") in {"delivered", "failed"}:
+        return receipt["result"]
+    try:
+        delivery = attach_artifact_to_chat(
+            artifact_id,
+            session_id=session_id,
+            audience_source=client_source,
+            effect_id=effect_id,
+            client_request_id=client_request_id or None,
+        )
+    except (ArtifactError, OSError, sqlite3.Error) as exc:
+        print(
+            f"artifact atomic delivery failed for {artifact_id}: {type(exc).__name__}: {exc}",
+            flush=True,
+        )
+        result = {
+            "ok": False,
+            "retryable": True,
+            "code": "artifact_delivery_integrity_error",
+            "status": "retry_wait",
+            "artifact_id": artifact_id,
+            "explanation": "Archive не подтвердил целостность файла и атомарную запись в чат; эффект сохранён для безопасного повтора.",
+            "evidence": {"artifact_id": artifact_id, "session_id": session_id},
+        }
+        _save_core_effect_receipt(
+            effect_id,
+            request_sha256,
+            intent={"kind": "artifact_delivery"},
+            state="retry_wait",
+            result=result,
+        )
+        return result
+    if delivery is None:
+        result = {
+            "ok": False,
+            "retryable": False,
+            "code": "artifact_not_available",
+            "status": "failed",
+            "artifact_id": artifact_id,
+            "explanation": "Файл не приложен: artifact_id отсутствует или недоступен для этой сессии и предъявленного ключа.",
+            "evidence": {"artifact_id": artifact_id, "session_id": session_id},
+        }
+        _save_core_effect_receipt(
+            effect_id,
+            request_sha256,
+            intent={"kind": "artifact_delivery"},
+            state="failed",
+            result=result,
+        )
+        return result
+    artifact = delivery["artifact"]
+    message_id = int(delivery["message_id"])
+    caption = str(delivery["caption"])
+    result = {
+        "ok": True,
+        "retryable": False,
+        "delegate_ref": str(message_id),
+        "artifact_id": artifact_id,
+        "caption": caption,
+        "status": "delivered",
+        "explanation": "Archive приложил зарегистрированный файл к чату владельца.",
+        "evidence": {"message_id": int(message_id), "artifact": artifact},
+    }
+    _save_core_effect_receipt(
+        effect_id,
+        request_sha256,
+        intent={"kind": "artifact_delivery"},
+        state="delivered",
         result=result,
     )
     return result
@@ -1996,6 +2467,8 @@ def init_storage():
                 content TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 asset_id TEXT,
+                artifact_id TEXT,
+                client_request_id TEXT,
                 source TEXT NOT NULL DEFAULT 'unknown',
                 dedupe_key TEXT,
                 FOREIGN KEY(session_id) REFERENCES mobile_chat_sessions(id)
@@ -2007,7 +2480,13 @@ def init_storage():
             db.execute("ALTER TABLE mobile_chat_messages ADD COLUMN source TEXT NOT NULL DEFAULT 'unknown'")
         if "dedupe_key" not in mobile_message_columns:
             db.execute("ALTER TABLE mobile_chat_messages ADD COLUMN dedupe_key TEXT")
+        if "artifact_id" not in mobile_message_columns:
+            db.execute("ALTER TABLE mobile_chat_messages ADD COLUMN artifact_id TEXT")
+        if "client_request_id" not in mobile_message_columns:
+            db.execute("ALTER TABLE mobile_chat_messages ADD COLUMN client_request_id TEXT")
         db.execute("CREATE INDEX IF NOT EXISTS idx_mobile_chat_messages_session_id ON mobile_chat_messages(session_id, id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_mobile_chat_messages_artifact_id ON mobile_chat_messages(artifact_id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_mobile_chat_messages_client_request ON mobile_chat_messages(session_id, client_request_id)")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mobile_chat_messages_dedupe ON mobile_chat_messages(dedupe_key) WHERE dedupe_key IS NOT NULL")
         shared_session = shared_chat_session_id(SHARED_CHAT_SESSION_ID)
         now = now_iso()
@@ -2076,6 +2555,7 @@ def init_storage():
             )
             """
         )
+    init_artifact_storage()
 
 
 def assistant_content(message):

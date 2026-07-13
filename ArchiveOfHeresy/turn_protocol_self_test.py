@@ -4,7 +4,7 @@ from __future__ import annotations
 import inspect
 
 from archive_handler import ArchiveHandler
-from archive_ops import decide_chat_turn_action, prompt_diagnostics
+from archive_ops import decide_chat_turn_action, prompt_diagnostics, run_mobile_chat_payload
 from ShushunyaCore.decide import normalize_decision
 from ShushunyaCore.ledger import MIGRATION_1
 from turn_protocol import (
@@ -67,6 +67,17 @@ def main() -> int:
     require("run_core_turn_payload" in start_source, "mobile job does not delegate the complete Core-owned turn")
     core_turn_source = inspect.getsource(ArchiveHandler.run_core_turn_payload)
     require("core_context_bundle" in core_turn_source and "core_effect" in core_turn_source, "queued turn loses Core truth")
+    chat_pipeline_source = inspect.getsource(run_mobile_chat_payload)
+    require(
+        'payload.get("turn_capabilities")' not in chat_pipeline_source
+        and 'trusted_turn_context.get("turn_capabilities")' in chat_pipeline_source,
+        "raw HTTP payload can still inject a capability catalog",
+    )
+    generic_source = inspect.getsource(ArchiveHandler.chat_completion)
+    require(
+        "trusted_turn_context=" not in generic_source,
+        "generic HTTP completion accidentally marks client JSON as trusted turn context",
+    )
     warmaster_source = inspect.getsource(ArchiveHandler.run_mobile_warmaster_payload)
     require("core_dispatch_effect" in warmaster_source, "Core-owned tasks bypass its durable outbox")
     require("canonical_start" in warmaster_source, "Abaddon canonical auto-start path is not identified")

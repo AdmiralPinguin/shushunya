@@ -15,6 +15,8 @@ def main() -> int:
         raise SystemExit(f"project root is missing: {PROJECT_ROOT}")
     if settings.db_path.exists() and settings.db_path.is_symlink():
         raise SystemExit("SHUSHUNYA_CORE_DB must not be a symlink")
+    if len(settings.archive_effect_key) < 32:
+        raise SystemExit("SHUSHUNYA_CORE_ARCHIVE_KEY must contain at least 32 characters")
     parent = settings.db_path.parent
     if not parent.is_dir():
         raise SystemExit(f"runtime directory is missing: {parent}")

@@ -183,6 +183,67 @@ Clients may disable archiving and focus injection per request with internal flag
 
 These flags are consumed by ArchiveOfHeresy and are not forwarded to the model host.
 
+## File artifacts
+
+Archive stores arbitrary deliverables separately from the legacy image-only
+`asset_id` mechanism. Each artifact is an immutable snapshot in a SHA-256
+content-addressed store plus a durable SQLite catalog row. Chat messages use a
+separate `artifact_id`; no HTTP request is allowed to provide a host path.
+Before the catalog transaction commits, Archive fsyncs the installed CAS inode
+and its directory chain. Import, atomic chat attachment, and cleanup share a
+cross-process storage lock. Delivery validates scope, opens and checks the CAS
+file, and writes the chat reference inside one `BEGIN IMMEDIATE` transaction.
+
+Trusted warband adapters should call `trusted_import_path` with explicit
+`allowed_roots`, or invoke the local publisher:
+
+```bash
+python3 artifact_publish.py ./result/report.pdf \
+  --root ./result --name report.pdf --source iskandar --mission-id mission-123
+```
+
+The operator CLI may omit `--root`; that explicit local invocation authorizes
+the source file's parent directory. Automated producers must use `--root` or
+`ARCHIVE_ARTIFACT_TRUSTED_ROOTS`. Standard output contains only the opaque id
+and public metadata, never the source path or CAS path.
+
+Authenticated clients use:
+
+```text
+GET|HEAD /archive/client/artifacts/{artifact_id}
+GET|HEAD /archive/client/artifacts/{artifact_id}/content
+```
+
+Content downloads support a single byte `Range`, `ETag`, `If-Range`, safe
+`Content-Disposition`, and streaming transfer. Artifact metadata and bytes are
+disabled when no Archive API/client/mobile key is configured, even though
+older Archive routes retain their legacy development-mode behavior. Core's
+idempotent internal effect endpoints require both loopback and a dedicated,
+constant-time checked `X-Shushunya-Core-Key`; configure the same high-entropy
+`SHUSHUNYA_CORE_ARCHIVE_KEY` in Archive's `.env` and Core's private environment.
+The artifact adapter can attach only an id already visible to that session and
+client source.
+The delivery caption is generated from catalog metadata by Archive; model
+caption text is ignored. The per-turn catalog ranks lexical matches from the
+whole catalog (including exact old `artifact_id` values) before filling its
+8-12 slots with recent files.
+
+Artifact audience is authentication-derived. Client/mobile credentials are
+bound to `app` and cannot override that through JSON. The generic operator API
+key is privileged (`*`) by default; on an authenticated chat route it may make
+a validated source claim such as `telegram`. Metadata, content, history
+attachments, capability catalogs, and Core effects all use this trusted value.
+
+Operator maintenance is intentionally local. `list_artifacts()` returns only
+public catalog metadata. `cleanup_unreferenced_artifacts()` defaults to a
+dry-run, never selects chat-linked artifacts, and also reports abandoned CAS
+blobs left by an interrupted SQLite transaction:
+
+```bash
+python3 -c "from artifact_store import list_artifacts; print(list_artifacts(session_id='shushunya-main'))"
+python3 -c "from artifact_store import cleanup_unreferenced_artifacts; print(cleanup_unreferenced_artifacts(older_than_days=30, dry_run=True))"
+```
+
 ## Local Environment
 
 The Python environment for this module is stored inside the module itself:
@@ -239,6 +300,15 @@ Stop it:
 - `ARCHIVE_SYSTEM_PROMPT` - archive-level system prompt prepended to chat requests; default personality is Shushunya, a sarcastic daemon of Tzeentch
 - `ARCHIVE_JSONL_ROOT` - default `ArchiveOfHeresy/archive/jsonl`
 - `ARCHIVE_SQLITE_PATH` - default `ArchiveOfHeresy/archive/sqlite/archive.sqlite3`
+- `ARCHIVE_ARTIFACTS_ROOT` - private CAS root; default `ArchiveOfHeresy/archive/artifacts`
+- `ARCHIVE_ARTIFACT_MAX_BYTES` - maximum single artifact; default `2147483648` (2 GiB)
+- `ARCHIVE_ARTIFACT_TOTAL_QUOTA_BYTES` - total unique CAS blob quota; default `21474836480` (20 GiB)
+- `ARCHIVE_ARTIFACT_STREAM_CHUNK_BYTES` - import/download chunk size; default `1048576`
+- `ARCHIVE_ARTIFACT_CAPABILITY_LIMIT` - recent artifact ids shown to Core; clamped to `8..12`, default `10`
+- `ARCHIVE_ARTIFACT_TRUSTED_ROOTS` - `os.pathsep`-separated roots accepted by automated local publishers
+- `ARCHIVE_API_AUDIENCE_SOURCE` - artifact audience for the generic API key; default `*` (privileged)
+- `ARCHIVE_CLIENT_AUDIENCE_SOURCE` - artifact audience for the client key; default `app`
+- `ARCHIVE_MOBILE_AUDIENCE_SOURCE` - artifact audience for the mobile key; default `app`
 - `ARCHIVE_FOCUS_ROOT` - default `ArchiveOfHeresy/focus`
 - `ARCHIVE_WIKI_ROOT` - default `ArchiveOfHeresy/wiki`
 - `ARCHIVE_VECTOR_ROOT` - default `ArchiveOfHeresy/vector`

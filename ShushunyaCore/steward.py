@@ -57,6 +57,10 @@ class Steward:
                 result = await self.organs.dispatch_abaddon(claim["payload"])
             elif claim["destination"] == "archive_adapter":
                 result = await self.organs.dispatch_archive_adapter(str(claim["message_id"]), claim["payload"])
+            elif claim["destination"] == "archive_artifact_adapter":
+                result = await self.organs.dispatch_archive_artifact_adapter(
+                    str(claim["message_id"]), claim["payload"],
+                )
             else:
                 raise OrganError(
                     "unknown_effect_destination",
@@ -70,7 +74,11 @@ class Steward:
                 "clarification_required",
                 "confirmation_required",
             }
-            organ_name = "Archive/Administratum" if claim["destination"] == "archive_adapter" else "Абаддон"
+            organ_name = {
+                "archive_adapter": "Archive/Administratum",
+                "archive_artifact_adapter": "Archive/Artifacts",
+                "abaddon": "Абаддон",
+            }.get(str(claim["destination"]), str(claim["destination"]))
             return self.ledger.finish_effect(
                 effect_id=str(claim["message_id"]),
                 lease_token=str(claim["lease_token"]),

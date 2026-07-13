@@ -653,6 +653,7 @@ class Ledger:
                     "delivery_ack_unknown_after_restart",
                     "abaddon_unreachable",
                     "archive_adapter_unreachable",
+                    "archive_artifact_adapter_unreachable",
                     "request_timeout",
                 }
                 if clarification:

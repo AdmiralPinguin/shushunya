@@ -4,10 +4,16 @@ from __future__ import annotations
 import json
 import os
 import stat
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, BinaryIO, Iterator
 
 MAX_MANIFEST_BYTES = 5_000_000
+MAX_ARTIFACT_CATALOG_ITEMS = 4096
+MAX_ARTIFACT_CATALOG_ERRORS = 32
+MAX_ARTIFACT_CATALOG_PATH_CHARS = 1024
+MAX_ARTIFACT_CATALOG_MANIFESTS = 16
+MAX_ARTIFACT_MANIFEST_SUMMARY_BYTES = 64_000
 VCS_DIR_NAMES = {".git", ".hg", ".svn"}
 
 
@@ -227,35 +233,150 @@ def _artifact_location(
     return _generic_artifact_location(result, artifact_path)
 
 
-def artifact_status(ledger: dict[str, Any]) -> dict[str, Any]:
+def _bounded_catalog_manifest_summary(manifest: dict[str, Any]) -> dict[str, Any]:
+    summary = compact_manifest_summary(manifest)
+    encoded = json.dumps(
+        summary,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    if len(encoded) <= MAX_ARTIFACT_MANIFEST_SUMMARY_BYTES:
+        return summary
+
+    def bounded_strings(values: Any) -> list[str]:
+        if not isinstance(values, list):
+            return []
+        return [" ".join(str(value)[:2_000].split())[:500] for value in values[:8]]
+
+    return {
+        "status": str(summary.get("status") or "")[:120],
+        "approved": bool(summary.get("approved")),
+        "critic_status": str(summary.get("critic_status") or "")[:120],
+        "warning_count": int(summary.get("warning_count") or 0),
+        "blocker_count": int(summary.get("blocker_count") or 0),
+        "file_count": int(summary.get("file_count") or 0),
+        "warnings": bounded_strings(summary.get("warnings")),
+        "blockers": bounded_strings(summary.get("blockers")),
+        "summary_truncated": True,
+        "summary_byte_limit": MAX_ARTIFACT_MANIFEST_SUMMARY_BYTES,
+    }
+
+
+def artifact_status(
+    ledger: dict[str, Any],
+    *,
+    max_items: int = MAX_ARTIFACT_CATALOG_ITEMS,
+) -> dict[str, Any]:
+    """Return a bounded, explicitly complete artifact catalog.
+
+    Catalog construction deliberately validates each recorded location directly.
+    Calling ``_artifact_location`` for every manifest member would rebuild and
+    reparse the complete manifest on every iteration, turning an N-file package
+    into O(N²) work.  The bounded protocol also prevents a consumer from treating
+    a truncated or unparseable manifest as a complete list of accepted outputs.
+    """
     result = ledger.get("result", {}) if isinstance(ledger.get("result"), dict) else {}
     native_skitarii = _is_skitarii_result(result)
     workspace_root = str(result.get("workspace_root") or "")
     artifacts = result.get("artifacts", [])
     if not isinstance(artifacts, list):
         artifacts = []
+    try:
+        safe_limit = max(1, min(int(max_items), MAX_ARTIFACT_CATALOG_ITEMS))
+    except (TypeError, ValueError):
+        safe_limit = MAX_ARTIFACT_CATALOG_ITEMS
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
+    catalog_errors: list[str] = []
+    catalog_error_count = 0
+    truncated = False
+    manifest_count = 0
 
-    def append_artifact(sandbox_path: str, source: str, extra: dict[str, Any] | None = None) -> None:
-        if sandbox_path in seen:
-            return
-        seen.add(sandbox_path)
+    native_root: Path | None = None
+    generic_root: Path | None = None
+    root_error = ""
+    try:
         if native_skitarii:
-            item = _native_artifact_status(result, sandbox_path)
+            native_root = _safe_artifact_root(
+                str(result.get("artifact_root") or ""),
+                "artifact_root",
+            )
         else:
-            try:
-                root, parts, _host_path = _artifact_location(ledger, sandbox_path)
-                size = _regular_size_beneath(root, parts)
-            except ValueError as exc:
-                item = {"path": sandbox_path, "exists": False, "bytes": 0, "errors": [str(exc)]}
+            generic_root = _safe_artifact_root(workspace_root, "workspace_root")
+    except ValueError as exc:
+        root_error = str(exc)
+
+    def catalog_error(message: str) -> None:
+        nonlocal catalog_error_count
+        catalog_error_count += 1
+        clean = " ".join(str(message)[:2_000].split())[:500]
+        if clean and len(catalog_errors) < MAX_ARTIFACT_CATALOG_ERRORS:
+            catalog_errors.append(clean)
+
+    def direct_artifact_status(sandbox_path: str) -> dict[str, Any]:
+        try:
+            if root_error:
+                raise ValueError(root_error)
+            if native_skitarii:
+                value = str(sandbox_path).replace("\\", "/")
+                path = PurePosixPath(value)
+                if (
+                    not value
+                    or "\x00" in value
+                    or path.is_absolute()
+                    or not path.parts
+                    or any(part in ("", ".", "..", ".git") for part in path.parts)
+                    or path.parts[0].endswith(":")
+                ):
+                    raise ValueError("artifact path must be a safe run-relative path")
+                if native_root is None:
+                    raise ValueError("artifact_root is unavailable")
+                size = _regular_size_beneath(native_root, tuple(path.parts))
             else:
-                item = {
-                    "path": sandbox_path,
-                    "exists": True,
-                    "bytes": size,
-                    "errors": [],
-                }
+                normalized = _generic_artifact_path(sandbox_path)
+                if generic_root is None:
+                    raise ValueError("workspace_root is unavailable")
+                size = _regular_size_beneath(
+                    generic_root,
+                    _generic_relative_parts(normalized),
+                )
+        except ValueError as exc:
+            return {
+                "path": sandbox_path,
+                "exists": False,
+                "bytes": 0,
+                "errors": [str(exc)],
+            }
+        return {
+            "path": sandbox_path,
+            "exists": True,
+            "bytes": size,
+            "errors": [],
+        }
+
+    def append_artifact(
+        raw_path: Any,
+        source: str,
+        extra: dict[str, Any] | None = None,
+    ) -> bool:
+        nonlocal truncated
+        if not isinstance(raw_path, str):
+            catalog_error(f"{source} artifact path is not a string")
+            return True
+        if len(raw_path) > MAX_ARTIFACT_CATALOG_PATH_CHARS:
+            catalog_error(
+                f"{source} artifact path exceeds the {MAX_ARTIFACT_CATALOG_PATH_CHARS}-character catalog limit"
+            )
+            return True
+        sandbox_path = raw_path
+        if sandbox_path in seen:
+            return True
+        if len(items) >= safe_limit:
+            truncated = True
+            return False
+        seen.add(sandbox_path)
+        item = direct_artifact_status(sandbox_path)
         # Filesystem locations are an implementation detail and can disclose the
         # host layout to any gateway caller. Public artifact APIs use logical paths.
         item.pop("host_path", None)
@@ -263,33 +384,88 @@ def artifact_status(ledger: dict[str, Any]) -> dict[str, Any]:
         if extra:
             item.update(extra)
         items.append(item)
+        return True
 
-    for artifact in artifacts:
-        sandbox_path = str(artifact)
+    for artifact_index, artifact in enumerate(artifacts):
+        if len(items) >= safe_limit:
+            truncated = True
+            break
+        sandbox_path = artifact
         append_artifact(sandbox_path, "result")
-        if workspace_root and sandbox_path.endswith("/final_manifest.json") and sandbox_path.startswith("/work/"):
+        if (
+            not native_skitarii
+            and isinstance(sandbox_path, str)
+            and len(sandbox_path) <= MAX_ARTIFACT_CATALOG_PATH_CHARS
+            and sandbox_path.endswith("/final_manifest.json")
+            and sandbox_path.startswith("/work/")
+        ):
+            manifest_count += 1
+            if manifest_count > MAX_ARTIFACT_CATALOG_MANIFESTS:
+                truncated = True
+                catalog_error(
+                    "artifact catalog contains more than "
+                    f"{MAX_ARTIFACT_CATALOG_MANIFESTS} final manifests"
+                )
+                break
             manifest_error = ""
             try:
-                root, parts, _host_path = _artifact_location(ledger, sandbox_path)
-                raw, _size = _read_regular_beneath(root, parts, MAX_MANIFEST_BYTES)
+                if generic_root is None:
+                    raise ValueError(root_error or "workspace_root is unavailable")
+                raw, _size = _read_regular_beneath(
+                    generic_root,
+                    _generic_relative_parts(sandbox_path),
+                    MAX_MANIFEST_BYTES,
+                )
                 manifest = _decode_json_object_bounded(raw)
             except ValueError as exc:
                 manifest = {}
                 manifest_error = str(exc)
+                catalog_error(
+                    f"could not enumerate package files from {sandbox_path}: {manifest_error}"
+                )
             for item in items:
                 if item.get("path") == sandbox_path:
                     if manifest_error:
                         item["manifest_error"] = manifest_error
                     else:
-                        item["manifest_summary"] = compact_manifest_summary(manifest)
+                        item["manifest_summary"] = _bounded_catalog_manifest_summary(
+                            manifest
+                        )
                     break
-            files = manifest.get("files") if isinstance(manifest, dict) else []
-            for file_item in files if isinstance(files, list) else []:
-                if isinstance(file_item, dict):
-                    package_path = str(file_item.get("path") or "")
-                    if package_path:
-                        append_artifact(package_path, "final_manifest")
-    return {"artifacts": items}
+            files = manifest.get("files", []) if isinstance(manifest, dict) else []
+            if not isinstance(files, list):
+                catalog_error(f"{sandbox_path} files field is not a list")
+                files = []
+            for file_index, file_item in enumerate(files):
+                if not isinstance(file_item, dict):
+                    catalog_error(
+                        f"{sandbox_path} files[{file_index}] is not an object"
+                    )
+                    continue
+                package_path = file_item.get("path")
+                if not isinstance(package_path, str) or not package_path:
+                    catalog_error(
+                        f"{sandbox_path} files[{file_index}] has no path"
+                    )
+                    continue
+                if not append_artifact(package_path, "final_manifest"):
+                    break
+        if artifact_index + 1 < len(artifacts) and len(items) >= safe_limit:
+            truncated = True
+            break
+    complete = not truncated and catalog_error_count == 0
+    return {
+        "artifacts": items,
+        "artifact_catalog": {
+            "schema_version": 1,
+            "complete": complete,
+            "truncated": truncated,
+            "limit": safe_limit,
+            "returned": len(items),
+            "errors": catalog_errors,
+            "error_count": catalog_error_count,
+        },
+    }
 
 
 def compact_manifest_summary(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -401,6 +577,27 @@ def resolve_artifact(ledger: dict[str, Any], artifact_path: str) -> Path:
     root, parts, host_path = _artifact_location(ledger, artifact_path)
     _regular_size_beneath(root, parts)
     return host_path
+
+
+@contextmanager
+def open_artifact_binary(
+    ledger: dict[str, Any], artifact_path: str,
+) -> Iterator[tuple[BinaryIO, int]]:
+    """Open one recorded artifact and keep the proven descriptor alive.
+
+    Callers must consume the yielded stream inside the context.  Returning a
+    host path after validation would reintroduce a symlink-swap race between
+    validation and the eventual read; this API deliberately exposes no path.
+    """
+    root, parts, _host_path = _artifact_location(ledger, artifact_path)
+    descriptor, info = _open_regular_beneath(root, parts)
+    try:
+        with os.fdopen(descriptor, "rb", closefd=True) as handle:
+            descriptor = -1
+            yield handle, int(info.st_size)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def artifact_text(ledger: dict[str, Any], artifact_path: str, max_bytes: int = 500000) -> dict[str, Any]:

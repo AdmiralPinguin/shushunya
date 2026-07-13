@@ -244,7 +244,7 @@ async def dispatch_effect(effect_id: str):
     effect = value.ledger.get_effect(effect_id)
     if not effect:
         raise HTTPException(status_code=404, detail="effect not found")
-    if effect["destination"] not in {"abaddon", "archive_adapter"}:
+    if effect["destination"] not in {"abaddon", "archive_adapter", "archive_artifact_adapter"}:
         raise HTTPException(status_code=409, detail="effect destination has no registered dispatcher")
     dispatched = await value.steward.dispatch_effect(effect_id)
     return {"ok": bool(dispatched and dispatched.get("state") == "delivered"), "effect": dispatched}

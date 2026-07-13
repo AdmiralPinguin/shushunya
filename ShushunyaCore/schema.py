@@ -11,6 +11,7 @@ TurnAction = Literal[
     "request_warmaster_mission",
     "create_administratum_task",
     "deliver_pending_reports",
+    "deliver_artifact",
 ]
 
 

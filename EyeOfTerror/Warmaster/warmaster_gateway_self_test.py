@@ -18,7 +18,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from unittest import mock
 
 PROJECT_ROOT = next(
@@ -252,6 +252,14 @@ def request_json(
     if not isinstance(body, dict):
         raise AssertionError(f"{url} returned a non-object JSON payload: {body!r}")
     return body
+
+
+def request_bytes(url: str) -> tuple[bytes, dict[str, str]]:
+    request = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(request, timeout=30) as response:
+        body = response.read()
+        headers = {key.lower(): value for key, value in response.headers.items()}
+    return body, headers
 
 
 def assert_native_shape(payload: dict, run_dir: Path) -> None:
@@ -980,6 +988,42 @@ def main() -> int:
                     raise AssertionError(
                         "terminal service-boundary smoke lost a native invariant: "
                         f"state={terminal_state}, final={terminal_final}, ledger={terminal_ledger}"
+                    )
+
+                artifact_listing = request_json(
+                    gateway_base + f"/runs/{terminal_task_id}/artifacts"
+                )
+                terminal_artifact = next(
+                    (
+                        item
+                        for item in artifact_listing.get("artifacts", [])
+                        if isinstance(item, dict)
+                        and str(item.get("path") or "").endswith("terminal-smoke.txt")
+                    ),
+                    None,
+                )
+                if not isinstance(terminal_artifact, dict):
+                    raise AssertionError(
+                        f"terminal artifact was not recorded: {artifact_listing}"
+                    )
+                logical_path = str(terminal_artifact["path"])
+                artifact_bytes, artifact_headers = request_bytes(
+                    gateway_base
+                    + f"/runs/{terminal_task_id}/artifact?path={quote(logical_path, safe='')}"
+                )
+                if (
+                    artifact_bytes != b"terminal-smoke-ok\n"
+                    or artifact_headers.get("content-length") != str(len(artifact_bytes))
+                    or artifact_headers.get("x-content-type-options") != "nosniff"
+                    or "attachment;" not in artifact_headers.get("content-disposition", "")
+                    or any(
+                        str(terminal_run) in value
+                        for value in artifact_headers.values()
+                    )
+                ):
+                    raise AssertionError(
+                        "binary artifact endpoint lost its byte/header boundary: "
+                        f"headers={artifact_headers}, body={artifact_bytes!r}"
                     )
 
                 immutable_paths = sorted(

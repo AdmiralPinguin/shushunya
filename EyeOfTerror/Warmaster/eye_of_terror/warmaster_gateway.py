@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import ipaddress
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -13,7 +14,7 @@ import threading
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
@@ -125,7 +126,7 @@ from .artifacts import (
     compact_manifest_summary,
     final_manifest_summary,
     final_package,
-    resolve_artifact,
+    open_artifact_binary,
 )
 from .skitarii_bridge import (
     answer_skitarii_mission,
@@ -211,6 +212,23 @@ from .runtime_state import (
 
 APPLY_TRUSTED_ORIGINS_ENV = "WARMMASTER_APPLY_TRUSTED_ORIGINS"
 TRUSTED_HOSTS_ENV = "WARMMASTER_TRUSTED_HOSTS"
+ARTIFACT_STREAM_CHUNK_BYTES = 1024 * 1024
+
+
+def _artifact_download_headers(artifact_path: str) -> tuple[str, str]:
+    """Return bounded, injection-safe MIME and Content-Disposition values."""
+    raw_name = PurePosixPath(str(artifact_path).replace("\\", "/")).name
+    unicode_name = (raw_name or "artifact")[:180]
+    fallback = "".join(
+        char if 0x20 <= ord(char) < 0x7F and char not in {'"', "\\"} else "_"
+        for char in unicode_name
+    ).strip(" .") or "artifact"
+    media_type = mimetypes.guess_type(unicode_name)[0] or "application/octet-stream"
+    disposition = (
+        f'attachment; filename="{fallback}"; '
+        f"filename*=UTF-8''{quote(unicode_name, safe='')}"
+    )
+    return media_type, disposition
 
 
 def _canonical_http_origin(value: str) -> str:
@@ -809,6 +827,88 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         return
                     payload = payload_with_run_view({"ok": True, "task_id": task_id, **artifact_status(ledger)}, run_dir, task_id)
                     response(self, 200, payload)
+                    return
+                if len(parts) == 3 and parts[2] == "artifact":
+                    if not ledger_path.exists():
+                        response(
+                            self,
+                            404,
+                            {"ok": False, "error": "ledger not found", "task_id": task_id},
+                        )
+                        return
+                    query = parse_qs(parsed.query)
+                    artifact_path = query.get("path", [""])[0]
+                    if not artifact_path:
+                        response(
+                            self,
+                            400,
+                            {"ok": False, "error": "artifact path is required", "task_id": task_id},
+                        )
+                        return
+                    ledger, ledger_error = load_ledger_dict(ledger_path)
+                    if ledger_error:
+                        response(
+                            self,
+                            500,
+                            {"ok": False, "error": ledger_error, "task_id": task_id},
+                        )
+                        return
+                    result = ledger.get("result") if isinstance(ledger.get("result"), dict) else {}
+                    ledger_status = str(ledger.get("status") or result.get("status") or "").lower()
+                    if ledger_status != "completed":
+                        response(
+                            self,
+                            409,
+                            {
+                                "ok": False,
+                                "error": "binary artifacts are exportable only after run completion",
+                                "task_id": task_id,
+                            },
+                        )
+                        return
+                    headers_started = False
+                    try:
+                        with open_artifact_binary(ledger, artifact_path) as (reader, size):
+                            media_type, disposition = _artifact_download_headers(artifact_path)
+                            self.send_response(200)
+                            self.send_header("Content-Type", media_type)
+                            self.send_header("Content-Length", str(size))
+                            self.send_header("Content-Disposition", disposition)
+                            self.send_header("Cache-Control", "no-store")
+                            self.send_header("X-Content-Type-Options", "nosniff")
+                            self.send_header("Accept-Ranges", "none")
+                            self.end_headers()
+                            headers_started = True
+                            remaining = size
+                            while remaining:
+                                chunk = reader.read(min(ARTIFACT_STREAM_CHUNK_BYTES, remaining))
+                                if not chunk:
+                                    raise OSError("recorded artifact changed during export")
+                                self.wfile.write(chunk)
+                                remaining -= len(chunk)
+                    except ValueError as exc:
+                        if not headers_started:
+                            response(
+                                self,
+                                400,
+                                {"ok": False, "error": str(exc), "task_id": task_id},
+                            )
+                        else:
+                            self.close_connection = True
+                        return
+                    except (BrokenPipeError, ConnectionResetError):
+                        self.close_connection = True
+                        return
+                    except OSError as exc:
+                        if not headers_started:
+                            response(
+                                self,
+                                500,
+                                {"ok": False, "error": f"artifact export failed: {exc}", "task_id": task_id},
+                            )
+                        else:
+                            self.close_connection = True
+                        return
                     return
                 if len(parts) == 3 and parts[2] == "final":
                     if not ledger_path.exists():

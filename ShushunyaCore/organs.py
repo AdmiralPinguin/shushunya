@@ -68,6 +68,16 @@ class Organs:
     def health_snapshot(self) -> dict[str, Any]:
         return self._health
 
+    def _archive_effect_headers(self) -> dict[str, str]:
+        key = str(self.settings.archive_effect_key or "").strip()
+        if len(key) < 32:
+            raise OrganError(
+                "archive_effect_auth_unconfigured",
+                "Не настроен отдельный секрет Core->Archive; внутренний effect adapter закрыт.",
+                retryable=False,
+            )
+        return {"X-Shushunya-Core-Key": key}
+
     async def dispatch_abaddon(self, payload: dict[str, Any]) -> dict[str, Any]:
         message = str(payload.get("message") or "").strip()
         task_id = str(payload.get("task_id") or "").strip()
@@ -141,11 +151,15 @@ class Organs:
         The stable effect id is also the downstream dedupe key, so a lost HTTP
         acknowledgement can be retried without creating a second reminder.
         """
+        # Authentication/configuration failures are factual and non-retryable;
+        # resolve the header outside the transport exception wrapper.
+        headers = self._archive_effect_headers()
         try:
             async with httpx.AsyncClient(timeout=self.settings.llm_timeout_sec) as client:
                 response = await client.post(
                     f"{self.settings.archive_base_url}/archive/internal/core/administratum-effect",
                     json={"effect_id": effect_id, "payload": payload},
+                    headers=headers,
                 )
             body = response.json() if response.content else {}
         except Exception as exc:
@@ -170,6 +184,62 @@ class Organs:
             "delegate_ref": str(body.get("delegate_ref") or ""),
             "status": str(body.get("status") or "created"),
             "explanation": str(body.get("explanation") or "Administratum подтвердил запись задачи."),
+            "evidence": body.get("evidence") if isinstance(body.get("evidence"), dict) else body,
+        }
+
+    async def dispatch_archive_artifact_adapter(self, effect_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Publish one registered artifact card through Archive exactly once."""
+        artifact_id = str(payload.get("artifact_id") or "").strip()
+        session_id = str(payload.get("session_id") or "").strip()
+        if not effect_id or not artifact_id or not session_id:
+            raise OrganError(
+                "invalid_artifact_effect",
+                "В доставке файла нет effect_id, artifact_id или сессии владельца.",
+                retryable=False,
+            )
+        headers = self._archive_effect_headers()
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.llm_timeout_sec) as client:
+                response = await client.post(
+                    f"{self.settings.archive_base_url}/archive/internal/core/artifact-effect",
+                    json={"effect_id": effect_id, "payload": payload},
+                    headers=headers,
+                )
+            body = response.json() if response.content else {}
+        except Exception as exc:
+            raise OrganError(
+                "archive_artifact_adapter_unreachable",
+                f"Archive не подтвердил публикацию файла: {exc}",
+                retryable=True,
+                evidence={"effect_id": effect_id, "artifact_id": artifact_id},
+            ) from exc
+        if not isinstance(body, dict) or response.status_code not in {200, 201} or body.get("ok") is not True:
+            retryable = response.status_code >= 500 or response.status_code in {408, 425, 429}
+            raise OrganError(
+                str(body.get("code") or "artifact_delivery_not_persisted")
+                if isinstance(body, dict)
+                else "artifact_delivery_invalid_response",
+                str(body.get("explanation") or "Archive не подтвердил публикацию файла.")
+                if isinstance(body, dict)
+                else "Archive вернул ответ неверной формы.",
+                retryable=retryable,
+                evidence={"effect_id": effect_id, "artifact_id": artifact_id, "response": body},
+            )
+        returned_artifact_id = str(body.get("artifact_id") or "").strip()
+        delegate_ref = str(body.get("delegate_ref") or "").strip()
+        if returned_artifact_id != artifact_id or not delegate_ref:
+            raise OrganError(
+                "artifact_delivery_identity_mismatch",
+                "Archive подтвердил публикацию без совпадающего artifact_id или сообщения доставки.",
+                retryable=False,
+                evidence={"effect_id": effect_id, "artifact_id": artifact_id, "response": body},
+            )
+        return {
+            "ok": True,
+            "delegate_ref": delegate_ref,
+            "artifact_id": returned_artifact_id,
+            "status": str(body.get("status") or "delivered"),
+            "explanation": str(body.get("explanation") or "Archive сохранил файл в чате владельца."),
             "evidence": body.get("evidence") if isinstance(body.get("evidence"), dict) else body,
         }
 

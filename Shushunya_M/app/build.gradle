@@ -24,6 +24,13 @@ def clientApiKey = (
                 ?: localEnvValue("../ArchiveOfHeresy/.env", "ARCHIVE_MOBILE_API_KEY")
         ).toString().trim()
 
+if (clientApiKey.isEmpty()) {
+    throw new GradleException(
+            "SHUSHUNYA_CLIENT_API_KEY (or ARCHIVE_MOBILE_API_KEY in ArchiveOfHeresy/.env) "
+                    + "is required; refusing to build an APK that cannot authenticate chat or artifact downloads."
+    )
+}
+
 android {
     namespace = "com.shushunya.m"
     compileSdk = 35
@@ -36,8 +43,8 @@ android {
         applicationId = "com.shushunya.m"
         minSdk = 34
         targetSdk = 35
-        versionCode = 41
-        versionName = "7.1"
+        versionCode = 43
+        versionName = "7.3"
         buildConfigField("String", "CLIENT_API_KEY", "\"$clientApiKey\"")
     }
 }

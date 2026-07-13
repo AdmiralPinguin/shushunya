@@ -30,6 +30,8 @@ TERMINAL_SERVICE_STATUSES = frozenset(
 ACTIVE_SERVICE_STATUSES = frozenset({"queued", "running", "needs_user", "cancelling"})
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 _SERVICE_MISSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
+RESEARCH_REPORT_ARTIFACT = "/work/research/research_report.md"
+RESEARCH_EVIDENCE_ARTIFACT = "/work/research/research_evidence.json"
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -482,6 +484,132 @@ def _external_answer(raw_result: dict[str, Any]) -> str:
     return value.strip() if type(value) is str else ""
 
 
+def _research_artifact_directory(run_dir: Path) -> tuple[Path, Path]:
+    try:
+        root = Path(run_dir).resolve(strict=True)
+        work = root / "work"
+        if work.exists() and (work.is_symlink() or not work.is_dir()):
+            raise OSError("work artifact root is not a regular directory")
+        work.mkdir(mode=0o700, exist_ok=True)
+        output = work / "research"
+        if output.exists() and (output.is_symlink() or not output.is_dir()):
+            raise OSError("research artifact root is not a regular directory")
+        output.mkdir(mode=0o700, exist_ok=True)
+        if work.resolve(strict=True) != work or output.resolve(strict=True) != output:
+            raise OSError("research artifact root crossed a symlink boundary")
+        return work, output
+    except OSError as exc:
+        raise ResearchWarbandBridgeError(
+            f"could not prepare ResearchWarband artifacts: {exc}"
+        ) from exc
+
+
+def _atomic_write_artifact(path: Path, data: bytes) -> None:
+    temporary = path.with_name(
+        f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp"
+    )
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor = -1
+    try:
+        descriptor = os.open(temporary, flags, 0o600)
+        view = memoryview(data)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("short artifact write")
+            view = view[written:]
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        os.replace(temporary, path)
+        if os.name != "nt":
+            os.chmod(path, 0o600, follow_symlinks=False)
+        directory_fd = os.open(
+            path.parent,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+        )
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError as exc:
+        raise ResearchWarbandBridgeError(
+            f"could not materialize ResearchWarband artifact {path.name}: {exc}"
+        ) from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _single_line(value: Any, limit: int = 2_000) -> str:
+    return " ".join(str(value or "").split())[:limit]
+
+
+def _write_completed_research_artifacts(
+    run_dir: Path,
+    task_id: str,
+    mission_id: str,
+    raw_result: dict[str, Any],
+    answer: str,
+) -> tuple[str, list[str]]:
+    """Materialize the accepted answer and its exact public evidence envelope."""
+    work, output = _research_artifact_directory(run_dir)
+    external = (
+        raw_result.get("external_evaluator_result")
+        if isinstance(raw_result.get("external_evaluator_result"), dict)
+        else {}
+    )
+    ledger = external.get("ledger") if isinstance(external.get("ledger"), dict) else {}
+    sources = ledger.get("sources") if isinstance(ledger.get("sources"), list) else []
+    source_lines: list[str] = []
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        source_id = _single_line(source.get("source_id"), 160) or "source"
+        url = _single_line(source.get("url"), 2_000)
+        digest = _single_line(source.get("raw_sha256"), 80)
+        detail = f" — {url}" if url else ""
+        if digest:
+            detail += f" (sha256: {digest})"
+        source_lines.append(f"- {source_id}{detail}")
+    if not source_lines:
+        source_lines.append("- No public source entries were recorded.")
+
+    report = (
+        "# Research report\n\n"
+        f"Task: `{task_id}`  \nMission: `{mission_id}`\n\n"
+        "## Answer\n\n"
+        f"{answer.strip()}\n\n"
+        "## Recorded sources\n\n"
+        + "\n".join(source_lines)
+        + "\n"
+    ).encode("utf-8")
+    audit = raw_result.get("pipeline_audit") if isinstance(raw_result.get("pipeline_audit"), dict) else {}
+    evidence = {
+        "schema_version": 1,
+        "task_id": task_id,
+        "mission_id": mission_id,
+        "outcome": raw_result.get("outcome"),
+        "external_evaluator_result": external,
+        "verification_report": audit.get("verification_report"),
+        "runtime_attestation_sha256": audit.get("runtime_attestation_sha256"),
+    }
+    evidence_bytes = _canonical_bytes(evidence) + b"\n"
+    _atomic_write_artifact(output / "research_report.md", report)
+    _atomic_write_artifact(output / "research_evidence.json", evidence_bytes)
+    return str(work), [RESEARCH_REPORT_ARTIFACT, RESEARCH_EVIDENCE_ARTIFACT]
+
+
 def _verification_passed(raw_result: dict[str, Any]) -> bool:
     audit = raw_result.get("pipeline_audit")
     report = audit.get("verification_report") if isinstance(audit, dict) else None
@@ -597,12 +725,17 @@ def _finalize_protocol(
     status = str(result.get("status") or "failed")
     summary = str(result.get("summary") or "ResearchWarband returned no summary")
     if status == "completed":
+        artifacts = [
+            str(item)
+            for item in (result.get("artifacts") or [])
+            if isinstance(item, str) and item
+        ]
         report = mc.governor_report(
             mission_id,
             governor="IskandarKhayon",
             status="ready",
             summary=summary,
-            deliverables=[],
+            deliverables=artifacts,
             quality_review={
                 "passed": True,
                 "checks": [
@@ -647,7 +780,7 @@ def _finalize_protocol(
             ),
             review,
         )
-        final = mc.final_response(mission_id, "completed", summary, artifacts=[])
+        final = mc.final_response(mission_id, "completed", summary, artifacts=artifacts)
         mc._write_json(mission_dir / "final_response.json", final)
         mc.record_mission_state(
             mission_dir, "completed", run_status="completed", phase="completed"
@@ -1129,7 +1262,14 @@ def _terminal_result(
             raise ResearchWarbandBridgeError(
                 "ResearchWarband accepted without a user-facing answer"
             )
-        return _warmaster_result(
+        workspace_root, artifacts = _write_completed_research_artifacts(
+            run_dir,
+            task_id,
+            mission_id,
+            raw_result,
+            answer,
+        )
+        result = _warmaster_result(
             run_dir,
             task_id,
             mission_id,
@@ -1138,6 +1278,9 @@ def _terminal_result(
             summary=answer,
             raw_result=raw_result,
         )
+        result["workspace_root"] = workspace_root
+        result["artifacts"] = artifacts
+        return result
     if service_status == "cancelled":
         return _warmaster_result(
             run_dir,

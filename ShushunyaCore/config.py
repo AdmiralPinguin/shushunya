@@ -41,6 +41,7 @@ class Settings:
     llm_timeout_sec: float
     abaddon_base_url: str
     archive_base_url: str
+    archive_effect_key: str
     administratum_base_url: str
     vox_base_url: str
     warpwails_base_url: str
@@ -70,6 +71,7 @@ class Settings:
             llm_timeout_sec=_float("SHUSHUNYA_CORE_LLM_TIMEOUT_SEC", 240.0, 1.0),
             abaddon_base_url=os.environ.get("SHUSHUNYA_CORE_ABADDON_URL", "http://127.0.0.1:7000").rstrip("/"),
             archive_base_url=os.environ.get("SHUSHUNYA_CORE_ARCHIVE_URL", "http://127.0.0.1:8090").rstrip("/"),
+            archive_effect_key=os.environ.get("SHUSHUNYA_CORE_ARCHIVE_KEY", "").strip(),
             administratum_base_url=os.environ.get("SHUSHUNYA_CORE_ADMINISTRATUM_URL", "http://127.0.0.1:7300").rstrip("/"),
             vox_base_url=os.environ.get("SHUSHUNYA_CORE_VOX_URL", "http://127.0.0.1:7400").rstrip("/"),
             warpwails_base_url=os.environ.get("SHUSHUNYA_CORE_WARPWAILS_URL", "http://127.0.0.1:7500").rstrip("/"),

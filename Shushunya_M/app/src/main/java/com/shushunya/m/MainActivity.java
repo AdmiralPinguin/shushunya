@@ -112,7 +112,7 @@ public class MainActivity extends Activity {
     private static final String SERVER_MEMORY_NAMESPACE = "shushunya";
     private static final int REQUEST_NOTIFICATIONS = 42;
     private static final String DEFAULT_BASE_URL = "https://chat.shushunya.com";
-    private static final String CLIENT_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; ShushunyaM/2.4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36";
+    private static final String CLIENT_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; ShushunyaM/7.3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36";
     private static final String MODEL = "gemma-4-12b-it-UD-Q5_K_XL.gguf";
     private static final int AUDIO_SAMPLE_RATE = 16000;
     private static final int REQUEST_RECORD_AUDIO = 41;
@@ -146,7 +146,7 @@ public class MainActivity extends Activity {
     private String lastAgentTasksJson = "";
     private String lastChatHistoryJson = "";
     private boolean brigadePollScheduled;
-    private long lastSeenChatMessageId;
+    private volatile long lastSeenChatMessageId;
     // Chat is paged: keep only a window of recent messages in the view; images
     // are decoded once and reused, so scrolling and re-renders stay cheap even
     // when the history is huge.
@@ -154,6 +154,7 @@ public class MainActivity extends Activity {
     private boolean loadingOlderChat;
     private boolean noOlderChat;
     private final android.util.LruCache<String, Bitmap> imageCache = new android.util.LruCache<>(16);
+    private ArtifactDownloads artifactDownloads;
     private TextView pendingAnswerBubble;
     private String pendingChatRequestId = "";
     private boolean pendingChatRecoveryActive;
@@ -171,7 +172,11 @@ public class MainActivity extends Activity {
         String finalKey = "";
         final java.util.ArrayList<String> cardKeys = new java.util.ArrayList<>();
     }
-    private boolean chatDeltaLoopRunning;
+    private volatile boolean chatDeltaLoopRunning;
+    private volatile boolean activityDestroyed;
+    private final java.util.concurrent.atomic.AtomicLong chatHistoryRequestSequence =
+            new java.util.concurrent.atomic.AtomicLong();
+    private long appliedChatHistoryRequestSequence;
     private final java.util.ArrayDeque<String> pendingLocalEchoes = new java.util.ArrayDeque<>();
     private LinearLayout messageList;
     private LinearLayout inputPanel;
@@ -251,7 +256,7 @@ public class MainActivity extends Activity {
     private boolean agentPinnedScroll;
     private boolean agentTouchActive;
     private ValueAnimator agentScrollAnimator;
-    private boolean appInForeground;
+    private volatile boolean appInForeground;
     public static volatile boolean appForeground;
     private String pendingImageDataUrl;
     private String pendingImageLabel;
@@ -278,6 +283,7 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {
         }
         baseUrl = DEFAULT_BASE_URL;
+        artifactDownloads = new ArtifactDownloads(this, baseUrl);
         buildUi();
         addMessage(false, "Шушуня здесь. Пиши, брат, пока нити судьбы не спутались окончательно.", false);
         loadServerChatHistory();
@@ -288,6 +294,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (artifactDownloads != null) {
+            artifactDownloads.refreshVisible();
+        }
         if (TAB_CHAT.equals(currentTab)) {
             loadServerChatHistory();
         }
@@ -326,12 +335,18 @@ public class MainActivity extends Activity {
         super.onStart();
         appInForeground = true;
         appForeground = true;
+        if (artifactDownloads != null) {
+            artifactDownloads.setUiActive(true);
+        }
     }
 
     @Override
     protected void onStop() {
         appInForeground = false;
         appForeground = false;
+        if (artifactDownloads != null) {
+            artifactDownloads.setUiActive(false);
+        }
         super.onStop();
     }
 
@@ -3230,10 +3245,30 @@ public class MainActivity extends Activity {
             try {
                 StreamingBubble liveBubble = new StreamingBubble(answerBubble);
                 liveBubble.start();
-                String finalText = streamChatAnswer(text, imageDataUrl, clientRequestId, liveBubble);
-                pendingLocalEchoes.addLast("assistant\n" + finalText);
+                ChatStreamResult streamResult = streamChatAnswer(text, imageDataUrl, clientRequestId, liveBubble);
+                String finalText = streamResult.text;
+                boolean hidePlaceholder = streamResult.artifactDelivered
+                        || (!streamResult.artifactFailed && finalText.isEmpty());
                 clearPendingChatTurn(clientRequestId);
                 main.post(() -> {
+                    boolean stillOwnsTurn = clientRequestId.equals(pendingChatRequestId)
+                            || pendingAnswerBubble == answerBubble;
+                    if (!stillOwnsTurn) {
+                        // History/delta may already have completed this durable
+                        // request. Never let its late stream callback unlock or
+                        // overwrite a newer turn.
+                        if (hidePlaceholder) {
+                            liveBubble.suppress();
+                        } else {
+                            liveBubble.finish();
+                        }
+                        return;
+                    }
+                    if (!hidePlaceholder) {
+                        // Delta reconciliation also runs on main; serializing this
+                        // marker removes the ArrayDeque worker/UI race.
+                        pendingLocalEchoes.addLast("assistant\n" + finalText);
+                    }
                     if (pendingAnswerBubble == answerBubble) {
                         pendingAnswerBubble = null;
                     }
@@ -3241,16 +3276,33 @@ public class MainActivity extends Activity {
                         pendingChatRequestId = "";
                     }
                     pendingChatRecoveryActive = false;
+                    if (hidePlaceholder) {
+                        liveBubble.suppress();
+                        // A factually confirmed deliver_artifact is represented by the authoritative
+                        // history/delta card. The temporary text bubble is not a
+                        // second answer and must not remain empty or duplicate it.
+                        lastChatHistoryJson = "";
+                        startChatDeltaLoop();
+                        loadServerChatHistory();
+                    } else {
+                        liveBubble.finish();
+                    }
+                    setWaiting(false);
                 });
-                liveBubble.finish();
-                showAnswerNotification(finalText);
-                main.post(() -> setWaiting(false));
+                if (!hidePlaceholder) {
+                    showAnswerNotification(finalText);
+                }
             } catch (Exception e) {
                 // The exact request payload and id remain durable. A later app
                 // start or submit retries the same server-side job, never a new
                 // turn/warband mission. The delta stream may still deliver an
                 // already-accepted answer in the meantime.
                 main.post(() -> {
+                    boolean stillOwnsTurn = clientRequestId.equals(pendingChatRequestId)
+                            || pendingAnswerBubble == answerBubble;
+                    if (!stillOwnsTurn) {
+                        return;
+                    }
                     answerBubble.setText("⏳ связь моргнула — ход сохранён и будет повторён с тем же ID");
                     pendingChatRecoveryActive = false;
                     setWaiting(false);
@@ -3568,7 +3620,7 @@ public class MainActivity extends Activity {
         showAnswerNotification(finalText);
     }
 
-    private String streamChatAnswer(String text, String imageDataUrl, String clientRequestId, StreamingBubble liveBubble) throws Exception {
+    private ChatStreamResult streamChatAnswer(String text, String imageDataUrl, String clientRequestId, StreamingBubble liveBubble) throws Exception {
         URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/stream");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
@@ -3593,6 +3645,8 @@ public class MainActivity extends Activity {
             throw new IllegalStateException("stream http " + conn.getResponseCode());
         }
         StringBuilder full = new StringBuilder();
+        ArtifactStreamOutcome artifactOutcome = ArtifactStreamOutcome.none();
+        boolean sawDone = false;
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
@@ -3605,6 +3659,10 @@ public class MainActivity extends Activity {
                 }
                 JSONObject evt = new JSONObject(data);
                 String type = evt.optString("type", "");
+                ArtifactStreamOutcome eventArtifactOutcome = artifactStreamOutcome(evt);
+                if (!eventArtifactOutcome.isNone()) {
+                    artifactOutcome = eventArtifactOutcome;
+                }
                 if ("token".equals(type)) {
                     String piece = evt.optString("text", "");
                     full.append(piece);
@@ -3628,8 +3686,21 @@ public class MainActivity extends Activity {
                 } else if ("error".equals(type)) {
                     throw new IllegalStateException(evt.optString("error", "stream error"));
                 } else if ("done".equals(type)) {
+                    sawDone = true;
                     String f = evt.optString("full", "");
-                    if (full.length() == 0 && !f.isEmpty()) {
+                    if (eventArtifactOutcome.isFailed()) {
+                        String explanation = eventArtifactOutcome.explanation;
+                        full.setLength(0);
+                        full.append(explanation);
+                        liveBubble.replace(explanation);
+                    } else if (eventArtifactOutcome.isSuccess()) {
+                        // The authoritative card/history row owns factual delivery
+                        // speech. Keep the caption only in the return trace; this
+                        // temporary bubble will be removed after the stream ends.
+                        if (full.length() == 0 && !f.isEmpty()) {
+                            full.append(f);
+                        }
+                    } else if (full.length() == 0 && !f.isEmpty()) {
                         full.append(f);
                         liveBubble.append(f);
                     }
@@ -3639,7 +3710,147 @@ public class MainActivity extends Activity {
         } finally {
             conn.disconnect();
         }
-        return full.toString();
+        if (!sawDone) {
+            // EOF is not an acknowledgement. Keep the durable request so the
+            // same idempotent turn can be resumed after a truncated stream.
+            throw new IllegalStateException("stream ended before the final done event");
+        }
+        return new ChatStreamResult(
+                full.toString().trim(),
+                artifactOutcome.isSuccess(),
+                artifactOutcome.isFailed()
+        );
+    }
+
+    private ArtifactStreamOutcome artifactStreamOutcome(JSONObject event) {
+        if (event == null || !"done".equals(event.optString("type", "").trim())) {
+            return ArtifactStreamOutcome.none();
+        }
+        boolean artifactAction = false;
+        String[] directFields = {"action", "turn_action", "route_action", "effect_kind"};
+        for (String field : directFields) {
+            if ("deliver_artifact".equals(event.optString(field, "").trim())) {
+                artifactAction = true;
+                break;
+            }
+        }
+        if (!artifactAction) {
+            String[] objectFields = {"decision", "turn_decision", "effect", "result", "response"};
+            for (String field : objectFields) {
+                JSONObject nested = event.optJSONObject(field);
+                if (nested != null && (
+                        "deliver_artifact".equals(nested.optString("action", "").trim())
+                                || "deliver_artifact".equals(nested.optString("kind", "").trim())
+                )) {
+                    artifactAction = true;
+                    break;
+                }
+            }
+        }
+        if (!artifactAction) {
+            return ArtifactStreamOutcome.none();
+        }
+
+        boolean effectOk = event.has("effect_ok") && event.optBoolean("effect_ok", false);
+        if (!effectOk) {
+            String explanation = firstNonEmptyEventText(event, "full", "explanation", "message", "error");
+            if (explanation.isEmpty()) {
+                explanation = "Файл не доставлен: Archive не подтвердил успешную публикацию артефакта.";
+            }
+            return ArtifactStreamOutcome.failed(explanation);
+        }
+
+        JSONObject metadata = event.optJSONObject("artifact");
+        String topLevelId = event.optString("artifact_id", "").trim();
+        String nestedId = metadata == null ? "" : metadata.optString("artifact_id", "").trim();
+        if (nestedId.isEmpty() && metadata != null) {
+            nestedId = metadata.optString("id", "").trim();
+        }
+        String filename = metadata == null ? "" : firstNonEmptyEventText(
+                metadata, "filename", "display_name", "name"
+        );
+        String mediaType = metadata == null ? "" : firstNonEmptyEventText(
+                metadata, "media_type", "mime_type", "mime"
+        );
+        ArtifactDownloads.Artifact artifact = ArtifactDownloads.Artifact.fromMessage(event);
+        boolean factualArtifact = metadata != null
+                && !topLevelId.isEmpty()
+                && topLevelId.equals(nestedId)
+                && !filename.isEmpty()
+                && !mediaType.isEmpty()
+                && artifact != null
+                && topLevelId.equals(artifact.id)
+                && artifact.hasVerificationContract();
+        if (!factualArtifact) {
+            return ArtifactStreamOutcome.failed(
+                    "Файл не доставлен: сервер заявил успех без совпадающего artifact_id "
+                            + "и полных проверяемых метаданных filename/MIME/size/SHA-256."
+            );
+        }
+        return ArtifactStreamOutcome.success();
+    }
+
+    private String firstNonEmptyEventText(JSONObject object, String... fields) {
+        if (object == null) {
+            return "";
+        }
+        for (String field : fields) {
+            String value = object.optString(field, "").trim();
+            if (!value.isEmpty() && !"null".equalsIgnoreCase(value)) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private static final class ArtifactStreamOutcome {
+        private static final int NONE = 0;
+        private static final int SUCCESS = 1;
+        private static final int FAILED = 2;
+
+        final int state;
+        final String explanation;
+
+        private ArtifactStreamOutcome(int state, String explanation) {
+            this.state = state;
+            this.explanation = explanation == null ? "" : explanation;
+        }
+
+        static ArtifactStreamOutcome none() {
+            return new ArtifactStreamOutcome(NONE, "");
+        }
+
+        static ArtifactStreamOutcome success() {
+            return new ArtifactStreamOutcome(SUCCESS, "");
+        }
+
+        static ArtifactStreamOutcome failed(String explanation) {
+            return new ArtifactStreamOutcome(FAILED, explanation);
+        }
+
+        boolean isNone() {
+            return state == NONE;
+        }
+
+        boolean isSuccess() {
+            return state == SUCCESS;
+        }
+
+        boolean isFailed() {
+            return state == FAILED;
+        }
+    }
+
+    private static final class ChatStreamResult {
+        final String text;
+        final boolean artifactDelivered;
+        final boolean artifactFailed;
+
+        ChatStreamResult(String text, boolean artifactDelivered, boolean artifactFailed) {
+            this.text = text == null ? "" : text;
+            this.artifactDelivered = artifactDelivered;
+            this.artifactFailed = artifactFailed;
+        }
     }
 
     private String requestChatStart(String text, String imageDataUrl) throws Exception {
@@ -4063,7 +4274,10 @@ public class MainActivity extends Activity {
                         }
                         String role = item.optString("role", "");
                         String text = item.optString("content", "");
-                        if (messageHasAsset(item)) {
+                        ArtifactDownloads.Artifact artifact = ArtifactDownloads.Artifact.fromMessage(item);
+                        if (artifact != null) {
+                            addArtifactMessage("user".equals(role), text.trim(), artifact, insertAt);
+                        } else if (messageHasAsset(item)) {
                             fetchAndRenderAsset("user".equals(role), text.trim(), item.optString("asset_id", "").trim(), insertAt);
                         } else if (!text.isEmpty()) {
                             addMessage("user".equals(role), text, false, insertAt);
@@ -4088,6 +4302,7 @@ public class MainActivity extends Activity {
     }
 
     private void loadServerChatHistory() {
+        long requestSequence = chatHistoryRequestSequence.incrementAndGet();
         new Thread(() -> {
             try {
                 URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/messages?session_id=" + SERVER_CHAT_SESSION_ID + "&limit=" + CHAT_HISTORY_LIMIT);
@@ -4121,6 +4336,25 @@ public class MainActivity extends Activity {
                 long finalMaxId = maxId;
                 long finalMinId = minId;
                 main.post(() -> {
+                    if (activityDestroyed || requestSequence < appliedChatHistoryRequestSequence) {
+                        return;
+                    }
+                    if (finalMaxId < lastSeenChatMessageId) {
+                        // A delta newer than this snapshot is already on screen.
+                        // Rebuilding from the older snapshot would erase that row
+                        // while the cursor prevents the server from sending it again.
+                        return;
+                    }
+                    appliedChatHistoryRequestSequence = requestSequence;
+                    if (pendingAnswerBubble != null && !pendingLocalEchoes.isEmpty()) {
+                        // A snapshot may have been taken before the just-submitted
+                        // user row reached Archive. Rebuilding it would erase the
+                        // local prompt while its echo marker later suppresses the
+                        // server copy. Keep both the view and delta cursor intact
+                        // so the live poll can still consume that authoritative row.
+                        startChatDeltaLoop();
+                        return;
+                    }
                     lastSeenChatMessageId = Math.max(lastSeenChatMessageId, finalMaxId);
                     startChatDeltaLoop();
                     if (historyKey.equals(lastChatHistoryJson)) {
@@ -4129,6 +4363,22 @@ public class MainActivity extends Activity {
                     lastChatHistoryJson = historyKey;
                     oldestLoadedChatId = finalMinId;
                     noOlderChat = false;
+                    if (artifactDownloads != null) {
+                        artifactDownloads.clearVisible();
+                    }
+                    TextView preservedPending = pendingAnswerBubble != null
+                            && pendingAnswerBubble.getParent() == messageList
+                            ? pendingAnswerBubble
+                            : null;
+                    ViewGroup.LayoutParams preservedPendingLayout = preservedPending == null
+                            ? null
+                            : preservedPending.getLayoutParams();
+                    if (preservedPending != null) {
+                        // A history refresh can race a resumed durable turn. Keep
+                        // the exact TextView that StreamingBubble is writing into;
+                        // replacing it would strand the answer in a detached view.
+                        messageList.removeView(preservedPending);
+                    }
                     messageList.removeAllViews();
                     for (int i = 0; i < history.length(); i++) {
                         JSONObject item = history.optJSONObject(i);
@@ -4137,11 +4387,22 @@ public class MainActivity extends Activity {
                         }
                         String role = item.optString("role", "");
                         String text = item.optString("content", "");
-                        if (messageHasAsset(item)) {
+                        if (!"user".equals(role) && serverMessageCompletesPendingTurn(item)) {
+                            completePendingTurnFromExternalMessage();
+                        }
+                        ArtifactDownloads.Artifact artifact = ArtifactDownloads.Artifact.fromMessage(item);
+                        if (artifact != null) {
+                            addArtifactMessage("user".equals(role), text.trim(), artifact);
+                        } else if (messageHasAsset(item)) {
                             fetchAndRenderAsset("user".equals(role), text.trim(), item.optString("asset_id", "").trim());
                         } else if (!text.isEmpty()) {
                             addMessage("user".equals(role), text, false);
                         }
+                    }
+                    if (preservedPending != null
+                            && pendingAnswerBubble == preservedPending
+                            && preservedPending.getParent() == null) {
+                        messageList.addView(preservedPending, preservedPendingLayout);
                     }
                     maybeScrollToBottom(true);
                 });
@@ -4151,7 +4412,7 @@ public class MainActivity extends Activity {
     }
 
     private void startChatDeltaLoop() {
-        if (chatDeltaLoopRunning) {
+        if (chatDeltaLoopRunning || activityDestroyed) {
             return;
         }
         chatDeltaLoopRunning = true;
@@ -4159,45 +4420,338 @@ public class MainActivity extends Activity {
             // Telegram-style delta stream: one short-lived long-poll at a time.
             // New messages are APPENDED to the view; nothing is ever rebuilt,
             // and a dropped poll is a normal outcome, not an error.
-            while (true) {
-                if (!appInForeground) {
-                    try {
-                        Thread.sleep(2000);
-                    } catch (InterruptedException ignored) {
-                        break;
-                    }
-                    continue;
-                }
-                try {
-                    URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/messages?session_id=" + SERVER_CHAT_SESSION_ID
-                            + "&after_id=" + lastSeenChatMessageId + "&wait=25&limit=50");
-                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("GET");
-                    conn.setConnectTimeout(10000);
-                    conn.setReadTimeout(35000);
-                    applyMobileAuth(conn);
-                    if (conn.getResponseCode() < 200 || conn.getResponseCode() >= 300) {
-                        Thread.sleep(3000);
+            try {
+                while (!activityDestroyed) {
+                    if (!appInForeground) {
+                        try {
+                            Thread.sleep(2000);
+                        } catch (InterruptedException ignored) {
+                            break;
+                        }
                         continue;
                     }
-                    JSONObject payload = new JSONObject(readAll(conn.getInputStream()));
-                    JSONArray delta = payload.optJSONArray("messages");
-                    if (delta == null || delta.length() == 0) {
-                        continue;
-                    }
-                    final JSONArray finalDelta = delta;
-                    main.post(() -> appendChatDelta(finalDelta));
-                } catch (InterruptedException stop) {
-                    break;
-                } catch (Exception transient_) {
                     try {
-                        Thread.sleep(3000);
-                    } catch (InterruptedException ignored) {
+                        URL url = new URL(trimSlash(baseUrl) + "/archive/client/chat/messages?session_id=" + SERVER_CHAT_SESSION_ID
+                                + "&after_id=" + lastSeenChatMessageId + "&wait=25&limit=50");
+                        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                        conn.setRequestMethod("GET");
+                        conn.setConnectTimeout(10000);
+                        conn.setReadTimeout(35000);
+                        applyMobileAuth(conn);
+                        if (conn.getResponseCode() < 200 || conn.getResponseCode() >= 300) {
+                            Thread.sleep(3000);
+                            continue;
+                        }
+                        JSONObject payload = new JSONObject(readAll(conn.getInputStream()));
+                        JSONArray delta = payload.optJSONArray("messages");
+                        if (delta == null || delta.length() == 0) {
+                            continue;
+                        }
+                        final JSONArray finalDelta = delta;
+                        if (!activityDestroyed) {
+                            main.post(() -> {
+                                if (!activityDestroyed) {
+                                    appendChatDelta(finalDelta);
+                                }
+                            });
+                        }
+                    } catch (InterruptedException stop) {
                         break;
+                    } catch (Exception transient_) {
+                        try {
+                            Thread.sleep(3000);
+                        } catch (InterruptedException ignored) {
+                            break;
+                        }
                     }
                 }
+            } finally {
+                chatDeltaLoopRunning = false;
             }
         }).start();
+    }
+
+    private void addArtifactMessage(
+            boolean fromUser,
+            String caption,
+            ArtifactDownloads.Artifact artifact
+    ) {
+        addArtifactMessage(fromUser, caption, artifact, -1);
+    }
+
+    private void addArtifactMessage(
+            boolean fromUser,
+            String caption,
+            ArtifactDownloads.Artifact artifact,
+            int insertIndex
+    ) {
+        boolean prepend = insertIndex >= 0;
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+        card.setBackground(fromUser
+                ? gradientPill(WARP_DEEP, Color.rgb(48, 30, 92), WARP, dp(21))
+                : pill(SURFACE_RAISED, LINE, dp(21)));
+        if (!prepend) {
+            card.setAlpha(0f);
+            card.setTranslationY(dp(10));
+        }
+
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView kind = new TextView(this);
+        kind.setText(artifactTypeLabel(artifact));
+        kind.setTextColor(INK);
+        kind.setTextSize(10);
+        kind.setTypeface(Typeface.DEFAULT_BOLD);
+        kind.setGravity(Gravity.CENTER);
+        kind.setPadding(dp(8), dp(3), dp(8), dp(3));
+        kind.setBackground(pill(ACID, ACID, dp(10)));
+        titleRow.addView(kind, new LinearLayout.LayoutParams(-2, dp(28)));
+
+        TextView name = new TextView(this);
+        name.setText(artifact.displayName);
+        name.setTextColor(TEXT);
+        name.setTextSize(15);
+        name.setTypeface(Typeface.DEFAULT_BOLD);
+        name.setMaxLines(2);
+        name.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(0, -2, 1);
+        nameLp.leftMargin = dp(10);
+        titleRow.addView(name, nameLp);
+        card.addView(titleRow, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView metadata = new TextView(this);
+        metadata.setText(artifactMetadataLabel(artifact));
+        metadata.setTextColor(TEXT_MUTED);
+        metadata.setTextSize(11);
+        metadata.setPadding(0, dp(7), 0, 0);
+        metadata.setMaxLines(2);
+        metadata.setEllipsize(TextUtils.TruncateAt.END);
+        card.addView(metadata, new LinearLayout.LayoutParams(-1, -2));
+
+        if (caption != null && !caption.trim().isEmpty()) {
+            TextView captionView = new TextView(this);
+            applyRichText(captionView, caption.trim());
+            captionView.setTextColor(TEXT);
+            captionView.setTextSize(14);
+            captionView.setPadding(0, dp(9), 0, 0);
+            card.addView(captionView, new LinearLayout.LayoutParams(-1, -2));
+        }
+
+        ProgressBar downloadProgress = new ProgressBar(
+                this,
+                null,
+                android.R.attr.progressBarStyleHorizontal
+        );
+        downloadProgress.setMax(100);
+        downloadProgress.setProgressTintList(android.content.res.ColorStateList.valueOf(ACID));
+        downloadProgress.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(WARP));
+        downloadProgress.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(LINE));
+        downloadProgress.setVisibility(View.GONE);
+        LinearLayout.LayoutParams progressLp = new LinearLayout.LayoutParams(-1, dp(5));
+        progressLp.topMargin = dp(10);
+        card.addView(downloadProgress, progressLp);
+
+        TextView status = new TextView(this);
+        status.setTextColor(TEXT_MUTED);
+        status.setTextSize(11);
+        status.setPadding(0, dp(7), 0, 0);
+        status.setText("Проверяю сохранённое состояние загрузки…");
+        card.addView(status, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(-1, dp(42));
+        actionsLp.topMargin = dp(10);
+        card.addView(actions, actionsLp);
+
+        Button primary = artifactButton("Скачать", true);
+        Button share = artifactButton("Поделиться", false);
+        share.setVisibility(View.GONE);
+        actions.addView(primary, new LinearLayout.LayoutParams(0, -1, 1));
+        LinearLayout.LayoutParams shareLp = new LinearLayout.LayoutParams(0, -1, 1);
+        shareLp.leftMargin = dp(8);
+        actions.addView(share, shareLp);
+
+        final ArtifactDownloads.Snapshot[] latest = new ArtifactDownloads.Snapshot[]{
+                new ArtifactDownloads.Snapshot(
+                        ArtifactDownloads.State.READY,
+                        0,
+                        artifact.sizeBytes,
+                        "Готов к загрузке.",
+                        null
+                )
+        };
+        primary.setOnClickListener(view -> {
+            ArtifactDownloads.Snapshot snapshot = latest[0];
+            if (artifactDownloads == null) {
+                Toast.makeText(this, "Загрузчик файлов уже остановлен.", Toast.LENGTH_SHORT).show();
+            } else if (snapshot != null && snapshot.state == ArtifactDownloads.State.COMPLETE) {
+                artifactDownloads.open(artifact);
+            } else {
+                artifactDownloads.startOrRetry(artifact);
+            }
+        });
+        share.setOnClickListener(view -> {
+            if (artifactDownloads != null) {
+                artifactDownloads.share(artifact);
+            }
+        });
+
+        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                Math.min(getResources().getDisplayMetrics().widthPixels - dp(58), dp(560)),
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        cardLp.gravity = fromUser ? Gravity.RIGHT : Gravity.LEFT;
+        cardLp.topMargin = dp(5);
+        cardLp.bottomMargin = dp(5);
+        if (prepend) {
+            messageList.addView(card, Math.min(insertIndex, messageList.getChildCount()), cardLp);
+        } else {
+            messageList.addView(card, cardLp);
+            card.animate()
+                    .alpha(1f)
+                    .translationY(0f)
+                    .setDuration(210)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .start();
+            maybeScrollToBottom(false);
+        }
+
+        if (artifactDownloads != null) {
+            artifactDownloads.observe(artifact, (observed, snapshot) -> {
+                latest[0] = snapshot;
+                renderArtifactSnapshot(observed, snapshot, downloadProgress, status, primary, share);
+            });
+        } else {
+            renderArtifactSnapshot(
+                    artifact,
+                    new ArtifactDownloads.Snapshot(
+                            ArtifactDownloads.State.FAILED,
+                            0,
+                            artifact.sizeBytes,
+                            "Загрузчик файлов недоступен.",
+                            null
+                    ),
+                    downloadProgress,
+                    status,
+                    primary,
+                    share
+            );
+        }
+    }
+
+    private Button artifactButton(String label, boolean primary) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setAllCaps(false);
+        button.setTextSize(12);
+        button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setTextColor(primary ? INK : TEXT);
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setPadding(dp(8), 0, dp(8), 0);
+        button.setBackground(primary
+                ? pill(ACID, ACID, dp(14))
+                : pill(SURFACE_SOFT, WARP, dp(14)));
+        return button;
+    }
+
+    private void renderArtifactSnapshot(
+            ArtifactDownloads.Artifact artifact,
+            ArtifactDownloads.Snapshot snapshot,
+            ProgressBar progress,
+            TextView status,
+            Button primary,
+            Button share
+    ) {
+        boolean active = snapshot.state == ArtifactDownloads.State.QUEUED
+                || snapshot.state == ArtifactDownloads.State.DOWNLOADING
+                || snapshot.state == ArtifactDownloads.State.VERIFYING;
+        progress.setVisibility(active ? View.VISIBLE : View.GONE);
+        if (active) {
+            boolean determinate = snapshot.totalBytes > 0
+                    && snapshot.state != ArtifactDownloads.State.VERIFYING;
+            progress.setIndeterminate(!determinate);
+            if (determinate) {
+                progress.setProgress(snapshot.progressPercent(), true);
+            }
+        }
+
+        String detail = snapshot.detail;
+        if (snapshot.state == ArtifactDownloads.State.DOWNLOADING && snapshot.downloadedBytes > 0) {
+            detail += "\n" + formatArtifactBytes(snapshot.downloadedBytes)
+                    + (snapshot.totalBytes > 0 ? " / " + formatArtifactBytes(snapshot.totalBytes) : "");
+        }
+        status.setText(detail);
+        status.setTextColor(snapshot.state == ArtifactDownloads.State.COMPLETE
+                ? CYAN
+                : snapshot.state == ArtifactDownloads.State.FAILED
+                ? Color.rgb(231, 95, 69)
+                : TEXT_MUTED);
+
+        if (snapshot.state == ArtifactDownloads.State.COMPLETE) {
+            primary.setText("Открыть");
+            primary.setEnabled(true);
+            primary.setAlpha(1f);
+            share.setVisibility(View.VISIBLE);
+            share.setEnabled(true);
+        } else if (snapshot.state == ArtifactDownloads.State.FAILED) {
+            primary.setText("Повторить");
+            primary.setEnabled(true);
+            primary.setAlpha(1f);
+            share.setVisibility(View.GONE);
+        } else if (snapshot.state == ArtifactDownloads.State.READY) {
+            primary.setText("Скачать");
+            primary.setEnabled(true);
+            primary.setAlpha(1f);
+            share.setVisibility(View.GONE);
+        } else {
+            primary.setText(snapshot.state == ArtifactDownloads.State.VERIFYING ? "Проверка…" : "Скачивается…");
+            primary.setEnabled(false);
+            primary.setAlpha(0.55f);
+            share.setVisibility(View.GONE);
+        }
+        primary.setContentDescription(primary.getText() + ": " + artifact.displayName);
+        share.setContentDescription("Поделиться: " + artifact.displayName);
+    }
+
+    private String artifactMetadataLabel(ArtifactDownloads.Artifact artifact) {
+        String size = artifact.sizeBytes >= 0 ? formatArtifactBytes(artifact.sizeBytes) : "размер не указан";
+        String sha = artifact.sha256.matches("[0-9a-f]{64}")
+                ? "SHA-256 " + artifact.sha256.substring(0, 12) + "…"
+                : "SHA-256 отсутствует";
+        return artifact.mimeType + "  •  " + size + "  •  " + sha;
+    }
+
+    private String artifactTypeLabel(ArtifactDownloads.Artifact artifact) {
+        int dot = artifact.displayName.lastIndexOf('.');
+        if (dot >= 0 && dot < artifact.displayName.length() - 1) {
+            String extension = artifact.displayName.substring(dot + 1).toUpperCase(java.util.Locale.ROOT);
+            if (extension.length() <= 7 && extension.matches("[A-Z0-9]+")) {
+                return extension;
+            }
+        }
+        if (artifact.mimeType.startsWith("image/")) return "IMG";
+        if (artifact.mimeType.startsWith("audio/")) return "AUDIO";
+        if (artifact.mimeType.startsWith("video/")) return "VIDEO";
+        if ("application/pdf".equals(artifact.mimeType)) return "PDF";
+        return "FILE";
+    }
+
+    private String formatArtifactBytes(long value) {
+        if (value < 0) return "—";
+        if (value < 1024) return value + " B";
+        double size = value;
+        String[] units = {"KB", "MB", "GB", "TB"};
+        int unit = -1;
+        do {
+            size /= 1024.0;
+            unit++;
+        } while (size >= 1024.0 && unit < units.length - 1);
+        return String.format(java.util.Locale.ROOT, size >= 10 ? "%.0f %s" : "%.1f %s", size, units[unit]);
     }
 
     private boolean messageHasAsset(JSONObject item) {
@@ -4285,8 +4839,21 @@ public class MainActivity extends Activity {
             String role = item.optString("role", "");
             String text = item.optString("content", "").trim();
             boolean fromUser = "user".equals(role);
+            ArtifactDownloads.Artifact artifact = ArtifactDownloads.Artifact.fromMessage(item);
+            if (artifact != null) {
+                if (!fromUser && serverMessageCompletesPendingTurn(item)) {
+                    completePendingTurnFromExternalMessage();
+                }
+                addArtifactMessage(fromUser, text, artifact);
+                appended = true;
+                showAnswerNotification(text.isEmpty() ? "Готов файл: " + artifact.displayName : text);
+                continue;
+            }
             if (messageHasAsset(item)) {
                 // Image message (e.g. from Moriana): fetch the asset by id and render it.
+                if (!fromUser && serverMessageCompletesPendingTurn(item)) {
+                    completePendingTurnFromExternalMessage();
+                }
                 fetchAndRenderAsset(fromUser, text, item.optString("asset_id", "").trim());
                 appended = true;
                 showAnswerNotification(text.isEmpty() ? "Готово изображение" : text);
@@ -4299,9 +4866,13 @@ public class MainActivity extends Activity {
             if (pendingLocalEchoes.remove(echoKey)) {
                 continue;  // already shown locally (own message or job-delivered answer)
             }
-            if (!fromUser && pendingAnswerBubble != null) {
+            if (!fromUser
+                    && pendingAnswerBubble != null
+                    && serverMessageCompletesPendingTurn(item)) {
                 // The awaited answer arrives through the delta stream (e.g. after
-                // a dropped poll): fill the waiting bubble instead of appending.
+                // a dropped poll): fill the waiting bubble only when the server
+                // correlated it to this exact durable request. Background reports
+                // and unrelated brigade messages must remain separate.
                 applyRichText(pendingAnswerBubble, text);
                 pendingAnswerBubble = null;
                 String deliveredRequestId = pendingChatRequestId;
@@ -4324,7 +4895,52 @@ public class MainActivity extends Activity {
         }
     }
 
+    private boolean serverMessageCompletesPendingTurn(JSONObject message) {
+        String pendingId = pendingChatRequestId == null ? "" : pendingChatRequestId.trim();
+        if (pendingId.isEmpty() || message == null) {
+            return false;
+        }
+        String[] messageFields = {"client_request_id", "correlation_id", "turn_id"};
+        for (String field : messageFields) {
+            if (pendingId.equals(message.optString(field, "").trim())) {
+                return true;
+            }
+        }
+        JSONObject artifact = message.optJSONObject("artifact");
+        if (artifact != null) {
+            for (String field : messageFields) {
+                if (pendingId.equals(artifact.optString(field, "").trim())) {
+                    return true;
+                }
+            }
+        }
+        String dedupeKey = message.optString("dedupe_key", "").trim();
+        return !dedupeKey.isEmpty() && dedupeKey.contains(pendingId);
+    }
+
+    private void completePendingTurnFromExternalMessage() {
+        if (pendingAnswerBubble != null) {
+            ViewGroup parent = pendingAnswerBubble.getParent() instanceof ViewGroup
+                    ? (ViewGroup) pendingAnswerBubble.getParent()
+                    : null;
+            if (parent != null) {
+                parent.removeView(pendingAnswerBubble);
+            }
+            pendingAnswerBubble = null;
+        }
+        String requestId = pendingChatRequestId;
+        if (requestId != null && !requestId.isEmpty()) {
+            clearPendingChatTurn(requestId);
+        }
+        pendingChatRequestId = "";
+        pendingChatRecoveryActive = false;
+        setWaiting(false);
+    }
+
     private void pollPendingReports() {
+        if (activityDestroyed) {
+            return;
+        }
         new Thread(() -> {
             int count = 0;
             try {
@@ -4344,13 +4960,21 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {
             }
             int finalCount = count;
+            if (activityDestroyed) {
+                return;
+            }
             main.post(() -> {
+                if (activityDestroyed) {
+                    return;
+                }
                 updateReportsBadge(finalCount);
                 if (!reportsPollScheduled) {
                     reportsPollScheduled = true;
                     main.postDelayed(() -> {
                         reportsPollScheduled = false;
-                        pollPendingReports();
+                        if (!activityDestroyed) {
+                            pollPendingReports();
+                        }
                     }, appInForeground ? 30000 : 120000);
                 }
             });
@@ -4514,7 +5138,13 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        activityDestroyed = true;
         recording = false;
+        main.removeCallbacksAndMessages(null);
+        if (artifactDownloads != null) {
+            artifactDownloads.close();
+            artifactDownloads = null;
+        }
         if (warpAnimator != null) {
             warpAnimator.cancel();
             warpAnimator = null;
@@ -4572,6 +5202,7 @@ public class MainActivity extends Activity {
         private int shown;
         private boolean finished;
         private boolean ticking;
+        private boolean suppressed;
 
         StreamingBubble(TextView bubble) {
             this.bubble = bubble;
@@ -4591,9 +5222,31 @@ public class MainActivity extends Activity {
             main.post(this::tick);
         }
 
+        void replace(String value) {
+            synchronized (target) {
+                target.setLength(0);
+                target.append(value == null ? "" : value);
+                shown = 0;
+            }
+            main.post(this::tick);
+        }
+
         void finish() {
             finished = true;
             main.post(this::tick);
+        }
+
+        void suppress() {
+            suppressed = true;
+            finished = true;
+            main.post(() -> {
+                ViewGroup parent = bubble.getParent() instanceof ViewGroup
+                        ? (ViewGroup) bubble.getParent()
+                        : null;
+                if (parent != null) {
+                    parent.removeView(bubble);
+                }
+            });
         }
 
         String targetText() {
@@ -4603,11 +5256,15 @@ public class MainActivity extends Activity {
         }
 
         private void tick() {
-            if (ticking) {
+            if (ticking || suppressed) {
                 return;
             }
             ticking = true;
             main.postDelayed(() -> {
+                if (suppressed) {
+                    ticking = false;
+                    return;
+                }
                 int available;
                 synchronized (target) {
                     available = target.length();

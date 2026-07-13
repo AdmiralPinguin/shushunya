@@ -6,6 +6,9 @@ from archive_handler import ArchiveHandler
 import task_journal
 from task_journal import deliver_final_to_chat, final_message_from_orchestration
 
+MISSION_ID = "mission-warmaster-final-self-test"
+STATIC_TASK_ID = "warmaster-final-self-test"
+
 
 def final_message(payload: dict[str, object]) -> str:
     return ArchiveHandler.warmaster_final_message(None, payload)
@@ -14,6 +17,7 @@ def final_message(payload: dict[str, object]) -> str:
 def accepted_review() -> dict[str, object]:
     return {
         "type": "acceptance_review",
+        "mission_id": MISSION_ID,
         "reviewer": "Warmaster",
         "accepted": True,
         "status": "accepted",
@@ -22,9 +26,14 @@ def accepted_review() -> dict[str, object]:
 
 def accepted_protocol(answer: str) -> dict[str, object]:
     return {
+        "mission": {"mission_id": MISSION_ID},
+        "commander_order": {"mission_id": MISSION_ID},
         "acceptance_review": accepted_review(),
         "final_response": {
             "type": "final_response",
+            "mission_id": MISSION_ID,
+            "status": "completed",
+            "accepted_by": "Warmaster",
             "answer": answer,
         },
     }
@@ -32,9 +41,14 @@ def accepted_protocol(answer: str) -> dict[str, object]:
 
 def accepted_protocol_history(answer: str) -> dict[str, object]:
     return {
+        "mission": {"mission_id": MISSION_ID},
+        "commander_order": {"mission_id": MISSION_ID},
         "acceptance_reviews": [accepted_review()],
         "final_response": {
             "type": "final_response",
+            "mission_id": MISSION_ID,
+            "status": "completed",
+            "accepted_by": "Warmaster",
             "answer": answer,
         },
     }
@@ -66,9 +80,12 @@ def main() -> int:
         raise AssertionError(f"acceptance message leaked the legacy public commander name: {acceptance!r}")
     accepted = final_message(
         {
+            "task_id": STATIC_TASK_ID,
             "status": "completed",
             "summary": {
+                "task_id": STATIC_TASK_ID,
                 "status": "completed",
+                "mission_ref": {"mission_id": MISSION_ID},
                 "mission_protocol": accepted_protocol("Принятый Вармастером финальный ответ."),
             },
             "display": {"detail": "служебный completed detail"},
@@ -194,10 +211,13 @@ def main() -> int:
         raise AssertionError(f"Warmaster activity was not kept as brigade-tab payload: {agent_task}")
     journal_accepted = final_message_from_orchestration(
         {
+            "task_id": STATIC_TASK_ID,
             "status": "completed",
             "snapshot": {
                 "summary": {
+                    "task_id": STATIC_TASK_ID,
                     "status": "completed",
+                    "mission_ref": {"mission_id": MISSION_ID},
                     "mission_protocol": accepted_protocol_history("Финал для доставки из фонового журнала."),
                 }
             },
@@ -211,10 +231,13 @@ def main() -> int:
     original_fetch = task_journal.fetch_orchestration
     original_enqueue = task_journal.enqueue_report
     task_journal.fetch_orchestration = lambda task_id: {
+        "task_id": task_id,
         "status": "completed",
             "snapshot": {
                 "summary": {
+                    "task_id": task_id,
                     "status": "completed",
+                    "mission_ref": {"mission_id": MISSION_ID},
                     "mission_protocol": accepted_protocol(f"Доставленный финал {task_id}."),
                 }
             },
@@ -294,11 +317,14 @@ def main() -> int:
     archive_handler.proxy_json_url = lambda *_args, **_kwargs: (
         200,
         {
+            "task_id": "mobile-final-event",
             "active": False,
+            "status": "completed",
             "snapshot": {
                 "summary": {
                     "status": "completed",
                     "task_id": "mobile-final-event",
+                    "mission_ref": {"mission_id": MISSION_ID},
                     "goal": "проверить разделение финала и активности",
                     "mission_protocol": accepted_protocol("Мобильный финал из final_response."),
                 }

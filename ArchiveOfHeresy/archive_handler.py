@@ -28,6 +28,13 @@ from archivist_agent.magos_agent import MAGOS_CONTEXT_LAYERS, Magos
 from archivist_agent.quality_report import generate_quality_report
 from archivist_agent.vector_memory import VECTOR_TOP_K, VectorMemory, latest_user_message
 from task_journal import final_response_message_from_orchestration
+from artifact_store import (
+    ArtifactError,
+    ArtifactRangeError,
+    artifact_metadata,
+    open_artifact_content,
+    parse_single_byte_range,
+)
 
 
 class ArchiveHandler(BaseHTTPRequestHandler):
@@ -36,9 +43,142 @@ class ArchiveHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args), flush=True)
 
+    @staticmethod
+    def _artifact_content_disposition(filename):
+        filename = str(filename or "artifact.bin")
+        fallback = "".join(char if 32 <= ord(char) < 127 and char not in {'"', "\\", ";"} else "_" for char in filename)
+        fallback = fallback.strip(" .")[:180] or "artifact.bin"
+        return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"
+
+    def _artifact_empty_response(self, status, *, size=None):
+        self.send_response(status)
+        if size is not None:
+            self.send_header("Content-Range", f"bytes */{size}")
+            self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+    def _handle_artifact_request(self, *, head_only=False):
+        parsed = urlsplit(self.path)
+        match = re.fullmatch(
+            r"/archive/(?:mobile/)?artifacts/(art_[0-9a-f]{32})(/content)?",
+            parsed.path,
+        )
+        if not match:
+            return False
+        if not require_artifact_auth(self, head_only=head_only):
+            return True
+        audience_source = authenticated_audience_source(self)
+        artifact_id = match.group(1)
+        params = parse_qs(parsed.query)
+        session_id = shared_chat_session_id((params.get("session_id") or [SHARED_CHAT_SESSION_ID])[0])
+        metadata = artifact_metadata(
+            artifact_id,
+            session_id=session_id,
+            audience_source=audience_source,
+        )
+        if metadata is None:
+            if head_only:
+                self._artifact_empty_response(404)
+            else:
+                write_json(self, 404, {"ok": False, "error": "artifact not found"})
+            return True
+        etag = f'"{metadata["sha256"]}"'
+        if not match.group(2):
+            payload = {
+                "ok": True,
+                "artifact": {
+                    **metadata,
+                    "content_url": f"/archive/client/artifacts/{artifact_id}/content",
+                },
+            }
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "private, no-cache")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            if not head_only:
+                self.wfile.write(body)
+            return True
+
+        if_none_match = str(self.headers.get("If-None-Match") or "")
+        if etag in {item.strip() for item in if_none_match.split(",")} or if_none_match.strip() == "*":
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "private, no-cache")
+            self.end_headers()
+            return True
+        range_header = self.headers.get("Range")
+        if_range = str(self.headers.get("If-Range") or "").strip()
+        if if_range and if_range not in {etag, metadata["sha256"]}:
+            range_header = None
+        try:
+            byte_range = parse_single_byte_range(range_header, int(metadata["size_bytes"]))
+        except ArtifactRangeError:
+            self._artifact_empty_response(416, size=int(metadata["size_bytes"]))
+            return True
+        start, end = byte_range if byte_range is not None else (0, int(metadata["size_bytes"]) - 1)
+        length = max(0, end - start + 1)
+        status = 206 if byte_range is not None else 200
+        response_started = False
+        try:
+            with open_artifact_content(
+                artifact_id,
+                session_id=session_id,
+                audience_source=audience_source,
+            ) as (opened_metadata, stream):
+                if opened_metadata["sha256"] != metadata["sha256"]:
+                    raise ArtifactError("artifact metadata changed while opening content")
+                self.send_response(status)
+                self.send_header("Content-Type", metadata["media_type"])
+                self.send_header("Content-Length", str(length))
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("ETag", etag)
+                self.send_header("Content-Disposition", self._artifact_content_disposition(metadata["filename"]))
+                self.send_header("Cache-Control", "private, no-cache")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                if byte_range is not None:
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{metadata['size_bytes']}")
+                self.end_headers()
+                response_started = True
+                if not head_only and length:
+                    stream.seek(start)
+                    remaining = length
+                    while remaining > 0:
+                        chunk = stream.read(min(ARTIFACT_STREAM_CHUNK_BYTES, remaining))
+                        if not chunk:
+                            raise ArtifactError("artifact blob ended before its catalogued size")
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+        except FileNotFoundError:
+            if not response_started:
+                self._artifact_empty_response(404)
+        except ArtifactError as exc:
+            if not response_started:
+                if head_only:
+                    self._artifact_empty_response(500)
+                else:
+                    write_json(self, 500, {"ok": False, "error": "artifact integrity failure"})
+            print(f"artifact content failure for {artifact_id}: {exc}", flush=True)
+        return True
+
+    def do_HEAD(self):
+        if self.path.startswith("/archive/client/"):
+            self.path = "/archive/mobile/" + self.path[len("/archive/client/") :]
+        if self._handle_artifact_request(head_only=True):
+            return
+        self._artifact_empty_response(404)
+
     def do_GET(self):
         if self.path.startswith("/archive/client/"):
             self.path = "/archive/mobile/" + self.path[len("/archive/client/") :]
+
+        if self._handle_artifact_request():
+            return
 
         if self.path == "/health":
             namespaces = known_memory_namespaces()
@@ -53,6 +193,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     "memory_events_root": str(MEMORY_EVENTS_ROOT),
                     "sqlite_path": str(SQLITE_PATH),
                     "reports_root": str(REPORTS_ROOT),
+                    "artifact_store": artifact_store_stats(),
                     "chat_context_messages": CHAT_CONTEXT_MESSAGES,
                     "chat_queue": {
                         **CHAT_QUEUE_LOCK.snapshot(),
@@ -109,6 +250,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/archive/mobile/chat/messages") or self.path.startswith("/archive/chat/messages"):
             if not require_auth(self, allow_mobile=True):
                 return
+            artifact_audience_source = authenticated_audience_source(self)
             session_id = "default"
             limit = CHAT_HISTORY_LIMIT
             after_id = 0
@@ -139,12 +281,23 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             # held until new messages exist (or the wait expires), so clients
             # append deltas instead of re-downloading and re-rendering history.
             # before_id gives scroll-up pagination (an older page).
-            messages = chat_history(session_id, limit=limit, after_id=after_id, before_id=before_id)
+            messages = chat_history(
+                session_id,
+                limit=limit,
+                after_id=after_id,
+                before_id=before_id,
+                audience_source=artifact_audience_source,
+            )
             if wait_sec > 0 and after_id > 0 and not messages:
                 deadline = time.time() + wait_sec
                 while time.time() < deadline:
                     time.sleep(1.0)
-                    messages = chat_history(session_id, limit=limit, after_id=after_id)
+                    messages = chat_history(
+                        session_id,
+                        limit=limit,
+                        after_id=after_id,
+                        audience_source=artifact_audience_source,
+                    )
                     if messages:
                         break
             write_json(
@@ -502,9 +655,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             self.path = "/archive/mobile/" + self.path[len("/archive/client/") :]
 
         if self.path == "/archive/internal/core/administratum-effect":
-            peer = str((self.client_address or ("",))[0] or "")
-            if peer not in {"127.0.0.1", "::1"}:
-                write_json(self, 403, {"ok": False, "error": "loopback only"})
+            if not require_internal_core_auth(self):
                 return
             try:
                 content_length = int(self.headers.get("Content-Length") or 0)
@@ -518,6 +669,42 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 result = run_core_administratum_effect(request.get("effect_id"), request.get("payload"))
             except (json.JSONDecodeError, ValueError) as exc:
                 write_json(self, 400, {"ok": False, "retryable": False, "code": "invalid_effect", "explanation": str(exc)})
+                return
+            status = 200 if result.get("ok") else 503 if result.get("retryable") else 422
+            write_json(self, status, result)
+            return
+
+        if self.path == "/archive/internal/core/artifact-effect":
+            if not require_internal_core_auth(self):
+                return
+            try:
+                content_length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                content_length = -1
+            if content_length < 0 or content_length > 262_144:
+                write_json(self, 413, {"ok": False, "error": "invalid internal effect size"})
+                return
+            try:
+                request = read_json(self)
+                result = run_core_artifact_effect(request.get("effect_id"), request.get("payload"))
+            except (json.JSONDecodeError, ValueError) as exc:
+                write_json(
+                    self,
+                    400,
+                    {"ok": False, "retryable": False, "code": "invalid_effect", "explanation": str(exc)},
+                )
+                return
+            except Exception as exc:
+                write_json(
+                    self,
+                    503,
+                    {
+                        "ok": False,
+                        "retryable": True,
+                        "code": "artifact_store_unavailable",
+                        "explanation": f"Archive не смог надёжно записать доставку файла: {exc}",
+                    },
+                )
                 return
             status = 200 if result.get("ok") else 503 if result.get("retryable") else 422
             write_json(self, status, result)
@@ -610,7 +797,13 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 "stream": False,
             }
             job_id = create_mobile_job("chat", job_payload)
-            run_mobile_job(job_id, lambda payload=job_payload: run_mobile_chat_payload(payload))
+            run_mobile_job(
+                job_id,
+                lambda payload=job_payload: run_mobile_chat_payload(
+                    payload,
+                    trusted_turn_context=payload,
+                ),
+            )
             write_json(self, 202, {"ok": True, "job_id": job_id, "pending": summary["count"], "status": "queued"})
             return
 
@@ -1489,7 +1682,11 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 return self.run_mobile_warmaster_payload(payload)
             if decision.get("action") in {"answer_in_chat", "ask_clarification"} and str(decision.get("reply") or "").strip():
                 payload["forced_chat_reply"] = str(decision.get("reply") or "").strip()
-            return run_mobile_chat_payload(payload, on_token=on_token)
+            return run_mobile_chat_payload(
+                payload,
+                on_token=on_token,
+                trusted_turn_context=payload,
+            )
 
     def mobile_chat_start(self):
         try:
@@ -1507,6 +1704,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         payload["session_id"] = session_id
         payload["memory_namespace"] = shared_memory_namespace(payload.get("memory_namespace"))
         payload["client_source"] = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
+        payload["artifact_audience_source"] = authenticated_artifact_audience(self, payload)
         request_id = ensure_core_transport_identity(payload)
         # Queue immediately. Decision, Magos and execution run under the same
         # four-slot/session gate, so a slow 31B turn cannot time out the start
@@ -1550,6 +1748,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
         payload["session_id"] = session_id
         payload["memory_namespace"] = shared_memory_namespace(payload.get("memory_namespace"))
         payload["client_source"] = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
+        payload["artifact_audience_source"] = authenticated_artifact_audience(self, payload)
         request_id = ensure_core_transport_identity(payload)
         try:
             job_id, created, _job_status = create_mobile_turn_job_once(payload)
@@ -1645,6 +1844,20 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 raise outcome["error"]
             result = outcome.get("result") if isinstance(outcome.get("result"), dict) else {}
             message = str(result.get("message") or "")
+            artifact = result.get("artifact") if isinstance(result.get("artifact"), dict) else None
+            if result.get("action") == "deliver_artifact":
+                sse(
+                    {
+                        "type": "done",
+                        "action": "deliver_artifact",
+                        "full": message,
+                        "artifact_id": result.get("artifact_id") or (artifact or {}).get("artifact_id"),
+                        "artifact": artifact,
+                        "effect_ok": bool(result.get("effect_ok")),
+                        "client_request_id": request_id,
+                    }
+                )
+                return
             if result.get("backend") == "warmaster":
                 sse(
                     {
@@ -1879,6 +2092,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             archive_system_prompt_enabled = internal_flag(payload.get("archive_system_prompt_enabled", True), default=True)
             memory_namespace = shared_memory_namespace(payload.get("memory_namespace") or SHARED_MEMORY_NAMESPACE)
             client_source = str(payload.get("client_source") or payload.get("source") or "app").strip()[:80] or "app"
+            payload["artifact_audience_source"] = authenticated_artifact_audience(self, payload)
             stream = internal_flag(payload.get("stream", True), default=True)
             model = payload.get("model") or DEFAULT_MODEL
             system_prompt = ""
@@ -1954,7 +2168,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             if decision.get("action") in {"answer_in_chat", "ask_clarification"} and str(decision.get("reply") or "").strip():
                 payload["forced_chat_reply"] = str(decision.get("reply") or "").strip()
             try:
-                result = run_mobile_chat_payload(payload)
+                result = run_mobile_chat_payload(payload, trusted_turn_context=payload)
             except ChatQueueBusy as exc:
                 write_json(self, 503, {"error": str(exc), "type": "chat_queue_busy"})
                 return
@@ -1982,6 +2196,7 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             "session_id": payload.get("session_id") or payload.get("user") or SHARED_CHAT_SESSION_ID,
             "memory_namespace": payload.get("memory_namespace") or SHARED_MEMORY_NAMESPACE,
             "client_source": str(payload.get("client_source") or payload.get("source") or "api").strip()[:80] or "api",
+            "artifact_audience_source": authenticated_artifact_audience(self, payload, fallback="api"),
             "archive_enabled": internal_flag(payload.get("archive_enabled", True), default=True),
             "focus_enabled": internal_flag(payload.get("focus_enabled", True), default=True),
             "vector_enabled": internal_flag(payload.get("vector_enabled", True), default=True),
