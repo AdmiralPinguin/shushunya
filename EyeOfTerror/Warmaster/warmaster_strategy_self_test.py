@@ -23,12 +23,13 @@ def main() -> int:
             governor_transport="local",
         )
         if (
-            not code_preflight.get("ok")
+            code_preflight.get("ok")
             or code_preflight.get("governor") != "Ceraxia"
-            or code_preflight.get("contract_summary", {}).get("assigned_governor") != "Ceraxia"
-            or code_preflight.get("contract_summary", {}).get("kind") != "code"
+            or code_preflight.get("route", {}).get("kind") != "code"
+            or code_preflight.get("error_code") != "ceraxia_leader_service_required"
+            or code_preflight.get("actions", {}).get("next_action", {}).get("body", {}).get("governor_transport") != "http"
         ):
-            raise AssertionError(f"code preflight must route to Ceraxia contract, not research: {code_preflight}")
+            raise AssertionError(f"code preflight must route to the live Ceraxia leader: {code_preflight}")
 
         comic_preflight = preflight_task(
             "сделай комикс 4 панели про техножреца",

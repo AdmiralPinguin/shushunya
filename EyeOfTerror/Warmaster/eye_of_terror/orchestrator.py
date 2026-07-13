@@ -26,6 +26,15 @@ from .mission_control import (
     record_warmaster_acceptance,
     task_id_for_message,
 )
+from .native_runs import (
+    NATIVE_CODE_ADAPTER,
+    NATIVE_RESEARCH_ADAPTER,
+    NativeRunAdapter,
+    native_adapter_for_contract,
+    native_adapter_for_execution,
+    native_adapter_for_run,
+    native_adapter_for_route,
+)
 from .run_package import load_json_file, load_json_object, load_ledger_dict, run_oversight, sandbox_artifact_file_status
 from .run_state import list_runs, orchestration_state, run_progress, run_snapshot, run_summary
 from .run_validation import revision_plan_summary, run_oversight_summary, validate_oversight_against_run, validate_revision_plan
@@ -35,14 +44,24 @@ from .task_prepare import prepare_task, preflight_task
 from .views import executable_client_action, orchestration_view_fields, recovery_candidate_display
 
 
-NATIVE_EXECUTION_DESCRIPTOR = {
-    "kind": "skitarii_mission",
-    "step_id": "skitarii",
-    "backend": "SkitariiWarband",
-}
+NATIVE_EXECUTION_DESCRIPTOR = NATIVE_CODE_ADAPTER.execution
 
 _ORCHESTRATE_LOCKS_GUARD = threading.Lock()
 _ORCHESTRATE_LOCKS: dict[str, tuple[threading.RLock, int]] = {}
+
+MAX_STANDARD_EXECUTION_TIMEOUT_SEC = 7_200
+MAX_RESEARCH_WARBAND_TIMEOUT_SEC = 604_800
+
+
+def _execution_timeout_for_run(run_dir: Path, requested: int) -> int:
+    """Clamp execution time without starving the deliberately slow research backend."""
+    adapter = native_adapter_for_run(run_dir, declared=True)
+    limit = (
+        MAX_RESEARCH_WARBAND_TIMEOUT_SEC
+        if adapter is not None and adapter.backend == "ResearchWarband"
+        else MAX_STANDARD_EXECUTION_TIMEOUT_SEC
+    )
+    return max(1, min(int(requested), limit))
 
 
 @contextmanager
@@ -89,6 +108,48 @@ def _skitarii_backend_health(timeout_sec: int) -> dict[str, Any]:
     }
 
 
+def _native_backend_health(
+    adapter: NativeRunAdapter, timeout_sec: int,
+) -> dict[str, Any]:
+    """Run the backend-specific attestation selected by a native adapter."""
+    if adapter is NATIVE_CODE_ADAPTER:
+        return _skitarii_backend_health(timeout_sec)
+    if adapter.backend == "ResearchWarband":
+        try:
+            from .research_warband_bridge import research_warband_backend_health
+        except ImportError as exc:
+            return {
+                "ok": False,
+                "backend": adapter.backend,
+                "service": f"http://127.0.0.1:{adapter.service_port}",
+                "status": "bridge_unavailable",
+                "health": {},
+                "identity": {},
+                "error": f"ResearchWarband bridge is unavailable: {exc}",
+            }
+        health = research_warband_backend_health(max(3, min(timeout_sec, 15)))
+        if not isinstance(health, dict):
+            return {
+                "ok": False,
+                "backend": adapter.backend,
+                "service": f"http://127.0.0.1:{adapter.service_port}",
+                "status": "invalid_health",
+                "health": {},
+                "identity": {},
+                "error": "ResearchWarband health adapter returned a non-object",
+            }
+        return health
+    return {
+        "ok": False,
+        "backend": adapter.backend,
+        "service": f"http://127.0.0.1:{adapter.service_port}",
+        "status": "unsupported_native_backend",
+        "health": {},
+        "identity": {},
+        "error": f"no health adapter is registered for {adapter.backend}",
+    }
+
+
 def _reprepare_action(run_dir: Path, contract: dict[str, Any]) -> dict[str, Any]:
     stem = run_dir.name[:119].rstrip(".-_") or "ceraxia-code-run"
     fresh_task_id = f"{stem}-native"
@@ -112,6 +173,37 @@ def _reprepare_action(run_dir: Path, contract: dict[str, Any]) -> dict[str, Any]
         "reason": (
             "this legacy Ceraxia package has no native execution descriptor; "
             "create a fresh run through the live Ceraxia service"
+        ),
+    }
+
+
+def _native_reprepare_action(
+    run_dir: Path, contract: dict[str, Any], adapter: NativeRunAdapter,
+) -> dict[str, Any]:
+    if adapter is NATIVE_CODE_ADAPTER:
+        return _reprepare_action(run_dir, contract)
+    stem = run_dir.name[:117].rstrip(".-_") or "iskandar-research-run"
+    fresh_task_id = f"{stem}-native"
+    suffix = 2
+    while (run_dir.parent / fresh_task_id).exists():
+        suffix_text = f"-native-{suffix}"
+        fresh_task_id = f"{stem[:127 - len(suffix_text)].rstrip('.-_')}{suffix_text}"
+        suffix += 1
+    return {
+        "kind": f"reprepare_{adapter.name}_run",
+        "method": "POST",
+        "endpoint": "POST /orchestrate_run",
+        "body": {
+            "message": str(contract.get("goal") or ""),
+            "task_id": fresh_task_id,
+            "governor_transport": "http",
+            "run_mode": "http",
+            "auto_start": True,
+            "reuse_existing": False,
+        },
+        "reason": (
+            "native terminal evidence is immutable; create a fresh "
+            f"{adapter.governor} mission"
         ),
     }
 
@@ -146,9 +238,9 @@ def _route_failure(
 def execution_backend_route(run_dir: Path) -> dict[str, Any]:
     """Resolve exactly one execution backend from the persisted run contract.
 
-    New code runs opt in through ``contract['execution']``. Governor names are
-    consulted only to quarantine old Ceraxia six-worker packages; they never opt
-    a new run into the native backend.
+    Native runs opt in through an adapter-owned ``contract['execution']``.
+    Governor names are consulted only to quarantine old Ceraxia six-worker
+    packages; they never opt a new run into a native backend.
     """
     raw_contract, contract_error = load_json_object(run_dir / "contract.json", "contract")
     if contract_error:
@@ -156,64 +248,51 @@ def execution_backend_route(run_dir: Path) -> dict[str, Any]:
         # existing diagnostics instead of changing non-code behaviour here.
         return {
             "ok": True,
+            "native": False,
             "kind": "generic_pipeline",
             "backend": "legacy_pipeline",
             "execution": {},
             "contract_error": contract_error,
         }
 
-    native_detection_error = ""
-    try:
-        from . import native_code_run as native_code_run_api
-        is_native_code_run = native_code_run_api.is_native_code_run
-        load_native_code_run = native_code_run_api.load_native_code_run
-        validate_native_code_run = getattr(
-            native_code_run_api,
-            "validate_native_code_run",
-            None,
-        ) or native_code_run_api.validate_native_code_run_package
-    except ImportError as exc:
-        if raw_contract.get("execution") == NATIVE_EXECUTION_DESCRIPTOR:
-            action = {
-                "kind": "inspect_native_code_run",
-                "method": "GET",
-                "endpoint": "GET /runs/{task_id}/package",
-                "body": {},
-                "reason": "native execution support is unavailable",
-            }
-            return _route_failure(
-                run_dir,
-                phase="native_code_run_invalid",
-                error=str(exc),
-                error_code="native_code_run_invalid",
-                next_action=action,
-                validation_errors=[str(exc)],
-            )
-        is_native = False
-    else:
-        try:
-            is_native = bool(is_native_code_run(run_dir))
-        except Exception as exc:  # noqa: BLE001 - malformed native packages fail closed.
-            is_native = False
-            native_detection_error = str(exc)
-        else:
-            native_detection_error = ""
+    legacy_iskandar = (
+        str(raw_contract.get("assigned_governor") or "") == "IskandarKhayon"
+        and str(raw_contract.get("kind") or "").lower() == "research"
+        and native_adapter_for_execution(
+            raw_contract.get("execution"), declared=True
+        ) is None
+    )
+    if legacy_iskandar:
+        action = _native_reprepare_action(
+            run_dir, raw_contract, NATIVE_RESEARCH_ADAPTER,
+        )
+        action["reason"] = (
+            "the old Iskandar worker-plan executor was removed; create a fresh "
+            "native ResearchWarband mission"
+        )
+        return _route_failure(
+            run_dir,
+            phase="legacy_iskandar_run_removed",
+            error="legacy Iskandar research packages cannot be executed",
+            error_code="legacy_iskandar_run_removed",
+            next_action=action,
+        )
 
-    explicit_native = raw_contract.get("execution") == NATIVE_EXECUTION_DESCRIPTOR
-    if is_native or explicit_native:
+    adapter = native_adapter_for_contract(raw_contract, declared=True)
+    if adapter is not None:
         validation_errors: list[str] = []
-        if native_detection_error:
-            validation_errors.append(native_detection_error)
         try:
-            raw_errors = validate_native_code_run(run_dir)
-            if isinstance(raw_errors, list):
-                validation_errors.extend(str(item) for item in raw_errors if str(item))
+            adapter.is_run(run_dir)
+        except Exception as exc:  # noqa: BLE001 - malformed native packages fail closed.
+            validation_errors.append(str(exc))
+        try:
+            validation_errors.extend(adapter.validate(run_dir))
         except Exception as exc:  # noqa: BLE001 - validation is an executor trust boundary.
             validation_errors.append(str(exc))
         validated_contract: dict[str, Any] = {}
         if not validation_errors:
             try:
-                loaded_native = load_native_code_run(run_dir)
+                loaded_native = adapter.load(run_dir)
                 load_errors = (
                     loaded_native.get("errors")
                     if isinstance(loaded_native.get("errors"), list)
@@ -232,29 +311,36 @@ def execution_backend_route(run_dir: Path) -> dict[str, Any]:
             if isinstance(validated_contract.get("execution"), dict)
             else raw_contract.get("execution")
         )
-        if execution != NATIVE_EXECUTION_DESCRIPTOR:
-            validation_errors.append("contract.execution is not the native Skitarii descriptor")
+        if execution != adapter.execution:
+            validation_errors.append(
+                f"contract.execution is not the native {adapter.backend} descriptor"
+            )
         if validation_errors:
             action = {
-                "kind": "inspect_native_code_run",
+                "kind": f"inspect_{adapter.route_kind}",
                 "method": "GET",
                 "endpoint": "GET /runs/{task_id}/package",
                 "body": {},
-                "reason": "native code-run contract or Ceraxia directive is invalid",
+                "reason": (
+                    f"native {adapter.contract_kind} contract or "
+                    f"{adapter.governor} directive is invalid"
+                ),
             }
             return _route_failure(
                 run_dir,
-                phase="native_code_run_invalid",
-                error="native code-run validation failed",
-                error_code="native_code_run_invalid",
+                phase=adapter.invalid_error_code,
+                error=f"{adapter.route_kind.replace('_', ' ')} validation failed",
+                error_code=adapter.invalid_error_code,
                 next_action=action,
                 validation_errors=validation_errors,
             )
         return {
             "ok": True,
-            "kind": "native_code_run",
-            "backend": "SkitariiWarband",
+            "native": True,
+            "kind": adapter.route_kind,
+            "backend": adapter.backend,
             "execution": dict(execution),
+            "adapter": adapter.to_dict(),
             "native_validation_errors": [],
         }
 
@@ -273,6 +359,7 @@ def execution_backend_route(run_dir: Path) -> dict[str, Any]:
 
     return {
         "ok": True,
+        "native": False,
         "kind": "generic_pipeline",
         "backend": "legacy_pipeline",
         "execution": {},
@@ -323,7 +410,10 @@ def _native_preflight(
     timeout_sec: int,
     force: bool = False,
 ) -> dict[str, Any]:
-    health = _skitarii_backend_health(timeout_sec)
+    adapter = native_adapter_for_route(route)
+    if adapter is None:
+        raise ValueError("native preflight requires an adapter-backed route")
+    health = _native_backend_health(adapter, timeout_sec)
     mission_ref_errors = _native_mission_ref_errors(run_dir)
     preflight = {
         "ok": (
@@ -339,8 +429,8 @@ def _native_preflight(
         "native_validation_errors": route.get("native_validation_errors", []),
         "backend_health": health,
         "mission_ref_errors": mission_ref_errors,
-        "step_ids": ["skitarii"],
-        "steps": [{"step_id": "skitarii", "backend": "SkitariiWarband"}],
+        "step_ids": [adapter.step_id],
+        "steps": [{"step_id": adapter.step_id, "backend": adapter.backend}],
         # Native packages never enter dispatch, artifact-dependency, local-command,
         # oversight, or per-worker preflight.
         "dispatch_errors": [],
@@ -361,8 +451,8 @@ def _native_preflight(
     )
     preflight["run_next_action"] = run_next_action
     # Native terminal evidence is immutable.  A second attempt must be a fresh
-    # Ceraxia mission (or the terminal result's own apply/clarification action),
-    # never an in-place forced rewrite of the old ledger and protocol trail.
+    # governor mission (or the terminal result's own backend action), never an
+    # in-place forced rewrite of the old ledger and protocol trail.
     del force
     immutable_terminal = run_status in {"blocked", "completed", "failed", "cancelled", "corrupt"}
     force_required = bool(run_actions.get("force_required_for_rerun")) and not immutable_terminal
@@ -374,7 +464,7 @@ def _native_preflight(
     ) and not immutable_terminal
     if can_start_run:
         start_action = {
-            "kind": "start_native_code_run",
+            "kind": f"start_{adapter.route_kind}",
             "method": "POST",
             "endpoint": (
                 "POST /runs/{task_id}/start_local"
@@ -382,7 +472,10 @@ def _native_preflight(
                 else "POST /runs/{task_id}/start_http"
             ),
             "body": {},
-            "reason": "native contract, Ceraxia directive, mission link, and Skitarii health passed",
+            "reason": (
+                f"native contract, {adapter.governor} directive, mission link, "
+                f"and {adapter.backend} health passed"
+            ),
         }
         preflight["actions"] = {
             "can_start_run": True,
@@ -412,7 +505,7 @@ def _native_preflight(
             "method": "POST",
             "endpoint": "POST /runs/{task_id}/preflight_http",
             "body": {},
-            "reason": "the declared Skitarii backend is unavailable",
+            "reason": f"the declared {adapter.backend} backend is unavailable",
         }
         preflight["actions"] = {
             "can_start_run": False,
@@ -425,11 +518,12 @@ def _native_preflight(
         terminal_action = run_next_action
         if not terminal_action:
             contract, _ = load_json_object(run_dir / "contract.json", "contract")
-            terminal_action = _reprepare_action(run_dir, contract)
-            terminal_action["kind"] = "reprepare_ceraxia_run"
-            terminal_action["reason"] = (
-                "native terminal evidence is immutable; create a fresh Ceraxia mission"
-            )
+            terminal_action = _native_reprepare_action(run_dir, contract, adapter)
+            if adapter is NATIVE_CODE_ADAPTER:
+                terminal_action["kind"] = "reprepare_ceraxia_run"
+                terminal_action["reason"] = (
+                    "native terminal evidence is immutable; create a fresh Ceraxia mission"
+                )
         preflight["actions"] = {
             "can_start_run": False,
             "can_inspect_package": True,
@@ -477,7 +571,7 @@ def run_execution_preflight(
             "worker_preflight_failures": [],
             "backend_route": backend_route,
         }
-    if backend_route.get("backend") == "SkitariiWarband":
+    if native_adapter_for_route(backend_route) is not None:
         return _native_preflight(
             run_dir,
             backend_route,
@@ -796,7 +890,12 @@ def _orchestrate_run_task_locked(
     force: bool = False,
     reuse_existing: bool = True,
 ) -> dict[str, Any]:
-    prepare_timeout_sec = max(1, min(int(timeout_sec), 7200))
+    requested_timeout_sec = max(
+        1, min(int(timeout_sec), MAX_RESEARCH_WARBAND_TIMEOUT_SEC)
+    )
+    prepare_timeout_sec = min(
+        requested_timeout_sec, MAX_STANDARD_EXECUTION_TIMEOUT_SEC
+    )
     if task_id is not None and not valid_task_id(task_id):
         return {
             "ok": False,
@@ -847,7 +946,9 @@ def _orchestrate_run_task_locked(
                 task_id,
                 run_mode=run_mode,
                 host=host,
-                timeout_sec=prepare_timeout_sec,
+                timeout_sec=_execution_timeout_for_run(
+                    existing_run, requested_timeout_sec
+                ),
                 force=force,
             )
             state = orchestration_state(existing_run, event_limit=5, events_after=0)
@@ -956,7 +1057,9 @@ def _orchestrate_run_task_locked(
                     task_id,
                     run_mode=run_mode,
                     host=host,
-                    timeout_sec=prepare_timeout_sec,
+                    timeout_sec=_execution_timeout_for_run(
+                        run_dir, requested_timeout_sec
+                    ),
                     force=force,
                 )
                 trace.append(
@@ -1067,7 +1170,7 @@ def _orchestrate_run_task_locked(
         run_task_id,
         run_mode=run_mode,
         host=host,
-        timeout_sec=prepare_timeout_sec,
+        timeout_sec=_execution_timeout_for_run(run_dir, requested_timeout_sec),
         force=force,
     )
     trace.append(
@@ -1227,7 +1330,8 @@ def execute_routed_run(
     route = execution_backend_route(run_dir)
     if not route.get("ok"):
         return route
-    if route.get("backend") == "SkitariiWarband":
+    native_adapter = native_adapter_for_route(route)
+    if native_adapter is not None:
         mission_ref_errors = _native_mission_ref_errors(run_dir)
         if mission_ref_errors:
             action = {
@@ -1250,14 +1354,16 @@ def execute_routed_run(
             return failure
         current_status = str(run_summary(run_dir).get("status") or "")
         if current_status in {"blocked", "completed", "failed", "cancelled", "corrupt"}:
-            action = _reprepare_action(
+            action = _native_reprepare_action(
                 run_dir,
                 load_json_object(run_dir / "contract.json", "contract")[0],
+                native_adapter,
             )
-            action["kind"] = "reprepare_ceraxia_run"
-            action["reason"] = (
-                "native terminal evidence is immutable; create a fresh Ceraxia mission"
-            )
+            if native_adapter is NATIVE_CODE_ADAPTER:
+                action["kind"] = "reprepare_ceraxia_run"
+                action["reason"] = (
+                    "native terminal evidence is immutable; create a fresh Ceraxia mission"
+                )
             failure = _route_failure(
                 run_dir,
                 phase="native_terminal_immutable",
@@ -1267,39 +1373,81 @@ def execute_routed_run(
             )
             failure["backend_route"] = route
             return failure
-        health = _skitarii_backend_health(timeout_sec)
+        health = _native_backend_health(native_adapter, timeout_sec)
         if not health.get("ok"):
             action = {
                 "kind": "retry_native_preflight",
                 "method": "POST",
                 "endpoint": "POST /runs/{task_id}/preflight_http",
                 "body": {},
-                "reason": "the declared Skitarii backend is unavailable",
+                "reason": f"the declared {native_adapter.backend} backend is unavailable",
             }
             failure = _route_failure(
                 run_dir,
                 phase="native_backend_unavailable",
-                error=str(health.get("error") or "Skitarii backend is unavailable"),
+                error=str(
+                    health.get("error")
+                    or f"{native_adapter.backend} backend is unavailable"
+                ),
                 error_code="native_backend_unavailable",
                 next_action=action,
             )
             failure["backend_route"] = route
             failure["backend_health"] = health
+            transient_research_failure = (
+                native_adapter.backend == "ResearchWarband"
+            )
+            if transient_research_failure:
+                # Preflight may pass and the service may disappear in the small
+                # window before execution.  No remote mission has been created
+                # at this point, so a transient 7201 outage must leave the
+                # durable native package startable instead of burning its
+                # immutable mission identity as a terminal failure.
+                failure["retryable"] = True
             ledger_path = run_dir / "task_ledger.json"
             if ledger_path.exists():
                 try:
                     ledger = TaskLedger.load(ledger_path)
-                    ledger.record_event("native_backend_preflight_failed", health)
-                    ledger.set_result(failure)
-                    ledger.set_status("failed")
+                    event = dict(health)
+                    if transient_research_failure:
+                        event["retryable"] = True
+                    ledger.record_event("native_backend_preflight_failed", event)
+                    if not transient_research_failure:
+                        # Preserve the established Skitarii failure semantics;
+                        # the research adapter alone has the fresh immutable
+                        # mission retry requirement introduced at cutover.
+                        ledger.set_result(failure)
+                        ledger.set_status("failed")
                 except Exception:  # noqa: BLE001 - failure payload remains authoritative.
                     pass
             return failure
-        result = run_via_skitarii(run_dir, run_dir.name, timeout_sec=timeout_sec)
+        if native_adapter is NATIVE_CODE_ADAPTER:
+            result = run_via_skitarii(run_dir, run_dir.name, timeout_sec=timeout_sec)
+        elif native_adapter.backend == "ResearchWarband":
+            try:
+                from .research_warband_bridge import run_via_research_warband
+            except ImportError as exc:
+                result = {
+                    "ok": False,
+                    "status": "failed",
+                    "error": f"ResearchWarband bridge is unavailable: {exc}",
+                    "error_code": "native_backend_unavailable",
+                }
+            else:
+                result = run_via_research_warband(
+                    run_dir, run_dir.name, timeout_sec=timeout_sec,
+                )
+        else:
+            result = {
+                "ok": False,
+                "status": "failed",
+                "error": f"no execution bridge is registered for {native_adapter.backend}",
+                "error_code": "native_backend_unavailable",
+            }
         routed = dict(result) if isinstance(result, dict) else {
             "ok": False,
             "status": "failed",
-            "error": "Skitarii backend returned a non-object result",
+            "error": f"{native_adapter.backend} backend returned a non-object result",
         }
         routed["backend_route"] = route
         routed["requested_execution_mode"] = execution_mode
@@ -1335,7 +1483,7 @@ def execute_run_cycle(
     backend_route = execution_backend_route(run_dir)
     if not backend_route.get("ok"):
         return backend_route
-    if backend_route.get("backend") == "SkitariiWarband":
+    if native_adapter_for_route(backend_route) is not None:
         return execute_routed_run(
             run_dir,
             run_mode=run_mode,
@@ -1375,9 +1523,9 @@ def research_loop_run(
     if run_mode not in {"local", "http"}:
         raise ValueError("run_mode must be local or http")
     host = validate_service_host(host)
-    timeout_sec = max(1, min(int(timeout_sec), 7200))
-    max_revision_cycles = max(0, min(int(max_revision_cycles), 8))
     run_dir = run_root / task_id
+    timeout_sec = _execution_timeout_for_run(run_dir, timeout_sec)
+    max_revision_cycles = max(0, min(int(max_revision_cycles), 8))
     if not run_dir.exists():
         return {"ok": False, "phase": "missing_run", "task_id": task_id, "error": "run not found"}
     if claim_active:
@@ -1399,7 +1547,7 @@ def research_loop_run(
         backend_route = execution_backend_route(run_dir)
         if not backend_route.get("ok"):
             return backend_route
-        if backend_route.get("backend") == "SkitariiWarband":
+        if native_adapter_for_route(backend_route) is not None:
             return execute_routed_run(
                 run_dir,
                 run_mode=run_mode,
@@ -1666,7 +1814,8 @@ def recovery_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         run_dir = Path(str(run.get("run_dir") or ""))
         backend_route = execution_backend_route(run_dir)
-        native_backend = backend_route.get("backend") == "SkitariiWarband"
+        native_adapter = native_adapter_for_route(backend_route)
+        native_backend = native_adapter is not None
         if backend_route.get("ok") and not native_backend and not actions.get("can_resume"):
             continue
         next_action = (
@@ -1678,14 +1827,14 @@ def recovery_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
         resume_errors: list[str] = []
         pending_step_ids = run.get("progress", {}).get("pending_step_ids", []) if isinstance(run.get("progress"), dict) else []
         if native_backend and backend_route.get("ok"):
-            pending_step_ids = ["skitarii"]
+            pending_step_ids = [native_adapter.step_id]
             resume_ready = True
             next_action = {
-                "kind": "resume_native_code_run",
+                "kind": f"resume_{native_adapter.route_kind}",
                 "method": "POST",
                 "endpoint": "POST /runs/{task_id}/start_resume_http",
                 "body": {},
-                "reason": "resume the atomic Skitarii mission",
+                "reason": f"resume the atomic {native_adapter.backend} mission",
             }
         elif not backend_route.get("ok"):
             resume_errors.append(str(backend_route.get("error") or backend_route.get("error_code") or "run cannot resume"))
@@ -1765,10 +1914,10 @@ def orchestrate_start_run(
     if run_mode not in {"local", "http"}:
         raise ValueError("run_mode must be local or http")
     host = validate_service_host(host)
-    timeout_sec = max(1, min(int(timeout_sec), 7200))
     run_dir = run_root / task_id
     if not run_dir.exists():
         return {"ok": False, "phase": "missing_run", "task_id": task_id, "error": "run not found"}
+    timeout_sec = _execution_timeout_for_run(run_dir, timeout_sec)
     backend_route = execution_backend_route(run_dir)
     if not backend_route.get("ok"):
         return backend_route
@@ -1777,7 +1926,7 @@ def orchestrate_start_run(
     next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}
     execution_mode = "full"
     step_ids: list[str] | None = None
-    native_backend = backend_route.get("backend") == "SkitariiWarband"
+    native_backend = native_adapter_for_route(backend_route) is not None
     if native_backend:
         start_preflight = _native_preflight(
             run_dir,
@@ -1821,12 +1970,12 @@ def orchestrate_start_run(
     elif actions.get("can_resume"):
         operation = "resume"
         execution_mode = "resume"
-        if backend_route.get("backend") != "SkitariiWarband":
+        if native_adapter_for_route(backend_route) is None:
             step_ids = resume_step_ids_from_run(run_dir)
     elif actions.get("can_start_revision"):
         operation = "revision"
         execution_mode = "revision"
-        if backend_route.get("backend") != "SkitariiWarband":
+        if native_adapter_for_route(backend_route) is None:
             step_ids = revision_step_ids_from_run(run_dir)
     elif not native_backend and force and actions.get("force_required_for_rerun"):
         operation = "force_rerun"
@@ -1896,7 +2045,7 @@ def start_recoverable_runs(run_root: Path, mode: str, host: str = "127.0.0.1", t
     if mode not in {"local", "http"}:
         raise ValueError("mode must be local or http")
     host = validate_service_host(host)
-    timeout_sec = max(1, min(int(timeout_sec), 7200))
+    timeout_sec = max(1, min(int(timeout_sec), MAX_RESEARCH_WARBAND_TIMEOUT_SEC))
     all_runs = list_runs(run_root)
     candidates = recovery_summary(all_runs).get("candidates", [])
     results: list[dict[str, Any]] = []
@@ -1908,19 +2057,20 @@ def start_recoverable_runs(run_root: Path, mode: str, host: str = "127.0.0.1", t
         if not task_id:
             continue
         run_dir = run_root / task_id
+        run_timeout_sec = _execution_timeout_for_run(run_dir, timeout_sec)
         ledger_path = run_dir / "task_ledger.json"
         try:
             backend_route = execution_backend_route(run_dir)
             if not backend_route.get("ok"):
                 results.append(backend_route)
                 continue
-            if backend_route.get("backend") == "SkitariiWarband":
+            if native_adapter_for_route(backend_route) is not None:
                 started = orchestrate_start_run(
                     run_root,
                     task_id,
                     run_mode=mode,
                     host=host,
-                    timeout_sec=timeout_sec,
+                    timeout_sec=run_timeout_sec,
                 )
                 if started.get("ok"):
                     started_count += 1
@@ -1952,7 +2102,7 @@ def start_recoverable_runs(run_root: Path, mode: str, host: str = "127.0.0.1", t
                     run_dir,
                     run_mode=mode,
                     host=host,
-                    timeout_sec=timeout_sec,
+                    timeout_sec=run_timeout_sec,
                     workspace_root=workspace_root if mode == "local" else None,
                     step_ids=step_ids or None,
                     execution_mode="resume",

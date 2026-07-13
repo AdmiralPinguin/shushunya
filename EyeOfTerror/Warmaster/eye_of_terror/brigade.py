@@ -9,6 +9,7 @@ from typing import Any
 
 from .gateway_util import validate_service_host
 from .governors import governor_refs
+from .native_runs import native_adapter_for_execution
 from .registry import worker_refs
 from .runtime_state import REPO_ROOT
 
@@ -125,11 +126,12 @@ def contract_summary(contract: dict[str, Any]) -> dict[str, Any]:
         if isinstance(step, dict)
     ]
     execution = contract.get("execution") if isinstance(contract.get("execution"), dict) else {}
-    if not steps and execution.get("kind") == "skitarii_mission":
+    native_adapter = native_adapter_for_execution(execution)
+    if not steps and native_adapter is not None:
         steps = [
             {
-                "step_id": str(execution.get("step_id") or "skitarii"),
-                "worker": str(execution.get("backend") or "SkitariiWarband"),
+                "step_id": native_adapter.step_id,
+                "worker": native_adapter.backend,
                 "depends_on": [],
                 "expected_artifacts": [],
                 "expected_artifact_count": 0,

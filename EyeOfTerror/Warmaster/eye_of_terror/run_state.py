@@ -14,7 +14,7 @@ from EyeOfTerror.common_protocol import LIFECYCLE_STATUSES, TERMINAL_LIFECYCLE_S
 from .actions import run_actions
 from .artifacts import artifact_status, final_manifest_summary, final_package
 from .gateway_util import validate_service_host
-from .native_code_run import is_native_code_run
+from .native_runs import native_adapter_for_run
 from .run_package import load_ledger_dict, load_json_object, run_dispatch_packets, sandbox_artifact_file_status
 from .run_validation import (
     revision_plan_summary,
@@ -370,7 +370,7 @@ def run_summary(run_dir: Path) -> dict[str, Any]:
         not result_next_action
         and str(summary["status"]) == "blocked"
         and str(summary.get("governor") or "") == "Ceraxia"
-        and not is_native_code_run(run_dir)
+        and native_adapter_for_run(run_dir, declared=True) is None
         and (
             str(result.get("phase") or "") == "ceraxia_directive_invalid"
             or "ceraxia_directive" in str(result.get("error") or "").lower()
@@ -519,6 +519,7 @@ WORKER_GOVERNOR_HINTS = {
     "ScriptoriumDaemon": "IskandarKhayon",
     "ReductorVerifier": "IskandarKhayon",
     "FabricatorFinalis": "IskandarKhayon",
+    "ResearchWarband": "IskandarKhayon",
     "SkitariiWarband": "Ceraxia",
     "Promptwright": "Moriana",
     "Canvaswright": "Moriana",
@@ -990,25 +991,47 @@ def payload_with_run_view(payload: dict[str, Any], run_dir: Path, task_id: str =
 
 def run_worker_tasks(run_dir: Path, include_health: bool = False, host: str = "127.0.0.1") -> dict[str, Any]:
     host = validate_service_host(host)
-    if is_native_code_run(run_dir):
+    native_adapter = native_adapter_for_run(run_dir, declared=True)
+    if native_adapter is not None:
         ledger, ledger_error = load_ledger_dict(run_dir / "task_ledger.json")
         if ledger_error:
             return {"ok": False, "error": ledger_error}
-        mission = ledger.get("skitarii_mission") if isinstance(ledger.get("skitarii_mission"), dict) else {}
+        mission = (
+            ledger.get(native_adapter.ledger_mission_key)
+            if isinstance(ledger.get(native_adapter.ledger_mission_key), dict)
+            else {}
+        )
         service_mission_id = str(mission.get("id") or "")
         task: dict[str, Any] = {
-            "step_id": "skitarii",
-            "worker": "SkitariiWarband",
-            "port": 7200,
+            "step_id": native_adapter.step_id,
+            "worker": native_adapter.backend,
+            "port": native_adapter.service_port,
             "task_id": service_mission_id,
             "status": str(mission.get("status") or "not_started"),
             "request_sha256": str(mission.get("request_sha256") or ""),
         }
         if include_health and service_mission_id:
             try:
-                endpoint = f"http://{host}:7200/missions/{quote(service_mission_id, safe='')}"
-                with urllib.request.urlopen(endpoint, timeout=1.0) as response:
-                    payload = json.loads(response.read().decode("utf-8"))
+                if native_adapter.backend == "ResearchWarband":
+                    # Port 7201 is a bearer-authenticated exact-origin boundary.
+                    # Keep credentials and identity validation inside its bridge
+                    # instead of constructing a bare inspection URL in a view.
+                    from .research_warband_bridge import (
+                        inspect_research_warband_mission,
+                    )
+
+                    payload = inspect_research_warband_mission(
+                        service_mission_id,
+                        str(mission.get("request_sha256") or ""),
+                        timeout_sec=1.0,
+                    )
+                else:
+                    endpoint = (
+                        f"http://{host}:{native_adapter.service_port}/missions/"
+                        f"{quote(service_mission_id, safe='')}"
+                    )
+                    with urllib.request.urlopen(endpoint, timeout=1.0) as response:
+                        payload = json.loads(response.read().decode("utf-8"))
                 task["runtime"] = payload if isinstance(payload, dict) else {"ok": False, "error": "mission response is not a JSON object"}
             except Exception as exc:  # noqa: BLE001 - mission lookup is best-effort.
                 task["runtime"] = {"ok": False, "error": str(exc)}

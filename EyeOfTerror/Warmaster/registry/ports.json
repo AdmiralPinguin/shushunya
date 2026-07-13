@@ -8,8 +8,8 @@
     },
     "7101": {
       "name": "IskandarKhayon",
-      "role": "lore research and reconstruction governor",
-      "path": "EyeOfTerror/Scriptorium/IskandarKhayon"
+      "role": "native ResearchWarband leadership governor",
+      "path": "EyeOfTerror/Warmaster/eye_of_terror/inner_circle/iskandar_service.py"
     },
     "7103": {
       "name": "Moriana",
@@ -142,6 +142,12 @@
       "role": "native coding warband for detailed planning, implementation, verification, and repair",
       "path": "EyeOfTerror/Mechanicum/Skitarii",
       "supervisor": "skitarii-warband.service"
+    },
+    "7201": {
+      "name": "ResearchWarband",
+      "role": "native research warband for search, reading, evidence construction, synthesis, verification, and repair",
+      "path": "EyeOfTerror/Scriptorium/ResearchWarband",
+      "supervisor": "research-warband-shadow.service"
     }
   }
 }

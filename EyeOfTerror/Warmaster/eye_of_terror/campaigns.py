@@ -16,6 +16,12 @@ from .native_code_run import (
     is_native_code_run,
     validate_native_code_run_package,
 )
+from .native_research_run import (
+    NATIVE_RESEARCH_EXECUTION,
+    is_native_research_run,
+    load_native_research_run,
+    validate_native_research_run_package,
+)
 from .orchestrator import cancel_http_worker_tasks, research_loop_run
 from .routing import route_message
 from .run_package import load_ledger_dict
@@ -46,6 +52,74 @@ NATIVE_CODE_RESULT_CONTRACT = {
     "artifact_list": "task_ledger.result.artifacts",
     "artifact_root": "task_ledger.result.artifact_root",
     "required_fields": sorted(NATIVE_CODE_RESULT_FIELDS),
+}
+NATIVE_RESEARCH_RESULT_FIELDS = {
+    "ok",
+    "task_id",
+    "phase",
+    "status",
+    "final_step",
+    "summary",
+    "artifacts",
+    "artifact_root",
+    "needs_user",
+    "question",
+    "next_action",
+    "research_warband_mission_id",
+    "research_result",
+    "via",
+}
+NATIVE_RESEARCH_RESULT_CONTRACT = {
+    "kind": "research_warband_bridge_result",
+    "final_step": "research_warband",
+    "evidence_ledger": (
+        "task_ledger.result.research_result.external_evaluator_result.ledger"
+    ),
+    "source_manifest": (
+        "task_ledger.result.research_result.external_evaluator_result.ledger.sources"
+    ),
+    "verification_report": (
+        "task_ledger.result.research_result.pipeline_audit.verification_report"
+    ),
+    "required_fields": sorted(NATIVE_RESEARCH_RESULT_FIELDS),
+}
+RESEARCH_RESULT_ROOT_FIELDS = {
+    "runner_contract_version",
+    "outcome",
+    "reason",
+    "external_evaluator_result",
+    "pipeline_audit",
+}
+RESEARCH_EXTERNAL_RESULT_FIELDS = {
+    "contract_version",
+    "mission_id",
+    "status",
+    "accepted",
+    "final_text",
+    "question",
+    "ledger",
+    "search_log",
+}
+RESEARCH_EVIDENCE_LEDGER_FIELDS = {
+    "sources",
+    "spans",
+    "claims",
+    "evidence_edges",
+    "derivations",
+    "conflicts",
+    "gaps",
+    "final_claim_refs",
+}
+RESEARCH_PIPELINE_AUDIT_FIELDS = {
+    "searched_queries",
+    "acquired_uris",
+    "semantic_reviews",
+    "verification_report",
+    "rounds_used",
+    "model_calls",
+    "diagnostics",
+    "persistent_graph_written",
+    "runtime_attestation_sha256",
 }
 
 
@@ -151,7 +225,8 @@ def decompose_task(message: str, campaign_id: str | None = None, route: dict[str
         "decomposition_strategy": "sequential_research_then_implementation",
         "route": route_payload,
         "global_acceptance_criteria": [
-            "research subrun completes with source-backed brief and final manifest",
+            "research subrun completes through one native Iskandar-to-ResearchWarband mission",
+            "research deliverable is the accepted bridge result and verified evidence ledger",
             "implementation subrun is created only after research handoff is available",
             "implementation task references the campaign handoff input",
             "implementation completes through one native Ceraxia-to-Skitarii mission",
@@ -167,13 +242,11 @@ def decompose_task(message: str, campaign_id: str | None = None, route: dict[str
                 "kind": "research",
                 "depends_on": [],
                 "task": campaign_task_text(goal, "research"),
-                "expected_artifacts": [
-                    "/work/research/research_corpus.json",
-                    "/work/research/source_map.json",
-                    "/work/research/synthesis_plan.json",
-                    "/work/research/reconstruction_ru.md",
-                    "/work/research/final_manifest.json",
-                ],
+                "execution": dict(NATIVE_RESEARCH_EXECUTION),
+                # ResearchWarband owns its internal files and planning.  The
+                # campaign consumes the bridge result and evidence ledger.
+                "expected_artifacts": [],
+                "result_contract": dict(NATIVE_RESEARCH_RESULT_CONTRACT),
                 "produces_handoffs": ["research_to_implementation"],
             },
             {
@@ -197,17 +270,12 @@ def decompose_task(message: str, campaign_id: str | None = None, route: dict[str
                 "id": "research_to_implementation",
                 "from_subrun": "research",
                 "to_subrun": "implementation",
-                "required_artifacts": [
-                    "final_manifest.json",
-                    "research_corpus.json",
-                    "source_map.json",
-                    "synthesis_plan.json",
-                    "reconstruction_ru.md",
-                ],
+                "required_artifacts": [],
+                "required_result_contract": dict(NATIVE_RESEARCH_RESULT_CONTRACT),
                 "summary_required": True,
                 "acceptance_criteria": [
-                    "handoff records source run status and final manifest summary",
-                    "handoff lists available and missing expected artifacts",
+                    "handoff records the exact accepted ResearchWarband bridge result",
+                    "handoff carries the verified evidence ledger and source manifest",
                     "implementation subrun task receives handoff path before creation",
                 ],
             }
@@ -268,6 +336,23 @@ def validate_campaign_plan(plan: dict[str, Any]) -> list[str]:
                 errors.append(
                     f"subrun {subrun_id or index} must consume the Skitarii bridge result contract",
                 )
+        if subrun.get("kind") == "research" or subrun.get("governor") == "IskandarKhayon":
+            if subrun.get("kind") != "research" or subrun.get("governor") != "IskandarKhayon":
+                errors.append(
+                    f"subrun {subrun_id or index} research missions must be owned by IskandarKhayon",
+                )
+            if subrun.get("execution") != NATIVE_RESEARCH_EXECUTION:
+                errors.append(
+                    f"subrun {subrun_id or index} must use the native ResearchWarband execution boundary",
+                )
+            if subrun.get("expected_artifacts") != []:
+                errors.append(
+                    f"subrun {subrun_id or index} must not pre-plan ResearchWarband artifact paths",
+                )
+            if subrun.get("result_contract") != NATIVE_RESEARCH_RESULT_CONTRACT:
+                errors.append(
+                    f"subrun {subrun_id or index} must consume the ResearchWarband bridge result contract",
+                )
     for subrun in subruns:
         if not isinstance(subrun, dict):
             continue
@@ -290,7 +375,26 @@ def validate_campaign_plan(plan: dict[str, Any]) -> list[str]:
         if str(handoff.get("to_subrun") or "") not in seen_ids:
             errors.append(f"handoff {handoff_id or index} to_subrun is unknown")
         required = handoff.get("required_artifacts")
-        if not isinstance(required, list) or not required:
+        if not isinstance(required, list):
+            errors.append(f"handoff {handoff_id or index} required_artifacts must be a list")
+        source = next(
+            (
+                item for item in subruns
+                if isinstance(item, dict)
+                and str(item.get("id") or "") == str(handoff.get("from_subrun") or "")
+            ),
+            {},
+        )
+        if isinstance(source, dict) and source.get("kind") == "research":
+            if required != []:
+                errors.append(
+                    f"handoff {handoff_id or index} must not require legacy research artifacts",
+                )
+            if handoff.get("required_result_contract") != NATIVE_RESEARCH_RESULT_CONTRACT:
+                errors.append(
+                    f"handoff {handoff_id or index} must require the ResearchWarband bridge result",
+                )
+        elif not required:
             errors.append(f"handoff {handoff_id or index} required_artifacts must be non-empty")
     return errors
 
@@ -517,6 +621,145 @@ def run_artifact_names(summary: dict[str, Any]) -> set[str]:
     return names
 
 
+def native_research_result_completion(run_root: Path, task_id: str) -> dict[str, Any]:
+    """Audit the exact Iskandar -> ResearchWarband campaign boundary.
+
+    ResearchWarband deliberately publishes no legacy ``/work/research`` file
+    plan.  Its accepted transport result, evidence ledger, verification report,
+    and proven process cleanup are the deliverable.
+    """
+    run_dir = run_root / task_id
+    errors: list[str] = []
+    if not is_native_research_run(run_dir):
+        errors.append("run is not a native Iskandar-to-ResearchWarband package")
+    package_errors = validate_native_research_run_package(run_dir)
+    errors.extend(f"native package: {error}" for error in package_errors)
+    package = load_native_research_run(run_dir)
+    contract = package.get("contract") if isinstance(package.get("contract"), dict) else {}
+    mission_id = str(contract.get("mission_id") or "")
+
+    ledger, ledger_error = load_ledger_dict(run_dir / "task_ledger.json")
+    if ledger_error:
+        errors.append(f"task ledger: {ledger_error}")
+        ledger = {}
+    result = ledger.get("result") if isinstance(ledger.get("result"), dict) else {}
+    result_fields = set(result)
+    if result_fields != NATIVE_RESEARCH_RESULT_FIELDS:
+        missing = sorted(NATIVE_RESEARCH_RESULT_FIELDS - result_fields)
+        unknown = sorted(result_fields - NATIVE_RESEARCH_RESULT_FIELDS)
+        if missing:
+            errors.append(f"ResearchWarband bridge result is missing fields: {missing}")
+        if unknown:
+            errors.append(f"ResearchWarband bridge result has unknown fields: {unknown}")
+    if result.get("ok") is not True:
+        errors.append("ResearchWarband bridge result is not accepted")
+    if result.get("task_id") != task_id:
+        errors.append("ResearchWarband bridge result task_id does not match the run")
+    if result.get("status") != "completed" or result.get("phase") != "completed":
+        errors.append("ResearchWarband bridge result is not completed")
+    if result.get("final_step") != "research_warband" or result.get("via") != "research_warband":
+        errors.append("ResearchWarband bridge identity is invalid")
+    if result.get("needs_user") is not False or result.get("question") != "":
+        errors.append("completed ResearchWarband result still requires user clarification")
+    if result.get("next_action") != {}:
+        errors.append("completed ResearchWarband result still exposes a next action")
+    if result.get("artifacts") != []:
+        errors.append("native ResearchWarband result must not expose legacy artifact paths")
+    try:
+        if Path(str(result.get("artifact_root") or "")).resolve() != run_dir.resolve():
+            errors.append("ResearchWarband result artifact_root is not the campaign run directory")
+    except OSError as exc:
+        errors.append(f"ResearchWarband result artifact_root is invalid: {exc}")
+    if result.get("research_warband_mission_id") != mission_id:
+        errors.append("ResearchWarband bridge mission id does not match the native contract")
+
+    raw_result = result.get("research_result") if isinstance(result.get("research_result"), dict) else {}
+    if set(raw_result) != RESEARCH_RESULT_ROOT_FIELDS:
+        errors.append("ResearchWarband research_result has missing or unknown fields")
+    if raw_result.get("runner_contract_version") != "research-warband-runner/v1":
+        errors.append("ResearchWarband runner contract version is invalid")
+    if raw_result.get("outcome") not in {"accepted", "accepted_with_uncertainty"}:
+        errors.append("ResearchWarband pipeline outcome is not accepted")
+    if not isinstance(raw_result.get("reason"), str):
+        errors.append("ResearchWarband pipeline reason must be text")
+
+    external = (
+        raw_result.get("external_evaluator_result")
+        if isinstance(raw_result.get("external_evaluator_result"), dict)
+        else {}
+    )
+    if set(external) != RESEARCH_EXTERNAL_RESULT_FIELDS:
+        errors.append("ResearchWarband external result has missing or unknown fields")
+    if external.get("contract_version") != "research-result/v1":
+        errors.append("ResearchWarband external result contract version is invalid")
+    if external.get("mission_id") != mission_id:
+        errors.append("ResearchWarband external result mission id does not match the native contract")
+    if external.get("status") != "accepted" or external.get("accepted") is not True:
+        errors.append("ResearchWarband external result is not accepted")
+    if not isinstance(external.get("final_text"), str) or not external.get("final_text", "").strip():
+        errors.append("ResearchWarband external result omitted final_text")
+    if external.get("question") != "":
+        errors.append("accepted ResearchWarband external result contains a question")
+    if not isinstance(external.get("search_log"), list):
+        errors.append("ResearchWarband search_log must be a list")
+
+    evidence = external.get("ledger") if isinstance(external.get("ledger"), dict) else {}
+    if set(evidence) != RESEARCH_EVIDENCE_LEDGER_FIELDS:
+        errors.append("ResearchWarband evidence ledger has missing or unknown fields")
+    elif any(not isinstance(evidence.get(field), list) for field in RESEARCH_EVIDENCE_LEDGER_FIELDS):
+        errors.append("ResearchWarband evidence ledger collections must be lists")
+    elif not evidence.get("sources"):
+        errors.append("ResearchWarband evidence ledger contains no sources")
+
+    audit = raw_result.get("pipeline_audit") if isinstance(raw_result.get("pipeline_audit"), dict) else {}
+    if set(audit) != RESEARCH_PIPELINE_AUDIT_FIELDS:
+        errors.append("ResearchWarband pipeline audit has missing or unknown fields")
+    verification = audit.get("verification_report") if isinstance(audit.get("verification_report"), dict) else {}
+    if (
+        verification.get("accepted") is not True
+        or verification.get("integrity_ok") is not True
+        or verification.get("issues") not in ([], None)
+    ):
+        errors.append("ResearchWarband verification report did not pass cleanly")
+    if audit.get("persistent_graph_written") is not False:
+        errors.append("ResearchWarband unexpectedly wrote to the trusted graph")
+    if not str(audit.get("runtime_attestation_sha256") or "").strip():
+        errors.append("ResearchWarband runtime attestation is missing")
+
+    remote = (
+        ledger.get("research_warband_mission")
+        if isinstance(ledger.get("research_warband_mission"), dict)
+        else {}
+    )
+    if remote.get("id") != mission_id or remote.get("status") != "done":
+        errors.append("ResearchWarband service mission identity or terminal status is invalid")
+    if remote.get("inflight") is not False or remote.get("cleanup_complete") is not True:
+        errors.append("ResearchWarband service process cleanup was not proven")
+    request_sha256 = str(remote.get("request_sha256") or "")
+    if len(request_sha256) != 64 or any(char not in "0123456789abcdef" for char in request_sha256):
+        errors.append("ResearchWarband service request identity is invalid")
+
+    source_manifest = {
+        "sources": evidence.get("sources", []) if isinstance(evidence, dict) else [],
+        "search_log": external.get("search_log", []) if isinstance(external, dict) else [],
+    }
+    return {
+        "ok": not errors,
+        "kind": "research_warband_bridge_result",
+        "task_id": task_id,
+        "final_step": str(result.get("final_step") or ""),
+        "status": str(result.get("status") or ""),
+        "mission_id": mission_id,
+        "package_errors": package_errors,
+        "answer": str(external.get("final_text") or ""),
+        "evidence_ledger": evidence,
+        "source_manifest": source_manifest,
+        "verification_report": verification,
+        "service_mission": remote,
+        "errors": errors,
+    }
+
+
 def native_code_result_completion(run_root: Path, task_id: str) -> dict[str, Any]:
     """Audit the native Ceraxia -> Skitarii boundary used by a campaign.
 
@@ -678,9 +921,20 @@ def create_handoff(run_root: Path, campaign_id: str, plan: dict[str, Any], state
     source_task_id = str(source_state.get("task_id") or "")
     source_summary = run_summary(run_root / source_task_id)
     source_protocol = subrun_protocol_completion(run_root, source_task_id) if source_task_id else {"ok": False, "errors": ["source task_id is missing"]}
-    available_names = run_artifact_names(source_summary)
+    source_plan = subrun_plan(plan, source_id)
+    native_research = (
+        native_research_result_completion(run_root, source_task_id)
+        if source_task_id and source_plan.get("kind") == "research"
+        else {}
+    )
+    available_names = (
+        set() if native_research else run_artifact_names(source_summary)
+    )
     required_names = [str(item) for item in handoff_plan.get("required_artifacts", []) if isinstance(item, str)]
     missing = [name for name in required_names if name not in available_names]
+    research_result_ready = (
+        native_research.get("ok") is True if native_research else True
+    )
     payload = {
         "schema_version": 1,
         "handoff_id": handoff_id,
@@ -691,8 +945,11 @@ def create_handoff(run_root: Path, campaign_id: str, plan: dict[str, Any], state
         "source_status": source_summary.get("status"),
         "source_protocol_completion": source_protocol,
         "source_goal": source_summary.get("goal"),
-        "source_final_manifest_summary": source_summary.get("final_manifest_summary", {}),
         "source_result": source_summary.get("result", {}),
+        "source_native_completion": native_research,
+        "source_evidence_ledger": native_research.get("evidence_ledger", {}),
+        "source_manifest": native_research.get("source_manifest", {}),
+        "source_verification_report": native_research.get("verification_report", {}),
         "required_artifacts": required_names,
         "available_artifact_names": sorted(available_names),
         "missing_required_artifacts": missing,
@@ -702,7 +959,7 @@ def create_handoff(run_root: Path, campaign_id: str, plan: dict[str, Any], state
             "target must preserve original task acceptance criteria unless explicitly blocked",
         ],
         "acceptance_criteria": handoff_plan.get("acceptance_criteria", []),
-        "status": "ready" if not missing and source_summary.get("status") == "completed" and source_protocol.get("ok") is True else "incomplete",
+        "status": "ready" if not missing and research_result_ready and source_summary.get("status") == "completed" and source_protocol.get("ok") is True else "incomplete",
         "created_at": now_iso(),
     }
     handoff_path = campaign_dir(run_root, campaign_id) / "handoffs" / f"{handoff_id}.json"
@@ -718,6 +975,7 @@ def create_handoff(run_root: Path, campaign_id: str, plan: dict[str, Any], state
             "checks": [
                 {"name": "source_completed", "ok": source_summary.get("status") == "completed"},
                 {"name": "source_protocol_completed", "ok": source_protocol.get("ok") is True, "errors": source_protocol.get("errors", [])},
+                {"name": "native_research_result_verified", "ok": research_result_ready, "errors": native_research.get("errors", [])},
                 {"name": "required_artifacts_available", "ok": not missing, "missing": missing},
             ],
         }
@@ -757,6 +1015,23 @@ def final_review(run_root: Path, campaign_id: str, plan: dict[str, Any], state: 
                     "errors": native_completion.get("errors", []),
                 }
             )
+        if subrun.get("kind") == "research":
+            native_completion = native_research_result_completion(run_root, task_id)
+            native_results[subrun_id] = native_completion
+            checks.append(
+                {
+                    "name": f"native_research_warband_result:{subrun_id}",
+                    "ok": native_completion.get("ok") is True,
+                    "final_step": native_completion.get("final_step", ""),
+                    "status": native_completion.get("status", ""),
+                    "source_count": len(
+                        native_completion.get("source_manifest", {}).get("sources", [])
+                        if isinstance(native_completion.get("source_manifest"), dict)
+                        else []
+                    ),
+                    "errors": native_completion.get("errors", []),
+                }
+            )
         for handoff_id in subrun.get("requires_handoffs", []) if isinstance(subrun.get("requires_handoffs"), list) else []:
             task_text = str(subrun.get("task") or "")
             handoff_state = handoff_states.get(str(handoff_id), {}) if isinstance(handoff_states, dict) else {}
@@ -778,12 +1053,23 @@ def final_review(run_root: Path, campaign_id: str, plan: dict[str, Any], state: 
         summary = subrun_state.get("run_summary") if isinstance(subrun_state.get("run_summary"), dict) else {}
         result = summary.get("result") if isinstance(summary.get("result"), dict) else {}
         if subrun_id in native_results:
-            deliverables[subrun_id] = {
-                "kind": "skitarii_bridge_result",
-                "result": result,
-                "artifact_status": native_results[subrun_id].get("artifact_status", []),
-                "patch_stage": native_results[subrun_id].get("patch_stage", {}),
-            }
+            if native_results[subrun_id].get("kind") == "research_warband_bridge_result":
+                deliverables[subrun_id] = {
+                    "kind": "research_warband_bridge_result",
+                    "result": result,
+                    "answer": native_results[subrun_id].get("answer", ""),
+                    "evidence_ledger": native_results[subrun_id].get("evidence_ledger", {}),
+                    "source_manifest": native_results[subrun_id].get("source_manifest", {}),
+                    "verification_report": native_results[subrun_id].get("verification_report", {}),
+                    "service_mission": native_results[subrun_id].get("service_mission", {}),
+                }
+            else:
+                deliverables[subrun_id] = {
+                    "kind": "skitarii_bridge_result",
+                    "result": result,
+                    "artifact_status": native_results[subrun_id].get("artifact_status", []),
+                    "patch_stage": native_results[subrun_id].get("patch_stage", {}),
+                }
         else:
             deliverables[subrun_id] = result
     report = {
@@ -842,6 +1128,15 @@ def refresh_campaign_state(run_root: Path, campaign_id: str) -> dict[str, Any]:
                 if protocol_completion.get("ok") is not True:
                     all_completed = False
                     continue
+                if item.get("kind") == "research":
+                    native_completion = native_research_result_completion(
+                        run_root, task_id,
+                    )
+                    sub_state["native_completion"] = native_completion
+                    if native_completion.get("ok") is not True:
+                        blocked = True
+                        all_completed = False
+                        continue
                 for handoff_id in item.get("produces_handoffs", []) if isinstance(item.get("produces_handoffs"), list) else []:
                     handoff_state = state.get("handoffs", {}).get(str(handoff_id), {}) if isinstance(state.get("handoffs"), dict) else {}
                     if handoff_state.get("status") != "ready":
@@ -986,10 +1281,13 @@ def create_subrun(run_root: Path, campaign_id: str, subrun_id: str, governor_tra
             "mission": mission,
             "error_code": "campaign_subrun_governor_mismatch",
         }
-    # Ceraxia is a live leadership service: its single delegation decision and
-    # signed directive cannot be synthesized by the old local planner path.
+    # Native warband leaders are live leadership services: their single
+    # delegation decisions and signed directives cannot be synthesized by the
+    # removed local planner paths.
     effective_governor_transport = (
-        "http" if (assigned_governor or expected_governor) == "Ceraxia" else governor_transport
+        "http"
+        if (assigned_governor or expected_governor) in {"Ceraxia", "IskandarKhayon"}
+        else governor_transport
     )
     prepared = prepare_task(
         str(mission.get("governor_task") or subrun["task"]),

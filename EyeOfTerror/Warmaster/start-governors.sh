@@ -2,6 +2,14 @@
 # Governors (Iskandar 7101, Ceraxia 7104) + Warmaster gateway (7000).
 cd /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/Warmaster || exit 1
 PY=../../DemonsForge/DemonsForge/bin/python
+RESEARCH_SECRET=/media/shushunya/SHUSHUNYA/shushunya/.secrets/research-warband-shadow.env
+if [ -r "$RESEARCH_SECRET" ]; then
+  set -a
+  # Operator-owned mode-0600 EnvironmentFile also supplies the exact 7201 token
+  # to Iskandar and Abaddon. Never echo it or copy it into repository config.
+  . "$RESEARCH_SECRET"
+  set +a
+fi
 mkdir -p runtime
 start() {
   local name="$1" port="$2"; shift 2

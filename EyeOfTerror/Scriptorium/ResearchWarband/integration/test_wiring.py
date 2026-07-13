@@ -615,6 +615,7 @@ class WiringTests(unittest.TestCase):
                 "gemma_max_num_seqs": 1,
                 "research_max_active": 1,
                 "gemma_max_tokens": 2048,
+                "reader_max_tokens": 1024,
                 "writer_max_tokens": 1024,
                 "gemma_max_context_chars": 24000,
                 "gemma_timeout_sec": 7200,
@@ -675,9 +676,13 @@ class WiringTests(unittest.TestCase):
         self.assertEqual(["gemma", "gemma"], [call["route"] for call in calls])
         self.assertEqual(["other", "other"], [call["priority"] for call in calls])
         self.assertNotIn("qwen", [call["route"] for call in calls])
-        self.assertEqual({"writer": 1024}, calls[0]["role_max_tokens"])
         self.assertEqual(
-            {"semantic_verifier": 1280}, calls[1]["role_max_tokens"]
+            {"reader": 1024, "writer": 1024},
+            calls[0]["role_max_tokens"],
+        )
+        self.assertEqual(
+            {"reader_coverage": 1024, "semantic_verifier": 1280},
+            calls[1]["role_max_tokens"],
         )
 
         self.assertTrue(

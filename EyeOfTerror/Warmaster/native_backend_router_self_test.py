@@ -449,20 +449,12 @@ def main() -> int:
             encoding="utf-8",
         )
         generic_route = orchestrator.execution_backend_route(generic_run)
-        assert generic_route.get("ok") is True, generic_route
-        assert generic_route.get("backend") == "legacy_pipeline", generic_route
-        with patch.object(
-            orchestrator,
-            "execute_http_run",
-            lambda *_args, **_kwargs: {"ok": True, "backend": "legacy_pipeline"},
-        ):
-            generic_execution = orchestrator.execute_routed_run(
-                generic_run,
-                run_mode="http",
-                host="127.0.0.1",
-                timeout_sec=10,
-            )
-        assert generic_execution == {"ok": True, "backend": "legacy_pipeline"}, generic_execution
+        assert generic_route.get("ok") is False, generic_route
+        assert generic_route.get("error_code") == "legacy_iskandar_run_removed", generic_route
+        assert generic_route.get("next_action", {}).get("kind") == "reprepare_native_research_run", generic_route
+        assert generic_route.get("next_action", {}).get("endpoint") == "POST /orchestrate_run", generic_route
+        assert generic_route.get("next_action", {}).get("body", {}).get("task_id") != generic_run.name, generic_route
+        assert generic_route.get("next_action", {}).get("body", {}).get("governor_transport") == "http", generic_route
 
     print("[ok] native backend router")
     return 0

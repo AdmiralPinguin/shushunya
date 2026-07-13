@@ -11,7 +11,7 @@ from EyeOfTerror.common_protocol import ProtocolValidationError, validate_protoc
 
 from .brigade import contract_summary
 from .local_executor import ordered_dispatch_paths
-from .native_code_run import is_native_code_run, load_native_code_run, validate_native_code_run_package
+from .native_runs import NativeRunAdapter, native_adapter_for_run
 from .oversight_guard import compact_oversight_summary, downstream_revision_steps, validate_oversight_payload
 from .run_package import load_json_file, load_json_object, run_contract, run_dispatch_packets, run_oversight
 
@@ -74,18 +74,25 @@ def validate_revision_plan(run_dir: Path, revision_plan: dict[str, Any]) -> list
     raw_steps = revision_plan.get("steps")
     if not isinstance(raw_steps, list) or not raw_steps:
         return ["revision_plan.steps must be a non-empty list when required"]
-    if is_native_code_run(run_dir):
+    native_adapter = native_adapter_for_run(run_dir, declared=True)
+    if native_adapter is not None:
         errors: list[str] = []
         if len(raw_steps) != 1:
-            errors.append("native revision_plan must contain exactly one Skitarii step")
+            errors.append(
+                f"native revision_plan must contain exactly one {native_adapter.backend} step"
+            )
         for index, item in enumerate(raw_steps):
             if not isinstance(item, dict):
                 errors.append(f"revision_plan.steps[{index}] must be an object")
                 continue
-            if str(item.get("step_id") or "").strip() != "skitarii":
-                errors.append("native revision_plan step_id must be skitarii")
-            if str(item.get("worker") or "").strip() != "SkitariiWarband":
-                errors.append("native revision_plan worker must be SkitariiWarband")
+            if str(item.get("step_id") or "").strip() != native_adapter.step_id:
+                errors.append(
+                    f"native revision_plan step_id must be {native_adapter.step_id}"
+                )
+            if str(item.get("worker") or "").strip() != native_adapter.backend:
+                errors.append(
+                    f"native revision_plan worker must be {native_adapter.backend}"
+                )
             for field_name in ("reason", "source", "priority"):
                 if field_name in item and not isinstance(item.get(field_name), str):
                     errors.append(f"revision_plan.steps[{index}].{field_name} must be a string")
@@ -183,8 +190,9 @@ def revision_plan_summary(revision_plan: dict[str, Any], revision_plan_errors: l
 def run_package_action_errors(run_dir: Path) -> list[str]:
     if not (run_dir / "status.json").exists() or not (run_dir / "contract.json").exists():
         return []
-    if is_native_code_run(run_dir):
-        return validate_native_code_run_package(run_dir)
+    native_adapter = native_adapter_for_run(run_dir, declared=True)
+    if native_adapter is not None:
+        return native_adapter.validate(run_dir)
     errors: list[str] = []
     status, status_error = load_json_object(run_dir / "status.json", "status")
     if status_error:
@@ -198,9 +206,10 @@ def run_package_action_errors(run_dir: Path) -> list[str]:
 
 
 def run_oversight_diagnostics(run_dir: Path) -> dict[str, Any]:
-    if is_native_code_run(run_dir):
-        loaded = load_native_code_run(run_dir)
-        errors = validate_native_code_run_package(run_dir)
+    native_adapter = native_adapter_for_run(run_dir, declared=True)
+    if native_adapter is not None:
+        loaded = native_adapter.load(run_dir)
+        errors = native_adapter.validate(run_dir)
         directive = loaded.get("leadership_directive") if isinstance(loaded.get("leadership_directive"), dict) else {}
         governor_plan = loaded.get("governor_plan") if isinstance(loaded.get("governor_plan"), dict) else {}
         return {
@@ -209,7 +218,7 @@ def run_oversight_diagnostics(run_dir: Path) -> dict[str, Any]:
             "leadership_directive": directive,
             "governor_plan": governor_plan,
             "oversight": governor_plan,
-            "summary": _native_leadership_summary(loaded),
+            "summary": _native_leadership_summary(loaded, native_adapter),
             "validation": {"ok": not errors, "errors": errors},
             **({"error_code": "corrupt_native_run", "error": errors[0]} if errors else {}),
         }
@@ -227,9 +236,10 @@ def run_oversight_diagnostics(run_dir: Path) -> dict[str, Any]:
 
 
 def run_package_diagnostics(run_dir: Path) -> dict[str, Any]:
-    if is_native_code_run(run_dir):
-        loaded = load_native_code_run(run_dir)
-        errors = validate_native_code_run_package(run_dir)
+    native_adapter = native_adapter_for_run(run_dir, declared=True)
+    if native_adapter is not None:
+        loaded = native_adapter.load(run_dir)
+        errors = native_adapter.validate(run_dir)
         contract = loaded.get("contract") if isinstance(loaded.get("contract"), dict) else {}
         return {
             "ok": not errors,
@@ -239,14 +249,14 @@ def run_package_diagnostics(run_dir: Path) -> dict[str, Any]:
             "validation": {"ok": not errors, "errors": errors},
             "files": {
                 "contract": (run_dir / "contract.json").exists(),
-                "leadership_directive": (run_dir / "ceraxia_directive.json").exists(),
+                "leadership_directive": (run_dir / native_adapter.directive_filename).exists(),
                 "governor_plan": (run_dir / "governor_plan.json").exists(),
                 "status": (run_dir / "status.json").exists(),
                 "receipt": (run_dir / "native_run_receipt.json").exists(),
                 "dispatch_dir": False,
             },
             "contract_summary": contract_summary(contract) if contract else {},
-            "oversight_summary": _native_leadership_summary(loaded),
+            "oversight_summary": _native_leadership_summary(loaded, native_adapter),
             "dispatch_count": 0,
         }
     status, status_error = load_json_object(run_dir / "status.json", "status")
@@ -284,8 +294,11 @@ def run_package_diagnostics(run_dir: Path) -> dict[str, Any]:
 
 
 def run_oversight_summary(run_dir: Path) -> dict[str, Any]:
-    if is_native_code_run(run_dir):
-        return _native_leadership_summary(load_native_code_run(run_dir))
+    native_adapter = native_adapter_for_run(run_dir, declared=True)
+    if native_adapter is not None:
+        return _native_leadership_summary(
+            native_adapter.load(run_dir), native_adapter,
+        )
     payload = run_oversight(run_dir)
     if not payload.get("ok"):
         return {}
@@ -296,8 +309,9 @@ def run_oversight_summary(run_dir: Path) -> dict[str, Any]:
 def run_oversight_validation_errors(run_dir: Path, status: dict[str, Any]) -> list[str]:
     if not (run_dir / "status.json").exists() or not (run_dir / "contract.json").exists():
         return []
-    if is_native_code_run(run_dir):
-        return validate_native_code_run_package(run_dir)
+    native_adapter = native_adapter_for_run(run_dir, declared=True)
+    if native_adapter is not None:
+        return native_adapter.validate(run_dir)
     payload = run_oversight(run_dir)
     if not payload.get("ok"):
         return [str(payload.get("error") or "oversight unavailable")]
@@ -314,8 +328,9 @@ def validate_oversight_against_run(run_dir: Path, oversight: dict[str, Any], sta
 
 
 def run_dispatch_package_errors(run_dir: Path, status: dict[str, Any]) -> list[str]:
-    if is_native_code_run(run_dir):
-        return validate_native_code_run_package(run_dir)
+    native_adapter = native_adapter_for_run(run_dir, declared=True)
+    if native_adapter is not None:
+        return native_adapter.validate(run_dir)
     errors: list[str] = []
     dispatch_dir = run_dir / "dispatch"
     if not dispatch_dir.exists():
@@ -398,12 +413,14 @@ def run_dispatch_package_errors(run_dir: Path, status: dict[str, Any]) -> list[s
     return errors
 
 
-def _native_leadership_summary(loaded: dict[str, Any]) -> dict[str, Any]:
+def _native_leadership_summary(
+    loaded: dict[str, Any], adapter: NativeRunAdapter,
+) -> dict[str, Any]:
     directive = loaded.get("leadership_directive") if isinstance(loaded.get("leadership_directive"), dict) else {}
     contract = loaded.get("contract") if isinstance(loaded.get("contract"), dict) else {}
     return {
-        "governor": "Ceraxia",
-        "kind": "native_code_leadership",
+        "governor": adapter.governor,
+        "kind": adapter.leadership_kind,
         "mission_id": str(contract.get("mission_id") or directive.get("mission_id") or ""),
         "decision": str(directive.get("decision") or ""),
         "delegated_to": str(directive.get("delegated_to") or ""),

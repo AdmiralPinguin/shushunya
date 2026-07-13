@@ -569,12 +569,23 @@ def main() -> int:
 
                 plan = request_json(gateway_base + "/brigade_plan")
                 warbands = plan.get("warbands") if isinstance(plan.get("warbands"), list) else []
+                warbands_by_name = {
+                    str(item.get("name") or ""): item
+                    for item in warbands
+                    if isinstance(item, dict)
+                }
                 if (
-                    plan.get("ports", {}).get("warbands") != {"SkitariiWarband": 7200}
-                    or len(warbands) != 1
-                    or warbands[0].get("name") != "SkitariiWarband"
-                    or warbands[0].get("lifecycle") != "externally_managed"
-                    or warbands[0].get("supervisor") != "skitarii-warband.service"
+                    plan.get("ports", {}).get("warbands")
+                    != {"SkitariiWarband": 7200, "ResearchWarband": 7201}
+                    or set(warbands_by_name) != {"SkitariiWarband", "ResearchWarband"}
+                    or warbands_by_name["SkitariiWarband"].get("lifecycle")
+                    != "externally_managed"
+                    or warbands_by_name["SkitariiWarband"].get("supervisor")
+                    != "skitarii-warband.service"
+                    or warbands_by_name["ResearchWarband"].get("lifecycle")
+                    != "externally_managed"
+                    or warbands_by_name["ResearchWarband"].get("supervisor")
+                    != "research-warband-shadow.service"
                 ):
                     raise AssertionError(f"gateway brigade plan lost the native warband lifecycle: {plan}")
                 worker_names = {

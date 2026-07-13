@@ -11,9 +11,11 @@ knowledge-graph mutation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+import hashlib
 import re
 import unicodedata
 from typing import Any, Callable, Mapping, Sequence, TypeVar
+from urllib.parse import urlsplit
 
 from .execution_policy import ExecutionPolicy
 from .model_client import (
@@ -41,6 +43,7 @@ from .reader import (
 from .research_tools import (
     AcquisitionError,
     ClosedWorldCatalogAdapter,
+    ExactSourceClassifier,
     FetchAdapter,
     FetchedSource,
     SearchAdapter,
@@ -91,10 +94,53 @@ _SEARCH_URL_RE = re.compile(r"(?i)(?:https?://|file://|www\.)\S+")
 MAX_CLARIFICATION_TURNS = 16
 MAX_CLARIFICATION_FIELD_BYTES = 8_000
 MAX_CLARIFICATION_TOTAL_BYTES = 16_000
+MAX_CALLER_SOURCE_URLS = 8
+MAX_CALLER_SOURCE_URL_BYTES = 2_000
 _MAX_AUTHOR_REPAIR_ATTEMPTS = 1
 _MAX_ANALYST_REPAIR_ATTEMPTS = 2
 _MAX_REPAIR_VALIDATOR_ERROR_CHARS = 512
+_MAX_SOURCE_POLICY_SKIP_DIAGNOSTICS = 32
 _ValidatedAuthorResponse = TypeVar("_ValidatedAuthorResponse")
+
+
+def caller_source_urls_from_text(value: str) -> tuple[str, ...]:
+    """Extract exact caller-supplied HTTP(S) sources without inventing any.
+
+    The full commander request remains outside Iskandar's leadership directive.
+    Only explicit URL tokens cross into the Warband plan, and every token is
+    bounded and structurally safe before the network boundary sees it.
+    """
+
+    if type(value) is not str:
+        raise TypeError("caller source text must be a string")
+    result: list[str] = []
+    seen: set[str] = set()
+    for match in _SEARCH_URL_RE.finditer(value):
+        url = match.group(0).rstrip(".,;:!?)\"]}")
+        try:
+            parsed = urlsplit(url)
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError(f"caller source URL is malformed: {exc}") from exc
+        if parsed.scheme.casefold() not in {"http", "https"}:
+            raise ValueError("caller source URLs must use explicit http or https")
+        if not parsed.hostname:
+            raise ValueError("caller source URL must contain a hostname")
+        if parsed.username or parsed.password:
+            raise ValueError("caller source URL credentials are forbidden")
+        if port is not None and not 1 <= port <= 65535:
+            raise ValueError("caller source URL port is outside the valid range")
+        if len(url.encode("utf-8")) > MAX_CALLER_SOURCE_URL_BYTES:
+            raise ValueError("caller source URL exceeds the UTF-8 byte budget")
+        folded = url.casefold()
+        if folded not in seen:
+            seen.add(folded)
+            result.append(url)
+    if len(result) > MAX_CALLER_SOURCE_URLS:
+        raise ValueError(
+            f"caller request contains more than {MAX_CALLER_SOURCE_URLS} source URLs"
+        )
+    return tuple(result)
 
 
 def _catalog_terms(value: str) -> frozenset[str]:
@@ -476,6 +522,7 @@ class ResearchSpec:
     question: str
     mode: str
     execution_policy: ExecutionPolicy
+    caller_source_urls: tuple[str, ...] = ()
     priorities: tuple[str, ...] = ()
     scope_boundaries: tuple[str, ...] = ()
     source_policy: tuple[str, ...] = ()
@@ -500,6 +547,19 @@ class ResearchSpec:
             raise ValueError("ResearchSpec identity does not match its execution policy")
         if self.question.strip() != self.execution_policy.research_objective.strip():
             raise ValueError("ResearchSpec.question must preserve the directive objective exactly")
+        if type(self.caller_source_urls) is not tuple:
+            raise TypeError("ResearchSpec.caller_source_urls must be a tuple")
+        if len(self.caller_source_urls) > MAX_CALLER_SOURCE_URLS:
+            raise ValueError(
+                f"ResearchSpec.caller_source_urls exceeds {MAX_CALLER_SOURCE_URLS} URLs"
+            )
+        normalized_urls = caller_source_urls_from_text(
+            " ".join(self.caller_source_urls)
+        )
+        if normalized_urls != self.caller_source_urls:
+            raise ValueError(
+                "ResearchSpec.caller_source_urls must contain unique exact HTTP(S) URLs"
+            )
         if self.mode not in RESEARCH_MODES:
             raise ValueError(
                 f"ResearchSpec.mode must be one of: {', '.join(sorted(RESEARCH_MODES))}"
@@ -563,6 +623,7 @@ class ResearchSpec:
         cls,
         directive: Mapping[str, Any],
         *,
+        caller_source_urls: tuple[str, ...] = (),
         hypotheses: tuple[HypothesisSpec, ...] = (),
         scope_boundaries: tuple[str, ...] = (),
         language_policy: tuple[str, ...] = (),
@@ -576,6 +637,7 @@ class ResearchSpec:
             question=policy.research_objective,
             mode=policy.research_mode,
             execution_policy=policy,
+            caller_source_urls=caller_source_urls,
             priorities=policy.priorities,
             scope_boundaries=scope_boundaries,
             source_policy=(policy.source_policy,),
@@ -591,6 +653,7 @@ class ResearchSpec:
             "task_id": self.task_id,
             "mission_id": self.mission_id,
             "question": self.question,
+            "caller_source_urls": list(self.caller_source_urls),
             "mode": self.mode,
             "execution_policy": self.execution_policy.to_dict(),
             "execution_policy_sha256": self.execution_policy.directive_sha256,
@@ -848,6 +911,7 @@ class _RunState:
     closed_world_catalog_discovered: bool = False
     closed_world_catalog_identity: str = ""
     closed_world_catalog_selected_count: int = 0
+    source_policy_skips: int = 0
 
 
 def _empty_ledger(snapshots: Sequence[SourceSnapshot] = ()) -> EvidenceLedger:
@@ -1136,6 +1200,11 @@ class ResearchPipeline:
                 "artifact_class_plus_requested_value_type_requires_proceed": True,
                 "clarify_only_when_artifact_scope_and_deliverable_are_unspecified": True,
             },
+            "caller_source_policy": {
+                "caller_source_urls_are_exact_immutable_inputs": True,
+                "caller_source_urls_are_classified_and_fetched_directly": True,
+                "inventing_or_rewriting_urls_is_forbidden": True,
+            },
             "allowed_modes": sorted(RESEARCH_MODES),
             "hypothesis_policy": (
                 "two_or_three_only_for_investigation_or_interpretation"
@@ -1223,9 +1292,31 @@ class ResearchPipeline:
             )
 
         hypotheses: tuple[HypothesisSpec, ...] = plan["hypotheses"]
+        exact_hits: tuple[SearchHit, ...] = ()
+        if spec.caller_source_urls:
+            if len(spec.caller_source_urls) > state.budgets.max_sources:
+                raise ResearchBudgetExhausted(
+                    "caller supplied more exact source URLs than the source budget"
+                )
+            if not isinstance(self.search, ExactSourceClassifier):
+                raise ResearchPipelineError(
+                    "search boundary cannot classify caller-supplied exact source URLs"
+                )
+            exact_hits = tuple(
+                self.search.classify_exact_source(url)
+                for url in spec.caller_source_urls
+            )
+            if tuple(hit.url for hit in exact_hits) != spec.caller_source_urls:
+                raise ResearchProtocolError(
+                    "exact source classifier changed caller-supplied URL identity"
+                )
         for round_number in range(1, state.budgets.max_rounds + 1):
             state.rounds_used = round_number
-            self._acquire_round(state, pending_queries)
+            self._acquire_round(
+                state,
+                pending_queries,
+                exact_hits=exact_hits if round_number == 1 else (),
+            )
             self._read_new_snapshots(spec, state, round_number)
             analyst_payload = self._analyst_payload(
                 spec, state, hypotheses, round_number
@@ -1776,7 +1867,7 @@ class ResearchPipeline:
         objective_urls = {
             match.group(0).rstrip(".,;:!?)\"]}")
             for match in _SEARCH_URL_RE.finditer(spec.question)
-        }
+        } | set(spec.caller_source_urls)
         for query in queries:
             if any(character in query for character in "\r\n\t") or any(
                 unicodedata.category(character) in {"Cc", "Cf", "Zl", "Zp"}
@@ -1821,7 +1912,13 @@ class ResearchPipeline:
                 "English search queries"
             )
 
-    def _acquire_round(self, state: _RunState, queries: Sequence[str]) -> None:
+    def _acquire_round(
+        self,
+        state: _RunState,
+        queries: Sequence[str],
+        *,
+        exact_hits: Sequence[SearchHit] = (),
+    ) -> None:
         snapshots_before = len(state.snapshots)
 
         def acquire_hits(hits: Sequence[SearchHit], *, bounded_limit: int | None) -> None:
@@ -1837,15 +1934,34 @@ class ResearchPipeline:
                     raise ResearchProtocolError(
                         "search adapter returned an invalid SearchHit"
                     )
+                if (
+                    hit.classification_identity == "unknown"
+                    or not _ID_RE.fullmatch(hit.classification_identity)
+                ):
+                    raise ResearchProtocolError(
+                        "search hit lacks a valid trusted source-classification identity"
+                    )
+                if hit.source_class == "unknown":
+                    raise ResearchProtocolError(
+                        "search hit lacks a trusted source-class binding"
+                    )
                 if not state.policy.allows_source_class(hit.source_class):
-                    raise ResearchProtocolError(
-                        "search hit source class is unknown or forbidden: "
-                        f"{hit.source_class!r}"
-                    )
-                if hit.classification_identity == "unknown":
-                    raise ResearchProtocolError(
-                        "search hit lacks a trusted source-classification identity"
-                    )
+                    state.source_policy_skips += 1
+                    if state.source_policy_skips <= _MAX_SOURCE_POLICY_SKIP_DIAGNOSTICS:
+                        url_sha256 = hashlib.sha256(
+                            hit.url.encode("utf-8")
+                        ).hexdigest()
+                        state.diagnostics.append(
+                            "source_policy_skip["
+                            f"class={hit.source_class},url_sha256={url_sha256}]"
+                        )
+                    elif state.source_policy_skips == (
+                        _MAX_SOURCE_POLICY_SKIP_DIAGNOSTICS + 1
+                    ):
+                        state.diagnostics.append(
+                            "source_policy_skip[additional_candidates_omitted]"
+                        )
+                    continue
                 if hit.url in state.fetched_requested_uris:
                     continue
                 state.fetched_requested_uris.add(hit.url)
@@ -1871,6 +1987,9 @@ class ResearchPipeline:
                         "fetch result changed the source-classification authority"
                     )
                 self._persist_fetched(state, fetched)
+
+        if exact_hits:
+            acquire_hits(exact_hits, bounded_limit=None)
 
         for query in queries:
             if query.casefold() in {

@@ -1,5 +1,5 @@
 [Unit]
-Description=Iskandar ResearchWarband production shadow (loopback 7201; no legacy cutover)
+Description=Iskandar ResearchWarband production backend (loopback 7201)
 After=network-online.target
 Wants=network-online.target
 

@@ -139,6 +139,12 @@ class SearchAdapter(Protocol):
 
 
 @runtime_checkable
+class ExactSourceClassifier(Protocol):
+    def classify_exact_source(self, url: str) -> SearchHit:
+        """Bind one caller-supplied exact URL to the trusted source classifier."""
+
+
+@runtime_checkable
 class ClosedWorldCatalogAdapter(Protocol):
     @property
     def catalog_identity(self) -> str:
@@ -313,6 +319,27 @@ class EyeWebSearchAdapter:
         self.classifier = classifier or ConfiguredDomainSourceClassifier.default()
         self.max_tool_output_chars = max_tool_output_chars
 
+    def classify_exact_source(self, url: str) -> SearchHit:
+        if type(url) is not str or not url.strip() or url != url.strip():
+            raise AcquisitionError("exact source URL must be one non-empty trimmed string")
+        parsed, host, _port = _validated_target(url)
+        del parsed
+        source_class = _source_class(
+            self.classifier.classify(
+                title=host,
+                url=url,
+                snippet="caller-supplied exact source",
+            ),
+            "trusted classifier result",
+        )
+        return SearchHit(
+            title=host,
+            url=url,
+            snippet="caller-supplied exact source",
+            source_class=source_class,
+            classification_identity=self.classifier.stable_identity,
+        )
+
     def search(self, query: str, limit: int) -> Sequence[SearchHit]:
         if type(query) is not str or not query.strip():
             raise ValueError("query must be a non-empty string")
@@ -414,6 +441,37 @@ def _peer_matches(sock: Any, pinned_ip: str) -> None:
         raise AcquisitionError(
             f"connected peer {peer} does not match pinned address {pinned_ip}"
         )
+
+
+def _response_peer_socket(response: Any) -> Any:
+    """Return the socket retained by a stdlib ``HTTPResponse``.
+
+    ``HTTPConnection.getresponse()`` deliberately clears ``connection.sock``
+    as soon as it sees a response that will close the connection.  The live
+    socket then belongs to ``HTTPResponse.fp``; on supported CPython versions
+    it is the ``SocketIO._sock`` below the buffered reader.  Keep this lookup
+    narrow and fail closed if the stdlib layout is not inspectable.
+    """
+
+    fp = getattr(response, "fp", None)
+    candidates = (
+        fp,
+        getattr(fp, "_sock", None),
+        getattr(getattr(fp, "raw", None), "_sock", None),
+    )
+    for candidate in candidates:
+        if candidate is not None and hasattr(candidate, "getpeername"):
+            return candidate
+    return None
+
+
+def _attest_response_peer(connection: Any, response: Any, pinned_ip: str) -> None:
+    """Attest the socket that actually delivered an HTTP response."""
+
+    sock = getattr(connection, "sock", None)
+    if sock is None or not hasattr(sock, "getpeername"):
+        sock = _response_peer_socket(response)
+    _peer_matches(sock, pinned_ip)
 
 
 class _PinnedHTTPConnection(http.client.HTTPConnection):
@@ -531,7 +589,7 @@ class EyeWebFetchAdapter:
         try:
             connection.request("GET", path, headers=headers)
             response = connection.getresponse()
-            _peer_matches(getattr(connection, "sock", None), pinned_ip)
+            _attest_response_peer(connection, response, pinned_ip)
             status = int(response.status)
             response_headers = {
                 str(name).lower(): str(value) for name, value in response.getheaders()
@@ -844,6 +902,7 @@ __all__ = [
     "EPUB_MAX_TOTAL_BYTES",
     "EyeWebFetchAdapter",
     "EyeWebSearchAdapter",
+    "ExactSourceClassifier",
     "FetchAdapter",
     "FetchedSource",
     "ResearchToolError",

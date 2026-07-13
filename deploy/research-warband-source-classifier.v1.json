@@ -1,5 +1,23 @@
 {
   "version": 1,
-  "exact": {},
+  "exact": {
+    "csrc.nist.gov": "official_documentation",
+    "datatracker.ietf.org": "standards_specification",
+    "doc.rust-lang.org": "official_documentation",
+    "docs.aws.amazon.com": "official_documentation",
+    "docs.docker.com": "official_documentation",
+    "docs.github.com": "official_documentation",
+    "docs.kernel.org": "official_documentation",
+    "docs.oracle.com": "official_documentation",
+    "docs.python.org": "official_documentation",
+    "go.dev": "official_documentation",
+    "html.spec.whatwg.org": "standards_specification",
+    "learn.microsoft.com": "official_documentation",
+    "peps.python.org": "official_documentation",
+    "python.org": "official_documentation",
+    "standards.ieee.org": "official_documentation",
+    "www.python.org": "official_documentation",
+    "www.rfc-editor.org": "standards_specification"
+  },
   "suffix": {}
 }

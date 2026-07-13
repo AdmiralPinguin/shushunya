@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -9,282 +10,239 @@ import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+WARMMASTER_ROOT = Path(__file__).resolve().parent
+for entry in (str(PROJECT_ROOT), str(WARMMASTER_ROOT)):
+    if entry not in sys.path:
+        sys.path.insert(0, entry)
 
-from eye_of_terror.contracts import build_research_writing_contract
-from eye_of_terror.inner_circle.iskandar_service import make_handler, oversight_template, pipeline_summary, required_workers, resolve_run_dir, task_from_payload
-from EyeOfTerror.common_protocol import commander_order, validate_protocol_payload
-
-
-def request_json(url: str, payload: dict | None = None) -> dict:
-    data = None if payload is None else json.dumps(payload).encode("utf-8")
-    method = "POST" if data else "GET"
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method=method)
-    with urllib.request.urlopen(req, timeout=60) as response:
-        return json.loads(response.read().decode("utf-8"))
+from EyeOfTerror.common_protocol import commander_order
+from eye_of_terror.inner_circle import iskandar_service as service
+from eye_of_terror.native_research_run import (
+    load_native_research_run,
+    validate_native_research_run_package,
+)
+from eye_of_terror.task_prepare import prepare_native_iskandar_via_service
 
 
-def request_options(url: str) -> int:
-    req = urllib.request.Request(url, method="OPTIONS")
-    with urllib.request.urlopen(req, timeout=60) as response:
-        return response.status
+TOKEN = "iskandar-research-warband-test-token-0123456789abcdef"
 
 
-def iskandar_command(task: str, task_id: str) -> dict:
-    order = commander_order(
+def command(task_id: str, *, constraint: str = "Do not exceed the evidence.") -> dict:
+    return commander_order(
         f"mission-{task_id}",
         to="IskandarKhayon",
-        user_request=task,
-        commander_intent="Проверить протокольный вход Искандара через приказ Вармастера.",
-        primary_goal=task,
-        success_conditions=[
-            "governor_plan preserves the commander mission_id",
-            "worker_order packets preserve the commander mission_id",
-        ],
-        constraints=["Do not answer the user directly from the governor layer."],
+        user_request="raw user wording",
+        commander_intent="Delegate one bounded research outcome.",
+        primary_goal="Determine the supported answer.",
+        success_conditions=["Every material claim is evidence-bound."],
+        constraints=[constraint],
+        escalate_to_user_if=["The question is materially ambiguous."],
     )
-    validate_protocol_payload(order, expected_type="commander_order")
-    return order
 
 
-def protocol_only_order(task_id: str) -> dict:
-    order = commander_order(
-        f"mission-{task_id}",
-        to="IskandarKhayon",
-        user_request="ПРИКАЗ ВАРМАСТЕРА\nИсходный сырой запрос не должен стать task.",
-        commander_intent="Передать Искандару нормализованную исследовательскую задачу.",
-        primary_goal="Собери события Скалатракса",
-        success_conditions=["governor receives primary_goal as task compatibility text"],
-        constraints=["Do not use raw user_request as the transport task."],
-    )
-    validate_protocol_payload(order, expected_type="commander_order")
-    return order
+def model_answer() -> dict:
+    return {
+        "ok": True,
+        "status": "answered",
+        "content": {
+            "decision": "delegate",
+            "research_objective": "Determine the supported answer.",
+            "depth": "standard",
+            "source_policy": "balanced",
+            "error_tolerance": "strict",
+            "answer_mode": "direct_answer",
+            "priorities": ["Prefer direct evidence."],
+            "allowed_source_classes": ["primary_source", "official_documentation"],
+            "prohibited_source_classes": ["machine_generated_summary"],
+            "constraints": [],
+            "success_conditions": [],
+            "output_requirements": ["Return a concise evidence-bound answer."],
+            "escalation_conditions": [],
+            "clarification_question": "",
+        },
+    }
+
+
+def healthy_backend() -> dict:
+    return {
+        "name": "ResearchWarband",
+        "kind": "native_research_warband",
+        "endpoint": "http://127.0.0.1:7201",
+        "health_endpoint": "http://127.0.0.1:7201/health",
+        "healthy": True,
+        "status": "healthy",
+        "health": {"ok": True},
+        "error": "",
+        "dispatch_owner": "native_research_backend_router",
+        "contract_relation": "executes one native Iskandar-delegated research mission",
+    }
+
+
+def request_json(
+    url: str,
+    payload: dict | None = None,
+    *,
+    token: str = TOKEN,
+) -> tuple[int, dict]:
+    data = None
+    headers = {"Accept": "application/json"}
+    method = "GET"
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+        headers["Authorization"] = f"Bearer {token}"
+        method = "POST"
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return int(response.status), json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return int(exc.code), json.loads(exc.read().decode("utf-8"))
 
 
 def main() -> int:
-    direct_order = protocol_only_order("iskandar-protocol-direct")
-    direct_task, direct_command = task_from_payload({"commander_order": direct_order})
-    if (
-        not direct_task.startswith(str(direct_order["primary_goal"]))
-        or direct_task.startswith("ПРИКАЗ ВАРМАСТЕРА")
-        or "Do not use raw user_request as the transport task." not in direct_task
-        or direct_command != direct_order
-    ):
-        raise AssertionError(f"Iskandar task_from_payload did not stay protocol-first: task={direct_task!r} command={direct_command}")
+    os.environ["RESEARCH_WARBAND_BEARER_TOKEN"] = TOKEN
+
+    task, normalized = service.task_from_payload({"commander_order": command("protocol")})
+    assert task.startswith("Determine the supported answer.")
+    assert normalized["mission_id"] == "mission-protocol"
     try:
-        task_from_payload({"task": "сырой обход бригадира"})
+        service.task_from_payload({"task": "bypass"})
     except ValueError as exc:
-        if "commander_order is required" not in str(exc):
-            raise AssertionError(f"bad direct task rejection: {exc}") from exc
+        assert "commander_order is required" in str(exc)
     else:
-        raise AssertionError("Iskandar accepted direct task input without commander_order")
-    contract_workers = [
-        step.worker
-        for step in build_research_writing_contract("Собери события Скалатракса", task_id="iskandar-service-test").worker_plan
+        raise AssertionError("direct governor input bypassed commander_order")
+    assert service.required_workers() == []
+    assert service.pipeline_summary()["steps"] == [
+        {
+            "step_id": "research_warband",
+            "backend": "ResearchWarband",
+            "depends_on": [],
+            "ownership": (
+                "detailed planning, search, acquisition, reading, evidence construction, "
+                "analysis, writing, semantic verification, and internal repair"
+            ),
+        }
     ]
-    if required_workers() != contract_workers:
-        raise AssertionError(f"Iskandar required workers drifted from contract plan: {required_workers()}")
-    pipeline = pipeline_summary()
-    if (
-        pipeline.get("step_count") != len(contract_workers)
-        or pipeline.get("steps", [])[0].get("worker") != "CorpusIngestor"
-        or pipeline.get("steps", [])[1].get("depends_on") != ["corpus_ingestion"]
-        or pipeline.get("steps", [])[2].get("expected_artifacts") != ["/work/capabilities/source_snapshots.json"]
-        or pipeline.get("steps", [])[3].get("worker") != "OcularisRenderium"
-        or pipeline.get("steps", [])[3].get("expected_artifacts") != ["/work/capabilities/rendered_snapshots.json"]
-        or pipeline.get("steps", [])[4].get("depends_on") != ["source_rendering"]
-    ):
-        raise AssertionError(f"bad Iskandar pipeline summary: {pipeline}")
-    oversight = oversight_template()
-    if (
-        oversight.get("final_review", {}).get("critic_step") != "critic_review"
-        or oversight.get("final_review", {}).get("requires_evidence_trace") is not True
-        or not oversight.get("artifact_roles", {}).get("final", [])[0].endswith("/final_manifest.json")
-        or not any(item.get("from_step") == "critic_review" and item.get("to_steps") == ["finalize"] for item in oversight.get("handoffs", []))
-        or oversight.get("revision_policy", {}).get("final_steps") != ["critic_review", "finalize"]
-        or oversight.get("iteration_policy", {}).get("recommended_endpoint") != "POST /runs/{task_id}/start_research_loop_http"
-        or oversight.get("iteration_policy", {}).get("max_revision_cycles") != 3
-        or len(oversight.get("step_quality_matrix", [])) != len(contract_workers)
-    ):
-        raise AssertionError(f"bad Iskandar oversight template: {oversight}")
+
     with tempfile.TemporaryDirectory() as temp_dir:
-        root = Path(temp_dir)
-        if resolve_run_dir(root / "runs", "child", "task").resolve() != (root / "runs" / "child").resolve():
-            raise AssertionError("relative run_dir did not resolve under default root")
-        server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(root / "runs"))
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            base = f"http://127.0.0.1:{server.server_port}"
-            if request_options(base + "/plan") != 200:
-                raise AssertionError("OPTIONS did not return 200")
-            health = request_json(base + "/health")
-            if not health.get("ok"):
-                raise AssertionError(f"bad health: {health}")
-            capabilities = request_json(base + "/capabilities")
-            if "dispatch_packet_preparation" not in capabilities.get("capabilities", []):
-                raise AssertionError(f"bad capabilities: {capabilities}")
-            if (
-                "model_backed_governor_planning" not in capabilities.get("capabilities", [])
-                or capabilities.get("model_brain", {}).get("kind") != "eye_of_terror_model_brain"
-            ):
-                raise AssertionError(f"capabilities did not expose Iskandar model brain: {capabilities}")
-            if capabilities.get("required_workers", [])[0] != "CorpusIngestor" or "FabricatorFinalis" not in capabilities.get("required_workers", []):
-                raise AssertionError(f"capabilities did not expose required workers: {capabilities}")
-            if (
-                capabilities.get("worker_availability", {}).get("ok") is not True
-                or capabilities.get("worker_availability", {}).get("missing_workers")
-                or capabilities.get("worker_availability", {}).get("unavailable_workers")
-                or capabilities.get("worker_availability", {}).get("resolved_workers", {}).get("Lexmechanic", {}).get("status") not in {"prototype", "active"}
-            ):
-                raise AssertionError(f"capabilities did not expose worker availability: {capabilities}")
-            if (
-                "oversight_plan" not in capabilities.get("capabilities", [])
-                or capabilities.get("oversight", {}).get("final_review", {}).get("final_step") != "finalize"
-                or capabilities.get("oversight", {}).get("revision_policy", {}).get("requires_focused_context") is not True
-                or capabilities.get("oversight", {}).get("iteration_policy", {}).get("controller") != "WarmasterGateway"
-            ):
-                raise AssertionError(f"capabilities did not expose oversight plan: {capabilities}")
-            if (
-                capabilities.get("pipeline", {}).get("step_count") != len(contract_workers)
-                or capabilities.get("pipeline", {}).get("steps", [])[0].get("step_id") != "corpus_ingestion"
-                or capabilities.get("summary", {}).get("step_count") != len(contract_workers)
-                or capabilities.get("summary", {}).get("step_quality_matrix_count") != len(contract_workers)
-                or capabilities.get("display", {}).get("headline") != "Iskandar Khayon capabilities"
-                or capabilities.get("client_action", {}).get("path") != "/plan"
-                or "step_quality_matrix" not in capabilities.get("capabilities", [])
-            ):
-                raise AssertionError(f"capabilities did not expose pipeline summary: {capabilities}")
+        run_root = Path(temp_dir) / "runs"
+        run_root.mkdir()
+        model_calls: list[dict] = []
+
+        def fake_model(*args, **kwargs):
+            model_calls.append({"args": args, "kwargs": kwargs})
+            return model_answer()
+
+        with (
+            patch.object(service, "research_warband_backend_health", side_effect=lambda *_a, **_k: healthy_backend()),
+            patch.object(service, "request_model_decision", side_effect=fake_model),
+        ):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), service.make_handler(run_root))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
             try:
-                request_json(base + "/plan", {"task": "Собери события Скалатракса", "task_id": "iskandar-raw-reject"})
-            except urllib.error.HTTPError as exc:
-                if exc.code != 400:
-                    raise
-                rejected = json.loads(exc.read().decode("utf-8"))
-                if "commander_order is required" not in rejected.get("error", ""):
-                    raise AssertionError(f"bad raw task rejection: {rejected}")
-            else:
-                raise AssertionError("Iskandar /plan accepted raw task without commander_order")
-            plan = request_json(
-                base + "/plan",
-                {
-                    "task": "Собери события Скалатракса",
-                    "task_id": "iskandar-http-test",
-                    "commander_order": iskandar_command("Собери события Скалатракса", "iskandar-http-test"),
-                },
-            )
-            if (
-                not plan.get("ok")
-                or plan["contract"]["assigned_governor"] != "IskandarKhayon"
-                or plan.get("oversight", {}).get("artifact_roles", {}).get("critic") != ["/work/skalathrax/critic_report.json"]
-                or len(plan.get("oversight", {}).get("step_quality_matrix", [])) != len(contract_workers)
-                or plan.get("oversight", {}).get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json"
-                or plan.get("oversight", {}).get("iteration_policy", {}).get("recommended_endpoint") != "POST /runs/{task_id}/start_research_loop_http"
-                or plan.get("pipeline", {}).get("step_count") != len(contract_workers)
-                or plan.get("pipeline", {}).get("steps", [])[0].get("worker") != "CorpusIngestor"
-                or plan.get("actions", {}).get("can_prepare_run") is not True
-                or plan.get("actions", {}).get("next_action", {}).get("kind") != "prepare_run"
-                or plan.get("actions", {}).get("next_action", {}).get("body", {}).get("commander_order") != "<same commander_order used for /plan>"
-                or "task" in plan.get("actions", {}).get("next_action", {}).get("body", {})
-                or plan.get("actions", {}).get("next_action", {}).get("body", {}).get("task_id") != "iskandar-http-test"
-                or plan.get("phase") != "plan_ready"
-                or plan.get("decision", {}).get("can_prepare_run") is not True
-                or plan.get("display", {}).get("headline") != "Plan is ready"
-                or plan.get("client_action", {}).get("path") != "/prepare_run"
-                or plan.get("model_brain", {}).get("status") != "answered"
-            ):
-                raise AssertionError(f"bad plan: {plan}")
-            protocol_only_plan = request_json(
-                base + "/plan",
-                {"task_id": "iskandar-protocol-only-plan", "commander_order": protocol_only_order("iskandar-protocol-only-plan")},
-            )
-            if (
-                not protocol_only_plan.get("ok")
-                or protocol_only_plan.get("governor_plan", {}).get("understanding") != "Собери события Скалатракса"
-                or "task" in protocol_only_plan.get("actions", {}).get("next_action", {}).get("body", {})
-            ):
-                raise AssertionError(f"Iskandar /plan did not use commander_order as authority: {protocol_only_plan}")
-            run_dir = root / "runs" / "custom-run"
-            prepared = request_json(
-                base + "/prepare_run",
-                {
-                    "task": "Собери события Скалатракса",
-                    "task_id": "iskandar-http-test",
-                    "run_dir": str(run_dir),
-                    "commander_order": iskandar_command("Собери события Скалатракса", "iskandar-http-test"),
-                },
-            )
-            if (
-                not prepared.get("ok")
-                or not (run_dir / "dispatch" / "source_discovery.json").exists()
-                or not (run_dir / "oversight.json").exists()
-                or not prepared.get("status", {}).get("oversight_path")
-                or prepared.get("phase") != "run_prepared"
-                or prepared.get("decision", {}).get("can_handoff_to_warmaster") is not True
-                or prepared.get("display", {}).get("headline") != "Run package prepared"
-                or prepared.get("client_action") != {}
-                or prepared.get("model_brain", {}).get("status") != "answered"
-            ):
-                raise AssertionError(f"bad prepared run: {prepared}")
-            prepared_oversight = json.loads((run_dir / "oversight.json").read_text(encoding="utf-8"))
-            if prepared_oversight.get("final_review", {}).get("final_artifact") != "/work/skalathrax/final_manifest.json":
-                raise AssertionError(f"prepare_run wrote bad oversight: {prepared_oversight}")
-            if prepared_oversight.get("iteration_policy", {}).get("max_revision_cycles") != 3:
-                raise AssertionError(f"prepare_run wrote bad iteration policy: {prepared_oversight}")
-            prepared_fact_dispatch = json.loads((run_dir / "dispatch" / "fact_extraction.json").read_text(encoding="utf-8"))
-            if (
-                prepared_fact_dispatch.get("request", {}).get("quality_expectations", {}).get("step_quality", {}).get("step_id") != "fact_extraction"
-                or prepared_fact_dispatch.get("request", {}).get("quality_expectations", {}).get("final_review", {}).get("final_step") != "finalize"
-            ):
-                raise AssertionError(f"prepare_run did not write dispatch quality expectations: {prepared_fact_dispatch}")
-            protocol_run_dir = root / "runs" / "protocol-run"
-            protocol_task = "Собери события Скалатракса"
-            protocol_prepared = request_json(
-                base + "/prepare_run",
-                {
-                    "task": protocol_task,
-                    "task_id": "iskandar-protocol-test",
-                    "run_dir": str(protocol_run_dir),
-                    "commander_order": iskandar_command(protocol_task, "iskandar-protocol-test"),
-                },
-            )
-            protocol_plan = json.loads((protocol_run_dir / "governor_plan.json").read_text(encoding="utf-8"))
-            protocol_dispatch = json.loads((protocol_run_dir / "dispatch" / "source_discovery.json").read_text(encoding="utf-8"))
-            if (
-                not protocol_prepared.get("ok")
-                or protocol_plan.get("mission_id") != "mission-iskandar-protocol-test"
-                or protocol_dispatch.get("worker_order", {}).get("mission_id") != "mission-iskandar-protocol-test"
-                or protocol_dispatch.get("request", {}).get("worker_order", {}).get("mission_id") != "mission-iskandar-protocol-test"
-            ):
-                raise AssertionError(
-                    "Iskandar /prepare_run did not preserve commander_order mission_id: "
-                    f"prepared={protocol_prepared} plan={protocol_plan} dispatch={protocol_dispatch}"
+                base = f"http://127.0.0.1:{server.server_port}"
+                status, health = request_json(base + "/health")
+                assert status == 200 and health["readiness"] is True
+                status, capabilities = request_json(base + "/capabilities")
+                assert status == 200
+                assert capabilities["required_workers"] == []
+                assert capabilities["contract_mode"] == "native_research_warband_v1"
+                assert capabilities["execution_contract"]["legacy_worker_plan_present"] is False
+
+                plan_task_id = "iskandar-structural-plan"
+                status, plan = request_json(
+                    base + "/plan",
+                    {"task_id": plan_task_id, "commander_order": command(plan_task_id)},
                 )
-            try:
-                request_json(
+                assert status == 200 and plan["ok"] is True
+                assert plan["contract"]["execution"] == {
+                    "kind": "research_warband_mission",
+                    "step_id": "research_warband",
+                    "backend": "ResearchWarband",
+                }
+                assert plan["governor_plan"]["work_plan"][0]["worker"] == "ResearchWarband"
+                assert not model_calls, "/plan invoked the leader model"
+                assert not (run_root / plan_task_id).exists(), "/plan persisted a run"
+
+                prepare_task_id = "iskandar-native-prepare"
+                prepare_payload = {
+                    "task_id": prepare_task_id,
+                    "run_dir": str(run_root / prepare_task_id),
+                    "commander_order": command(prepare_task_id),
+                }
+                status, prepared = request_json(base + "/prepare_run", prepare_payload)
+                assert status == 200 and prepared["prepare_replayed"] is False
+                assert len(model_calls) == 1
+                assert validate_native_research_run_package(run_root / prepare_task_id) == []
+                package = load_native_research_run(run_root / prepare_task_id)
+                assert package["receipt"]["kind"] == "native_research_run_receipt"
+                assert package["leadership_directive"]["delegated_to"] == "ResearchWarband"
+                assert not (run_root / prepare_task_id / "dispatch").exists()
+
+                status, replay = request_json(base + "/prepare_run", prepare_payload)
+                assert status == 200 and replay["prepare_replayed"] is True
+                assert replay["model_brain"]["status"] == "persisted"
+                assert len(model_calls) == 1, "idempotent replay called the leader again"
+
+                changed = dict(prepare_payload)
+                changed["commander_order"] = command(
+                    prepare_task_id,
+                    constraint="Use only official documentation.",
+                )
+                status, conflict = request_json(base + "/prepare_run", changed)
+                assert status == 409 and conflict["error_code"] == "prepare_identity_conflict"
+                assert len(model_calls) == 1
+
+                unauth_id = "iskandar-unauthorized"
+                status, unauthorized = request_json(
                     base + "/prepare_run",
                     {
-                        "task": "Собери события Скалатракса",
-                        "task_id": "iskandar-escape-test",
-                        "run_dir": str(root / "escape"),
-                        "commander_order": iskandar_command("Собери события Скалатракса", "iskandar-escape-test"),
+                        "task_id": unauth_id,
+                        "run_dir": str(run_root / unauth_id),
+                        "commander_order": command(unauth_id),
                     },
-            )
-            except urllib.error.HTTPError as exc:
-                if exc.code != 400:
-                    raise
-                rejected = json.loads(exc.read().decode("utf-8"))
-                if "run_dir must stay inside" not in rejected.get("error", ""):
-                    raise AssertionError(f"bad run_dir rejection: {rejected}")
-            else:
-                raise AssertionError("prepare_run should reject run_dir outside default root")
-        finally:
-            server.shutdown()
-            thread.join(timeout=5)
-    print("[ok] Iskandar service")
+                    token="wrong",
+                )
+                assert status == 401 and "authentication failed" in unauthorized["error"]
+
+                gateway_task_id = "iskandar-abaddon-prepare"
+                gateway_result = prepare_native_iskandar_via_service(
+                    "ignored raw message",
+                    gateway_task_id,
+                    run_root,
+                    SimpleNamespace(name="IskandarKhayon", port=server.server_port),
+                    commander_order=command(gateway_task_id),
+                    require_commander_order=True,
+                )
+                assert gateway_result["ok"] is True, gateway_result
+                assert gateway_result["contract"]["task_id"] == gateway_task_id
+                assert (run_root / gateway_task_id / "task_ledger.json").is_file()
+                assert validate_native_research_run_package(run_root / gateway_task_id) == []
+                assert len(model_calls) == 2
+
+                gateway_replay = prepare_native_iskandar_via_service(
+                    "ignored raw message",
+                    gateway_task_id,
+                    run_root,
+                    SimpleNamespace(name="IskandarKhayon", port=server.server_port),
+                    commander_order=command(gateway_task_id),
+                    require_commander_order=True,
+                )
+                assert gateway_replay["ok"] is True
+                assert gateway_replay["prepare_replayed"] is True
+                assert len(model_calls) == 2
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+
+    print("[ok] native Iskandar leadership service")
     return 0
 
 

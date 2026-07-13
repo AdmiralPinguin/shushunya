@@ -41,6 +41,30 @@ class NativeRunAdapter:
             "backend": self.backend,
         }
 
+    @property
+    def route_kind(self) -> str:
+        return f"{self.name}_run"
+
+    @property
+    def leadership_kind(self) -> str:
+        return f"{self.name}_leadership"
+
+    @property
+    def invalid_error_code(self) -> str:
+        return f"{self.route_kind}_invalid"
+
+    @property
+    def raw_executor_error(self) -> str:
+        # Preserve the established Ceraxia diagnostic verbatim.  Other native
+        # backends get an equally explicit failure without pretending they are
+        # Skitarii missions.
+        if self.name == "native_code":
+            return "native code run must use the centralized Skitarii backend router"
+        return (
+            f"{self.name.replace('_', ' ')} run must use the centralized "
+            f"{self.backend} backend router"
+        )
+
     def _call(self, name: str, run_dir: Path) -> Any:
         module = importlib.import_module(self.module_name)
         target = getattr(module, name)
@@ -73,6 +97,9 @@ class NativeRunAdapter:
             "directive_filename": self.directive_filename,
             "ledger_mission_key": self.ledger_mission_key,
             "service_port": self.service_port,
+            "route_kind": self.route_kind,
+            "leadership_kind": self.leadership_kind,
+            "invalid_error_code": self.invalid_error_code,
         }
 
 
@@ -162,7 +189,19 @@ def native_adapter_for_contract(
 ) -> NativeRunAdapter | None:
     if not isinstance(contract, dict):
         return None
-    return native_adapter_for_execution(contract.get("execution"), declared=declared)
+    adapter = native_adapter_for_execution(contract.get("execution"), declared=declared)
+    if adapter is not None:
+        return adapter
+    # Iskandar no longer has a generic worker-plan executor.  Claim legacy
+    # research contracts at the raw-executor boundary so a hand-crafted or
+    # historical package cannot silently revive the deleted ten-worker path.
+    if (
+        declared
+        and str(contract.get("kind") or "").lower() == NATIVE_RESEARCH_ADAPTER.contract_kind
+        and str(contract.get("assigned_governor") or "") == NATIVE_RESEARCH_ADAPTER.governor
+    ):
+        return NATIVE_RESEARCH_ADAPTER
+    return None
 
 
 def native_adapter_for_run(
@@ -171,6 +210,13 @@ def native_adapter_for_run(
     declared: bool = True,
 ) -> NativeRunAdapter | None:
     return native_adapter_for_contract(_read_contract(Path(run_dir)), declared=declared)
+
+
+def native_adapter_for_route(route: Any) -> NativeRunAdapter | None:
+    """Recover the exact adapter selected by an executor route payload."""
+    if not isinstance(route, dict) or route.get("native") is not True:
+        return None
+    return native_adapter_for_execution(route.get("execution"), declared=True)
 
 
 def is_native_warband_run(run_dir: Path) -> bool:
@@ -206,5 +252,6 @@ __all__ = [
     "native_adapter_for_contract",
     "native_adapter_for_execution",
     "native_adapter_for_run",
+    "native_adapter_for_route",
     "validate_native_warband_run",
 ]

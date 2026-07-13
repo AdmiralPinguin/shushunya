@@ -12,6 +12,7 @@ from EyeOfTerror.common_protocol import validate_protocol_payload
 from .local_executor import ordered_dispatch_paths, revision_contexts_from_result
 from .ledger import TaskLedger
 from .mission_control import record_worker_execution_started, record_worker_protocol_report, worker_report_from_payload
+from .native_runs import native_adapter_for_run
 from .pipeline import dispatch_packet_with_worker_order, require_dispatch_worker_order, write_json_atomic
 
 
@@ -61,32 +62,22 @@ def get_json(url: str, timeout_sec: int) -> dict[str, Any]:
     return decoded
 
 
-def _reject_native_code_run(run_dir: Path) -> None:
-    """Raw worker HTTP dispatch is never a native code-run backend."""
-    from .native_code_run import is_native_code_run
-
-    contract = load_json(run_dir / "contract.json") if (run_dir / "contract.json").exists() else {}
-    explicit_native = contract.get("execution") == {
-        "kind": "skitarii_mission",
-        "step_id": "skitarii",
-        "backend": "SkitariiWarband",
-    }
-    try:
-        native = bool(is_native_code_run(run_dir))
-    except Exception as exc:  # noqa: BLE001 - explicit native packages fail closed.
-        if explicit_native:
-            raise RuntimeError(
-                "native code run must use the centralized Skitarii backend router"
-            ) from exc
+def _reject_native_warband_run(run_dir: Path) -> None:
+    """Raw worker HTTP dispatch is never a native-warband backend."""
+    adapter = native_adapter_for_run(run_dir, declared=True)
+    if adapter is None:
         return
-    if native or explicit_native:
-        raise RuntimeError(
-            "native code run must use the centralized Skitarii backend router"
-        )
+    try:
+        adapter.is_run(run_dir)
+    except Exception as exc:  # noqa: BLE001 - declared native packages fail closed.
+        raise RuntimeError(adapter.raw_executor_error) from exc
+    # A declared native descriptor may be malformed and return False.  It must
+    # still be quarantined rather than falling through to the legacy workers.
+    raise RuntimeError(adapter.raw_executor_error)
 
 
 def preflight_workers(run_dir: Path, host: str, timeout_sec: int, step_ids: list[str] | None = None) -> list[dict[str, Any]]:
-    _reject_native_code_run(run_dir)
+    _reject_native_warband_run(run_dir)
     failures: list[dict[str, Any]] = []
     for dispatch_path in ordered_dispatch_paths(run_dir, step_ids=step_ids):
         try:
@@ -199,7 +190,7 @@ def execute_run(
     step_ids: list[str] | None = None,
     execution_mode: str = "full",
 ) -> dict[str, Any]:
-    _reject_native_code_run(run_dir)
+    _reject_native_warband_run(run_dir)
     contract = load_json(run_dir / "contract.json") if (run_dir / "contract.json").exists() else {}
     ledger_path = run_dir / "task_ledger.json"
     ledger = (

@@ -149,10 +149,35 @@ _MODEL_DETAIL_PATTERNS = (
         re.compile(r"(?:\"[^\"\r\n]+\"|'[^'\r\n]+')\s+(?:AND|OR)\s+", re.IGNORECASE),
     ),
 )
+_CALLER_URL_TOKEN_RE = re.compile(
+    r"(?i)(?:\b(?:https?|hxxps?|ftp|file)\s*:\s*//|\bwww\s*\.)\S+"
+)
+_CALLER_DETAIL_MARKER = "[caller-provided research detail]"
 
 
 class IskandarDirectiveError(ValueError):
     """The leader answer or persisted directive is not safe to delegate."""
+
+
+def _leadership_projection(value: Any) -> Any:
+    """Hide worker-owned research detail from the leader model only.
+
+    The exact commander order remains immutable and is still used for binding,
+    persistence, and ResearchWarband handoff. Iskandar receives a semantic
+    projection so it can choose policy without copying URLs or search syntax
+    into its leadership directive.
+    """
+
+    if isinstance(value, dict):
+        return {key: _leadership_projection(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_leadership_projection(item) for item in value]
+    if not isinstance(value, str):
+        return value
+    projected = _CALLER_URL_TOKEN_RE.sub(_CALLER_DETAIL_MARKER, value)
+    for _label, pattern in _MODEL_DETAIL_PATTERNS:
+        projected = pattern.sub(_CALLER_DETAIL_MARKER, projected)
+    return projected
 
 
 def directive_request_payload(
@@ -163,8 +188,12 @@ def directive_request_payload(
     """Build the bounded model request for one leadership decision."""
     return {
         "task_id": task_id,
-        "commander_order": commander_order,
-        "delegation_subject": task,
+        "commander_order": _leadership_projection(commander_order),
+        "delegation_subject": _leadership_projection(task),
+        "caller_detail_projection": (
+            "Exact caller URLs and search syntax are intentionally represented by "
+            f"{_CALLER_DETAIL_MARKER}; ResearchWarband receives the immutable originals."
+        ),
         "required_json_schema": {
             "decision": "delegate | needs_clarification | escalate | reject",
             "research_objective": "leadership-level research outcome",
@@ -486,6 +515,38 @@ def validate_directive_for_commander(
             raise IskandarDirectiveError(
                 f"directive dropped commander_order.{command_field}: {missing}",
             )
+
+    # Re-apply the leadership/detail boundary to persisted directives.  The
+    # original model response was checked while the directive was built, but a
+    # production consumer must not trust that historical call site alone.
+    # Commander-authored constraints may legitimately contain a caller URL or
+    # exact document identifier, so remove only those exact bound values before
+    # scanning the remaining (model-authored) leadership content.
+    caller_bound = {
+        "constraints": set(_commander_items(
+            commander_order.get("constraints"), "constraints",
+        )),
+        "success_conditions": set(_commander_items(
+            commander_order.get("success_conditions"), "success_conditions",
+        )),
+        "escalation_conditions": set(_commander_items(
+            commander_order.get("escalate_to_user_if"), "escalate_to_user_if",
+        )),
+    }
+    persisted_model_content = {
+        field: (
+            [
+                item
+                for item in directive[field]
+                if item not in caller_bound.get(field, set())
+            ]
+            if field in LIST_FIELDS
+            else directive[field]
+        )
+        for field in MODEL_FIELDS
+        if field != "decision"
+    }
+    _validate_model_content_boundary(persisted_model_content)
     return directive
 
 

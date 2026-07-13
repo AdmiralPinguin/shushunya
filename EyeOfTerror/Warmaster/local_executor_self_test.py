@@ -12,9 +12,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from EyeOfTerror.common_protocol import worker_order
 from eye_of_terror import local_executor
-from eye_of_terror.inner_circle.iskandar import plan_lore_reconstruction
 from eye_of_terror.local_executor import execute_run, revision_contexts_from_result, terminal_payload_allows_completion
-from eye_of_terror.pipeline import write_pipeline_run
 
 
 def write_json(path: Path, payload: dict) -> None:
@@ -337,21 +335,6 @@ print(json.dumps({"ok": True, "status": "completed", "summary": "flaky worker re
                 local_executor.WORKER_COMMANDS.pop("FlakyWorker", None)
             else:
                 local_executor.WORKER_COMMANDS["FlakyWorker"] = old_command
-        run_dir = root / "run"
-        work_dir = root / "work"
-        plan = plan_lore_reconstruction("Собери все известное о событиях Скалатракса.", task_id="executor-test")
-        write_pipeline_run(plan.contract, run_dir)
-        summary = execute_run(repo_root, run_dir, work_dir, timeout_sec=30)
-        if not summary.get("ok"):
-            raise AssertionError(summary)
-        manifest = work_dir / "skalathrax" / "final_manifest.json"
-        if not manifest.exists():
-            raise AssertionError("final manifest was not written")
-        if not (run_dir / "task_ledger.json").exists():
-            raise AssertionError("task ledger was not written")
-        ledger = json.loads((run_dir / "task_ledger.json").read_text(encoding="utf-8"))
-        if ledger.get("result", {}).get("revision_plan", {}).get("required"):
-            raise AssertionError(f"ready run should not require revision: {ledger}")
     print("[ok] local executor")
     return 0
 

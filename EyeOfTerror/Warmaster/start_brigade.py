@@ -128,7 +128,11 @@ def warband_service_plan(repo_root: Path, host: str) -> list[dict[str, object]]:
                 "port": port,
                 "path": module_path,
                 "supervisor": supervisor,
-                "health_url": f"http://{host}:{port}/health?vm=1",
+                "health_url": (
+                    f"http://{host}:{port}/health?vm=1"
+                    if name == "SkitariiWarband"
+                    else f"http://{host}:{port}/health"
+                ),
                 "lifecycle": "externally_managed",
             }
         )
@@ -201,7 +205,7 @@ def brigade_commands(
         ),
         CommandSpec(
             "iskandar-khayon",
-            "Inner Circle lore reconstruction governor",
+            "Inner Circle research-warband leader",
             host,
             iskandar_port,
             [],
@@ -416,7 +420,15 @@ def health_payload_is_ready(url: str, payload: object) -> bool:
 
 def url_is_ready(url: str, timeout_sec: float = 1.0) -> bool:
     try:
-        with urllib.request.urlopen(url, timeout=timeout_sec) as response:
+        parsed = urlsplit(url)
+        headers: dict[str, str] = {}
+        if parsed.port == 7201:
+            token = os.environ.get("RESEARCH_WARBAND_BEARER_TOKEN", "")
+            if len(token) < 32 or any(char in token for char in "\r\n"):
+                return False
+            headers["Authorization"] = f"Bearer {token}"
+        request = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(request, timeout=timeout_sec) as response:
             if response.status >= 400:
                 return False
             payload = json.loads(response.read().decode("utf-8"))

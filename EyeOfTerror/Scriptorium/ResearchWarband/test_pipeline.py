@@ -181,6 +181,32 @@ class FakeSearch:
         return self.results.get(query, ())[:limit]
 
 
+class ExactFakeSearch(FakeSearch):
+    def __init__(
+        self,
+        results: Mapping[str, list[SearchHit]],
+        exact_hits: Mapping[str, SearchHit],
+    ) -> None:
+        super().__init__(results)
+        self.exact_hits = dict(exact_hits)
+        self.exact_calls: list[str] = []
+
+    def classify_exact_source(self, url: str) -> SearchHit:
+        self.exact_calls.append(url)
+        return self.exact_hits[url]
+
+
+class RawSearch:
+    """Test adapter that can return values outside the SearchHit contract."""
+
+    def __init__(self, results: list[Any]) -> None:
+        self.results = tuple(results)
+
+    def search(self, query: str, limit: int):
+        del query
+        return self.results[:limit]
+
+
 class FakeCatalogSearch(FakeSearch):
     def __init__(
         self,
@@ -373,6 +399,7 @@ class ResearchPipelineTests(unittest.TestCase):
         *,
         mode: str = "lookup",
         depth: str = "standard",
+        caller_source_urls: tuple[str, ...] = (),
         clarification_turns: tuple[ClarificationTurn, ...] = (),
         hypotheses: tuple[HypothesisSpec, ...] = (),
     ) -> ResearchSpec:
@@ -405,6 +432,7 @@ class ResearchPipelineTests(unittest.TestCase):
             question="What is the answer?",
             mode=mode,
             execution_policy=policy,
+            caller_source_urls=caller_source_urls,
             priorities=policy.priorities,
             scope_boundaries=("public sources",),
             source_policy=(policy.source_policy,),
@@ -511,6 +539,194 @@ class ResearchPipelineTests(unittest.TestCase):
                 "normalized_sha256"
             ],
         )
+
+    def test_caller_exact_url_is_classified_and_fetched_without_search_recall(self) -> None:
+        exact_url = "https://www.rfc-editor.org/rfc/rfc1149.txt"
+        source = "The answer is Alpha."
+        model = FakeModel(
+            {
+                "planner": [planner("ordinary discovery query")],
+                "analyst": [analyst_ready([claim_item(excerpt=source)])],
+                "writer": [writer_claim(text=source)],
+                "semantic_verifier": [semantic_accept()],
+            }
+        )
+        search = ExactFakeSearch(
+            {"ordinary discovery query": []},
+            {
+                exact_url: SearchHit(
+                    "www.rfc-editor.org",
+                    exact_url,
+                    "caller-supplied exact source",
+                    "official_documentation",
+                    "test-classifier",
+                )
+            },
+        )
+        fetcher = FakeFetch({exact_url: fetched(exact_url, source)})
+
+        result = self.pipeline(model, search, fetcher).run(
+            self.spec(caller_source_urls=(exact_url,))
+        )
+
+        self.assertEqual("accepted", result.outcome)
+        self.assertEqual([exact_url], search.exact_calls)
+        self.assertEqual([exact_url], [url for url, _limit in fetcher.calls])
+        planner_payload = next(payload for role, payload in model.calls if role == "planner")
+        self.assertEqual([exact_url], planner_payload["spec"]["caller_source_urls"])
+
+    def test_caller_exact_url_fails_closed_without_classifier_capability(self) -> None:
+        exact_url = "https://www.rfc-editor.org/rfc/rfc1149.txt"
+        model = FakeModel({"planner": [planner()]})
+
+        result = self.pipeline(model, FakeSearch({}), FakeFetch({})).run(
+            self.spec(caller_source_urls=(exact_url,))
+        )
+
+        self.assertEqual("blocked", result.outcome)
+        self.assertIn("cannot classify caller-supplied exact source URLs", result.reason)
+
+    def test_planner_cannot_invent_url_outside_caller_exact_sources(self) -> None:
+        model = FakeModel(
+            {
+                "planner": [
+                    planner("https://attacker.invalid/invented"),
+                    planner("https://attacker.invalid/invented"),
+                ]
+            }
+        )
+
+        result = self.pipeline(model, FakeSearch({}), FakeFetch({})).run(self.spec())
+
+        self.assertEqual("blocked", result.outcome)
+        self.assertIn("URL absent from the research objective", result.reason)
+
+    def test_disallowed_candidate_before_allowed_candidate_is_skipped(self) -> None:
+        rejected_url = "https://unverified.example.test/pep-8-copy"
+        accepted_url = "https://peps.python.org/pep-0008/"
+        source = "The answer is Alpha."
+        model = FakeModel(
+            {
+                "planner": [planner()],
+                "analyst": [analyst_ready([claim_item(excerpt=source)])],
+                "writer": [writer_claim(text=source)],
+                "semantic_verifier": [semantic_accept()],
+            }
+        )
+        search = FakeSearch(
+            {
+                "primary query": [
+                    SearchHit(
+                        "Unverified copy",
+                        rejected_url,
+                        "",
+                        "anonymous_or_unverified_web",
+                        "test-classifier",
+                    ),
+                    SearchHit(
+                        "Python enhancement proposal",
+                        accepted_url,
+                        "",
+                        "official_documentation",
+                        "test-classifier",
+                    ),
+                ]
+            }
+        )
+        fetcher = FakeFetch({accepted_url: fetched(accepted_url, source)})
+
+        result = self.pipeline(model, search, fetcher).run(self.spec())
+
+        self.assertEqual("accepted", result.outcome)
+        self.assertEqual([accepted_url], [url for url, _limit in fetcher.calls])
+        skips = [
+            item for item in result.diagnostics
+            if item.startswith("source_policy_skip[")
+        ]
+        self.assertEqual(1, len(skips))
+        self.assertIn("class=anonymous_or_unverified_web", skips[0])
+        self.assertNotIn(rejected_url, skips[0])
+        self.assertLessEqual(len(skips[0]), 160)
+
+    def test_all_disallowed_candidates_are_not_fetched(self) -> None:
+        hits = [
+            SearchHit(
+                f"Unverified candidate {index}",
+                f"https://unverified-{index}.example.test/source",
+                "",
+                "anonymous_or_unverified_web",
+                "test-classifier",
+            )
+            for index in range(2)
+        ]
+        model = FakeModel(
+            {
+                "planner": [planner()],
+                "analyst": [
+                    {
+                        "decision": "blocked",
+                        "reason": "no policy-admissible source was acquired",
+                    }
+                ],
+            }
+        )
+        search = FakeSearch({"primary query": hits})
+        fetcher = FakeFetch({})
+
+        result = self.pipeline(
+            model,
+            search,
+            fetcher,
+            budgets=ResearchBudgets(max_rounds=1, max_search_queries=1),
+        ).run(self.spec())
+
+        self.assertEqual("blocked", result.outcome)
+        self.assertEqual([], fetcher.calls)
+        self.assertEqual(
+            2,
+            len(
+                [
+                    item for item in result.diagnostics
+                    if item.startswith("source_policy_skip[")
+                ]
+            ),
+        )
+        self.assertNotIn("failed closed", result.reason)
+
+    def test_invalid_search_hit_or_classification_identity_fails_closed(self) -> None:
+        invalid_cases = (
+            (object(), "invalid SearchHit"),
+            (
+                SearchHit(
+                    "Untrusted identity",
+                    "https://example.test/source",
+                    "",
+                    "anonymous_or_unverified_web",
+                    "not a valid identity",
+                ),
+                "source-classification identity",
+            ),
+        )
+        for invalid_hit, expected_reason in invalid_cases:
+            with self.subTest(expected_reason=expected_reason):
+                model = FakeModel({"planner": [planner()]})
+                fetcher = FakeFetch({})
+
+                result = self.pipeline(
+                    model,
+                    RawSearch([invalid_hit]),
+                    fetcher,
+                ).run(self.spec())
+
+                self.assertEqual("blocked", result.outcome)
+                self.assertIn(expected_reason, result.reason)
+                self.assertEqual([], fetcher.calls)
+                self.assertFalse(
+                    any(
+                        item.startswith("source_policy_skip[")
+                        for item in result.diagnostics
+                    )
+                )
 
     def test_author_model_contract_cannot_change_after_pipeline_setup(self) -> None:
         model, search, fetcher = self.accepted_fixture()

@@ -13,7 +13,6 @@ if str(WARM_ROOT) not in sys.path:
     sys.path.insert(0, str(WARM_ROOT))
 
 from EyeOfTerror.common_protocol import commander_order
-import eye_of_terror.task_prepare as task_prepare_module
 from eye_of_terror.mission_control import governor_task_from_order
 from eye_of_terror.task_prepare import governor_payload_for, prepare_task, preflight_task
 
@@ -63,35 +62,23 @@ def main() -> int:
             or governor_payload.get("commander_order") != order
         ):
             raise AssertionError(f"governor payload did not stay commander_order-first: {governor_payload}")
-        original_route_message = task_prepare_module.route_message
-        original_plan_lore_reconstruction = task_prepare_module.plan_lore_reconstruction
-        local_governor_inputs: list[str] = []
-
-        def recording_plan_lore_reconstruction(task: str, *args, **kwargs):
-            local_governor_inputs.append(task)
-            return original_plan_lore_reconstruction(task, *args, **kwargs)
-
-        task_prepare_module.route_message = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("forced commander path must not call route_message"))
-        task_prepare_module.plan_lore_reconstruction = recording_plan_lore_reconstruction
-        try:
-            strict_preflight = preflight_task(
-                "СЫРОЙ ТЕКСТ НЕ ДОЛЖЕН СТАТЬ ЗАДАЧЕЙ БРИГАДИРА.",
-                "strict-with-order-preflight",
-                run_root,
-                governor_transport="local",
-                forced_governor="IskandarKhayon",
-                commander_order=order,
-                require_commander_order=True,
-            )
-        finally:
-            task_prepare_module.route_message = original_route_message
-            task_prepare_module.plan_lore_reconstruction = original_plan_lore_reconstruction
-        if not strict_preflight.get("ok") or strict_preflight.get("protocol_mode") != "commander_order":
-            raise AssertionError(f"strict preflight did not use commander_order mode: {strict_preflight}")
+        strict_preflight = preflight_task(
+            "СЫРОЙ ТЕКСТ НЕ ДОЛЖЕН СТАТЬ ЗАДАЧЕЙ БРИГАДИРА.",
+            "strict-with-order-preflight",
+            run_root,
+            governor_transport="local",
+            forced_governor="IskandarKhayon",
+            commander_order=order,
+            require_commander_order=True,
+        )
+        if (
+            strict_preflight.get("ok")
+            or strict_preflight.get("error_code") != "iskandar_leader_service_required"
+            or strict_preflight.get("protocol_mode") != "commander_order"
+        ):
+            raise AssertionError(f"strict local preflight did not fail closed on the removed legacy leader: {strict_preflight}")
         if strict_preflight.get("route", {}).get("source") != "forced_governor":
             raise AssertionError(f"strict preflight did not expose commander route source: {strict_preflight}")
-        if local_governor_inputs != [order.get("primary_goal")]:
-            raise AssertionError(f"local governor did not receive commander_order task text: {local_governor_inputs!r}")
         missing_order_preflight = preflight_task(
             "Исследуй Скалатракс.",
             "strict-missing-order-preflight",

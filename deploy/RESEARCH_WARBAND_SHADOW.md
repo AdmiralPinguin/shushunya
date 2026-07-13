@@ -1,9 +1,11 @@
-# ResearchWarband shadow deployment
+# ResearchWarband production deployment
 
-These files define two deliberately separate services. Neither unit edits,
-stops, proxies, or binds the legacy Iskandar port `7101`.
+These files define two deliberately separate services. The historical
+`shadow` filename is retained so the installed user unit and persistent runtime
+path do not need a destructive migration; the `7201` profile is now the native
+production backend reached through Abaddon and Iskandar.
 
-- `research-warband-shadow.service`: production shadow on loopback `7201`,
+- `research-warband-shadow.service`: production backend on loopback `7201`,
   exact native Iskandar envelope, mandatory bearer token, one mission slot,
   persistent production mission store and CAS.
 - `research-warband-evaluator.service`: tokenless loopback evaluator on `7202`,
@@ -22,9 +24,21 @@ and every `SHUSHUNYA_SEARCH_*` input are bound by the deployment guard. Put an
 optional Brave key only in the mode-`0600` secret file; its manifest value is a
 SHA-256 digest, never the raw credential.
 
+`research-warband-source-classifier.v1.json` is an operator-owned exact-host
+allowlist. Its initial entries cover narrowly named official documentation and
+standards hosts, including `docs.python.org` and `peps.python.org`; `suffix` is
+intentionally empty so an unrelated subdomain cannot inherit authority. Search
+results from other hosts retain a trusted classifier identity but are honestly
+classified as `anonymous_or_unverified_web`. If the mission policy disallows
+that class, the candidate is skipped without fetching and a bounded URL-hash
+diagnostic is recorded; malformed hits, unknown classes, and invalid classifier
+identities still fail the mission closed.
+
 Install the units into the user systemd directory only during an approved
 deployment, run `systemctl --user daemon-reload`, and start the required profile
-explicitly. Do not add either unit to the legacy 7101 launcher before cutover.
+explicitly. Abaddon starts the `7201` backend before the `7101` Iskandar leader;
+`7101` performs leadership and native handoff only and never recreates the
+deleted legacy worker pipeline.
 Before the first start, create the selected profile's
 `runtime/research-warband-{shadow,evaluator}` directory with mode `0700` and
 ownership matching the service user. `ProtectSystem=strict` makes the repository
@@ -36,13 +50,18 @@ The units also redirect interpreter cache lookup away from the repository with
 remove old repository `__pycache__` and `.pyc` artifacts before the first
 start. Startup rejects them and never deletes them automatically.
 
-Submit a native canary package to 7201 with:
+For backend-only diagnostics, submit a native canary package directly to 7201
+with:
 
 ```bash
 RESEARCH_WARBAND_BEARER_TOKEN='<secret>' \
   python -m EyeOfTerror.Scriptorium.ResearchWarband.integration.shadow_dispatch \
   /path/to/native-run --wait-sec 604800
 ```
+
+This command is an operator diagnostic, not the public production path. A real
+mission must enter through Abaddon, receive one Iskandar leadership directive,
+and then be delegated to the same bearer-protected `7201` service.
 
 With the isolated 7202 daemon running, invoke the HTTP evaluation subject with:
 
@@ -66,10 +85,14 @@ and publish `epistemic_independence_claimed=false`.
 The dispatcher still advertises four legacy slots, while the physical upstream
 has `max_num_seqs=1`, `max_num_batched_tokens=1024`, `max_model_len=6144`, and
 `gpu_memory_utilization=0.94` to preserve activation headroom. ResearchWarband
-therefore uses `max_active=1`, `max_tokens=2048`, an attested 1,024-token
-Writer reserve, a 1,280-token semantic-review reserve, and a 24,000-character outer
+therefore uses `max_active=1`, `max_tokens=2048`, attested 1,024-token Reader
+and Writer reserves, a 1,280-token semantic-review reserve, and a 24,000-character outer
 guard backed by exact physical-token preflight with the role's output reserve,
-and 8,000-character reader chunks. Trust comes from exact
+and 8,000-character Reader chunks. The bounded Reader schema returns at most
+four segment indices and short reasons, so reserving 2,048 output tokens for it
+only displaced source context; exact token preflight remains fail-closed for
+pathological chunks that still cannot fit the physical 6,144-token window.
+Trust comes from exact
 application-owned source snapshots, locators, evidence/provenance records,
 content-bound review sessions, and deterministic gates—not from pretending that
 two contexts of one model are independent. Independent judgment belongs only

@@ -24,9 +24,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from EyeOfTerror.model_brain import attach_model_brain, request_model_decision
 
 from .contracts import validate_task_contract_payload
-from .inner_circle.ceraxia import plan_code_task
-from .inner_circle.iskandar import plan_lore_reconstruction
-from .native_code_run import NATIVE_EXECUTION, is_native_code_run
 from doctor import run_doctor
 from .governors import governor_by_name, governor_refs
 from .ledger import TaskLedger
@@ -134,6 +131,11 @@ from .skitarii_bridge import (
     apply_staged_patch,
     begin_run_cancellation,
     cancel_skitarii_mission_for_run,
+)
+from .native_runs import native_adapter_for_run
+from .research_warband_bridge import (
+    answer_research_warband_mission,
+    cancel_research_warband_mission_for_run,
 )
 from .brigade import (
     brigade_health_snapshot,
@@ -756,15 +758,16 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     response(self, 200 if payload.get("ok") else status_code, payload)
                     return
                 if len(parts) == 3 and parts[2] == "dispatch":
+                    native_adapter = native_adapter_for_run(run_dir, declared=True)
                     payload = (
                         {
                             "ok": True,
                             "native": True,
-                            "execution": dict(NATIVE_EXECUTION),
+                            "execution": dict(native_adapter.execution),
                             "dispatch": [],
                             "dispatch_count": 0,
                         }
-                        if is_native_code_run(run_dir)
+                        if native_adapter is not None
                         else run_dispatch_packets(run_dir)
                     )
                     payload = payload_with_run_view(payload, run_dir, task_id)
@@ -960,7 +963,16 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         return
                     run_mode = str(payload.get("run_mode") or "http").strip() or "http"
                     host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
-                    timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
+                    default_timeout = int(
+                        os.environ.get("RESEARCH_WARBAND_BRIDGE_TIMEOUT_SEC", "604800")
+                    )
+                    timeout_sec = max(
+                        1,
+                        min(
+                            int(payload.get("timeout_sec") or default_timeout),
+                            604800,
+                        ),
+                    )
                     started = orchestrate_start_run(
                         run_root,
                         task_id,
@@ -986,7 +998,16 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
                     run_mode = str(payload.get("run_mode") or "http").strip() or "http"
                     host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
-                    timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
+                    default_timeout = int(
+                        os.environ.get("RESEARCH_WARBAND_BRIDGE_TIMEOUT_SEC", "604800")
+                    )
+                    timeout_sec = max(
+                        1,
+                        min(
+                            int(payload.get("timeout_sec") or default_timeout),
+                            604800,
+                        ),
+                    )
                     include_brigade_health = bool(payload.get("include_brigade_health"))
                     auto_start = bool(payload.get("auto_start", True))
                     submitted = orchestrate_run_task(
@@ -1207,7 +1228,25 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         response(self, 400, {"ok": False, "error": "answer is required", "task_id": task_id})
                         return
                     try:
-                        answered = answer_skitarii_mission(run_dir, task_id, answer)
+                        backend_route = execution_backend_route(run_dir)
+                        if not backend_route.get("ok"):
+                            response(self, 409, backend_route)
+                            return
+                        backend = str(backend_route.get("backend") or "")
+                        if backend == "ResearchWarband":
+                            answered = answer_research_warband_mission(
+                                run_dir, task_id, answer
+                            )
+                        elif backend == "SkitariiWarband":
+                            answered = answer_skitarii_mission(
+                                run_dir, task_id, answer
+                            )
+                        else:
+                            answered = {
+                                "ok": False,
+                                "status": "conflict",
+                                "error": "run backend does not support durable clarification",
+                            }
                     except (OSError, RuntimeError, ValueError) as exc:
                         response(
                             self,
@@ -1220,7 +1259,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         "method": "GET",
                         "endpoint": "GET /runs/{task_id}/snapshot",
                         "body": {"events_after": 0},
-                        "reason": "clarification accepted; the same Skitarii mission resumed",
+                        "reason": "clarification accepted; the same native mission resumed",
                     }
                     answered["next_action"] = next_action if answered.get("ok") else {}
                     answered["client_action"] = (
@@ -1337,6 +1376,11 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     if not ledger_path.exists():
                         response(self, 404, {"ok": False, "error": "ledger not found", "task_id": task_id})
                         return
+                    backend_route = execution_backend_route(run_dir)
+                    if not backend_route.get("ok"):
+                        response(self, 409, backend_route)
+                        return
+                    backend = str(backend_route.get("backend") or "")
                     reason = str(payload.get("reason") or "").strip()
                     cancellation = begin_run_cancellation(run_dir, reason)
                     if not cancellation.get("ok"):
@@ -1366,37 +1410,58 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         )
                         return
                     try:
-                        skitarii_cancellation = cancel_skitarii_mission_for_run(
-                            run_dir, task_id,
-                        )
+                        if backend == "ResearchWarband":
+                            backend_cancellation = cancel_research_warband_mission_for_run(
+                                run_dir, task_id,
+                            )
+                        elif backend == "SkitariiWarband":
+                            backend_cancellation = cancel_skitarii_mission_for_run(
+                                run_dir, task_id,
+                            )
+                        else:
+                            backend_cancellation = {
+                                "ok": False,
+                                "status": "not_active",
+                                "error": "run has no active native backend mission",
+                            }
                     except (OSError, RuntimeError, ValueError) as exc:
-                        skitarii_cancellation = {
+                        backend_cancellation = {
                             "ok": False,
                             "status": "error",
-                            "error": f"Skitarii cancellation failed: {exc}",
+                            "error": f"native backend cancellation failed: {exc}",
                         }
                     host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
-                    worker_cancellations = cancel_http_worker_tasks(run_dir, host=host)
-                    skitarii_status = str(skitarii_cancellation.get("status") or "")
-                    if skitarii_status == "cancelled" and skitarii_cancellation.get("ok") is True:
+                    worker_cancellations = (
+                        []
+                        if backend in {"SkitariiWarband", "ResearchWarband"}
+                        else cancel_http_worker_tasks(run_dir, host=host)
+                    )
+                    backend_status = str(backend_cancellation.get("status") or "")
+                    if backend_status == "cancelled" and backend_cancellation.get("ok") is True:
                         inspect_action = {
                             "kind": "inspect", "method": "GET",
                             "endpoint": "GET /runs/{task_id}/summary", "body": {},
-                            "reason": "Skitarii cancellation and sandbox cleanup are complete",
+                            "reason": "native backend cancellation and cleanup are complete",
                         }
                         refreshed = TaskLedger.load(ledger_path)
                         response(self, 200, {
                             "ok": True, "task_id": task_id, "status": "cancelled",
                             "ledger": refreshed.to_dict(),
-                            "skitarii_cancellation": skitarii_cancellation,
+                            "backend_cancellation": backend_cancellation,
+                            "skitarii_cancellation": (
+                                backend_cancellation if backend == "SkitariiWarband" else {}
+                            ),
+                            "research_warband_cancellation": (
+                                backend_cancellation if backend == "ResearchWarband" else {}
+                            ),
                             "worker_cancellations": worker_cancellations,
                             "next_action": inspect_action,
                             "client_action": executable_client_action(task_id, inspect_action),
                         })
                         return
                     if (
-                        skitarii_cancellation.get("ok") is not True
-                        and skitarii_status not in {"", "not_active"}
+                        backend_cancellation.get("ok") is not True
+                        and backend_status not in {"", "not_active"}
                     ):
                         inspect_action = {
                             "kind": "inspect", "method": "GET",
@@ -1407,9 +1472,15 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         response(self, 409, {
                             "ok": False, "task_id": task_id,
                             "status": str(refreshed.to_dict().get("status") or "blocked"),
-                            "error": str(skitarii_cancellation.get("error") or "Skitarii cancellation failed"),
+                            "error": str(backend_cancellation.get("error") or "native backend cancellation failed"),
                             "ledger": refreshed.to_dict(),
-                            "skitarii_cancellation": skitarii_cancellation,
+                            "backend_cancellation": backend_cancellation,
+                            "skitarii_cancellation": (
+                                backend_cancellation if backend == "SkitariiWarband" else {}
+                            ),
+                            "research_warband_cancellation": (
+                                backend_cancellation if backend == "ResearchWarband" else {}
+                            ),
                             "worker_cancellations": worker_cancellations,
                             "next_action": inspect_action,
                             "client_action": executable_client_action(task_id, inspect_action),
@@ -1424,7 +1495,13 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                             "task_id": task_id,
                             "status": "cancelling",
                             "ledger": TaskLedger.load(ledger_path).to_dict(),
-                            "skitarii_cancellation": skitarii_cancellation,
+                            "backend_cancellation": backend_cancellation,
+                            "skitarii_cancellation": (
+                                backend_cancellation if backend == "SkitariiWarband" else {}
+                            ),
+                            "research_warband_cancellation": (
+                                backend_cancellation if backend == "ResearchWarband" else {}
+                            ),
                             "worker_cancellations": worker_cancellations,
                             "next_action": poll_action,
                             "client_action": executable_client_action(task_id, poll_action),
@@ -1449,7 +1526,13 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         return
                     run_mode = "local" if parts[2].endswith("_local") else "http"
                     host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
-                    timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
+                    timeout_sec = max(
+                        1,
+                        min(
+                            int(payload.get("timeout_sec") or 604800),
+                            604800,
+                        ),
+                    )
                     raw_max_revision_cycles = payload.get("max_revision_cycles", 3)
                     max_revision_cycles = max(0, min(int(raw_max_revision_cycles), 8))
                     allow_resume = bool(payload.get("allow_resume", True))
@@ -1544,7 +1627,9 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     if not backend_route.get("ok"):
                         response(self, 409, backend_route)
                         return
-                    native_backend = backend_route.get("backend") == "SkitariiWarband"
+                    native_backend = backend_route.get("backend") in {
+                        "SkitariiWarband", "ResearchWarband"
+                    }
                     ledger_path = run_dir / "task_ledger.json"
                     force = bool(payload.get("force"))
                     preflight_mode = parts[2] in {"preflight_local", "preflight_http"}
@@ -1581,7 +1666,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     if native_backend:
                         if requested_step_ids:
                             raise ValueError(
-                                "native code runs are atomic Skitarii missions and do not accept step_ids"
+                                "native warband runs are atomic missions and do not accept step_ids"
                             )
                         mode_step_ids = None
                         restricted_step_ids = None
@@ -1593,7 +1678,21 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         else:
                             restricted_step_ids = mode_step_ids
                     workspace_root = resolve_run_child_path(run_dir, str(payload.get("workspace_root") or ""), "work")
-                    timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
+                    if backend_route.get("backend") == "ResearchWarband":
+                        default_timeout = int(
+                            os.environ.get(
+                                "RESEARCH_WARBAND_BRIDGE_TIMEOUT_SEC", "604800"
+                            )
+                        )
+                        timeout_sec = max(
+                            1,
+                            min(
+                                int(payload.get("timeout_sec") or default_timeout),
+                                604800,
+                            ),
+                        )
+                    else:
+                        timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 7200))
                     execution_mode = "revision" if revision_mode else ("resume" if resume_mode else "full")
                     if parts[2] in {"preflight_local", "preflight_http"}:
                         if parts[2] == "preflight_http":
@@ -1653,7 +1752,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         if local_execution or "workspace_root" in payload
                         else None
                     )
-                    if backend_route.get("backend") == "SkitariiWarband":
+                    if native_backend:
                         native_preflight = run_execution_preflight(
                             run_dir,
                             mode=routed_run_mode,

@@ -1,4 +1,4 @@
-"""Attested live-model dependency probe for ResearchWarband shadow profiles."""
+"""Attested live-model dependency probe for ResearchWarband runtime profiles."""
 
 from __future__ import annotations
 
@@ -123,6 +123,7 @@ def load_runtime_contract(path: str | os.PathLike[str] | None = None) -> dict[st
         "gemma_max_num_seqs",
         "research_max_active",
         "gemma_max_tokens",
+        "reader_max_tokens",
         "writer_max_tokens",
         "gemma_max_context_chars",
         "gemma_timeout_sec",
@@ -140,6 +141,7 @@ def load_runtime_contract(path: str | os.PathLike[str] | None = None) -> dict[st
         (operator, "gemma_max_num_seqs"),
         (operator, "research_max_active"),
         (operator, "gemma_max_tokens"),
+        (operator, "reader_max_tokens"),
         (operator, "writer_max_tokens"),
         (operator, "gemma_max_context_chars"),
         (operator, "gemma_timeout_sec"),
@@ -148,6 +150,10 @@ def load_runtime_contract(path: str | os.PathLike[str] | None = None) -> dict[st
     ]
     if any(type(obj.get(field)) is not int or obj[field] < 1 for obj, field in integer_fields):
         raise RuntimeDependencyError("runtime contract contains an invalid integer")
+    if not 256 <= operator["reader_max_tokens"] <= operator["gemma_max_tokens"]:
+        raise RuntimeDependencyError("runtime Reader output reserve is invalid")
+    if not 256 <= operator["writer_max_tokens"] <= operator["gemma_max_tokens"]:
+        raise RuntimeDependencyError("runtime Writer output reserve is invalid")
     if operator.get("modality") != "text_only":
         raise RuntimeDependencyError("current model runtime must remain explicitly text-only")
     for field in ("base_url", "model_id", "canonical_model_id", "root", "owned_by"):

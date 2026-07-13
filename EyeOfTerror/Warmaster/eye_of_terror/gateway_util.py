@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -12,7 +13,64 @@ from .runtime_state import ALLOWED_SERVICE_HOSTS, MAX_LIST_LIMIT, TASK_ID_RE
 
 
 MAX_GATEWAY_REQUEST_BYTES = int(os.environ.get("WARMMASTER_MAX_REQUEST_BYTES", "2000000"))
+MAX_SERVICE_RESPONSE_BYTES = int(
+    os.environ.get("WARMMASTER_MAX_SERVICE_RESPONSE_BYTES", "1000000")
+)
 _HOST_PATH_KEYS = {"host_path", "artifact_root", "workspace_root", "patch_file"}
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Do not forward governor credentials away from their exact URL."""
+
+    def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+
+_PRIVATE_LOOPBACK_OPENER = urllib.request.build_opener(
+    urllib.request.ProxyHandler({}),
+    _NoRedirect(),
+)
+
+
+def _strict_json_object(raw: bytes) -> dict[str, Any]:
+    def pairs(values: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in values:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    def invalid_constant(value: str) -> None:
+        raise ValueError(f"invalid JSON constant: {value}")
+
+    try:
+        value = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=pairs,
+            parse_constant=invalid_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f"service response is not valid JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError("service response is not a JSON object")
+    return value
+
+
+def _validate_service_response(response: Any, requested_url: str) -> None:
+    if response.geturl() != requested_url:
+        raise ValueError("service response URL differs from the requested URL")
+    media_type = str(response.headers.get("Content-Type") or "").split(";", 1)[0]
+    if media_type.strip().lower() != "application/json":
+        raise ValueError("service response Content-Type must be application/json")
+    length = response.headers.get("Content-Length")
+    if length:
+        try:
+            parsed_length = int(length)
+        except ValueError as exc:
+            raise ValueError("service returned an invalid Content-Length") from exc
+        if parsed_length < 0 or parsed_length > MAX_SERVICE_RESPONSE_BYTES:
+            raise ValueError("service response exceeds the byte limit")
 
 
 def redact_host_paths(value: Any) -> Any:
@@ -125,13 +183,23 @@ def post_json(
     headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     data = json.dumps(payload).encode("utf-8")
-    request_headers = {"Content-Type": "application/json"}
+    request_headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
     request_headers.update(headers or {})
     request = urllib.request.Request(
         url, data=data, headers=request_headers, method="POST",
     )
-    with urllib.request.urlopen(request, timeout=timeout_sec) as response:
-        result = json.loads(response.read().decode("utf-8"))
-    if not isinstance(result, dict):
-        raise ValueError("service response is not a JSON object")
-    return result
+    try:
+        with _PRIVATE_LOOPBACK_OPENER.open(request, timeout=timeout_sec) as response:
+            _validate_service_response(response, url)
+            raw = response.read(MAX_SERVICE_RESPONSE_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        if 300 <= int(exc.code) < 400:
+            raise ValueError("service attempted an HTTP redirect") from exc
+        _validate_service_response(exc, url)
+        raise
+    if len(raw) > MAX_SERVICE_RESPONSE_BYTES:
+        raise ValueError("service response exceeds the byte limit")
+    return _strict_json_object(raw)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import threading
 import urllib.request
@@ -14,6 +15,7 @@ from eye_of_terror import campaigns as campaigns_module
 from eye_of_terror import mission_control, task_prepare, warmaster_gateway
 from eye_of_terror.campaigns import (
     FINAL_REPORT_FILE,
+    NATIVE_RESEARCH_RESULT_CONTRACT,
     campaign_preflight,
     campaign_state,
     create_handoff,
@@ -24,13 +26,18 @@ from eye_of_terror.campaigns import (
     prepare_campaign,
     validate_campaign_plan,
 )
-from eye_of_terror.inner_circle import ceraxia_service
+from eye_of_terror.inner_circle import ceraxia_service, iskandar_service
 from eye_of_terror.ledger import TaskLedger
 from eye_of_terror.mission_control import record_warmaster_acceptance
 from eye_of_terror.native_code_run import (
     NATIVE_EXECUTION,
     is_native_code_run,
     validate_native_code_run_package,
+)
+from eye_of_terror.native_research_run import (
+    NATIVE_RESEARCH_EXECUTION,
+    is_native_research_run,
+    validate_native_research_run_package,
 )
 from eye_of_terror.routing import RouteDecision
 from eye_of_terror.warmaster_gateway import make_handler
@@ -127,6 +134,29 @@ def ceraxia_model_answer() -> dict:
     }
 
 
+def iskandar_model_answer() -> dict:
+    return {
+        "ok": True,
+        "status": "answered",
+        "content": {
+            "decision": "delegate",
+            "research_objective": "Build the source-backed implementation basis.",
+            "depth": "standard",
+            "source_policy": "balanced",
+            "error_tolerance": "strict",
+            "answer_mode": "direct_answer",
+            "priorities": ["Prefer direct evidence."],
+            "allowed_source_classes": ["primary_source", "official_documentation"],
+            "prohibited_source_classes": ["machine_generated_summary"],
+            "constraints": [],
+            "success_conditions": [],
+            "output_requirements": ["Return an evidence-bound implementation brief."],
+            "escalation_conditions": [],
+            "clarification_question": "",
+        },
+    }
+
+
 def healthy_skitarii_backend() -> dict:
     return {
         "name": "SkitariiWarband",
@@ -140,6 +170,21 @@ def healthy_skitarii_backend() -> dict:
     }
 
 
+def healthy_research_backend() -> dict:
+    return {
+        "name": "ResearchWarband",
+        "kind": "native_research_warband",
+        "endpoint": "http://127.0.0.1:7201",
+        "health_endpoint": "http://127.0.0.1:7201/health",
+        "healthy": True,
+        "status": "healthy",
+        "health": {"ok": True},
+        "error": "",
+        "dispatch_owner": "native_research_backend_router",
+        "contract_relation": "executes one native Iskandar-delegated research mission",
+    }
+
+
 def open_test_mission(run_root: Path):
     protocol_root = run_root / "_mission_protocol"
 
@@ -149,9 +194,10 @@ def open_test_mission(run_root: Path):
     return opener
 
 
-def prepare_with_test_ceraxia(service_port: int):
+def prepare_with_test_governors(ceraxia_port: int, iskandar_port: int):
     original_prepare = campaigns_module.prepare_task
-    governor = SimpleNamespace(name="Ceraxia", port=service_port)
+    ceraxia = SimpleNamespace(name="Ceraxia", port=ceraxia_port)
+    iskandar = SimpleNamespace(name="IskandarKhayon", port=iskandar_port)
 
     def prepare(
         message: str,
@@ -170,9 +216,22 @@ def prepare_with_test_ceraxia(service_port: int):
                 message,
                 task_id,
                 run_root,
-                governor,
+                ceraxia,
                 host=governor_host,
-                port=service_port,
+                port=ceraxia_port,
+                commander_order=commander_order,
+                require_commander_order=require_commander_order,
+            )
+        if forced_governor == "IskandarKhayon":
+            if governor_transport != "http":
+                raise AssertionError("campaign bypassed the live Iskandar leadership service")
+            return task_prepare.prepare_native_iskandar_via_service(
+                message,
+                task_id,
+                run_root,
+                iskandar,
+                host=governor_host,
+                port=iskandar_port,
                 commander_order=commander_order,
                 require_commander_order=require_commander_order,
             )
@@ -222,49 +281,90 @@ def portable_campaign_artifact_status(original):
 
 def make_completed_research_run(run_root: Path, task_id: str) -> None:
     run_dir = run_root / task_id
-    workspace = run_dir / "work"
-    write_json(
-        run_dir / "status.json",
-        {
-            "task_id": task_id,
-            "status": "completed",
-            "governor": "IskandarKhayon",
-            "steps": [],
-        },
-    )
-    for name, payload in {
-        "research_corpus.json": {"items": [{"source": "example"}]},
-        "source_map.json": {"sources": []},
-        "synthesis_plan.json": {"sections": []},
-        "final_manifest.json": {
-            "status": "ready",
-            "approved": True,
-            "files": [
-                {"path": "/work/research/research_corpus.json"},
-                {"path": "/work/research/source_map.json"},
-                {"path": "/work/research/synthesis_plan.json"},
-                {"path": "/work/research/reconstruction_ru.md"},
+    if not is_native_research_run(run_dir) or validate_native_research_run_package(run_dir):
+        raise AssertionError(
+            "research campaign fixture is not a valid native Iskandar-to-ResearchWarband run",
+        )
+    contract = json.loads((run_dir / "contract.json").read_text(encoding="utf-8"))
+    mission_id = str(contract["mission_id"])
+    evidence_ledger = {
+        "sources": [
+            {
+                "id": "source-1",
+                "uri": "https://example.invalid/risc-v",
+                "title": "RISC-V primary source",
+            }
+        ],
+        "spans": [{"id": "span-1", "source_id": "source-1"}],
+        "claims": [{"id": "claim-1", "text": "The implementation basis is supported."}],
+        "evidence_edges": [{"claim_id": "claim-1", "span_id": "span-1"}],
+        "derivations": [],
+        "conflicts": [],
+        "gaps": [],
+        "final_claim_refs": ["claim-1"],
+    }
+    raw_result = {
+        "runner_contract_version": "research-warband-runner/v1",
+        "outcome": "accepted",
+        "reason": "accepted",
+        "external_evaluator_result": {
+            "contract_version": "research-result/v1",
+            "mission_id": mission_id,
+            "status": "accepted",
+            "accepted": True,
+            "final_text": "Verified source-backed implementation brief.",
+            "question": "",
+            "ledger": evidence_ledger,
+            "search_log": [
+                {"query": "RISC-V official specification"},
+                {"acquired_uri": "https://example.invalid/risc-v"},
             ],
         },
-    }.items():
-        write_json(workspace / "research" / name, payload)
-    (workspace / "research" / "reconstruction_ru.md").write_text("brief\n", encoding="utf-8")
-    ledger = TaskLedger.create(run_dir / "task_ledger.json", task_id, "research goal", "IskandarKhayon")
+        "pipeline_audit": {
+            "searched_queries": ["RISC-V official specification"],
+            "acquired_uris": ["https://example.invalid/risc-v"],
+            "semantic_reviews": [],
+            "verification_report": {
+                "accepted": True,
+                "integrity_ok": True,
+                "issues": [],
+            },
+            "rounds_used": 1,
+            "model_calls": 4,
+            "diagnostics": {},
+            "persistent_graph_written": False,
+            "runtime_attestation_sha256": "a" * 64,
+        },
+    }
+    ledger = TaskLedger.load(run_dir / "task_ledger.json")
     ledger.set_result(
         {
             "ok": True,
+            "task_id": task_id,
+            "phase": "completed",
             "status": "completed",
-            "summary": "done",
-            "workspace_root": str(workspace),
-            "artifacts": [
-                "/work/research/research_corpus.json",
-                "/work/research/source_map.json",
-                "/work/research/synthesis_plan.json",
-                "/work/research/reconstruction_ru.md",
-                "/work/research/final_manifest.json",
-            ],
+            "final_step": "research_warband",
+            "summary": "Verified source-backed implementation brief.",
+            "artifacts": [],
+            "artifact_root": str(run_dir.resolve()),
+            "needs_user": False,
+            "question": "",
+            "next_action": {},
+            "research_warband_mission_id": mission_id,
+            "research_result": raw_result,
+            "via": "research_warband",
         }
     )
+    ledger.data["research_warband_mission"] = {
+        "id": mission_id,
+        "request_sha256": "b" * 64,
+        "status": "done",
+        "service": "http://127.0.0.1:7201",
+        "attempt": 1,
+        "inflight": False,
+        "cleanup_complete": True,
+    }
+    ledger.save()
     ledger.set_status("completed")
 
 
@@ -300,6 +400,9 @@ def make_completed_code_run(run_root: Path, task_id: str) -> None:
 
 
 def main() -> int:
+    os.environ["RESEARCH_WARBAND_BEARER_TOKEN"] = (
+        "campaign-research-warband-test-token-0123456789abcdef"
+    )
     message = "собери обзор источников по RISC-V и реализуй python демо код"
     campaigns_module.route_message = route_for_self_test
     mission_control.route_message = route_for_self_test
@@ -317,6 +420,16 @@ def main() -> int:
         raise AssertionError(f"unexpected subrun order: {plan['subruns']}")
     if plan["subruns"][1]["depends_on"] != ["research"]:
         raise AssertionError(f"implementation must depend on research: {plan['subruns'][1]}")
+    research_plan = plan["subruns"][0]
+    if (
+        research_plan.get("execution") != NATIVE_RESEARCH_EXECUTION
+        or research_plan.get("expected_artifacts") != []
+        or research_plan.get("result_contract") != NATIVE_RESEARCH_RESULT_CONTRACT
+        or "/work/research/" in json.dumps(research_plan)
+    ):
+        raise AssertionError(
+            f"research is not a native ResearchWarband result boundary: {research_plan}",
+        )
     implementation_plan = plan["subruns"][1]
     if (
         implementation_plan.get("execution") != NATIVE_EXECUTION
@@ -339,7 +452,23 @@ def main() -> int:
         ceraxia_service.skitarii_backend_health = lambda *_args, **_kwargs: healthy_skitarii_backend()
         ceraxia_service.request_model_decision = lambda *_args, **_kwargs: ceraxia_model_answer()
         ceraxia_thread.start()
-        campaigns_module.prepare_task = prepare_with_test_ceraxia(ceraxia_server.server_port)
+        iskandar_service.research_warband_backend_health = (
+            lambda *_args, **_kwargs: healthy_research_backend()
+        )
+        iskandar_service.request_model_decision = (
+            lambda *_args, **_kwargs: iskandar_model_answer()
+        )
+        iskandar_handler = iskandar_service.make_handler(run_root)
+        iskandar_server = ThreadingHTTPServer(("127.0.0.1", 0), iskandar_handler)
+        iskandar_thread = threading.Thread(
+            target=iskandar_server.serve_forever,
+            daemon=True,
+        )
+        iskandar_thread.start()
+        campaigns_module.prepare_task = prepare_with_test_governors(
+            ceraxia_server.server_port,
+            iskandar_server.server_port,
+        )
         prepared = prepare_campaign(run_root, message, campaign_id="campaign-self-test")
         if not prepared.get("ok") or prepared.get("state", {}).get("status") != "planned":
             raise AssertionError(f"bad prepared campaign: {prepared}")
@@ -356,7 +485,16 @@ def main() -> int:
             raise AssertionError(f"campaign list failed: {campaigns}")
 
         research_created = create_subrun(run_root, "campaign-self-test", "research")
-        if not research_created.get("ok") or research_created.get("task", {}).get("governor") != "IskandarKhayon":
+        if (
+            not research_created.get("ok")
+            or research_created.get("task", {}).get("governor") != "IskandarKhayon"
+            or research_created.get("governor_transport") != "http"
+            or not is_native_research_run(run_root / "campaign-self-test-research")
+            or validate_native_research_run_package(
+                run_root / "campaign-self-test-research"
+            )
+            or (run_root / "campaign-self-test-research" / "dispatch").exists()
+        ):
             raise AssertionError(f"research subrun create failed: {research_created}")
         research_ref = json.loads((run_root / "campaign-self-test-research" / "mission_ref.json").read_text(encoding="utf-8"))
         if research_ref.get("mission_id") != research_created.get("mission", {}).get("mission_id"):
@@ -379,6 +517,20 @@ def main() -> int:
             raise AssertionError(f"handoff was not created: {refreshed}")
         if handoff.get("checks", [{}])[1].get("name") != "source_protocol_completed":
             raise AssertionError(f"handoff did not record source protocol check: {handoff}")
+        handoff_payload = json.loads(
+            Path(str(handoff["path"])).read_text(encoding="utf-8"),
+        )
+        if (
+            handoff_payload.get("source_native_completion", {}).get("kind")
+            != "research_warband_bridge_result"
+            or not handoff_payload.get("source_evidence_ledger", {}).get("sources")
+            or not handoff_payload.get("source_manifest", {}).get("search_log")
+            or handoff_payload.get("required_artifacts") != []
+            or "/work/research/" in json.dumps(handoff_payload)
+        ):
+            raise AssertionError(
+                f"handoff did not consume the native evidence result: {handoff_payload}",
+            )
 
         code_created = create_subrun(run_root, "campaign-self-test", "implementation")
         code_ledger = json.loads((run_root / "campaign-self-test-code" / "task_ledger.json").read_text(encoding="utf-8"))
@@ -411,6 +563,19 @@ def main() -> int:
         report = final_review(run_root, "campaign-self-test", final_state["plan"], final_state["state"])
         if report.get("status") != "completed":
             raise AssertionError(f"final review failed: {report}")
+        research_deliverable = report.get("deliverables", {}).get("research", {})
+        if (
+            research_deliverable.get("kind") != "research_warband_bridge_result"
+            or research_deliverable.get("result", {}).get("final_step")
+            != "research_warband"
+            or not research_deliverable.get("evidence_ledger", {}).get("sources")
+            or not research_deliverable.get("source_manifest", {}).get("search_log")
+            or research_deliverable.get("service_mission", {}).get("cleanup_complete")
+            is not True
+        ):
+            raise AssertionError(
+                f"campaign final report did not consume native research evidence: {research_deliverable}",
+            )
         native_deliverable = report.get("deliverables", {}).get("implementation", {})
         if (
             native_deliverable.get("kind") != "skitarii_bridge_result"
@@ -425,6 +590,9 @@ def main() -> int:
         ceraxia_server.shutdown()
         ceraxia_server.server_close()
         ceraxia_thread.join(timeout=5)
+        iskandar_server.shutdown()
+        iskandar_server.server_close()
+        iskandar_thread.join(timeout=5)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         run_root = Path(temp_dir)

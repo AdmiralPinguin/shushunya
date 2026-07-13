@@ -4,10 +4,22 @@
 # Requires /media/shushunya/SHUSHUNYA mounted first (see fstab).
 ROOT=/media/shushunya/SHUSHUNYA/shushunya
 cd "$ROOT" || { echo "disk not mounted at $ROOT"; exit 1; }
+RESEARCH_SECRET="$ROOT/.secrets/research-warband-shadow.env"
+if [ -r "$RESEARCH_SECRET" ]; then
+  set -a
+  . "$RESEARCH_SECRET"
+  set +a
+fi
 
 echo "[boot] gemma-31B vLLM (3090, 8080)…"; bash CoreOfMadness/llm-host/start-gemma31-vllm.sh
 echo "[boot] qwen (CPU 8081)…";         bash CoreOfMadness/llm-host/start-qwen.sh
 echo "[boot] dispatcher+archive+Vox…";  bash ArchiveOfHeresy/start-main.sh || true
+echo "[boot] ResearchWarband production backend (7201)…"
+if systemctl --user list-unit-files research-warband-shadow.service >/dev/null 2>&1; then
+  systemctl --user start research-warband-shadow.service || true
+else
+  echo "  research-warband-shadow.service is not installed"
+fi
 echo "[boot] governors+gateway…";       bash EyeOfTerror/Warmaster/start-governors.sh
 echo "[boot] moriana (7103)…"
 if ! curl -fsS --max-time 3 http://127.0.0.1:7103/health >/dev/null 2>&1; then
@@ -48,8 +60,12 @@ echo "[boot] cloudflare tunnel (chat.shushunya.com — вход для прил�
 bash start-cloudflare-tunnel.sh >/dev/null 2>&1 || echo "  tunnel FAILED (см. runtime/cloudflare/)"
 
 echo "[boot] done. Status:"
-for pp in "8080 gemma" "8081 qwen" "8079 dispatcher" "8090 archive" "7000 gateway" "7101 iskandar" "7104 ceraxia" "7103 moriana" "7200 skitarii-warband" "7300 administratum" "7500 warpwails"; do
+for pp in "8080 gemma" "8081 qwen" "8079 dispatcher" "8090 archive" "7000 gateway" "7101 iskandar" "7104 ceraxia" "7103 moriana" "7200 skitarii-warband" "7201 research-warband" "7300 administratum" "7500 warpwails"; do
   set -- $pp
-  if curl -fsS -m2 "http://127.0.0.1:$1/health" >/dev/null 2>&1 || curl -fsS -m2 "http://127.0.0.1:$1/v1/models" >/dev/null 2>&1; then
+  auth=()
+  if [ "$1" = 7201 ] && [ -n "${RESEARCH_WARBAND_BEARER_TOKEN:-}" ]; then
+    auth=(-H "Authorization: Bearer $RESEARCH_WARBAND_BEARER_TOKEN")
+  fi
+  if curl -fsS -m2 "${auth[@]}" "http://127.0.0.1:$1/health" >/dev/null 2>&1 || curl -fsS -m2 "http://127.0.0.1:$1/v1/models" >/dev/null 2>&1; then
     echo "  UP   $2 ($1)"; else echo "  DOWN $2 ($1)"; fi
 done

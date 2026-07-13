@@ -33,6 +33,7 @@ from .pipeline import (
     ResearchPipeline,
     ResearchResult,
     ResearchSpec,
+    caller_source_urls_from_text,
 )
 from .research_tools import (
     AcquisitionError,
@@ -360,7 +361,9 @@ def _validate_context(
     return tuple(turns)
 
 
-def _validate_production_directive(payload: Mapping[str, Any]) -> dict[str, Any]:
+def _validate_production_directive(
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], tuple[str, ...]]:
     if set(payload) != PRODUCTION_FIELDS:
         raise ProductionRunnerError("production payload is not the exact Iskandar envelope")
     try:
@@ -378,13 +381,15 @@ def _validate_production_directive(payload: Mapping[str, Any]) -> dict[str, Any]
         order = validate_native_research_commander_order(
             payload["commander_order"], expected_mission_id=mission_id
         )
-        return validate_directive_for_commander(
+        directive = validate_directive_for_commander(
             payload["leadership_directive"],
             order,
             expected_task_id=task_id,
             expected_mission_id=mission_id,
             require_delegation=True,
         )
+        caller_source_urls = caller_source_urls_from_text(order["user_request"])
+        return directive, order, caller_source_urls
     except (TypeError, ValueError) as exc:
         raise ProductionRunnerError(f"native Iskandar directive rejected: {exc}") from exc
 
@@ -906,7 +911,15 @@ def _build_pipeline(
         )
 
     semantic_max_tokens = runtime_contract["review_pass"]["semantic_max_tokens"]
+    reader_max_tokens = operator_profile["reader_max_tokens"]
     writer_max_tokens = operator_profile["writer_max_tokens"]
+    if (
+        type(reader_max_tokens) is not int
+        or not 256 <= reader_max_tokens <= gemma_max_tokens
+    ):
+        raise ProductionRunnerError(
+            "Reader output reserve is outside the Gemma generation budget"
+        )
     if (
         type(writer_max_tokens) is not int
         or not 256 <= writer_max_tokens <= gemma_max_tokens
@@ -921,9 +934,17 @@ def _build_pipeline(
         raise ProductionRunnerError(
             "semantic review output reserve is outside the Gemma generation budget"
         )
-    raw_author = build_gemma_pass(role_max_tokens={"writer": writer_max_tokens})
+    raw_author = build_gemma_pass(
+        role_max_tokens={
+            "reader": reader_max_tokens,
+            "writer": writer_max_tokens,
+        }
+    )
     raw_reviewer = build_gemma_pass(
-        role_max_tokens={"semantic_verifier": semantic_max_tokens}
+        role_max_tokens={
+            "reader_coverage": reader_max_tokens,
+            "semantic_verifier": semantic_max_tokens,
+        }
     )
     runtime_digest = str(runtime_attestation["attestation_sha256"])
     author = RuntimeGuardedModelClient(
@@ -1013,14 +1034,19 @@ def run_mission(payload: dict[str, Any], context: Any) -> dict[str, Any]:
         raise ProductionRunnerError("mission payload must be an object")
     profile = _required_env("RESEARCH_WARBAND_PROFILE")
     if profile == PRODUCTION_PROFILE:
-        directive = _validate_production_directive(payload)
+        directive, _commander_order, caller_source_urls = (
+            _validate_production_directive(payload)
+        )
     elif profile == EVALUATOR_PROFILE:
         directive = _evaluator_directive(payload)
+        caller_source_urls = ()
     else:
         raise ProductionRunnerError("RESEARCH_WARBAND_PROFILE is unsupported")
     clarification_turns = _validate_context(payload, context)
     spec = ResearchSpec.from_directive(
-        directive, clarification_turns=clarification_turns
+        directive,
+        caller_source_urls=caller_source_urls,
+        clarification_turns=clarification_turns,
     )
     pipeline, snapshot_store, runtime_attestation = _build_pipeline(profile, payload)
     result = pipeline.run(spec)

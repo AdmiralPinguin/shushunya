@@ -169,7 +169,7 @@ def main() -> int:
         raise AssertionError(f"brigade worker contract must require worker health_url: {worker_contract}")
     if (
         "supervisor" not in worker_contract.get("external_warband_required_fields", [])
-        or worker_contract.get("external_warband_count") != 1
+        or worker_contract.get("external_warband_count") != 2
     ):
         raise AssertionError(f"brigade contract must expose one externally supervised warband: {worker_contract}")
     contract_edges = {item.get("service"): item.get("depends_on") for item in worker_contract.get("dependency_edges", []) if isinstance(item, dict)}
@@ -185,6 +185,7 @@ def main() -> int:
         or stages[1].get("services") != ["warmaster-gateway"]
         or "http://127.0.0.1:7002/health" not in stages[0].get("health_urls", [])
         or "http://127.0.0.1:7200/health?vm=1" not in stages[0].get("health_urls", [])
+        or "http://127.0.0.1:7201/health" not in stages[0].get("health_urls", [])
         or "http://127.0.0.1:7000/health" not in stages[1].get("health_urls", [])
     ):
         raise AssertionError(f"bad brigade startup stages: {plan}")
@@ -217,6 +218,8 @@ def main() -> int:
         raise AssertionError(f"bad worker health URLs: {plan}")
     if health_urls.get("SkitariiWarband") != "http://127.0.0.1:7200/health?vm=1":
         raise AssertionError(f"bad native warband health URL: {plan}")
+    if health_urls.get("ResearchWarband") != "http://127.0.0.1:7201/health":
+        raise AssertionError(f"bad research warband health URL: {plan}")
     warbands = plan.get("warbands", [])
     if warbands != [
         {
@@ -227,10 +230,22 @@ def main() -> int:
             "supervisor": "skitarii-warband.service",
             "health_url": "http://127.0.0.1:7200/health?vm=1",
             "lifecycle": "externally_managed",
+        },
+        {
+            "name": "ResearchWarband",
+            "role": "native research warband for search, reading, evidence construction, synthesis, verification, and repair",
+            "port": 7201,
+            "path": "EyeOfTerror/Scriptorium/ResearchWarband",
+            "supervisor": "research-warband-shadow.service",
+            "health_url": "http://127.0.0.1:7201/health",
+            "lifecycle": "externally_managed",
         }
     ]:
         raise AssertionError(f"bad native warband plan: {warbands}")
-    if plan.get("ports", {}).get("warbands") != {"SkitariiWarband": 7200}:
+    if plan.get("ports", {}).get("warbands") != {
+        "SkitariiWarband": 7200,
+        "ResearchWarband": 7201,
+    }:
         raise AssertionError(f"bad native warband port plan: {plan}")
     worker_names = {item.get("name") for item in plan.get("mechanicum_workers", []) if isinstance(item, dict)}
     required_workers = {
@@ -259,6 +274,8 @@ def main() -> int:
         raise AssertionError(f"worker readiness URL missing from plan: {plan}")
     if "http://127.0.0.1:7200/health?vm=1" not in plan.get("readiness_urls", []):
         raise AssertionError(f"native warband readiness URL missing from plan: {plan}")
+    if "http://127.0.0.1:7201/health" not in plan.get("readiness_urls", []):
+        raise AssertionError(f"research warband readiness URL missing from plan: {plan}")
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_root = Path(temp_dir)
         services_path = temp_root / "LegacyMechanicum" / "worker_services.json"

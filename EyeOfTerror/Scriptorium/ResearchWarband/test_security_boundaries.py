@@ -26,6 +26,7 @@ from ResearchWarband.pipeline import (
     ResearchBudgets,
     ResearchPipeline,
     ResearchSpec,
+    caller_source_urls_from_text,
 )
 from ResearchWarband.reader import reader_cache_key
 from ResearchWarband.research_tools import (
@@ -334,6 +335,29 @@ class SecurityBoundaryTests(unittest.TestCase):
         with self.assertRaises(ExecutionPolicyError):
             ExecutionPolicy.from_directive(tampered)
 
+    def test_caller_source_urls_are_exact_bounded_and_separate_from_objective(self) -> None:
+        first = "https://www.rfc-editor.org/rfc/rfc1149.txt"
+        second = "http://example.test:8080/source?q=1"
+        urls = caller_source_urls_from_text(
+            f"Read {first}, compare {second}. Duplicate: {first}"
+        )
+
+        self.assertEqual((first, second), urls)
+        spec = ResearchSpec.from_directive(
+            directive(), caller_source_urls=urls
+        )
+        self.assertEqual("What is supported by the record?", spec.question)
+        self.assertEqual([first, second], spec.to_dict()["caller_source_urls"])
+
+    def test_caller_source_url_credentials_and_non_http_schemes_are_rejected(self) -> None:
+        for value in (
+            "https://user:secret@example.test/source",
+            "file:///etc/passwd",
+            "www.example.test/source",
+        ):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                caller_source_urls_from_text(value)
+
     def test_context_oversize_fails_before_transport(self) -> None:
         client = RoutedOpenAIModelClient(
             route="gemma",
@@ -541,14 +565,19 @@ class SecurityBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ModelProtocolError, "does not match"):
             mismatch.preflight("reader", {"task_id": "task-1"})
 
-    def test_semantic_role_output_reserve_is_bounded_without_cutting_reader(self) -> None:
+    def test_role_output_reserves_keep_reader_and_semantic_requests_physical(self) -> None:
         counter = StaticTokenCounter(input_tokens=4_744, max_model_len=6_144)
         client = RoutedOpenAIModelClient(
             route="gemma",
             base_url="http://127.0.0.1:8079/v1",
             model="gemma-alias",
             max_tokens=2_048,
-            role_max_tokens={"semantic_verifier": 1_280},
+            role_max_tokens={
+                "reader": 1_024,
+                "reader_coverage": 1_024,
+                "semantic_verifier": 1_280,
+                "writer": 1_024,
+            },
             physical_model_identity="google/gemma-4-31B-it-qat-w4a16-ct",
             attested_max_model_len=6_144,
             token_counter=counter,
@@ -572,8 +601,79 @@ class SecurityBoundaryTests(unittest.TestCase):
                 {}, client.decide("semantic_verifier", {"task_id": "task-1"})
             )
         self.assertEqual(1_280, captured["max_tokens"])
+        client.preflight("reader", {"task_id": "task-1"})
+        client.preflight("reader_coverage", {"task_id": "task-1"})
+        client.preflight("writer", {"task_id": "task-1"})
         with self.assertRaisesRegex(ModelProtocolError, "2048 output tokens"):
-            client.preflight("reader", {"task_id": "task-1"})
+            client.preflight("planner", {"task_id": "task-1"})
+
+    def test_reader_worst_case_schema_response_fits_exact_6144_boundary(self) -> None:
+        counter = StaticTokenCounter(input_tokens=5_120, max_model_len=6_144)
+        client = RoutedOpenAIModelClient(
+            route="gemma",
+            base_url="http://127.0.0.1:8079/v1",
+            model="gemma-alias",
+            max_tokens=2_048,
+            role_max_tokens={"reader": 1_024, "reader_coverage": 1_024},
+            physical_model_identity="google/gemma-4-31B-it-qat-w4a16-ct",
+            attested_max_model_len=6_144,
+            token_counter=counter,
+        )
+        worst_reader_response = {
+            "candidates": [
+                {
+                    "segment_index": index,
+                    "relevance": "high",
+                    "reason": "x" * 96,
+                }
+                for index in range(1, 5)
+            ]
+        }
+        captured: dict[str, Any] = {}
+
+        def generation(request: Any, timeout: float) -> FakeGatewayResponse:
+            del timeout
+            captured.update(json.loads(request.data.decode("utf-8")))
+            return FakeGatewayResponse(
+                json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "finish_reason": "stop",
+                                "message": {
+                                    "content": json.dumps(worst_reader_response)
+                                },
+                            }
+                        ]
+                    }
+                ).encode("utf-8")
+            )
+
+        with patch(
+            "ResearchWarband.model_client.urllib.request.urlopen",
+            side_effect=generation,
+        ):
+            self.assertEqual(
+                worst_reader_response,
+                client.decide("reader", reader_model_payload(segment_count=4)),
+            )
+        self.assertEqual(1_024, captured["max_tokens"])
+
+        too_large = RoutedOpenAIModelClient(
+            route="gemma",
+            base_url="http://127.0.0.1:8079/v1",
+            model="gemma-alias",
+            max_tokens=2_048,
+            role_max_tokens={"reader": 1_024},
+            physical_model_identity="google/gemma-4-31B-it-qat-w4a16-ct",
+            attested_max_model_len=6_144,
+            token_counter=StaticTokenCounter(5_121, 6_144),
+        )
+        with self.assertRaisesRegex(
+            ModelProtocolError,
+            "5121 input \\+ 1024 output tokens",
+        ):
+            too_large.preflight("reader", reader_model_payload(segment_count=4))
 
     def test_vllm_counter_posts_exact_chat_and_strictly_validates_response(self) -> None:
         counter = VLLMChatTokenCounter("http://127.0.0.1:8080/tokenize")

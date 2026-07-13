@@ -29,6 +29,7 @@
     "gemma_max_num_seqs": 1,
     "research_max_active": 1,
     "gemma_max_tokens": 2048,
+    "reader_max_tokens": 1024,
     "writer_max_tokens": 1024,
     "gemma_max_context_chars": 24000,
     "gemma_timeout_sec": 7200,

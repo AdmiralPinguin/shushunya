@@ -25,12 +25,17 @@ from .command_text import task_text_from_commander_order
 from .contracts import validate_task_contract_payload
 from .gateway_util import post_json, valid_task_id, validate_service_host
 from .governors import governor_by_name
-from .inner_circle.iskandar import plan_research_writing as plan_lore_reconstruction
 from .ledger import TaskLedger
 from .native_code_run import (
     load_native_code_run,
     validate_native_code_contract,
     validate_native_code_run_package,
+)
+from .native_research_run import (
+    load_native_research_run,
+    native_research_prepare_request_sha256,
+    validate_native_research_contract,
+    validate_native_research_run_package,
 )
 from .oversight_guard import compact_oversight_summary
 from .pipeline import write_pipeline_run
@@ -40,7 +45,11 @@ from .views import payload_with_task_view
 from EyeOfTerror.common_protocol import governor_plan_from_contract, validate_protocol_payload
 from EyeOfTerror.common_protocol.ceraxia_directive import (
     CeraxiaDirectiveError,
-    validate_directive_for_commander,
+    validate_directive_for_commander as validate_ceraxia_directive_for_commander,
+)
+from EyeOfTerror.common_protocol.iskandar_directive import (
+    IskandarDirectiveError,
+    validate_directive_for_commander as validate_iskandar_directive_for_commander,
 )
 
 
@@ -49,24 +58,47 @@ def _post_governor_json(
     payload: dict[str, Any],
     governor_name: str,
 ) -> dict[str, Any]:
-    """Attach the Ceraxia credential only to Ceraxia's own POST endpoints."""
+    """Attach only the selected governor's dedicated loopback credential."""
     headers: dict[str, str] = {}
-    if str(governor_name) == "Ceraxia":
-        token = os.environ.get("CERAXIA_BEARER_TOKEN", "")
+    token_env = {
+        "Ceraxia": "CERAXIA_BEARER_TOKEN",
+        "IskandarKhayon": "RESEARCH_WARBAND_BEARER_TOKEN",
+    }.get(str(governor_name), "")
+    if token_env:
+        token = os.environ.get(token_env, "")
         if any(char in token for char in "\r\n"):
-            raise ValueError("invalid Ceraxia bearer token")
+            raise ValueError(f"invalid {governor_name} bearer token")
+        if governor_name == "IskandarKhayon" and (
+            len(token) < 32 or token.startswith("REPLACE_") or len(set(token)) < 8
+        ):
+            raise ValueError(f"{governor_name} bearer token is missing or unsafe")
         if token:
             headers["Authorization"] = f"Bearer {token}"
     return post_json(url, payload, headers=headers)
 
 
 def _bounded_http_error_payload(error: urllib.error.HTTPError) -> dict[str, Any]:
+    def pairs(values: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in values:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    def invalid_constant(value: str) -> None:
+        raise ValueError(f"invalid JSON constant: {value}")
+
     try:
         raw = error.read(1_000_001)
         if len(raw) > 1_000_000:
             return {}
-        payload = json.loads(raw.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        payload = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=pairs,
+            parse_constant=invalid_constant,
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -356,14 +388,14 @@ def prepare_native_ceraxia_via_service(
         )
         if persisted_receipt.get("prepare_request_sha256") != expected_request_sha256:
             raise ValueError("persisted native receipt belongs to a different prepare request")
-        directive = validate_directive_for_commander(
+        directive = validate_ceraxia_directive_for_commander(
             prepared.get("leadership_directive"),
             commander_order,
             expected_task_id=resolved_task_id,
             expected_mission_id=mission_id_from_commander(resolved_task_id, commander_order),
             require_delegation=True,
         )
-        persisted_directive = validate_directive_for_commander(
+        persisted_directive = validate_ceraxia_directive_for_commander(
             persisted_package.get("leadership_directive"),
             commander_order,
             expected_task_id=resolved_task_id,
@@ -445,6 +477,250 @@ def prepare_native_ceraxia_via_service(
     }
 
 
+def prepare_native_iskandar_via_service(
+    message: str,
+    task_id: str | None,
+    run_root: Path,
+    governor: Any,
+    host: str = "127.0.0.1",
+    port: int | None = None,
+    commander_order: dict[str, Any] | None = None,
+    require_commander_order: bool = False,
+) -> dict[str, Any]:
+    """Prepare one commander-bound Iskandar -> ResearchWarband native run."""
+    if require_commander_order and not commander_order:
+        return commander_order_required_payload(task_id, "http", host, message)
+    if not isinstance(commander_order, dict) or not commander_order:
+        return commander_order_required_payload(task_id, "http", host, message)
+    validate_protocol_payload(commander_order, expected_type="commander_order")
+    host = validate_service_host(host)
+    service_port = int(port or governor.port)
+    base = f"http://{host}:{service_port}"
+    resolved_task_id = str(task_id or "").strip()
+    if not resolved_task_id:
+        try:
+            preview = _post_governor_json(
+                base + "/plan",
+                governor_payload_for(message, None, commander_order=commander_order),
+                governor.name,
+            )
+            preview_contract = (
+                preview.get("contract")
+                if isinstance(preview.get("contract"), dict)
+                else {}
+            )
+            resolved_task_id = str(preview_contract.get("task_id") or "").strip()
+        except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+            return {
+                "ok": False,
+                "gateway": "WarmasterGateway",
+                "governor": "IskandarKhayon",
+                "error": f"Iskandar structural preview unavailable: {exc}",
+                "error_code": "governor_service_unavailable",
+                "actions": task_preflight_actions(
+                    False, "governor_service_unavailable", "",
+                    governor_transport="http", governor_host=host, message=message,
+                ),
+            }
+    if not valid_task_id(resolved_task_id):
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "governor": "IskandarKhayon",
+            "task_id": resolved_task_id,
+            "error": "Iskandar returned an invalid task_id",
+            "error_code": "invalid_governor_task_id",
+            "actions": task_preflight_actions(
+                False, "invalid_governor_task_id", resolved_task_id,
+                governor_transport="http", governor_host=host, message=message,
+            ),
+        }
+    root = run_root.resolve()
+    run_dir = (root / resolved_task_id).resolve()
+    if run_dir == root or root not in run_dir.parents:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "governor": "IskandarKhayon",
+            "task_id": resolved_task_id,
+            "error": "native research run escaped run_root",
+            "error_code": "invalid_run_dir",
+            "actions": task_preflight_actions(
+                False, "invalid_run_dir", resolved_task_id,
+                governor_transport="http", governor_host=host, message=message,
+            ),
+        }
+    request_payload = {
+        **governor_payload_for(
+            message,
+            resolved_task_id,
+            commander_order=commander_order,
+        ),
+        "run_dir": str(run_dir),
+    }
+    try:
+        prepared = _post_governor_json(
+            base + "/prepare_run",
+            request_payload,
+            governor.name,
+        )
+    except urllib.error.HTTPError as exc:
+        error_payload = _bounded_http_error_payload(exc)
+        error_code = str(error_payload.get("error_code") or "")
+        public_code = {
+            "delegation_not_authorized": "iskandar_delegation_not_authorized",
+            "prepare_identity_conflict": "iskandar_prepare_identity_conflict",
+            "research_warband_backend_unavailable": "research_warband_backend_unavailable",
+        }.get(error_code, "governor_service_unavailable")
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "governor": "IskandarKhayon",
+            "task_id": resolved_task_id,
+            "error": str(error_payload.get("error") or f"Iskandar returned HTTP {exc.code}"),
+            "error_code": public_code,
+            "leadership_directive": error_payload.get("leadership_directive", {}),
+            "response": error_payload,
+            "actions": task_preflight_actions(
+                False, public_code, resolved_task_id,
+                governor_transport="http", governor_host=host, message=message,
+            ),
+        }
+    except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "governor": "IskandarKhayon",
+            "task_id": resolved_task_id,
+            "error": f"Iskandar prepare unavailable: {exc}",
+            "error_code": "governor_service_unavailable",
+            "actions": task_preflight_actions(
+                False, "governor_service_unavailable", resolved_task_id,
+                governor_transport="http", governor_host=host, message=message,
+            ),
+        }
+    if prepared.get("ok") is not True:
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "governor": "IskandarKhayon",
+            "task_id": resolved_task_id,
+            "error": str(prepared.get("error") or "Iskandar did not prepare the native run"),
+            "error_code": str(prepared.get("error_code") or "governor_prepare_failed"),
+            "response": prepared,
+            "actions": task_preflight_actions(
+                False, str(prepared.get("error_code") or "governor_prepare_failed"),
+                resolved_task_id, governor_transport="http", governor_host=host,
+                message=message,
+            ),
+        }
+    try:
+        contract_payload = prepared.get("contract")
+        if not isinstance(contract_payload, dict):
+            raise ValueError("prepare response omitted the native research contract")
+        contract_payload = validate_native_research_contract(
+            contract_payload,
+            expected_task_id=resolved_task_id,
+            expected_mission_id=mission_id_from_commander(resolved_task_id, commander_order),
+        )
+        persisted = load_native_research_run(run_dir)
+        if persisted.get("ok") is not True:
+            errors = persisted.get("errors") if isinstance(persisted.get("errors"), list) else []
+            raise ValueError("persisted native research package could not be loaded: " + "; ".join(errors))
+        if persisted.get("contract") != contract_payload:
+            raise ValueError("prepare response and persisted native research contract differ")
+        package_errors = validate_native_research_run_package(run_dir)
+        if package_errors:
+            raise ValueError("; ".join(package_errors))
+        receipt = persisted.get("receipt") if isinstance(persisted.get("receipt"), dict) else {}
+        expected_request_sha256 = native_research_prepare_request_sha256(
+            contract_payload,
+            commander_order,
+        )
+        if receipt.get("kind") != "native_research_run_receipt" or receipt.get("version") != 1:
+            raise ValueError("persisted native research receipt identity is invalid")
+        if receipt.get("prepare_request_sha256") != expected_request_sha256:
+            raise ValueError("persisted native research receipt belongs to a different prepare request")
+        directive = validate_iskandar_directive_for_commander(
+            prepared.get("leadership_directive"),
+            commander_order,
+            expected_task_id=resolved_task_id,
+            expected_mission_id=mission_id_from_commander(resolved_task_id, commander_order),
+            require_delegation=True,
+        )
+        persisted_directive = validate_iskandar_directive_for_commander(
+            persisted.get("leadership_directive"),
+            commander_order,
+            expected_task_id=resolved_task_id,
+            expected_mission_id=mission_id_from_commander(resolved_task_id, commander_order),
+            require_delegation=True,
+        )
+        if directive != persisted_directive:
+            raise ValueError("prepare response and persisted Iskandar directive differ")
+        persisted_plan = persisted.get("governor_plan") if isinstance(persisted.get("governor_plan"), dict) else {}
+        persisted_status = persisted.get("status") if isinstance(persisted.get("status"), dict) else {}
+        if prepared.get("governor_plan") != persisted_plan:
+            raise ValueError("prepare response and persisted native research governor plan differ")
+        if prepared.get("status") != persisted_status:
+            raise ValueError("prepare response and persisted native research status differ")
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, IskandarDirectiveError) as exc:
+        cleanup = cleanup_unregistered_run_dir(run_root, run_dir)
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "governor": "IskandarKhayon",
+            "task_id": resolved_task_id,
+            "error": f"Iskandar prepared an invalid native research run: {exc}",
+            "error_code": "governor_prepare_invalid_run",
+            "cleanup": cleanup,
+            "actions": task_preflight_actions(
+                False, "governor_prepare_invalid_run", resolved_task_id,
+                governor_transport="http", governor_host=host, message=message,
+            ),
+        }
+    ledger_path = run_dir / "task_ledger.json"
+    if ledger_path.exists():
+        ledger_data = TaskLedger.load(ledger_path).to_dict()
+        if (
+            str(ledger_data.get("task_id") or "") != resolved_task_id
+            or str(ledger_data.get("governor") or "") != "IskandarKhayon"
+        ):
+            return {
+                "ok": False,
+                "gateway": "WarmasterGateway",
+                "governor": "IskandarKhayon",
+                "task_id": resolved_task_id,
+                "error": "existing ledger does not belong to this Iskandar prepare request",
+                "error_code": "iskandar_prepare_identity_conflict",
+                "actions": task_preflight_actions(
+                    False, "iskandar_prepare_identity_conflict", resolved_task_id,
+                    governor_transport="http", governor_host=host, message=message,
+                ),
+            }
+    else:
+        TaskLedger.create(
+            ledger_path,
+            resolved_task_id,
+            str(contract_payload.get("goal") or message),
+            "IskandarKhayon",
+        )
+    return {
+        "ok": True,
+        "gateway": "WarmasterGateway",
+        "governor": "IskandarKhayon",
+        "governor_transport": "http",
+        "protocol_mode": "commander_order",
+        "task_id": resolved_task_id,
+        "run_dir": str(run_dir),
+        "status": persisted_status,
+        "contract": contract_payload,
+        "governor_plan": persisted_plan,
+        "leadership_directive": directive,
+        "prepare_replayed": bool(prepared.get("prepare_replayed")),
+        "actions": created_task_actions(resolved_task_id),
+    }
+
+
 def prepare_task_via_governor_service(
     message: str,
     task_id: str | None,
@@ -457,6 +733,17 @@ def prepare_task_via_governor_service(
 ) -> dict[str, Any]:
     if governor.name == "Ceraxia":
         return prepare_native_ceraxia_via_service(
+            message,
+            task_id,
+            run_root,
+            governor,
+            host=host,
+            port=port,
+            commander_order=commander_order,
+            require_commander_order=require_commander_order,
+        )
+    if governor.name == "IskandarKhayon":
+        return prepare_native_iskandar_via_service(
             message,
             task_id,
             run_root,
@@ -860,20 +1147,38 @@ def prepare_task(
             "route": route_payload.get("route") if isinstance(route_payload.get("route"), dict) else {},
             "actions": task_preflight_actions(False, "governor_inactive", task_id or "", governor_transport=governor_transport, governor_host=governor_host, message=message),
         }
-    if governor == "Ceraxia" and governor_transport == "local":
+    if governor in {"Ceraxia", "IskandarKhayon"} and governor_transport == "local":
+        is_research = governor == "IskandarKhayon"
+        error_code = (
+            "iskandar_leader_service_required"
+            if is_research
+            else "ceraxia_leader_service_required"
+        )
         return {
             "ok": False,
             "gateway": "WarmasterGateway",
-            "governor": "Ceraxia",
+            "governor": governor,
+            "kind": str(route_payload.get("kind") or "commanded"),
+            "route": (
+                route_payload.get("route")
+                if isinstance(route_payload.get("route"), dict)
+                else {}
+            ),
+            "protocol_mode": (
+                "commander_order" if commander_order else "commander_order_missing"
+            ),
             "error": (
-                "Ceraxia code missions require governor_transport=http so the live leader "
+                "Iskandar research missions require governor_transport=http so the live leader "
+                "can validate and persist iskandar_directive.json"
+                if is_research
+                else "Ceraxia code missions require governor_transport=http so the live leader "
                 "can validate and persist ceraxia_directive.json"
             ),
-            "error_code": "ceraxia_leader_service_required",
+            "error_code": error_code,
             "task_id": task_id or "",
             "actions": task_preflight_actions(
                 False,
-                "ceraxia_leader_service_required",
+                error_code,
                 task_id or "",
                 governor_transport="http",
                 governor_host=governor_host,
@@ -898,11 +1203,10 @@ def prepare_task(
             "error_code": "invalid_governor_transport",
             "actions": task_preflight_actions(False, "invalid_governor_transport", task_id or "", governor_transport=governor_transport, governor_host=governor_host, message=message),
         }
+    if governor != "Moriana":
+        raise RuntimeError("native governors cannot enter the legacy local worker-plan path")
     task_text = governor_task_text(message, commander_order)
-    if governor == "Moriana":
-        plan = plan_image_task(task_text, task_id=task_id)
-    else:
-        plan = plan_lore_reconstruction(task_text, task_id=task_id)
+    plan = plan_image_task(task_text, task_id=task_id)
     run_dir = run_root / plan.contract.task_id
     if run_dir.exists():
         return {
@@ -1039,20 +1343,38 @@ def preflight_task(
             "error_code": "invalid_governor_transport",
             "actions": task_preflight_actions(False, "invalid_governor_transport", task_id or "", include_brigade_health, governor_transport, governor_host, message),
         }
-    if governor_ref.name == "Ceraxia" and governor_transport == "local":
+    if governor_ref.name in {"Ceraxia", "IskandarKhayon"} and governor_transport == "local":
+        is_research = governor_ref.name == "IskandarKhayon"
+        error_code = (
+            "iskandar_leader_service_required"
+            if is_research
+            else "ceraxia_leader_service_required"
+        )
         return {
             "ok": False,
             "gateway": "WarmasterGateway",
-            "governor": "Ceraxia",
+            "governor": governor_ref.name,
+            "kind": str(route_payload.get("kind") or "commanded"),
+            "route": (
+                route_payload.get("route")
+                if isinstance(route_payload.get("route"), dict)
+                else {}
+            ),
+            "protocol_mode": (
+                "commander_order" if commander_order else "commander_order_missing"
+            ),
             "error": (
-                "Ceraxia code preflight requires governor_transport=http so the live leader "
+                "Iskandar research preflight requires governor_transport=http so the live leader "
+                "can produce a validated leadership directive"
+                if is_research
+                else "Ceraxia code preflight requires governor_transport=http so the live leader "
                 "can produce a validated leadership directive"
             ),
-            "error_code": "ceraxia_leader_service_required",
+            "error_code": error_code,
             "task_id": task_id or "",
             "actions": task_preflight_actions(
                 False,
-                "ceraxia_leader_service_required",
+                error_code,
                 task_id or "",
                 include_brigade_health,
                 "http",
@@ -1096,7 +1418,7 @@ def preflight_task(
                 governor_payload_for(message, task_id, commander_order=commander_order),
                 governor_ref.name,
             )
-            if governor_ref.name != "Ceraxia":
+            if governor_ref.name not in {"Ceraxia", "IskandarKhayon"}:
                 plan_payload = attach_governor_plan_payload(
                     plan_payload,
                     mission_id_from_commander(task_id, commander_order),
@@ -1184,12 +1506,82 @@ def preflight_task(
             if include_brigade_health:
                 payload["brigade_readiness"] = compact_brigade_readiness(host=governor_host)
             return payload
+        if governor_ref.name == "IskandarKhayon":
+            resolved_task_id = str(contract.get("task_id") or "").strip()
+            errors: list[str] = []
+            try:
+                contract = validate_native_research_contract(
+                    contract,
+                    expected_task_id=str(task_id or ""),
+                    expected_mission_id=mission_id_from_commander(
+                        resolved_task_id or task_id,
+                        commander_order,
+                    ),
+                )
+            except ValueError as exc:
+                errors.append(str(exc))
+            run_dir = run_root / resolved_task_id if resolved_task_id else run_root / "_invalid"
+            backend = (
+                plan_payload.get("active_execution_backend")
+                if isinstance(plan_payload.get("active_execution_backend"), dict)
+                else {}
+            )
+            backend_ready = backend.get("healthy") is True
+            if not backend_ready:
+                errors.append("ResearchWarband backend is not ready")
+            if resolved_task_id and run_dir.exists():
+                errors.append("task_id already exists")
+            ok = not errors
+            if resolved_task_id and run_dir.exists():
+                error_code = "task_exists"
+            elif not backend_ready:
+                error_code = "research_warband_backend_unavailable"
+            elif errors:
+                error_code = "invalid_native_research_contract"
+            else:
+                error_code = ""
+            payload = {
+                "ok": ok,
+                "gateway": "WarmasterGateway",
+                "governor": "IskandarKhayon",
+                "governor_transport": "http",
+                "protocol_mode": "commander_order" if commander_order else "commander_order_missing",
+                "task_id": resolved_task_id,
+                "route": route_payload.get("route") if isinstance(route_payload.get("route"), dict) else {},
+                "contract_summary": contract_summary(contract),
+                "governor_plan": plan_payload.get("governor_plan") if isinstance(plan_payload.get("governor_plan"), dict) else {},
+                "leadership_authorization": "pending_prepare",
+                "active_execution_backend": backend,
+                "validation": {"ok": not errors, "errors": errors},
+                "missing_workers": [],
+                "unavailable_workers": [],
+                "worker_availability": {
+                    "ok": backend_ready,
+                    "required_workers": [],
+                    "available_workers": [],
+                    "missing_workers": [],
+                    "unavailable_workers": [],
+                },
+                "would_create_run_dir": str(run_dir) if resolved_task_id else "",
+                "error_code": error_code,
+                "actions": task_preflight_actions(
+                    ok,
+                    error_code,
+                    resolved_task_id,
+                    include_brigade_health,
+                    "http",
+                    governor_host,
+                    message,
+                ),
+            }
+            if include_brigade_health:
+                payload["brigade_readiness"] = compact_brigade_readiness(host=governor_host)
+            return payload
     else:
+        if governor_ref.name != "Moriana":
+            raise RuntimeError("native governors cannot enter the legacy local preflight path")
         task_text = governor_task_text(message, commander_order)
-        if governor_ref.name == "Moriana":
-            plan = plan_image_task(task_text, task_id=task_id)
-        else:
-            plan = plan_lore_reconstruction(task_text, task_id=task_id)
+        plan = plan_image_task(task_text, task_id=task_id)
         plan_payload = plan.to_dict()
         plan_payload = attach_governor_plan_payload(plan_payload, mission_id_from_commander(str(plan.contract.task_id), commander_order), commander_order)
         contract = plan_payload.get("contract") if isinstance(plan_payload.get("contract"), dict) else plan.contract.to_dict()

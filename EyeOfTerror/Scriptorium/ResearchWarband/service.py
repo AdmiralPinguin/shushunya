@@ -61,6 +61,7 @@ def _public_model_runtime_identity() -> dict[str, Any]:
     canonical_model_id = ""
     physical_model_root = ""
     max_model_len: int | None = None
+    reader_max_tokens: int | None = None
     writer_max_tokens: int | None = None
     selected = os.environ.get("RESEARCH_WARBAND_MODEL_RUNTIME_CONTRACT", "").strip()
     if selected:
@@ -81,7 +82,10 @@ def _public_model_runtime_identity() -> dict[str, Any]:
                 if type(raw_limit) is int:
                     max_model_len = raw_limit
             if isinstance(operator, dict):
+                raw_reader_limit = operator.get("reader_max_tokens")
                 raw_writer_limit = operator.get("writer_max_tokens")
+                if type(raw_reader_limit) is int:
+                    reader_max_tokens = raw_reader_limit
                 if type(raw_writer_limit) is int:
                     writer_max_tokens = raw_writer_limit
         except (OSError, UnicodeError, json.JSONDecodeError):
@@ -94,6 +98,7 @@ def _public_model_runtime_identity() -> dict[str, Any]:
         "canonical_model_id": canonical_model_id,
         "physical_model_root": physical_model_root,
         "max_model_len": max_model_len,
+        "reader_max_tokens": reader_max_tokens,
         "writer_max_tokens": writer_max_tokens,
     }
 
