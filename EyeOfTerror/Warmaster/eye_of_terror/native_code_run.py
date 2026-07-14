@@ -462,9 +462,12 @@ def write_native_code_run(
     directive: dict[str, Any],
     governor_plan: dict[str, Any],
     prepare_request_sha256: str = "",
+    *,
+    published_run_dir: Path | None = None,
 ) -> dict[str, Any]:
-    """Atomically publish a native run package, writing ``status.json`` last."""
+    """Write a native package, optionally staged for atomic directory publish."""
     target = Path(run_dir)
+    published_target = Path(published_run_dir) if published_run_dir is not None else target
     if target.is_symlink():
         raise ValueError("native run directory must not be a symlink")
     target.mkdir(parents=True, exist_ok=True)
@@ -494,7 +497,9 @@ def write_native_code_run(
         "directive_sha256": _sha256(normalized_directive),
         "governor_plan_sha256": _sha256(normalized_plan),
     }
-    status = _native_status(target, normalized_contract)
+    if published_target.name != normalized_contract["task_id"]:
+        raise ValueError("published native run directory must match contract task_id")
+    status = _native_status(published_target, normalized_contract)
     for key, payload in (
         ("contract", normalized_contract),
         ("leadership_directive", normalized_directive),
@@ -503,7 +508,10 @@ def write_native_code_run(
         ("status", status),
     ):
         _write_json_atomic(target / PACKAGE_FILES[key], payload)
-    errors = validate_native_code_run_package(target)
+    errors = validate_native_code_run_package(
+        target,
+        expected_run_dir=published_target,
+    )
     if errors:
         raise ValueError(f"native run package failed post-write validation: {errors}")
     return status
@@ -524,8 +532,13 @@ def load_native_code_run(run_dir: Path) -> dict[str, Any]:
     return loaded
 
 
-def validate_native_code_run_package(run_dir: Path) -> list[str]:
+def validate_native_code_run_package(
+    run_dir: Path,
+    *,
+    expected_run_dir: Path | None = None,
+) -> list[str]:
     target = Path(run_dir)
+    expected_target = Path(expected_run_dir) if expected_run_dir is not None else target
     if target.is_symlink():
         return ["native run directory must not be a symlink"]
     if not target.is_dir():
@@ -539,7 +552,7 @@ def validate_native_code_run_package(run_dir: Path) -> list[str]:
     try:
         contract = validate_native_code_contract(
             loaded["contract"],
-            expected_task_id=target.name,
+            expected_task_id=expected_target.name,
         )
     except ValueError as exc:
         return [str(exc)]
@@ -559,7 +572,7 @@ def validate_native_code_run_package(run_dir: Path) -> list[str]:
         errors.append(str(exc))
         plan = {}
     try:
-        _validate_status(loaded["status"], contract, target)
+        _validate_status(loaded["status"], contract, expected_target)
     except ValueError as exc:
         errors.append(str(exc))
     try:

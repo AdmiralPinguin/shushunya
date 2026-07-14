@@ -59,6 +59,15 @@ MAX_ACTIVE_MISSIONS = _env_int("SKITARII_MISSION_ACTIVE_MAX_COUNT", 1, 1)
 MAX_AUTO_REVISION_ATTEMPTS = _env_int(
     "SKITARII_MISSION_AUTO_REVISION_ATTEMPTS", 3, 1
 )
+MAX_TASK_CHECKPOINT_COMMIT_ATTEMPTS = _env_int(
+    "SKITARII_TASK_CHECKPOINT_COMMIT_ATTEMPTS", 8, 1
+)
+TASK_CHECKPOINT_RETRY_BASE_SECONDS = _env_float(
+    "SKITARII_TASK_CHECKPOINT_RETRY_BASE_SECONDS", 1.0, 0.0
+)
+TASK_CHECKPOINT_RETRY_MAX_SECONDS = _env_float(
+    "SKITARII_TASK_CHECKPOINT_RETRY_MAX_SECONDS", 30.0, 0.0
+)
 MAX_REVISION_TURNS = _env_int("SKITARII_MISSION_REVISION_TURNS", 8, 1)
 MAX_REVISION_FINDINGS = 20
 MAX_REVISION_CONTEXT_BYTES = _env_int(
@@ -153,6 +162,95 @@ def _revision_time_available(mission: "Mission") -> bool:
     except (TypeError, ValueError):
         max_wall = 3600
     return time.time() - mission.created < max(1, max_wall - 30)
+
+
+def _task_checkpoint_commit_pending(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("error_code") == "task_checkpoint_commit_pending"
+        and isinstance(value.get("pending_task_checkpoint"), dict)
+        and bool(str(value.get("pending_task_checkpoint_key") or ""))
+        and isinstance(value.get("checkpoint_pending_original"), dict)
+    )
+
+
+def _task_checkpoint_commit_attempts(value: dict[str, Any]) -> int:
+    try:
+        attempts = int(value.get("task_checkpoint_commit_attempts") or 1)
+    except (TypeError, ValueError):
+        attempts = 1
+    return max(1, attempts)
+
+
+def _task_checkpoint_retry_delay(attempts: int) -> float:
+    base = max(0.0, float(TASK_CHECKPOINT_RETRY_BASE_SECONDS))
+    maximum = max(0.0, float(TASK_CHECKPOINT_RETRY_MAX_SECONDS))
+    if base <= 0.0 or maximum <= 0.0:
+        return 0.0
+    return min(maximum, base * (2 ** min(16, max(0, attempts - 1))))
+
+
+def _valid_restart_workspace_checkpoint(value: Any) -> bool:
+    """Accept only a complete, identity-bound patch that can really be replayed."""
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        return False
+    diff = value.get("unified_diff")
+    changed = value.get("changed_files")
+    base_tree = str(value.get("base_tree") or "")
+    patch_sha256 = str(value.get("patch_sha256") or "")
+    task_memory_id = str(value.get("task_memory_id") or "")
+    root_task_id = str(value.get("root_task_id") or "")
+    parent_task_id = value.get("parent_task_id")
+    try:
+        diff_raw = diff.encode("utf-8", errors="strict") if isinstance(diff, str) else b""
+    except UnicodeEncodeError:
+        return False
+    if (
+        not isinstance(diff, str)
+        or not diff
+        or len(diff_raw) > MAX_PERSISTED_RESULT_BYTES
+        or not isinstance(changed, list)
+        or not changed
+        or any(type(path) is not str or not path or "\x00" in path for path in changed)
+        or not re.fullmatch(r"[0-9a-f]{40,64}", base_tree)
+        or not re.fullmatch(r"[0-9a-f]{64}", patch_sha256)
+        or hashlib.sha256(diff_raw).hexdigest() != patch_sha256
+        or not valid_mission_id(task_memory_id)
+        or not valid_mission_id(root_task_id)
+        or type(parent_task_id) is not str
+        or (bool(parent_task_id) and not valid_mission_id(parent_task_id))
+    ):
+        return False
+    return True
+
+
+def _valid_restart_pending_task_checkpoint(value: Any) -> bool:
+    if not _task_checkpoint_commit_pending(value):
+        return False
+    assert isinstance(value, dict)
+    checkpoint = value.get("pending_task_checkpoint")
+    parent_task_id = value.get("parent_task_id")
+    return bool(
+        valid_mission_id(str(value.get("task_memory_id") or ""))
+        and valid_mission_id(str(value.get("root_task_id") or ""))
+        and type(parent_task_id) is str
+        and (not parent_task_id or valid_mission_id(parent_task_id))
+        and isinstance(checkpoint, dict)
+        and checkpoint.get("version") == 1
+        and bool(str(checkpoint.get("current_state") or "").strip())
+    )
+
+
+def _cancelled_result(value: Any) -> dict[str, Any]:
+    """Overlay cancellation without erasing patches or pending leader commits."""
+    result = dict(value) if isinstance(value, dict) else {}
+    result.update({
+        "status": "cancelled",
+        "accepted": False,
+        "cancelled": True,
+        "summary": "Mission was cancelled; any durable recovery checkpoint is preserved.",
+    })
+    return result
 
 
 class MissionExistsError(RuntimeError):
@@ -1051,7 +1149,11 @@ def run_async(mission: Mission, fn: Callable[[Mission], dict[str, Any]]) -> None
         # the interval before the new thread starts.
         mission.inflight = True
         mission.cleanup_complete = False
-        mission.attempt += 1
+        # A verified candidate waiting only for its canonical wiki commit is
+        # not a new coding attempt.  Keep the coding/revision budget untouched.
+        checkpoint_only_resume = _task_checkpoint_commit_pending(mission.result)
+        if not checkpoint_only_resume:
+            mission.attempt += 1
         try:
             mission._persist(raise_errors=True)
         except Exception as exc:
@@ -1061,10 +1163,11 @@ def run_async(mission: Mission, fn: Callable[[Mission], dict[str, Any]]) -> None
 
     def _run() -> None:
         cleanup_proven = True
+        verdict: dict[str, Any] | None = None
         try:
             with mission._lock:
                 if mission.cancelled.is_set():
-                    mission.result = {"status": "cancelled", "accepted": False}
+                    mission.result = _cancelled_result(mission.result)
                     return
                 mission.set_status("running")
             while True:
@@ -1081,8 +1184,63 @@ def run_async(mission: Mission, fn: Callable[[Mission], dict[str, Any]]) -> None
                     }
                 if mission.cancelled.is_set() and cleanup_proven:
                     with mission._lock:
-                        mission.result = {"status": "cancelled", "accepted": False}
+                        mission.result = _cancelled_result(verdict)
                     return
+
+                if _task_checkpoint_commit_pending(verdict):
+                    checkpoint_attempts = _task_checkpoint_commit_attempts(verdict)
+                    can_retry_checkpoint = bool(
+                        cleanup_proven
+                        and checkpoint_attempts < MAX_TASK_CHECKPOINT_COMMIT_ATTEMPTS
+                    )
+                    if not can_retry_checkpoint:
+                        durable_pending = {
+                            **verdict,
+                            "status": "failed",
+                            "accepted": False,
+                            "retryable": True,
+                            "revision_required": False,
+                            "task_checkpoint_retry_exhausted": True,
+                            "summary": _bounded_text(
+                                "The verified candidate is preserved, but its canonical "
+                                "task-page commit is still pending. POST resume will retry "
+                                "only that idempotent commit; coding will not restart.",
+                                8_000,
+                            ),
+                        }
+                        with mission._lock:
+                            mission.complete_result(durable_pending)
+                        break
+
+                    delay = _task_checkpoint_retry_delay(checkpoint_attempts)
+                    retry_at = time.time() + delay
+                    durable_pending = {
+                        **verdict,
+                        "status": "failed",
+                        "accepted": False,
+                        "retryable": True,
+                        "revision_required": False,
+                        "task_checkpoint_retry_after_seconds": delay,
+                        "task_checkpoint_retry_at": retry_at,
+                    }
+                    with mission._lock:
+                        mission.result = durable_pending
+                        mission.status = "queued"
+                        mission.record(
+                            "task_checkpoint_retry_scheduled",
+                            {
+                                "checkpoint_attempt": checkpoint_attempts,
+                                "next_checkpoint_attempt": checkpoint_attempts + 1,
+                                "retry_after_seconds": delay,
+                                "retry_at": retry_at,
+                            },
+                        )
+                        mission._persist(raise_errors=True)
+                    if mission.cancelled.wait(delay):
+                        return
+                    with mission._lock:
+                        mission.set_status("running")
+                    continue
 
                 turn = _revision_turn(verdict, mission.attempt)
                 can_retry = bool(
@@ -1134,7 +1292,9 @@ def run_async(mission: Mission, fn: Callable[[Mission], dict[str, Any]]) -> None
         except Exception as exc:  # noqa: BLE001
             with mission._lock:
                 if mission.cancelled.is_set() and cleanup_proven:
-                    mission.result = {"status": "cancelled", "accepted": False}
+                    mission.result = _cancelled_result(
+                        verdict if isinstance(verdict, dict) else mission.result
+                    )
                 elif not cleanup_proven:
                     mission.result = {
                         "status": "blocked",
@@ -1161,7 +1321,7 @@ def run_async(mission: Mission, fn: Callable[[Mission], dict[str, Any]]) -> None
                 try:
                     if mission.cancelled.is_set() and cleanup_proven:
                         mission.question = None
-                        mission.result = {"status": "cancelled", "accepted": False}
+                        mission.result = _cancelled_result(mission.result)
                         mission.set_status("cancelled")
                     elif not cleanup_proven:
                         mission.question = None
@@ -1220,6 +1380,7 @@ def resume(
     *,
     expected: Mission | None = None,
     require_payload: bool = False,
+    preserve_result: bool = False,
 ) -> bool:
     """Restart a stopped, healthy persisted mission while retaining its journal."""
     if not valid_mission_id(mission_id):
@@ -1246,12 +1407,48 @@ def resume(
             mission._answer_ev = threading.Event()
             mission.answer = None
             mission.question = None
-            mission.result = None
+            if not preserve_result:
+                mission.result = None
             mission.cleanup_complete = True
             mission.record("resume", {"from_status": from_status})
             # Make it GC-ineligible before releasing the global lock.
             mission.set_status("queued")
             run_async(mission, fn)
+            return True
+
+
+def prepare_restart_salvage(
+    mission_id: str,
+    *,
+    expected: Mission | None = None,
+) -> bool:
+    """Unlock a restart envelope only after the service proved a boundary sweep."""
+    if not valid_mission_id(mission_id):
+        return False
+    with _GLOCK:
+        mission = _MISSIONS.get(mission_id)
+        if not mission or (expected is not None and mission is not expected):
+            return False
+        with mission._lock:
+            result = mission.result if isinstance(mission.result, dict) else {}
+            if (
+                mission.status != "blocked"
+                or result.get("restart_recovery_required") is not True
+                or not (
+                    _valid_restart_workspace_checkpoint(
+                        result.get("workspace_checkpoint")
+                    )
+                    or _valid_restart_pending_task_checkpoint(result)
+                )
+            ):
+                return False
+            mission.cleanup_complete = True
+            mission._resume_disabled = False
+            mission._gc_after_restart = False
+            mission.record("restart_boundary_swept", {
+                "checkpoint_only": result.get("error_code") == "task_checkpoint_commit_pending",
+            })
+            mission._persist(raise_errors=True)
             return True
 
 
@@ -1629,10 +1826,21 @@ def _rehydrate() -> None:
                 or mission.inflight
                 or not mission.cleanup_complete
             ):
+                prior_result = (
+                    dict(mission.result) if isinstance(mission.result, dict) else {}
+                )
+                has_recovery = bool(
+                    _valid_restart_workspace_checkpoint(
+                        prior_result.get("workspace_checkpoint")
+                    )
+                    or _valid_restart_pending_task_checkpoint(prior_result)
+                )
                 mission.result = {
+                    **prior_result,
                     "status": "blocked",
                     "accepted": False,
                     "error": "service restarted while mission was active",
+                    "restart_recovery_required": has_recovery,
                 }
                 mission.question = None
                 mission.inflight = False

@@ -72,7 +72,12 @@ def main() -> int:
         "archive_ops.continuable_tasks",
         return_value=[
             {"parent_task_id": "task-old", "goal": "Старый отчёт", "state": "failed"},
-            {"parent_task_id": "task-galaga", "goal": "Собрать APK Galaga", "state": "failed"},
+            {
+                "parent_task_id": "task-galaga",
+                "goal": "Собрать APK Galaga",
+                "state": "failed",
+                "failure_summary": "structured failure from the task journal",
+            },
         ],
     ):
         ranked = continuation_candidates_for_history(
@@ -89,6 +94,10 @@ def main() -> int:
     require(
         ranked[0].get("context_root") is True,
         "history-ranked continuation was not marked as the trusted root",
+    )
+    require(
+        ranked[0].get("failure_summary") == "structured failure from the task journal",
+        "ordinary assistant speech overwrote structured task failure evidence",
     )
     with patch(
         "archive_ops.continuable_tasks",

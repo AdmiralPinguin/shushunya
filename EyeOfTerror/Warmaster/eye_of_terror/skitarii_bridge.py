@@ -4631,17 +4631,37 @@ def _record_skitarii_internal_contract_failure(
     return failure
 
 
-def _ceraxia_reprepare_action(message: str = "") -> dict[str, Any]:
+def _ceraxia_reprepare_action(
+    message: str = "",
+    *,
+    run_dir: Path | None = None,
+    task_id: str = "",
+) -> dict[str, Any]:
     """Describe the only safe recovery for a pre-directive Ceraxia run."""
+    source_task_id = str(task_id or (run_dir.name if run_dir is not None else "")).strip()
+    if not _MISSION_ID_RE.fullmatch(source_task_id):
+        raise ValueError("recovery source has an invalid task identity")
+    task_memory = _read_json(run_dir / "task_memory.json") if run_dir is not None else {}
+    task_memory_id = str(task_memory.get("task_memory_id") or source_task_id).strip()
+    root_task_id = str(task_memory.get("root_task_id") or task_memory_id).strip()
+    if not _MISSION_ID_RE.fullmatch(task_memory_id) or not _MISSION_ID_RE.fullmatch(root_task_id):
+        raise ValueError("recovery source has an invalid task-memory lineage")
+    stem = source_task_id[:119].rstrip(".-_") or "ceraxia-code-run"
     return {
         "kind": "reprepare_ceraxia_run",
         "method": "POST",
         "endpoint": "POST /orchestrate_run",
         "body": {
             "message": message,
+            "task_id": f"{stem}-native",
             "governor_transport": "http",
             "run_mode": "http",
             "auto_start": True,
+            "reuse_existing": True,
+            "task_memory_id": task_memory_id,
+            "root_task_id": root_task_id,
+            "parent_task_id": source_task_id,
+            "continuation_of": source_task_id,
         },
         "reason": (
             "this historical run predates native Ceraxia leadership; create a "
@@ -4650,9 +4670,14 @@ def _ceraxia_reprepare_action(message: str = "") -> dict[str, Any]:
     }
 
 
-def _acceptance_source_reprepare_action(message: str = "") -> dict[str, Any]:
+def _acceptance_source_reprepare_action(
+    message: str = "",
+    *,
+    run_dir: Path | None = None,
+    task_id: str = "",
+) -> dict[str, Any]:
     """Recover a current run whose commander provenance is missing or inconsistent."""
-    action = _ceraxia_reprepare_action(message)
+    action = _ceraxia_reprepare_action(message, run_dir=run_dir, task_id=task_id)
     action["reason"] = (
         "the linked commander-order acceptance provenance is missing, corrupt, or "
         "does not match this mission; create a fresh mission through Abaddon"
@@ -4795,6 +4820,42 @@ def _service_mission_id(task_id: str, attempt: int = 1) -> str:
     normalized_attempt = max(1, int(attempt))
     digest = hashlib.sha256(f"{task_id}\0{normalized_attempt}".encode("utf-8")).hexdigest()[:16]
     return f"wm-{safe_task}-{normalized_attempt}-{digest}"
+
+
+def _parent_skitarii_mission_id(
+    run_dir: Path, task_memory: dict[str, Any],
+) -> str:
+    """Return a validated checkpoint source for an immutable recovery child.
+
+    Recovery runs are siblings, so their fresh ledger cannot name the old
+    Skitarii mission that owns the useful checkpoint. Missing, corrupt, or
+    stale parent metadata is deliberately treated as no hint: execution can
+    still start from the repository snapshot.
+    """
+    parent_task_id = str(task_memory.get("parent_task_id") or "").strip()
+    if not parent_task_id or not _MISSION_ID_RE.fullmatch(parent_task_id):
+        return ""
+    parent_run = (run_dir.parent / parent_task_id).resolve()
+    run_root = run_dir.parent.resolve()
+    if parent_run == run_dir.resolve() or parent_run.parent != run_root:
+        return ""
+    parent_ledger = _read_json(parent_run / "task_ledger.json")
+    mission_meta = (
+        parent_ledger.get("skitarii_mission")
+        if isinstance(parent_ledger.get("skitarii_mission"), dict)
+        else {}
+    )
+    mission_id = str(mission_meta.get("id") or "").strip()
+    service = str(mission_meta.get("service") or "").strip()
+    if service and service != SKITARII_URL:
+        return ""
+    try:
+        attempt = int(mission_meta.get("attempt") or 0)
+    except (TypeError, ValueError):
+        return ""
+    if attempt > 0 and mission_id != _service_mission_id(parent_task_id, attempt):
+        return ""
+    return mission_id if _MISSION_ID_RE.fullmatch(mission_id) else ""
 
 
 def _service_clarification_action() -> dict[str, Any]:
@@ -4966,6 +5027,7 @@ def _await_async_skitarii_mission(
     last_waiting: tuple[str, str] | None = None
     consecutive_errors = 0
     cancel_sent = False
+    checkpoint_resume_attempts = 0
     while True:
         latest = type(ledger).load(run_dir / "task_ledger.json")
         latest_data = latest.to_dict()
@@ -5100,6 +5162,39 @@ def _await_async_skitarii_mission(
                     raise RuntimeError("Skitarii terminal mission did not prove sandbox cleanup")
                 result = dict(result)
                 result.setdefault("cleanup_error", str(snapshot.get("cleanup_error") or "sandbox cleanup failed"))
+            if (
+                status in {"blocked", "failed"}
+                and (
+                    result.get("restart_recovery_required") is True
+                    or result.get("error_code") == "task_checkpoint_commit_pending"
+                )
+            ):
+                if checkpoint_resume_attempts:
+                    time.sleep(
+                        min(30.0, float(2 ** min(checkpoint_resume_attempts, 5)))
+                    )
+                resumed = _skitarii_json_request(
+                    "POST",
+                    f"/missions/{mission_id}/resume",
+                    body=b"{}",
+                    timeout=180.0,
+                )
+                if resumed.get("ok") is not True:
+                    raise RuntimeError(
+                        "Skitarii restart checkpoint salvage was not accepted: "
+                        + str(resumed.get("error") or resumed.get("status") or "unknown response")
+                    )
+                checkpoint_resume_attempts += 1
+                latest.record_event(
+                    "skitarii_checkpoint_salvage_started",
+                    {
+                        "mission_id": mission_id,
+                        "after_restart": result.get("restart_recovery_required") is True,
+                        "attempt": checkpoint_resume_attempts,
+                    },
+                )
+                time.sleep(SKITARII_POLL_INTERVAL_SEC)
+                continue
             return result
         if status not in {"queued", "running", "needs_user"}:
             _cancel_service_mission(mission_id)
@@ -5353,6 +5448,21 @@ def run_via_skitarii(
 
     contract = _read_json(run_dir / "contract.json")
     goal = str(contract.get("goal") or "")
+    task_memory = _read_json(run_dir / "task_memory.json")
+    task_memory_id = str(task_memory.get("task_memory_id") or "").strip()
+    root_task_id = str(task_memory.get("root_task_id") or "").strip()
+    parent_task_id = str(task_memory.get("parent_task_id") or "").strip()
+    if not task_memory_id or not root_task_id:
+        raise ValueError(
+            "run has no durable task-memory lineage; reprepare it before Skitarii execution"
+        )
+    if not _MISSION_ID_RE.fullmatch(task_memory_id) or not _MISSION_ID_RE.fullmatch(root_task_id):
+        raise ValueError("run has an invalid task-memory identity")
+    if parent_task_id and (
+        not _MISSION_ID_RE.fullmatch(parent_task_id) or parent_task_id == task_id
+    ):
+        raise ValueError("run has an invalid parent task-memory identity")
+    parent_skitarii_mission_id = _parent_skitarii_mission_id(run_dir, task_memory)
     ledger = TaskLedger.load(run_dir / "task_ledger.json")
     ledger_status = str(ledger.to_dict().get("status") or "")
     if execution_mode is None:
@@ -5366,7 +5476,9 @@ def run_via_skitarii(
         leadership_directive = _load_ceraxia_directive(run_dir, task_id)
     except CeraxiaDirectiveError as exc:
         msg = f"Skitarii blocked: Ceraxia leadership directive is invalid ({exc})."
-        reprepare_action = _ceraxia_reprepare_action(goal)
+        reprepare_action = _ceraxia_reprepare_action(
+            goal, run_dir=run_dir, task_id=task_id,
+        )
         ledger.record_event("ceraxia_directive_blocked", {"error": str(exc)[:300]})
         failure = _bridge_failure(
             run_dir,
@@ -5395,7 +5507,9 @@ def run_via_skitarii(
         )
     except CeraxiaDirectiveError as exc:
         msg = f"Skitarii blocked: commander acceptance source is invalid ({exc})."
-        reprepare_action = _acceptance_source_reprepare_action(goal)
+        reprepare_action = _acceptance_source_reprepare_action(
+            goal, run_dir=run_dir, task_id=task_id,
+        )
         ledger.record_event("acceptance_source_blocked", {"error": str(exc)[:300]})
         failure = _bridge_failure(
             run_dir,
@@ -5477,8 +5591,11 @@ def run_via_skitarii(
                                               "preloaded_file_sample": inventory[:50]})
     ledger.set_status("running")
 
-    body = json.dumps({"goal": goal, "task_id": task_id,
+    mission_payload = {"goal": goal, "task_id": task_id,
                        "delegating_task_id": task_id, "max_wall_sec": timeout_sec,
+                       "task_memory_id": task_memory_id,
+                       "root_task_id": root_task_id,
+                       "parent_task_id": parent_task_id,
                        "leadership_directive": leadership_directive,
                        "acceptance_source": acceptance_source,
                        "mode": mode, "workspace_files": workspace,
@@ -5487,8 +5604,10 @@ def run_via_skitarii(
                        "workspace_inventory": inventory,
                        "workspace_deleted": getattr(workspace, "deleted_paths", []),
                        "workspace_modes": getattr(workspace, "modes", {}),
-                       "workspace_symlinks": getattr(workspace, "symlinks", {})},
-                      ensure_ascii=False).encode("utf-8")
+                       "workspace_symlinks": getattr(workspace, "symlinks", {})}
+    if parent_skitarii_mission_id:
+        mission_payload["parent_skitarii_mission_id"] = parent_skitarii_mission_id
+    body = json.dumps(mission_payload, ensure_ascii=False).encode("utf-8")
     started = time.monotonic()
     try:
         verdict = _await_async_skitarii_mission(
@@ -5560,6 +5679,12 @@ def run_via_skitarii(
         verdict_schema_error = str(exc)
     if verdict_schema_error:
         pass
+    elif str(verdict.get("task_memory_id") or "") != task_memory_id:
+        verdict_schema_error = "task_memory_id does not match the delegated task page"
+    elif str(verdict.get("root_task_id") or "") != root_task_id:
+        verdict_schema_error = "root_task_id does not match the delegated task lineage"
+    elif str(verdict.get("parent_task_id") or "") != parent_task_id:
+        verdict_schema_error = "parent_task_id does not match the delegated task lineage"
     elif not isinstance(accepted_value, bool):
         verdict_schema_error = "accepted must be a boolean"
     elif not isinstance(needs_user_value, bool):
@@ -5803,6 +5928,18 @@ def run_via_skitarii(
         "status": status,
         "final_step": "skitarii",
         "phase": status,
+        "task_memory_id": task_memory_id,
+        "root_task_id": root_task_id,
+        "parent_task_id": parent_task_id,
+        "task_checkpoint": (
+            verdict.get("task_checkpoint")
+            if isinstance(verdict.get("task_checkpoint"), dict)
+            else {}
+        ),
+        "task_checkpoint_error": str(verdict.get("task_checkpoint_error") or ""),
+        "workspace_checkpoint_available": isinstance(
+            verdict.get("workspace_checkpoint"), dict
+        ) and bool(verdict.get("workspace_checkpoint")),
         "summary": summary,
         "artifacts": saved,
         "artifact_root": str(run_dir.resolve()),
@@ -5985,6 +6122,8 @@ def run_via_skitarii(
 
     return {"ok": accepted, "phase": status,
             "task_id": task_id, "status": status, "summary": summary,
+            "task_memory_id": task_memory_id, "root_task_id": root_task_id,
+            "parent_task_id": parent_task_id,
             "artifacts": saved, "via": "skitarii", "rounds": rounds,
             "artifact_root": str(run_dir.resolve()), "final_step": "skitarii",
             "patch_stage": patch_stage, "ready_to_apply": ready_to_apply,

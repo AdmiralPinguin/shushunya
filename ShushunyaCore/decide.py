@@ -384,6 +384,12 @@ class DecisionEngine:
         parent_spec = {
             "message": _bounded_text(spec.get("message"), _PARENT_MESSAGE_LIMIT),
             "warmaster_request": _bounded_parent_request(spec.get("warmaster_request")),
+            "task_id": _bounded_text(spec.get("task_id"), 240),
+            "goal_id": _bounded_text(spec.get("goal_id"), 240),
+            "task_memory_id": _bounded_text(
+                spec.get("task_memory_id") or spec.get("goal_id"), 240
+            ),
+            "root_task_id": _bounded_text(spec.get("root_task_id"), 240),
         }
         diagnostic = (
             commitment.get("diagnostic")
@@ -514,19 +520,15 @@ class DecisionEngine:
         turn_id, cached = self.ledger.accept_turn(envelope.idempotency_key, request_payload)
         if cached:
             return cached
-        deterministic_continuation = (
+        literal_continuation_fallback = (
             None
             if envelope.forced_action
             else _truth_guard_continuation_decision(envelope)
         )
-        # Typed/forced work and a fully bound explicit continuation do not need
-        # an LLM situation at all.  Building a large conversational prompt must
-        # never be allowed to veto an already complete, authorized command.
-        situation = (
-            {}
-            if envelope.forced_action or deterministic_continuation
-            else self.situation.assemble(envelope)
-        )
+        # Literal matching is only a fallback. The model gets the full
+        # situation first so a valid semantic continuation is not constrained
+        # by a small Russian imperative regex.
+        situation = {} if envelope.forced_action else self.situation.assemble(envelope)
         model_trace: dict[str, Any] = {}
         degraded = False
         repair_error = ""
@@ -534,19 +536,6 @@ class DecisionEngine:
             if envelope.forced_action:
                 decision = self._forced(envelope)
                 model_trace = {"forced_action": envelope.forced_action}
-            elif deterministic_continuation:
-                # An explicit continuation imperative plus an exact parent
-                # identity from the trusted capability manifest is already a
-                # complete, authorized intent. Do not let a conversational
-                # model answer (even a harmless "не понял") erase the action.
-                decision = deterministic_continuation
-                model_trace = {
-                    "deterministic_continuation": {
-                        "bound_parent_task_id": deterministic_continuation[
-                            "continue_parent_task_id"
-                        ],
-                    }
-                }
             else:
                 raw, model_trace = await self._model_call(envelope, situation)
                 try:
@@ -608,27 +597,19 @@ class DecisionEngine:
             model_trace = {"degraded_error": str(exc)[:2_000]}
 
         if (
-            decision["action"] == "continue_warmaster_mission"
-            and not _looks_like_continuation_directive(envelope.text)
+            literal_continuation_fallback
+            and decision["action"] in {"answer_in_chat", "ask_clarification"}
         ):
-            # This invariant applies even when the model selected the typed
-            # continuation action directly. A trusted parent id grants scope,
-            # not permission to reinterpret negation, questions or discussion
-            # as an imperative.
-            decision = {
-                "action": "answer_in_chat",
-                "reply": (
-                    "Я не запустил продолжение: текущая реплика не является прямой "
-                    "командой продолжить остановившуюся работу."
-                ),
-                "task": "",
-                "warmaster_request": {},
-                "artifact_delivery": {},
-                "pending_decision": {"task_id": "", "answer": ""},
-                "pending_decision_task_id": "",
-                "continue_parent_task_id": "",
-                "confidence": 1.0,
-                "reason": "continuation_requires_imperative",
+            # The model was allowed to reason first, but an unambiguous literal
+            # command bound to a trusted parent must not degrade into speech.
+            decision = literal_continuation_fallback
+            model_trace = {
+                "first": model_trace,
+                "literal_continuation_fallback": {
+                    "bound_parent_task_id": literal_continuation_fallback[
+                        "continue_parent_task_id"
+                    ],
+                },
             }
 
         if decision["action"] == "answer_pending_decision":
@@ -714,9 +695,14 @@ class DecisionEngine:
             if action == "request_warmaster_mission":
                 request = decision["warmaster_request"]
                 stable_task_id = "core-" + commitment_id.split("-", 1)[-1][:20]
+                goal_id = stable_task_id
+                root_task_id = stable_task_id
                 payload = {
                     "message": warmaster_message(request),
                     "task_id": stable_task_id,
+                    "goal_id": goal_id,
+                    "task_memory_id": goal_id,
+                    "root_task_id": root_task_id,
                     "idempotency_key": effect_id,
                     "warmaster_request": request,
                 }
@@ -787,12 +773,33 @@ class DecisionEngine:
                         parent_task_id,
                     )
                     stable_task_id = "core-" + commitment_id.split("-", 1)[-1][:20]
+                    parent_spec = (
+                        candidate.get("parent_spec")
+                        if isinstance(candidate.get("parent_spec"), dict)
+                        else {}
+                    )
+                    root_task_id = str(
+                        parent_spec.get("root_task_id")
+                        or parent_spec.get("task_id")
+                        or parent_task_id
+                    ).strip()[:240]
+                    task_memory_id = str(
+                        parent_spec.get("task_memory_id")
+                        or parent_spec.get("goal_id")
+                        or root_task_id
+                    ).strip()[:240]
+                    goal_id = str(
+                        parent_spec.get("goal_id") or task_memory_id
+                    ).strip()[:240]
                     payload = {
                         "message": continuation_message(candidate),
                         "task_id": stable_task_id,
+                        "goal_id": goal_id,
+                        "task_memory_id": task_memory_id,
+                        "root_task_id": root_task_id,
                         "parent_task_id": parent_task_id,
                         "continuation_of": parent_task_id,
-                        "parent_spec": candidate.get("parent_spec") or {},
+                        "parent_spec": parent_spec,
                         "failure_guidance": candidate.get("failure_guidance") or {},
                         "idempotency_key": effect_id,
                     }

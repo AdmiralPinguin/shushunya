@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +76,37 @@ def _extract_json_object(text: str) -> dict[str, Any]:
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    encoded = (
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    fd, raw_temp = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    temp_path = Path(raw_temp)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        try:
+            directory_fd = os.open(str(path.parent), os.O_RDONLY)
+        except OSError:
+            directory_fd = -1
+        if directory_fd >= 0:
+            try:
+                os.fsync(directory_fd)
+            except OSError:
+                pass
+            finally:
+                os.close(directory_fd)
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _next_numbered_path(directory: Path, prefix: str) -> Path:
@@ -241,9 +273,165 @@ def governor_task_from_order(order: dict[str, Any]) -> str:
     return task_text_from_commander_order(order)
 
 
-def open_mission(warmaster_root: Path, message: str, task_id: str | None, source_channel: str = "main_chat") -> dict[str, Any]:
+def open_mission(
+    warmaster_root: Path,
+    message: str,
+    task_id: str | None,
+    source_channel: str = "main_chat",
+    *,
+    task_memory: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     mission_id = mission_id_for(task_id, message)
     mission_dir = mission_dir_for(warmaster_root, mission_id)
+    mission_path = mission_dir / "mission.json"
+    if mission_path.exists():
+        existing = _read_json(mission_path)
+        if not existing:
+            return {
+                "ok": False,
+                "error": "existing mission protocol is corrupt",
+                "error_code": "existing_mission_invalid",
+                "mission_id": mission_id,
+                "mission_dir": str(mission_dir),
+            }
+        if (
+            str(existing.get("mission_id") or "") != mission_id
+            or str(existing.get("task_id") or "") != str(task_id or "")
+        ):
+            return {
+                "ok": False,
+                "error": "existing mission identity does not match its task",
+                "error_code": "existing_mission_invalid",
+                "mission_id": mission_id,
+                "mission_dir": str(mission_dir),
+                "mission": existing,
+            }
+        existing_intake = _read_json(mission_dir / "mission_intake.json")
+        try:
+            validate_protocol_payload(existing_intake, expected_type="mission_intake")
+        except (TypeError, ValueError) as exc:
+            return {
+                "ok": False,
+                "error": f"existing mission intake is corrupt: {exc}",
+                "error_code": "existing_mission_invalid",
+                "mission_id": mission_id,
+                "mission_dir": str(mission_dir),
+                "mission": existing,
+            }
+        if (
+            str(existing_intake.get("user_request") or "")
+            != owner_request_from_message(message)
+            or str(existing_intake.get("source_channel") or "") != source_channel
+        ):
+            return {
+                "ok": False,
+                "error": "task_id already owns a different commander request",
+                "error_code": "mission_request_identity_conflict",
+                "mission_id": mission_id,
+                "mission_dir": str(mission_dir),
+                "mission": existing,
+            }
+        current_memory = (
+            existing.get("task_memory")
+            if isinstance(existing.get("task_memory"), dict)
+            else {}
+        )
+        requested_memory = dict(task_memory or {})
+        identity = (
+            "task_memory_id",
+            "root_task_id",
+            "run_task_id",
+            "parent_task_id",
+        )
+        if current_memory and any(
+            str(current_memory.get(key) or "")
+            != str(requested_memory.get(key) or "")
+            for key in identity
+        ):
+            return {
+                "ok": False,
+                "error": "mission already belongs to a different task-memory lineage",
+                "error_code": "mission_identity_conflict",
+                "mission_id": mission_id,
+                "mission_dir": str(mission_dir),
+                "mission": existing,
+            }
+        if requested_memory and not current_memory:
+            # Legacy crash window: exact task/message/source identity above is
+            # durable proof only for the old canonical default identity. An
+            # arbitrary wiki/root/parent cannot be inferred from matching text.
+            legacy_task_id = str(task_id or "")
+            canonical_legacy = (
+                str(requested_memory.get("task_memory_id") or "") == legacy_task_id
+                and str(requested_memory.get("root_task_id") or "") == legacy_task_id
+                and str(requested_memory.get("run_task_id") or "") == legacy_task_id
+                and not str(requested_memory.get("parent_task_id") or "")
+            )
+            if not canonical_legacy:
+                return {
+                    "ok": False,
+                    "error": (
+                        "legacy mission lineage cannot be rebound implicitly; "
+                        "use a fresh linked task or an explicit migration"
+                    ),
+                    "error_code": "legacy_mission_lineage_migration_required",
+                    "mission_id": mission_id,
+                    "mission_dir": str(mission_dir),
+                    "mission": existing,
+                }
+            existing["task_memory"] = requested_memory
+            _write_json(mission_path, existing)
+        existing_order = _read_json(mission_dir / "commander_order.json")
+        if existing_order:
+            try:
+                validate_protocol_payload(existing_order, expected_type="commander_order")
+            except (TypeError, ValueError) as exc:
+                return {
+                    "ok": False,
+                    "error": f"existing commander order is corrupt: {exc}",
+                    "error_code": "existing_mission_invalid",
+                    "mission_id": mission_id,
+                    "mission_dir": str(mission_dir),
+                    "mission": existing,
+                }
+            return {
+                "ok": True,
+                "mission_id": mission_id,
+                "route": _read_json(mission_dir / "route.json"),
+                "commander_order": existing_order,
+                "model_brain": {},
+                "mission": existing,
+                "mission_dir": str(mission_dir),
+                "governor_task": governor_task_from_order(existing_order),
+                "mission_replayed": True,
+            }
+        commander_error = _read_json(mission_dir / "commander_error.json")
+        if commander_error:
+            if str(existing.get("status") or "") != "failed":
+                return {
+                    "ok": False,
+                    "error": "existing mission error does not match mission state",
+                    "error_code": "existing_mission_invalid",
+                    "mission_id": mission_id,
+                    "mission_dir": str(mission_dir),
+                    "mission": existing,
+                }
+            return {
+                **commander_error,
+                "ok": False,
+                "mission_id": mission_id,
+                "mission": existing,
+                "mission_dir": str(mission_dir),
+                "mission_replayed": True,
+            }
+        return {
+            "ok": False,
+            "error": "existing mission has neither commander order nor commander error",
+            "error_code": "existing_mission_invalid",
+            "mission_id": mission_id,
+            "mission_dir": str(mission_dir),
+            "mission": existing,
+        }
     intake = mission_intake(mission_id, owner_request_from_message(message), source_channel=source_channel)
     validate_protocol_payload(intake, expected_type="mission_intake")
     commander = build_commander_order(message, mission_id)
@@ -257,6 +445,7 @@ def open_mission(warmaster_root: Path, message: str, task_id: str | None, source
                 "status": "failed",
                 "assigned_governor": "",
                 "source_channel": source_channel,
+                "task_memory": dict(task_memory or {}),
             },
         )
         _write_json(mission_dir / "mission_intake.json", intake)
@@ -282,6 +471,7 @@ def open_mission(warmaster_root: Path, message: str, task_id: str | None, source
         "status": "assigned",
         "assigned_governor": order["to"],
         "source_channel": source_channel,
+        "task_memory": dict(task_memory or {}),
     }
     _write_json(mission_dir / "mission.json", mission)
     _write_json(mission_dir / "mission_intake.json", intake)

@@ -15,7 +15,9 @@ from .ledger import (
 from .organs import OrganError, Organs
 
 
-TERMINAL_STATES = {"succeeded", "failed", "cancelled"}
+# A failed delegate run is evidence about one attempt, not the death of the
+# durable goal. Only success or an explicit cancellation closes a commitment.
+TERMINAL_STATES = {"succeeded", "cancelled"}
 WORKING_STATES = {
     "running",
     "started",
@@ -35,6 +37,21 @@ WORKING_STATES = {
     "cancelling",
 }
 REVISION_STATES = {"revising", "revision", "needs_revision", "revision_required"}
+TASK_MEMORY_LINEAGE_ERRORS = {
+    "invalid_abaddon_continuation",
+    "invalid_task_memory_identity",
+    "legacy_mission_lineage_migration_required",
+    "mission_identity_conflict",
+    "task_memory_auth_invalid",
+    "task_memory_identity_conflict",
+    "task_memory_identity_invalid",
+    "task_memory_mission_missing",
+    "task_memory_parent_conflict",
+    "task_memory_read_rejected",
+    "task_memory_reference_invalid",
+    "task_memory_reference_missing",
+    "task_memory_rejected",
+}
 
 
 def _retry_at(seconds: int = 30) -> str:
@@ -49,6 +66,16 @@ def _dicts(value: Any) -> Iterator[dict[str, Any]]:
     elif isinstance(value, list):
         for child in value:
             yield from _dicts(child)
+
+
+def _task_memory_lineage_error(evidence: Any) -> str:
+    """Return a durable-lineage rejection hidden in a downstream envelope."""
+    for node in _dicts(evidence):
+        for field in ("error_code", "code"):
+            code = str(node.get(field) or "").strip().lower()
+            if code in TASK_MEMORY_LINEAGE_ERRORS:
+                return code
+    return ""
 
 
 class Commitments:
@@ -209,6 +236,87 @@ class Commitments:
         result = summary.get("result") if isinstance(summary.get("result"), dict) else {}
         return str(result.get("phase") or result.get("status") or "").lower()
 
+    @staticmethod
+    def _recovery_payload(
+        item: dict[str, Any],
+        snapshot: dict[str, Any],
+        status: str,
+    ) -> dict[str, Any]:
+        """Build one crash-stable child run for a failed immutable parent."""
+        spec = item.get("spec") if isinstance(item.get("spec"), dict) else {}
+        parent_task_id = str(item.get("delegate_ref") or "").strip()
+        task_memory_id = str(
+            spec.get("task_memory_id")
+            or spec.get("goal_id")
+            or spec.get("root_task_id")
+            or spec.get("task_id")
+            or item.get("id")
+        ).strip()
+        root_task_id = str(
+            spec.get("root_task_id") or task_memory_id or spec.get("task_id")
+        ).strip()
+        prior_result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        recovery_generation = max(0, int(prior_result.get("recovery_generation") or 0))
+        # Do not include attempt_count: a lost acknowledgement increments the
+        # transport counter, but retry must reattach to this exact child run.
+        recovery_digest = sha256_json(
+            {
+                "commitment_id": item.get("id"),
+                "parent_task_id": parent_task_id,
+                "task_memory_id": task_memory_id,
+                "root_task_id": root_task_id,
+                "recovery_generation": recovery_generation,
+            }
+        )[:24]
+        task_id = f"core-recovery-{recovery_digest}"
+        failure_guidance = {
+            "code": f"abaddon_{status}",
+            "explanation": (
+                f"Неизменяемая попытка {parent_task_id} завершилась в состоянии {status}."
+            ),
+            "required_action": (
+                "Разобрать доказательства провала и выбрать отличающуюся стратегию; "
+                "не повторять stale action или тот же план."
+            ),
+            "resume_condition": (
+                "Новая связанная попытка реализует изменённый план и заново проверяет исходные критерии успеха."
+            ),
+            "snapshot_sha256": sha256_json(snapshot),
+        }
+        original_message = str(spec.get("message") or "").strip()
+        original_goal = str(item.get("goal") or "").strip()
+        summary = snapshot.get("summary") if isinstance(snapshot.get("summary"), dict) else {}
+        evidence_summary = canonical_json(summary)[:4_000] if summary else ""
+        message_parts = [
+            "Автономная recovery-миссия для всё ещё активной цели Шушуни.",
+            f"Неизменяемая родительская попытка: {parent_task_id}",
+            f"Корневая задача: {root_task_id}",
+            f"Поколение recovery-стратегии: {recovery_generation}",
+            f"Исходная цель: {original_goal}",
+            failure_guidance["explanation"],
+            f"Обязательное изменение стратегии: {failure_guidance['required_action']}",
+        ]
+        if original_message:
+            message_parts.append("Исходная спецификация:\n" + original_message)
+        if evidence_summary:
+            message_parts.append("Краткие доказательства предыдущей попытки:\n" + evidence_summary)
+        payload = {
+            "message": "\n\n".join(message_parts),
+            "task_id": task_id,
+            "goal_id": task_memory_id,
+            "task_memory_id": task_memory_id,
+            "root_task_id": root_task_id,
+            "parent_task_id": parent_task_id,
+            "continuation_of": parent_task_id,
+            "recovery_of": parent_task_id,
+            "failure_guidance": failure_guidance,
+            "recovery_generation": recovery_generation,
+            "idempotency_key": f"recovery-{recovery_digest}",
+        }
+        if isinstance(spec.get("warmaster_request"), dict):
+            payload["warmaster_request"] = dict(spec["warmaster_request"])
+        return payload
+
     def _bounded_retry(
         self,
         item: dict[str, Any],
@@ -218,30 +326,188 @@ class Commitments:
         seconds: int = 30,
     ) -> dict[str, Any]:
         attempt = int(item.get("attempt_count") or 0) + 1
-        maximum = int(item.get("max_attempts") or 3)
+        maximum = max(1, int(item.get("max_attempts") or 3))
+        delay = min(3_600, max(1, int(seconds)) * (2 ** min(max(0, attempt - 1), 7)))
         if attempt >= maximum:
+            existing_action = str(diagnostic.get("required_action") or "").strip()
+            strategy_action = (
+                "Не повторять ту же транспортную попытку или тот же план. "
+                "Сформировать отличающуюся проверяемую стратегию продолжения и новую попытку."
+            )
             diagnostic = {
                 **diagnostic,
-                "required_action": diagnostic.get("required_action")
-                or "Проверить контракт органа и выбрать подтверждаемый путь продолжения.",
+                "strategy_review_required": True,
+                "requires_user": False,
+                "required_action": (
+                    f"{existing_action} {strategy_action}".strip()
+                    if existing_action
+                    else strategy_action
+                ),
                 "resume_condition": diagnostic.get("resume_condition")
-                or "Появится новый фактический статус или исправленный action contract.",
+                or "Будет опубликована новая стратегия с отличающимся планом или исправленный action contract.",
             }
-            return self.transition(
-                item["id"],
-                "quarantined",
-                honest_status=str(diagnostic["explanation"]),
-                diagnostic=diagnostic,
-                result=result,
-                increment_attempt=True,
-            )
         return self.transition(
             item["id"],
             "retry_wait",
             honest_status=str(diagnostic["explanation"]),
             diagnostic=diagnostic,
             result=result,
-            next_attempt_at=_retry_at(seconds),
+            next_attempt_at=_retry_at(delay),
+            increment_attempt=True,
+        )
+
+    async def _dispatch_recovery_attempt(
+        self,
+        item: dict[str, Any],
+        snapshot: dict[str, Any],
+        *,
+        status: str,
+        diagnostic: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Replace one inert immutable run with a linked autonomous attempt."""
+        recovery_payload = self._recovery_payload(item, snapshot, status)
+        try:
+            dispatched = await self.organs.dispatch_abaddon(recovery_payload)
+        except OrganError as exc:
+            decision_request = (
+                exc.evidence.get("decision_request")
+                if isinstance(exc.evidence, dict)
+                and isinstance(exc.evidence.get("decision_request"), dict)
+                else {}
+            )
+            question = str(decision_request.get("question") or "").strip()
+            if exc.code == "clarification_required" and question:
+                needs_user = {
+                    "code": "abaddon_needs_user",
+                    "explanation": question,
+                    "evidence": {
+                        "previous_attempt": snapshot,
+                        "recovery_task_id": recovery_payload["task_id"],
+                        "detail": exc.evidence,
+                    },
+                    "required_action": question,
+                    "resume_condition": "Ответ будет передан в связанную recovery-миссию.",
+                }
+                return self.transition(
+                    item["id"],
+                    "waiting_user",
+                    honest_status=question,
+                    diagnostic=needs_user,
+                    result={"previous_attempt": snapshot, "recovery": recovery_payload},
+                )
+            lineage_error = _task_memory_lineage_error(exc.evidence)
+            if lineage_error:
+                lineage_repair = {
+                    "code": "task_memory_lineage_repair_required",
+                    "explanation": (
+                        "Abaddon rejected the recovery attempt because its immutable "
+                        "task-memory ancestry is inconsistent. The goal and prior "
+                        "evidence remain preserved; generating more child ids cannot "
+                        "repair provenance."
+                    ),
+                    "evidence": {
+                        "downstream_error_code": lineage_error,
+                        "previous_attempt": snapshot,
+                        "recovery_payload": recovery_payload,
+                        "dispatch_error": exc.evidence,
+                    },
+                    "external_dependency": "internal task-memory lineage reconciliation",
+                    "required_action": (
+                        "Reconcile the existing parent run, mission record, and Archive "
+                        "page identity without rebinding or deleting their evidence."
+                    ),
+                    "resume_condition": (
+                        "The parent task_memory.json, mission lineage, and Archive "
+                        "root identity agree, after which this same recovery can be retried."
+                    ),
+                    "requires_user": False,
+                }
+                return self.transition(
+                    item["id"],
+                    "waiting_external",
+                    honest_status=lineage_repair["explanation"],
+                    diagnostic=lineage_repair,
+                    result={"previous_attempt": snapshot, "recovery": recovery_payload},
+                )
+            external = self._external_diagnostic(exc.evidence)
+            if external:
+                return self.transition(
+                    item["id"],
+                    "waiting_external",
+                    honest_status=external["explanation"],
+                    diagnostic=external,
+                    result={"previous_attempt": snapshot, "recovery": recovery_payload},
+                )
+            recovery_error = {
+                **diagnostic,
+                "code": exc.code,
+                "explanation": (
+                    f"Новая recovery-попытка {recovery_payload['task_id']} пока не подтверждена: "
+                    f"{exc.explanation} Цель остаётся активной."
+                ),
+                "evidence": {
+                    "previous_attempt": snapshot,
+                    "recovery_payload": recovery_payload,
+                    "dispatch_error": exc.evidence,
+                },
+            }
+            if not exc.retryable:
+                next_generation = int(recovery_payload.get("recovery_generation") or 0) + 1
+                recovery_error.update(
+                    {
+                        "strategy_review_required": True,
+                        "requires_user": False,
+                        "required_action": (
+                            "Доказанно отвергнутую recovery-попытку не повторять. "
+                            "Сформировать следующее поколение стратегии с новым task_id."
+                        ),
+                        "resume_condition": (
+                            "Абаддон примет новое поколение recovery-стратегии либо вернёт "
+                            "конкретную внешнюю зависимость/решение владельца."
+                        ),
+                    }
+                )
+                return self._bounded_retry(
+                    item,
+                    diagnostic=recovery_error,
+                    result={
+                        "previous_attempt": snapshot,
+                        "rejected_recovery": recovery_payload,
+                        "recovery_generation": next_generation,
+                    },
+                    seconds=30,
+                )
+            return self._bounded_retry(
+                item,
+                diagnostic=recovery_error,
+                result={
+                    "previous_attempt": snapshot,
+                    "recovery": recovery_payload,
+                    "recovery_generation": int(
+                        recovery_payload.get("recovery_generation") or 0
+                    ),
+                },
+                seconds=30,
+            )
+        new_ref = str(
+            dispatched.get("delegate_ref")
+            or dispatched.get("task_id")
+            or recovery_payload["task_id"]
+        ).strip()
+        return self.transition(
+            item["id"],
+            "working",
+            honest_status=(
+                f"Абаддон принял новую recovery-попытку {new_ref}; Core продолжает исходную цель."
+            ),
+            result={
+                "previous_attempt": snapshot,
+                "recovery": {
+                    "payload": recovery_payload,
+                    "response": dispatched,
+                },
+            },
+            delegate_ref=new_ref,
             increment_attempt=True,
         )
 
@@ -272,17 +538,16 @@ class Commitments:
         if int(item.get("attempt_count") or 0) >= int(item.get("max_attempts") or 3):
             diagnostic = {
                 "code": "continuation_budget_exhausted",
-                "explanation": "Автоматические продолжения исчерпаны; Core остановил цикл вместо бесконечного перезапуска одной стратегии.",
+                "explanation": "Лимит повторов одной continuation-стратегии исчерпан; цель остаётся активной и ждёт внутреннего пересмотра стратегии.",
                 "evidence": {"snapshot": snapshot, "action": action},
-                "required_action": "Абаддон или владелец должен выбрать новую стратегию, а не повторить тот же action.",
-                "resume_condition": "Появится новая директива/миссия с отличающимся проверяемым планом.",
+                "required_action": "Абаддон должен выбрать новую проверяемую стратегию, а не повторить тот же action.",
+                "resume_condition": "Появится новая внутренняя стратегия/миссия с отличающимся проверяемым планом.",
             }
-            return self.transition(
-                item["id"],
-                "quarantined",
-                honest_status=diagnostic["explanation"],
+            return await self._dispatch_recovery_attempt(
+                item,
+                snapshot,
+                status="continuation_budget_exhausted",
                 diagnostic=diagnostic,
-                result=snapshot,
             )
         try:
             dispatched = await self.organs.execute_abaddon_action(str(item["delegate_ref"]), snapshot)
@@ -324,6 +589,32 @@ class Commitments:
         try:
             snapshot = await self.organs.inspect_abaddon(str(item["delegate_ref"]))
         except OrganError as exc:
+            if exc.code == "abaddon_run_not_found":
+                missing_snapshot = {
+                    "task_id": str(item["delegate_ref"]),
+                    "status": "failed",
+                    "phase": "delegation_not_created",
+                    "summary": {
+                        "diagnostic": item.get("diagnostic") or {},
+                        "last_result": item.get("result") or {},
+                        "inspection": exc.evidence,
+                    },
+                }
+                diagnostic = {
+                    "code": "abaddon_attempt_missing",
+                    "explanation": exc.explanation,
+                    "evidence": missing_snapshot,
+                    "strategy_review_required": True,
+                    "requires_user": False,
+                    "required_action": "Создать новую связанную попытку той же задачи; не ждать статус несуществующего run.",
+                    "resume_condition": "Абаддон подтвердит новую попытку с той же страницей задачи.",
+                }
+                return await self._dispatch_recovery_attempt(
+                    item,
+                    missing_snapshot,
+                    status="delegation_not_created",
+                    diagnostic=diagnostic,
+                )
             diagnostic = {
                 "code": exc.code,
                 "explanation": exc.explanation,
@@ -339,6 +630,16 @@ class Commitments:
         needs_user = self._needs_user_diagnostic(snapshot)
         external = self._external_diagnostic(snapshot)
         revision_required = status in REVISION_STATES or phase in REVISION_STATES or nested in REVISION_STATES
+        failure_states = {"failed", "corrupt", "preflight_failed"}
+        failure_status = (
+            status
+            if status in failure_states
+            else phase
+            if phase in failure_states
+            else nested
+            if nested in failure_states
+            else ""
+        )
 
         # The outer Abaddon run may be mechanically complete while its native
         # warband result still requires owner input, an external dependency or
@@ -348,6 +649,7 @@ class Commitments:
             and needs_user is None
             and external is None
             and not revision_required
+            and not failure_status
         ):
             return self.transition(
                 item["id"],
@@ -386,25 +688,26 @@ class Commitments:
                 result=snapshot,
             )
 
-        # A terminal failure outranks any stale start/resume affordance left on
-        # the wrapper snapshot. Replaying such an action only produces a 409 and
-        # launders a proven failure into an apparently live retry loop.
-        if status in {"failed", "corrupt", "preflight_failed"}:
+        # A failed Abaddon run is an immutable failed attempt, not a failed
+        # durable goal. Never replay its stale start affordance; schedule an
+        # internal strategy review that must produce a different attempt.
+        if failure_status:
             diagnostic = {
-                "code": f"abaddon_{status}",
+                "code": f"abaddon_{failure_status}",
                 "explanation": (
-                    "Работа завершилась неуспешно и не опубликовала доказуемый путь ревизии."
+                    f"Попытка Абаддона завершилась в состоянии {failure_status}; цель остаётся активной и переведена на внутренний пересмотр стратегии."
                 ),
                 "evidence": snapshot,
-                "required_action": "Сформировать новую стратегию, если цель всё ещё нужна.",
-                "resume_condition": "Новая миссия с исправленной стратегией и явными критериями.",
+                "strategy_review_required": True,
+                "requires_user": False,
+                "required_action": "Не запускать stale action этого run. Сформировать отличающуюся стратегию и создать новую связанную попытку с теми же критериями цели.",
+                "resume_condition": "Core или Абаддон опубликует новую связанную попытку с исправленной стратегией и явными критериями.",
             }
-            return self.transition(
-                item["id"],
-                "failed",
-                honest_status=diagnostic["explanation"],
+            return await self._dispatch_recovery_attempt(
+                item,
+                snapshot,
+                status=failure_status,
                 diagnostic=diagnostic,
-                result=snapshot,
             )
 
         continuation = await self._execute_continuation(item, snapshot)
@@ -422,12 +725,19 @@ class Commitments:
         if status in {"blocked", "interrupted", "resume_required"} or phase in {"blocked", "resume_required", "inspect", "needs_attention"}:
             diagnostic = {
                 "code": "abaddon_continuation_not_executable",
-                "explanation": "Абаддон остановил миссию, но не дал исполнимую команду продолжения; Core не выдаёт это ни за работу, ни за терминальный провал.",
+                "explanation": "Абаддон остановил попытку и не дал исполнимую команду продолжения; Core сохраняет её диагностику и меняет стратегию в новой попытке.",
                 "evidence": snapshot,
-                "required_action": "Абаддон должен опубликовать конкретный POST action с причиной и телом команды.",
-                "resume_condition": "В orchestration snapshot появится исполнимая revision/resume/apply/reprepare команда.",
+                "strategy_review_required": True,
+                "requires_user": False,
+                "required_action": "Не ждать пустого status-блока и не повторять stale action. Создать новую связанную попытку с исправленной стратегией и конкретным исполнимым планом.",
+                "resume_condition": "Новая связанная попытка принята Абаддоном и продолжает ту же долговечную цель.",
             }
-            return self._bounded_retry(item, diagnostic=diagnostic, result=snapshot, seconds=30)
+            return await self._dispatch_recovery_attempt(
+                item,
+                snapshot,
+                status="blocked_no_action",
+                diagnostic=diagnostic,
+            )
 
         if status not in WORKING_STATES and phase not in WORKING_STATES:
             diagnostic = {
@@ -456,10 +766,9 @@ class Commitments:
                 continue
             # A waiting-user mission must remain observable: after Archive
             # delivers the answer directly to Abaddon, its next snapshot is
-            # the durable evidence that this commitment resumed. Quarantined
-            # work still requires an explicit recovery path.
-            if item.get("state") == "quarantined":
-                continue
+            # the durable evidence that this commitment resumed. Legacy
+            # quarantined rows are reconciled too: quarantine must not make a
+            # still-authorized durable goal disappear from the steward.
             if item.get("state") == "retry_wait" and str(item.get("next_attempt_at") or "") > now:
                 continue
             checked += 1

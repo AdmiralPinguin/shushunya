@@ -99,11 +99,15 @@ def reconsider(top_goal: str, stuck_goal: str, failed: dict[str, Any]) -> str:
         return ""
 
 
-def _run_with_retry(goal: str, executor: Any, task_id: str, *, top_goal: str,
-                    note, max_wall_sec: int, rounds: int = 2, ask_fn=None, cancel_fn=None) -> dict[str, Any]:
+def _run_with_retry(goal: str, executor: Any, task_id: str, *, memory_task_id: str,
+                    top_goal: str,
+                    note, max_wall_sec: int, rounds: int = 2, ask_fn=None,
+                    cancel_fn=None, durable_checkpoint_fn=None) -> dict[str, Any]:
     """Run a fighter; if it gets stuck, let the planner change the approach once."""
-    res = run_mission(goal, executor, task_id=task_id, max_fighter_rounds=rounds,
-                      max_wall_sec=max_wall_sec, ask_fn=ask_fn, cancel_fn=cancel_fn)
+    res = run_mission(goal, executor, task_id=task_id,
+                      memory_task_id=memory_task_id, max_fighter_rounds=rounds,
+                      max_wall_sec=max_wall_sec, ask_fn=ask_fn, cancel_fn=cancel_fn,
+                      durable_checkpoint_fn=durable_checkpoint_fn)
     if res.get("accepted") or res.get("status") == "cancelled":
         return res
     note("Планировщик: боец застрял — переобдумываю подход.")
@@ -111,8 +115,10 @@ def _run_with_retry(goal: str, executor: Any, task_id: str, *, top_goal: str,
     if not new_goal:
         return res
     note(f"Планировщик: новый подход → {new_goal[:120]}")
-    res2 = run_mission(new_goal, executor, task_id=task_id, max_fighter_rounds=rounds,
-                       max_wall_sec=max_wall_sec, ask_fn=ask_fn, cancel_fn=cancel_fn)
+    res2 = run_mission(new_goal, executor, task_id=task_id,
+                       memory_task_id=memory_task_id, max_fighter_rounds=rounds,
+                       max_wall_sec=max_wall_sec, ask_fn=ask_fn, cancel_fn=cancel_fn,
+                       durable_checkpoint_fn=durable_checkpoint_fn)
     res2["reconsidered"] = True
     return res2
 
@@ -146,15 +152,34 @@ def _ensure_git(ex) -> bool:
     return "GIT_OK" in (r.get("stdout") or "")
 
 
-def _run_wave_parallel(wave, base_executor, task_id, top_goal, note, per, ask_fn, cancel_fn):
+def _run_wave_parallel(
+    wave, base_executor, task_id, top_goal, note, per, ask_fn, cancel_fn,
+    memory_task_id="", durable_checkpoint_fn=None,
+):
     """Run one wave. A single subtask runs in the shared workdir. Several independent
     subtasks each run in a real `git worktree` off the base repo (own branch), then their
     branches are MERGED back with git — a real 3-way merge, so a file changed by two
     subtasks is a genuine merge conflict we surface, not a silent last-writer-wins copy.
     Concurrency is capped. Falls back to cp -a only if git is unavailable."""
     if len(wave) == 1:
-        return [_run_with_retry(wave[0]["goal"], base_executor, task_id, top_goal=top_goal,
-                                note=note, max_wall_sec=per, ask_fn=ask_fn, cancel_fn=cancel_fn)]
+        return [_run_with_retry(wave[0]["goal"], base_executor, task_id,
+                                memory_task_id=memory_task_id, top_goal=top_goal,
+                                note=note, max_wall_sec=per, ask_fn=ask_fn,
+                                cancel_fn=cancel_fn,
+                                durable_checkpoint_fn=durable_checkpoint_fn)]
+    if durable_checkpoint_fn is not None:
+        # Several unmerged tmpfs worktrees cannot be recovered atomically after
+        # host loss. Durable production missions keep one replayable workspace.
+        return [
+            _run_with_retry(
+                item["goal"], base_executor, task_id,
+                memory_task_id=memory_task_id, top_goal=top_goal,
+                note=note, max_wall_sec=per, ask_fn=ask_fn,
+                cancel_fn=cancel_fn,
+                durable_checkpoint_fn=durable_checkpoint_fn,
+            )
+            for item in wave
+        ]
     import concurrent.futures as _f
     base = str(getattr(base_executor, "workdir", ""))   # may be Path (Local) or str (VM)
     limit = max(1, int(os.environ.get("SKITARII_PARALLEL", "2")))
@@ -184,8 +209,11 @@ def _run_wave_parallel(wave, base_executor, task_id, top_goal, note, per, ask_fn
     # 2) run the fighters in PARALLEL — each writes only inside its own worktree (no git,
     # so no shared-repo race). Parallel fighters don't ask the user; cancel still applies.
     def _one(idx):
-        res = _run_with_retry(wave[idx]["goal"], children[idx], task_id, top_goal=top_goal,
-                              note=note, max_wall_sec=per, ask_fn=None, cancel_fn=cancel_fn)
+        res = _run_with_retry(wave[idx]["goal"], children[idx], task_id,
+                              memory_task_id=memory_task_id, top_goal=top_goal,
+                              note=note, max_wall_sec=per, ask_fn=None,
+                              cancel_fn=cancel_fn,
+                              durable_checkpoint_fn=durable_checkpoint_fn)
         return idx, res
 
     results: dict[int, dict] = {}
@@ -215,11 +243,19 @@ def _run_wave_parallel(wave, base_executor, task_id, top_goal, note, per, ask_fn
             base_executor.bash(f"git worktree remove --force {cdir!r} 2>/dev/null; git branch -D {_branch(idx)} 2>/dev/null", timeout=30)
         else:
             base_executor.bash(f"cp -a {cdir!r}/. {base!r}/ 2>/dev/null || true", timeout=60)
+        if durable_checkpoint_fn is not None:
+            durable_checkpoint_fn(
+                base_executor,
+                step=idx + 1,
+                boundary=f"planner_merge:{idx + 1}",
+            )
     return [results[i] for i in range(len(wave))]
 
 
-def plan_and_run(goal: str, executor: Any, *, task_id: str = "", ask_fn=None, cancel_fn=None,
-                 max_wall_sec: int = 5400, memory=None) -> dict[str, Any]:
+def plan_and_run(goal: str, executor: Any, *, task_id: str = "",
+                 memory_task_id: str = "", ask_fn=None, cancel_fn=None,
+                 max_wall_sec: int = 5400, memory=None,
+                 durable_checkpoint_fn=None) -> dict[str, Any]:
     """Plan the goal, run fighters per subtask in one shared workdir, then accept the
     whole thing against the top-level checks. `memory(note)` is an optional callback."""
     def note(msg: str) -> None:
@@ -233,8 +269,11 @@ def plan_and_run(goal: str, executor: Any, *, task_id: str = "", ask_fn=None, ca
     # small task → single fighter, but with the head's anti-stuck retry
     if len(subtasks) <= 1:
         note("Планировщик: задача простая, один боец.")
-        return _run_with_retry(goal, executor, task_id, top_goal=goal, note=note,
-                               max_wall_sec=max_wall_sec, ask_fn=ask_fn, cancel_fn=cancel_fn)
+        return _run_with_retry(goal, executor, task_id,
+                               memory_task_id=memory_task_id, top_goal=goal, note=note,
+                               max_wall_sec=max_wall_sec, ask_fn=ask_fn,
+                               cancel_fn=cancel_fn,
+                               durable_checkpoint_fn=durable_checkpoint_fn)
 
     note(f"Планировщик разбил на {len(subtasks)} подзадач: " + "; ".join(s["title"] for s in subtasks))
     top_spec = build_spec(goal)          # final acceptance for the whole task
@@ -248,7 +287,11 @@ def plan_and_run(goal: str, executor: Any, *, task_id: str = "", ask_fn=None, ca
         # independent subtasks in one wave run in parallel, each in its own isolated
         # worktree (child executor). With a single Qwen slot they still serialise on the
         # model, but the isolation + merge is ready for multi-slot / a stronger model.
-        results = _run_wave_parallel(wave, executor, task_id, goal, note, per, ask_fn, cancel_fn)
+        results = _run_wave_parallel(
+            wave, executor, task_id, goal, note, per, ask_fn, cancel_fn,
+            memory_task_id=memory_task_id,
+            durable_checkpoint_fn=durable_checkpoint_fn,
+        )
         for sub, res in zip(wave, results):
             sub_results.append({"title": sub["title"], "status": res.get("status"),
                                 "accepted": res.get("accepted"), "reconsidered": res.get("reconsidered", False)})

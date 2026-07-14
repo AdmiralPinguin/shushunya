@@ -41,6 +41,49 @@ ADMINISTRATUM_BASE_URL = os.environ.get("ARCHIVE_ADMINISTRATUM_BASE_URL", "http:
 JSONL_ROOT = Path(os.environ.get("ARCHIVE_JSONL_ROOT", ROOT / "archive" / "jsonl"))
 MEMORY_EVENTS_ROOT = Path(os.environ.get("ARCHIVE_MEMORY_EVENTS_ROOT", ROOT / "archive" / "memory_events"))
 SQLITE_PATH = Path(os.environ.get("ARCHIVE_SQLITE_PATH", ROOT / "archive" / "sqlite" / "archive.sqlite3"))
+TASK_MEMORY_SQLITE_PATH = Path(
+    os.environ.get("ARCHIVE_TASK_MEMORY_SQLITE_PATH", ROOT / "runtime" / "task_memory.sqlite3")
+)
+TASK_MEMORY_BUSY_TIMEOUT_MS = int(os.environ.get("ARCHIVE_TASK_MEMORY_BUSY_TIMEOUT_MS", "5000"))
+TASK_MEMORY_MAX_SNAPSHOT_BYTES = int(
+    os.environ.get("ARCHIVE_TASK_MEMORY_MAX_SNAPSHOT_BYTES", str(256 * 1024))
+)
+TASK_MEMORY_MAX_EVENT_BYTES = int(
+    os.environ.get("ARCHIVE_TASK_MEMORY_MAX_EVENT_BYTES", str(32 * 1024))
+)
+TASK_MEMORY_MAX_TEXT_CHARS = int(os.environ.get("ARCHIVE_TASK_MEMORY_MAX_TEXT_CHARS", "12000"))
+TASK_MEMORY_MAX_LIST_ITEMS = int(os.environ.get("ARCHIVE_TASK_MEMORY_MAX_LIST_ITEMS", "80"))
+TASK_MEMORY_CONTEXT_CHARS = int(os.environ.get("ARCHIVE_TASK_MEMORY_CONTEXT_CHARS", "8000"))
+TASK_MEMORY_MAX_REQUEST_BYTES = int(
+    os.environ.get(
+        "ARCHIVE_TASK_MEMORY_MAX_REQUEST_BYTES",
+        str(
+            TASK_MEMORY_MAX_SNAPSHOT_BYTES
+            + TASK_MEMORY_MAX_EVENT_BYTES
+            + (2 * TASK_MEMORY_MAX_TEXT_CHARS)
+            + 65536
+        ),
+    )
+)
+if TASK_MEMORY_BUSY_TIMEOUT_MS < 1:
+    raise RuntimeError("ARCHIVE_TASK_MEMORY_BUSY_TIMEOUT_MS must be >= 1")
+if TASK_MEMORY_MAX_SNAPSHOT_BYTES < 4096:
+    raise RuntimeError("ARCHIVE_TASK_MEMORY_MAX_SNAPSHOT_BYTES must be >= 4096")
+if TASK_MEMORY_MAX_EVENT_BYTES < 1024:
+    raise RuntimeError("ARCHIVE_TASK_MEMORY_MAX_EVENT_BYTES must be >= 1024")
+if TASK_MEMORY_MAX_TEXT_CHARS < 256:
+    raise RuntimeError("ARCHIVE_TASK_MEMORY_MAX_TEXT_CHARS must be >= 256")
+if TASK_MEMORY_MAX_LIST_ITEMS < 8:
+    raise RuntimeError("ARCHIVE_TASK_MEMORY_MAX_LIST_ITEMS must be >= 8")
+if TASK_MEMORY_CONTEXT_CHARS < 1000 or TASK_MEMORY_CONTEXT_CHARS > 50000:
+    raise RuntimeError("ARCHIVE_TASK_MEMORY_CONTEXT_CHARS must be between 1000 and 50000")
+if (
+    TASK_MEMORY_MAX_REQUEST_BYTES < TASK_MEMORY_MAX_SNAPSHOT_BYTES + 1024
+    or TASK_MEMORY_MAX_REQUEST_BYTES > 2 * 1024 * 1024
+):
+    raise RuntimeError(
+        "ARCHIVE_TASK_MEMORY_MAX_REQUEST_BYTES must cover a snapshot envelope and stay <= 2 MiB"
+    )
 ARTIFACTS_ROOT = Path(os.environ.get("ARCHIVE_ARTIFACTS_ROOT", ROOT / "archive" / "artifacts"))
 ARTIFACT_MAX_BYTES = int(os.environ.get("ARCHIVE_ARTIFACT_MAX_BYTES", str(2 * 1024 * 1024 * 1024)))
 ARTIFACT_TOTAL_QUOTA_BYTES = int(

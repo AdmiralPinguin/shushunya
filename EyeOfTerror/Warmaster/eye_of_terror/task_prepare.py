@@ -147,6 +147,7 @@ def _ceraxia_prepare_request_sha256(
     task: str,
     task_id: str,
     commander_order: dict[str, Any],
+    task_memory_id: str = "",
 ) -> str:
     """Recompute the native receipt identity at the Warmaster trust boundary."""
     canonical = json.dumps(
@@ -157,6 +158,7 @@ def _ceraxia_prepare_request_sha256(
                 commander_order.get("mission_id") or f"mission-{task_id}"
             ),
             "commander_order": commander_order,
+            "task_memory_id": task_memory_id,
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -165,13 +167,23 @@ def _ceraxia_prepare_request_sha256(
     return hashlib.sha256(canonical).hexdigest()
 
 
-def governor_payload_for(message: str, task_id: str | None, commander_order: dict[str, Any] | None = None) -> dict[str, Any]:
+def governor_payload_for(
+    message: str,
+    task_id: str | None,
+    commander_order: dict[str, Any] | None = None,
+    *,
+    task_memory_id: str = "",
+) -> dict[str, Any]:
     if commander_order:
         validate_protocol_payload(commander_order, expected_type="commander_order")
         payload = {"task": task_text_from_commander_order(commander_order), "task_id": task_id or ""}
         payload["commander_order"] = commander_order
+        if task_memory_id:
+            payload["task_memory_id"] = task_memory_id
         return payload
     payload = {"task": message, "task_id": task_id or ""}
+    if task_memory_id:
+        payload["task_memory_id"] = task_memory_id
     return payload
 
 
@@ -219,6 +231,7 @@ def prepare_native_ceraxia_via_service(
     port: int | None = None,
     commander_order: dict[str, Any] | None = None,
     require_commander_order: bool = False,
+    task_memory_id: str = "",
 ) -> dict[str, Any]:
     """Prepare one native Ceraxia -> Skitarii mission.
 
@@ -239,7 +252,10 @@ def prepare_native_ceraxia_via_service(
         try:
             preview = _post_governor_json(
                 base + "/plan",
-                governor_payload_for(message, None, commander_order=commander_order),
+                governor_payload_for(
+                    message, None, commander_order=commander_order,
+                    task_memory_id=task_memory_id,
+                ),
                 governor.name,
             )
             preview_contract = preview.get("contract") if isinstance(preview.get("contract"), dict) else {}
@@ -269,6 +285,20 @@ def prepare_native_ceraxia_via_service(
                 governor_transport="http", governor_host=host, message=message,
             ),
         }
+    resolved_task_memory_id = str(task_memory_id or resolved_task_id).strip()
+    if not valid_task_id(resolved_task_memory_id):
+        return {
+            "ok": False,
+            "gateway": "WarmasterGateway",
+            "governor": "Ceraxia",
+            "task_id": resolved_task_id,
+            "error": "invalid task_memory_id",
+            "error_code": "invalid_task_memory_identity",
+            "actions": task_preflight_actions(
+                False, "invalid_task_memory_identity", resolved_task_id,
+                governor_transport="http", governor_host=host, message=message,
+            ),
+        }
     root = run_root.resolve()
     run_dir = (root / resolved_task_id).resolve()
     if run_dir == root or root not in run_dir.parents:
@@ -289,6 +319,7 @@ def prepare_native_ceraxia_via_service(
             message,
             resolved_task_id,
             commander_order=commander_order,
+            task_memory_id=resolved_task_memory_id,
         ),
         "run_dir": str(run_dir),
     }
@@ -385,6 +416,7 @@ def prepare_native_ceraxia_via_service(
             str(contract_payload.get("goal") or ""),
             resolved_task_id,
             commander_order,
+            resolved_task_memory_id,
         )
         if persisted_receipt.get("prepare_request_sha256") != expected_request_sha256:
             raise ValueError("persisted native receipt belongs to a different prepare request")
@@ -486,6 +518,7 @@ def prepare_native_iskandar_via_service(
     port: int | None = None,
     commander_order: dict[str, Any] | None = None,
     require_commander_order: bool = False,
+    task_memory_id: str = "",
 ) -> dict[str, Any]:
     """Prepare one commander-bound Iskandar -> ResearchWarband native run."""
     if require_commander_order and not commander_order:
@@ -501,7 +534,10 @@ def prepare_native_iskandar_via_service(
         try:
             preview = _post_governor_json(
                 base + "/plan",
-                governor_payload_for(message, None, commander_order=commander_order),
+                governor_payload_for(
+                    message, None, commander_order=commander_order,
+                    task_memory_id=task_memory_id,
+                ),
                 governor.name,
             )
             preview_contract = (
@@ -555,6 +591,7 @@ def prepare_native_iskandar_via_service(
             message,
             resolved_task_id,
             commander_order=commander_order,
+            task_memory_id=task_memory_id,
         ),
         "run_dir": str(run_dir),
     }
@@ -730,6 +767,7 @@ def prepare_task_via_governor_service(
     port: int | None = None,
     commander_order: dict[str, Any] | None = None,
     require_commander_order: bool = False,
+    task_memory_id: str = "",
 ) -> dict[str, Any]:
     if governor.name == "Ceraxia":
         return prepare_native_ceraxia_via_service(
@@ -741,6 +779,7 @@ def prepare_task_via_governor_service(
             port=port,
             commander_order=commander_order,
             require_commander_order=require_commander_order,
+            task_memory_id=task_memory_id,
         )
     if governor.name == "IskandarKhayon":
         return prepare_native_iskandar_via_service(
@@ -752,6 +791,7 @@ def prepare_task_via_governor_service(
             port=port,
             commander_order=commander_order,
             require_commander_order=require_commander_order,
+            task_memory_id=task_memory_id,
         )
     if require_commander_order and not commander_order:
         return commander_order_required_payload(task_id, "http", host, message)
@@ -1108,6 +1148,7 @@ def prepare_task(
     forced_governor: str | None = None,
     commander_order: dict[str, Any] | None = None,
     require_commander_order: bool = False,
+    task_memory_id: str = "",
 ) -> dict[str, Any]:
     if require_commander_order and not commander_order:
         return commander_order_required_payload(task_id, governor_transport, governor_host, message)
@@ -1194,6 +1235,7 @@ def prepare_task(
             host=governor_host,
             commander_order=commander_order,
             require_commander_order=require_commander_order,
+            task_memory_id=task_memory_id,
         )
     if governor_transport != "local":
         return {

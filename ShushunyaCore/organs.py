@@ -271,11 +271,28 @@ class Organs:
     async def dispatch_abaddon(self, payload: dict[str, Any]) -> dict[str, Any]:
         message = str(payload.get("message") or "").strip()
         task_id = str(payload.get("task_id") or "").strip()
+        task_memory_id = str(
+            payload.get("task_memory_id") or payload.get("goal_id") or task_id
+        ).strip()
+        root_task_id = str(
+            payload.get("root_task_id") or task_memory_id or task_id
+        ).strip()
         parent_task_id = str(
             payload.get("parent_task_id") or payload.get("continuation_of") or ""
         ).strip()
         if not message or not task_id:
             raise OrganError("invalid_abaddon_effect", "В запросе Абаддону нет message или стабильного task_id.", retryable=False)
+        for field, value in (
+            ("task_memory_id", task_memory_id),
+            ("root_task_id", root_task_id),
+        ):
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value):
+                raise OrganError(
+                    "invalid_abaddon_effect",
+                    f"В запросе Абаддону поле {field} не является безопасным идентификатором.",
+                    retryable=False,
+                    evidence={field: value[:160]},
+                )
         if parent_task_id and parent_task_id == task_id:
             raise OrganError(
                 "invalid_abaddon_continuation",
@@ -286,6 +303,8 @@ class Organs:
         request = {
             "message": message,
             "task_id": task_id,
+            "task_memory_id": task_memory_id,
+            "root_task_id": root_task_id,
             "auto_start": True,
             "reuse_existing": True,
             "run_mode": "http",
@@ -555,6 +574,20 @@ class Organs:
             body = response.json()
             if not isinstance(body, dict):
                 raise TypeError("orchestration snapshot must be a JSON object")
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                raise OrganError(
+                    "abaddon_run_not_found",
+                    f"Абаддон не нашёл неизменяемую попытку {task_id}; цель требует новой связанной попытки.",
+                    retryable=False,
+                    evidence={"task_id": task_id, "http_status": 404},
+                ) from exc
+            raise OrganError(
+                "abaddon_status_unavailable",
+                f"Не удалось сверить задачу {task_id} с Абаддоном: HTTP {exc.response.status_code}",
+                retryable=exc.response.status_code >= 500,
+                evidence={"task_id": task_id, "http_status": exc.response.status_code},
+            ) from exc
         except Exception as exc:
             raise OrganError(
                 "abaddon_status_unavailable",

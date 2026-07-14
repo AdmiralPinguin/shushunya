@@ -3,13 +3,18 @@
 cd /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/Warmaster || exit 1
 PY=../../DemonsForge/DemonsForge/bin/python
 RESEARCH_SECRET=/media/shushunya/SHUSHUNYA/shushunya/.secrets/research-warband-shadow.env
+ARCHIVE_CLIENT_SECRET=/media/shushunya/SHUSHUNYA/shushunya/.secrets/archive-clients.env
+set -a
 if [ -r "$RESEARCH_SECRET" ]; then
-  set -a
-  # Operator-owned mode-0600 EnvironmentFile also supplies the exact 7201 token
-  # to Iskandar and Abaddon. Never echo it or copy it into repository config.
+  # Operator-owned mode-0600 file supplies the exact 7201 token to Iskandar
+  # and Abaddon. Never echo it or copy it into repository config.
   . "$RESEARCH_SECRET"
-  set +a
 fi
+if [ -r "$ARCHIVE_CLIENT_SECRET" ]; then
+  # The same local-only task-page key is consumed by Abaddon and Ceraxia.
+  . "$ARCHIVE_CLIENT_SECRET"
+fi
+set +a
 mkdir -p runtime
 start() {
   local name="$1" port="$2"; shift 2

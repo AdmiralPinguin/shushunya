@@ -7,6 +7,7 @@ import json
 import hashlib
 import os
 import re
+import secrets
 import shutil
 import stat
 import sys
@@ -15,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 REPO_ROOT = next(
@@ -60,25 +61,154 @@ MAX_CERAXIA_REQUEST_BYTES = int(os.environ.get("CERAXIA_MAX_REQUEST_BYTES", "200
 CERAXIA_TRUSTED_ORIGINS_ENV = "CERAXIA_TRUSTED_ORIGINS"
 _TASK_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 _PREPARE_LOCK = threading.RLock()
+ARCHIVE_URL = os.environ.get("CERAXIA_ARCHIVE_URL", "http://127.0.0.1:8090").rstrip("/")
+ARCHIVE_API_KEY = os.environ.get("ARCHIVE_API_KEY", "").strip()
+TASK_MEMORY_CONTEXT_CHARS = int(os.environ.get("CERAXIA_TASK_MEMORY_CONTEXT_CHARS", "12000"))
 
 
 class PrepareIdentityConflict(ValueError):
     """An existing run cannot be proven to belong to this prepare request."""
 
 
-def _prepare_request_sha256(task: str, task_id: str, command: dict[str, Any]) -> str:
+class TaskMemoryContextError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str,
+        retryable: bool,
+        http_status: int,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.retryable = retryable
+        self.http_status = http_status
+
+
+def _fsync_directory(path: Path) -> None:
+    """Durably order directory-entry publication where the host supports it."""
+    flags = os.O_RDONLY | int(getattr(os, "O_DIRECTORY", 0))
+    descriptor = os.open(path, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _write_json_durable(path: Path, payload: dict[str, Any]) -> None:
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+    with path.open("x", encoding="utf-8", newline="\n") as handle:
+        handle.write(raw)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _prepare_request_sha256(
+    task: str,
+    task_id: str,
+    command: dict[str, Any],
+    task_memory_id: str = "",
+) -> str:
     canonical = json.dumps(
         {
             "task": task,
             "task_id": task_id,
             "mission_id": str(command.get("mission_id") or f"mission-{task_id}"),
             "commander_order": command,
+            "task_memory_id": task_memory_id,
         },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
+
+
+def _load_task_memory_context(task_memory_id: str) -> dict[str, Any]:
+    """Load the exact durable goal page for a fresh leadership decision."""
+    memory_id = str(task_memory_id or "").strip()
+    if not memory_id or not _TASK_ID_RE.fullmatch(memory_id):
+        raise TaskMemoryContextError(
+            "Ceraxia received an invalid task-memory identity",
+            error_code="task_memory_identity_invalid",
+            retryable=False,
+            http_status=409,
+        )
+    headers = {"Accept": "application/json"}
+    if ARCHIVE_API_KEY:
+        if any(char in ARCHIVE_API_KEY for char in "\r\n"):
+            raise TaskMemoryContextError(
+                "Ceraxia Archive API key contains invalid control characters",
+                error_code="task_memory_auth_invalid",
+                retryable=False,
+                http_status=502,
+            )
+        headers["Authorization"] = f"Bearer {ARCHIVE_API_KEY}"
+    request = Request(
+        f"{ARCHIVE_URL}/archive/task-page?task_memory_id={quote(memory_id, safe='')}",
+        headers=headers,
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=10.0) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        retryable = exc.code >= 500 or exc.code in {408, 425, 429}
+        raise TaskMemoryContextError(
+            f"Archive rejected Ceraxia task-memory read with HTTP {exc.code}",
+            error_code=(
+                "task_memory_unavailable" if retryable else "task_memory_read_rejected"
+            ),
+            retryable=retryable,
+            http_status=503 if retryable else 502,
+        ) from exc
+    except (URLError, OSError, TimeoutError) as exc:
+        raise TaskMemoryContextError(
+            f"Archive task memory is temporarily unavailable: {exc}",
+            error_code="task_memory_unavailable",
+            retryable=True,
+            http_status=503,
+        ) from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TaskMemoryContextError(
+            f"Archive returned invalid task-memory JSON: {exc}",
+            error_code="task_memory_invalid_response",
+            retryable=True,
+            http_status=503,
+        ) from exc
+    if not isinstance(payload, dict):
+        raise TaskMemoryContextError(
+            "Archive returned a non-object task-memory response",
+            error_code="task_memory_invalid_response",
+            retryable=True,
+            http_status=503,
+        )
+    returned_id = str(payload.get("task_memory_id") or "").strip()
+    if returned_id != memory_id:
+        raise TaskMemoryContextError(
+            "Archive task-memory identity does not match Ceraxia request",
+            error_code="task_memory_identity_conflict",
+            retryable=False,
+            http_status=409,
+        )
+    content = str(payload.get("context") or payload.get("content") or "")[
+        : max(1_000, TASK_MEMORY_CONTEXT_CHARS)
+    ]
+    if not content or not isinstance(payload.get("snapshot"), dict):
+        raise TaskMemoryContextError(
+            "Archive has not initialised the required task page yet",
+            error_code="task_memory_not_initialised",
+            retryable=True,
+            http_status=503,
+        )
+    return {
+        "task_memory_id": memory_id,
+        "root_task_id": str(payload.get("root_task_id") or ""),
+        "available": True,
+        "revision": int(payload.get("revision") or 0),
+        "sha256": str(payload.get("sha256") or payload.get("snapshot_sha256") or "")[:64],
+        "content": content,
+    }
 
 
 def _load_prepare_replay(
@@ -581,13 +711,17 @@ def request_leadership_directive(
     task: str,
     task_id: str,
     command: dict[str, Any],
+    task_memory_context: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Ask Ceraxia for a leader decision, not a detailed implementation plan."""
     mission_id = str(command.get("mission_id") or f"mission-{task_id}")
+    request_payload = directive_request_payload(task, task_id, command)
+    if task_memory_context:
+        request_payload["task_memory"] = task_memory_context
     model_decision = request_model_decision(
         "Ceraxia",
         "Leader of the coding warband",
-        directive_request_payload(task, task_id, command),
+        request_payload,
         layer="governor_service",
         instructions=directive_model_instructions(),
     )
@@ -911,6 +1045,10 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                 repo_path = str(payload.get("repo_path") or "").strip()
                 task = task_with_repo_marker(task, repo_path)
                 task_id = str(payload.get("task_id") or "").strip() or None
+                task_memory_id = str(payload.get("task_memory_id") or task_id or "").strip()
+                if task_memory_id and not _TASK_ID_RE.fullmatch(task_memory_id):
+                    response(self, 400, {"ok": False, "error": "invalid task_memory_id"})
+                    return
                 if self.path == "/plan":
                     plan_payload = native_plan_payload(task, task_id, command)
                     plan_payload = _bind_commander_order(plan_payload, command)
@@ -935,6 +1073,7 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                         task,
                         contract["task_id"],
                         command,
+                        task_memory_id,
                     )
                     with _PREPARE_LOCK:
                         if run_dir.exists():
@@ -960,11 +1099,27 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                             )
                             return
                         try:
+                            task_memory_context = _load_task_memory_context(task_memory_id)
                             leadership_directive, model_decision = request_leadership_directive(
                                 task,
                                 contract["task_id"],
                                 command,
+                                task_memory_context,
                             )
+                        except TaskMemoryContextError as exc:
+                            response(
+                                self,
+                                exc.http_status,
+                                {
+                                    "ok": False,
+                                    "retryable": exc.retryable,
+                                    "governor": "Ceraxia",
+                                    "error": str(exc),
+                                    "error_code": exc.error_code,
+                                    "task_memory_id": task_memory_id,
+                                },
+                            )
+                            return
                         except CeraxiaDirectiveError as exc:
                             response(
                                 self,
@@ -992,18 +1147,44 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                             )
                             return
                         run_dir.parent.mkdir(parents=True, exist_ok=True)
-                        os.mkdir(run_dir, mode=0o755)
-                        reserved_metadata = os.lstat(run_dir)
+                        staging_dir = run_dir.with_name(
+                            f".{run_dir.name}.prepare-{secrets.token_hex(8)}"
+                        )
+                        os.mkdir(staging_dir, mode=0o755)
+                        reserved_metadata = os.lstat(staging_dir)
                         reserved_identity = (reserved_metadata.st_dev, reserved_metadata.st_ino)
                         try:
                             governor_plan_payload = native_governor_plan(contract, command)
                             status = write_native_code_run(
-                                run_dir,
+                                staging_dir,
                                 contract,
                                 leadership_directive,
                                 governor_plan_payload,
                                 prepare_request_sha256=request_sha256,
+                                published_run_dir=run_dir,
                             )
+                            _write_json_durable(
+                                staging_dir / "task_memory_context.json",
+                                task_memory_context,
+                            )
+                            try:
+                                _fsync_directory(staging_dir)
+                            except OSError:
+                                # Some hosts (notably Windows) cannot open a
+                                # directory for fsync. Linux production can.
+                                pass
+                            # The final run directory becomes visible only after
+                            # every required package and memory file is complete.
+                            # A crash before this rename leaves at most an
+                            # unreferenced hidden staging directory; a crash after
+                            # it is an idempotently replayable prepared run.
+                            os.replace(staging_dir, run_dir)
+                            try:
+                                _fsync_directory(run_dir.parent)
+                            except OSError:
+                                # Windows cannot fsync a directory. Atomic rename
+                                # is still the strongest available publication.
+                                pass
                             response_payload = _with_execution_contract({
                                 "ok": True,
                                 "governor": "Ceraxia",
@@ -1031,12 +1212,12 @@ def make_handler(default_run_root: Path) -> type[BaseHTTPRequestHandler]:
                             }, backend)
                         except Exception:
                             try:
-                                current = os.lstat(run_dir)
+                                current = os.lstat(staging_dir)
                                 if (
                                     stat.S_ISDIR(current.st_mode)
                                     and (current.st_dev, current.st_ino) == reserved_identity
                                 ):
-                                    shutil.rmtree(run_dir)
+                                    shutil.rmtree(staging_dir)
                             except OSError:
                                 pass
                             raise

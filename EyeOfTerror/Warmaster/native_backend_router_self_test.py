@@ -35,8 +35,11 @@ if "EyeOfTerror.model_brain" not in sys.modules:
 
 import eye_of_terror.http_executor as http_executor
 import eye_of_terror.local_executor as local_executor
+import eye_of_terror.mission_control as mission_control
 import eye_of_terror.orchestrator as orchestrator
+import eye_of_terror.skitarii_bridge as skitarii_bridge
 import eye_of_terror.warmaster_gateway as warmaster_gateway
+from EyeOfTerror.common_protocol import commander_order, mission_intake
 from eye_of_terror.ledger import TaskLedger
 from eye_of_terror.native_code_run import (
     build_native_code_contract,
@@ -135,6 +138,141 @@ def _phantom_worker_call(*_args, **_kwargs):
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="native-backend-router-") as raw_root:
         run_root = Path(raw_root)
+
+        # A crashed gateway may leave the native package behind before it writes
+        # task_memory.json.  The persisted Ceraxia context is authority for the
+        # goal page; a retry cannot bind that package to another page.
+        crash_window_run = run_root / "native-memory-crash-window"
+        crash_window_run.mkdir()
+        (crash_window_run / "task_memory_context.json").write_text(
+            json.dumps({"task_memory_id": "goal-crash-window", "available": False}),
+            encoding="utf-8",
+        )
+        wrong_ref = orchestrator._task_memory_ref(
+            crash_window_run.name,
+            task_memory_id="wrong-goal-memory",
+            root_task_id=crash_window_run.name,
+        )
+        try:
+            orchestrator._persist_task_memory_ref(crash_window_run, wrong_ref)
+        except ValueError as exc:
+            assert "different task memory" in str(exc), exc
+        else:
+            raise AssertionError("crash-window run accepted a different goal page")
+        correct_ref = orchestrator._task_memory_ref(
+            crash_window_run.name,
+            task_memory_id="goal-crash-window",
+            root_task_id=crash_window_run.name,
+        )
+        assert (
+            orchestrator._persist_task_memory_ref(crash_window_run, correct_ref)
+            == correct_ref
+        )
+        persisted_ref_path = crash_window_run / "task_memory.json"
+        persisted_ref = json.loads(persisted_ref_path.read_text(encoding="utf-8"))
+        persisted_ref["run_task_id"] = "different-run"
+        persisted_ref_path.write_text(json.dumps(persisted_ref), encoding="utf-8")
+        mismatched_guard = orchestrator.task_memory_start_guard(crash_window_run)
+        assert mismatched_guard.get("error_code") == "task_memory_reference_invalid", mismatched_guard
+        persisted_ref["run_task_id"] = crash_window_run.name
+        persisted_ref_path.write_text(json.dumps(persisted_ref), encoding="utf-8")
+
+        checkpoint_parent = run_root / "checkpoint-parent-run"
+        checkpoint_child = run_root / "checkpoint-recovery-run"
+        checkpoint_parent.mkdir()
+        checkpoint_child.mkdir()
+        checkpoint_ledger = TaskLedger.create(
+            checkpoint_parent / "task_ledger.json",
+            checkpoint_parent.name,
+            "continue the same goal",
+            "Ceraxia",
+        )
+        checkpoint_ledger.data["skitarii_mission"] = {
+            "id": "wm-checkpoint-parent-1-deadbeef",
+            "status": "failed",
+        }
+        checkpoint_ledger.save()
+        assert skitarii_bridge._parent_skitarii_mission_id(
+            checkpoint_child,
+            {"parent_task_id": checkpoint_parent.name},
+        ) == "wm-checkpoint-parent-1-deadbeef"
+        assert skitarii_bridge._parent_skitarii_mission_id(
+            checkpoint_child,
+            {"parent_task_id": "missing-parent-run"},
+        ) == ""
+
+        # A mission created before the same crash is likewise immutable: retrying
+        # the task id with conflicting lineage must not overwrite mission.json.
+        mission_task_id = "mission-lineage-crash-window"
+        mission_id = mission_control.mission_id_for(mission_task_id, "original")
+        mission_dir = mission_control.mission_dir_for(run_root, mission_id)
+        mission_dir.mkdir(parents=True)
+        original_mission_ref = orchestrator._task_memory_ref(
+            mission_task_id,
+            task_memory_id="goal-original",
+            root_task_id=mission_task_id,
+        )
+        original_mission = {
+            "mission_id": mission_id,
+            "task_id": mission_task_id,
+            "status": "assigned",
+            "assigned_governor": "Ceraxia",
+            "source_channel": "main_chat",
+            "task_memory": original_mission_ref,
+        }
+        (mission_dir / "mission.json").write_text(
+            json.dumps(original_mission), encoding="utf-8",
+        )
+        original_intake = mission_intake(mission_id, "original")
+        original_order = commander_order(
+            mission_id,
+            to="Ceraxia",
+            user_request="original",
+            commander_intent="Preserve the immutable request.",
+            primary_goal="original",
+            success_conditions=["The original request remains bound."],
+        )
+        (mission_dir / "mission_intake.json").write_text(
+            json.dumps(original_intake), encoding="utf-8",
+        )
+        (mission_dir / "commander_order.json").write_text(
+            json.dumps(original_order), encoding="utf-8",
+        )
+        with patch.object(
+            mission_control,
+            "build_commander_order",
+            side_effect=AssertionError("conflicting retry reached Abaddon"),
+        ):
+            exact_replay = mission_control.open_mission(
+                run_root,
+                "original",
+                mission_task_id,
+                task_memory=original_mission_ref,
+            )
+            request_conflict = mission_control.open_mission(
+                run_root,
+                "different request",
+                mission_task_id,
+                task_memory=original_mission_ref,
+            )
+            mission_conflict = mission_control.open_mission(
+                run_root,
+                "original",
+                mission_task_id,
+                task_memory=orchestrator._task_memory_ref(
+                    mission_task_id,
+                    task_memory_id="goal-other",
+                    root_task_id=mission_task_id,
+                ),
+            )
+        assert exact_replay.get("ok") is True and exact_replay.get("mission_replayed") is True
+        assert exact_replay.get("commander_order") == original_order
+        assert request_conflict.get("error_code") == "mission_request_identity_conflict"
+        assert mission_conflict.get("error_code") == "mission_identity_conflict"
+        assert json.loads(
+            (mission_dir / "mission.json").read_text(encoding="utf-8")
+        ) == original_mission
+
         auto_run = run_root / "native-auto-start-smoke"
         auto_mission_dir = run_root / "_missions" / "mission-native-auto-start-smoke"
         direct_run = _native_run(run_root, "native-direct-start-smoke")
@@ -210,6 +348,31 @@ def main() -> int:
 
         with ExitStack() as stack:
             stack.enter_context(patch.object(orchestrator, "run_via_skitarii", fake_skitarii))
+            stack.enter_context(
+                patch.object(
+                    orchestrator,
+                    "_ensure_task_memory_page",
+                    lambda ref, *_args, **_kwargs: {
+                        "stage": "task_memory_init",
+                        "ok": True,
+                        "retryable": False,
+                        "task_memory_id": ref["task_memory_id"],
+                        "root_task_id": ref["root_task_id"],
+                        "revision": 1,
+                    },
+                )
+            )
+            stack.enter_context(
+                patch.object(
+                    orchestrator,
+                    "task_memory_start_guard",
+                    lambda _run_dir: {
+                        "stage": "task_memory_start_guard",
+                        "ok": True,
+                        "retryable": False,
+                    },
+                )
+            )
             stack.enter_context(patch.object(orchestrator, "_skitarii_backend_health", lambda _timeout: dict(healthy)))
             stack.enter_context(patch.object(orchestrator, "preflight_http_workers", _phantom_worker_call))
             stack.enter_context(patch.object(orchestrator, "execute_http_run", _phantom_worker_call))
@@ -279,6 +442,17 @@ def main() -> int:
             # are black-box-ish: only the gateway response and backend call are
             # observed, while every phantom worker function is armed to explode.
             stack.enter_context(patch.object(warmaster_gateway, "start_background", _sync_background))
+            stack.enter_context(
+                patch.object(
+                    warmaster_gateway,
+                    "task_memory_start_guard",
+                    lambda _run_dir: {
+                        "stage": "task_memory_start_guard",
+                        "ok": True,
+                        "retryable": False,
+                    },
+                )
+            )
             server = ThreadingHTTPServer(
                 ("127.0.0.1", 0),
                 warmaster_gateway.make_handler(run_root),
@@ -430,6 +604,16 @@ def main() -> int:
             ),
             encoding="utf-8",
         )
+        legacy_memory = {
+            "schema_version": 1,
+            "task_memory_id": "goal-legacy-code",
+            "root_task_id": "root-code-project",
+            "run_task_id": legacy_run.name,
+            "parent_task_id": "older-code-attempt",
+        }
+        (legacy_run / "task_memory.json").write_text(
+            json.dumps(legacy_memory), encoding="utf-8",
+        )
         legacy = orchestrator.orchestrate_start_run(run_root, legacy_run.name)
         assert legacy.get("error_code") == "legacy_ceraxia_reprepare_required", legacy
         assert legacy.get("next_action", {}).get("kind") == "legacy_ceraxia_reprepare_required", legacy
@@ -437,6 +621,27 @@ def main() -> int:
         assert legacy.get("next_action", {}).get("body", {}).get("auto_start") is True, legacy
         assert legacy.get("next_action", {}).get("body", {}).get("task_id") != legacy_run.name, legacy
         assert legacy.get("next_action", {}).get("body", {}).get("governor_transport") == "http", legacy
+        legacy_body = legacy.get("next_action", {}).get("body", {})
+        assert legacy_body.get("reuse_existing") is True, legacy
+        assert legacy_body.get("task_memory_id") == "goal-legacy-code", legacy
+        assert legacy_body.get("root_task_id") == "root-code-project", legacy
+        assert legacy_body.get("parent_task_id") == legacy_run.name, legacy
+        assert legacy_body.get("continuation_of") == legacy_run.name, legacy
+        (run_root / str(legacy_body["task_id"])).mkdir()
+        replayed_legacy = orchestrator.orchestrate_start_run(run_root, legacy_run.name)
+        assert (
+            replayed_legacy.get("next_action", {}).get("body", {}).get("task_id")
+            == legacy_body["task_id"]
+        ), replayed_legacy
+        bridge_reprepare = skitarii_bridge._ceraxia_reprepare_action(
+            "legacy code task", run_dir=legacy_run, task_id=legacy_run.name,
+        )
+        bridge_body = bridge_reprepare["body"]
+        assert bridge_body["task_id"] == legacy_body["task_id"], bridge_reprepare
+        assert bridge_body["task_memory_id"] == "goal-legacy-code", bridge_reprepare
+        assert bridge_body["root_task_id"] == "root-code-project", bridge_reprepare
+        assert bridge_body["parent_task_id"] == legacy_run.name, bridge_reprepare
+        assert bridge_body["reuse_existing"] is True, bridge_reprepare
         assert not (legacy_run / "ceraxia_directive.json").exists(), legacy
 
         generic_run = run_root / "generic-research-smoke"
@@ -456,11 +661,9 @@ def main() -> int:
         )
         generic_route = orchestrator.execution_backend_route(generic_run)
         assert generic_route.get("ok") is False, generic_route
-        assert generic_route.get("error_code") == "legacy_iskandar_run_removed", generic_route
-        assert generic_route.get("next_action", {}).get("kind") == "reprepare_native_research_run", generic_route
-        assert generic_route.get("next_action", {}).get("endpoint") == "POST /orchestrate_run", generic_route
-        assert generic_route.get("next_action", {}).get("body", {}).get("task_id") != generic_run.name, generic_route
-        assert generic_route.get("next_action", {}).get("body", {}).get("governor_transport") == "http", generic_route
+        assert generic_route.get("error_code") == "task_memory_reference_missing", generic_route
+        assert generic_route.get("next_action", {}).get("kind") == "task_memory_lineage_repair_required", generic_route
+        assert not generic_route.get("next_action", {}).get("method"), generic_route
 
     print("[ok] native backend router")
     return 0

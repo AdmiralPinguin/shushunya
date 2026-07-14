@@ -49,6 +49,12 @@ from EyeOfTerror.common_protocol.protocol import (  # noqa: E402
 )
 from warband import run_mission  # noqa: E402
 from planner import plan_and_run  # noqa: E402
+from harness import (  # noqa: E402
+    LLMRequestError,
+    _normalize_checkpoint,
+    _persist_checkpoint,
+    _task_page_document,
+)
 from executor import (  # noqa: E402
     BOUNDARY_HELPER_SHA256, BOUNDARY_HELPER_VERSION, ProcessBoundaryBusy,
     ProcessBoundaryQuarantined, VmExecutor,
@@ -135,6 +141,13 @@ def service_identity() -> dict:
             "actionable_findings_required": True,
             "ordinary_check_failure_is_blocked": False,
         },
+        "task_checkpoint_commit_retry": {
+            "enabled": True,
+            "max_attempts": mission_store.MAX_TASK_CHECKPOINT_COMMIT_ATTEMPTS,
+            "base_backoff_seconds": mission_store.TASK_CHECKPOINT_RETRY_BASE_SECONDS,
+            "max_backoff_seconds": mission_store.TASK_CHECKPOINT_RETRY_MAX_SECONDS,
+            "spends_coding_attempts": False,
+        },
         "execution_authorization": {
             "ceraxia_leadership_directive_required": True,
             "acceptance_source_required": True,
@@ -167,9 +180,7 @@ def service_identity() -> dict:
 
 def _memory(task_id: str, note: str) -> None:
     """Best-effort note to the task's wiki memory page (also feeds Shushunya)."""
-    # Mission ledgers already persist progress. Archive indexing mutates a tracked
-    # runtime index and would invalidate the repository baseline during a code run.
-    if os.environ.get("SKITARII_WRITE_ARCHIVE_MEMORY", "0") != "1":
+    if not _valid_task_id(task_id):
         return
     try:
         from harness import _memory_note
@@ -654,6 +665,9 @@ def _run_hidden_revision_round(
     held_out_checks: list[dict],
     base_commit: str,
     task_id: str,
+    task_memory_id: str,
+    root_task_id: str,
+    parent_task_id: str,
     ask_fn: object,
     cancel_fn: object,
     max_steps: int,
@@ -668,17 +682,29 @@ def _run_hidden_revision_round(
         "and rerun the complete public acceptance set. The hidden command and oracle "
         "are intentionally not disclosed."
     )
-    revised = run_mission(
-        goal + feedback,
-        ex,
-        checks=public_checks,
-        task_id=task_id,
-        ask_fn=ask_fn,
-        cancel_fn=cancel_fn,
-        max_fighter_rounds=1,
-        max_steps=max_steps,
-        max_wall_sec=max_wall_sec,
-    )
+    try:
+        revised = run_mission(
+            goal + feedback,
+            ex,
+            checks=public_checks,
+            task_id=task_id,
+            memory_task_id=task_memory_id,
+            ask_fn=ask_fn,
+            cancel_fn=cancel_fn,
+            max_fighter_rounds=1,
+            max_steps=max_steps,
+            max_wall_sec=max_wall_sec,
+        )
+    except Exception as exc:  # preserve any transient model/runtime failure
+        revised = _recoverable_pipeline_verdict(
+            exc,
+            ex=ex,
+            base_commit=base_commit,
+            task_id=task_id,
+            task_memory_id=task_memory_id,
+            root_task_id=root_task_id,
+            parent_task_id=parent_task_id,
+        )
     revised["hidden_revision_attempted"] = True
     revised["held_out_required"] = True
     revised["held_out_check_count"] = len(held_out_checks)
@@ -1418,6 +1444,467 @@ def _build_patch_bundle(ex: VmExecutor, base_commit: str, *, accepted: bool) -> 
     }
 
 
+def _baseline_tree(ex: VmExecutor, base_commit: str) -> str:
+    result = _checked_bash(
+        ex,
+        _TRUSTED_GIT_ENV
+        + f"/usr/bin/git rev-parse {shlex.quote(str(base_commit) + '^{tree}')}",
+        timeout=30,
+    )
+    return str(result.get("stdout") or "").strip().splitlines()[-1]
+
+
+def _capture_workspace_checkpoint(
+    ex: VmExecutor,
+    base_commit: str,
+    *,
+    task_memory_id: str = "",
+    root_task_id: str = "",
+    parent_task_id: str = "",
+) -> dict:
+    """Capture unaccepted work before the isolated VM workspace is destroyed."""
+    bundle = _build_patch_bundle(ex, base_commit, accepted=False)
+    diff = str(bundle.get("unified_diff") or "")
+    return {
+        "schema_version": 1,
+        "base_tree": _baseline_tree(ex, base_commit),
+        "patch_sha256": hashlib.sha256(diff.encode("utf-8")).hexdigest(),
+        "unified_diff": diff,
+        "changed_files": list(bundle.get("changed_files") or []),
+        "task_memory_id": task_memory_id,
+        "root_task_id": root_task_id,
+        "parent_task_id": parent_task_id,
+    }
+
+
+def _mission_workspace_checkpoint(mission: Any) -> dict:
+    if mission is None or getattr(mission, "_lock", None) is None:
+        return {}
+    with mission._lock:
+        result = dict(mission.result) if isinstance(mission.result, dict) else {}
+    checkpoint = result.get("workspace_checkpoint")
+    return dict(checkpoint) if isinstance(checkpoint, dict) else {}
+
+
+def _mission_result_snapshot(mission: Any) -> dict[str, Any]:
+    if mission is None or getattr(mission, "_lock", None) is None:
+        return {}
+    with mission._lock:
+        return dict(mission.result) if isinstance(mission.result, dict) else {}
+
+
+def _parent_skitarii_mission_id_from_payload(payload: dict) -> str:
+    raw = payload.get("parent_skitarii_mission_id")
+    if raw is None or raw == "":
+        return ""
+    if not isinstance(raw, str) or not mission_store.valid_mission_id(raw):
+        raise ValueError("parent_skitarii_mission_id is invalid")
+    return raw
+
+
+def _workspace_checkpoint_for_attempt(
+    payload: dict,
+    mission: Any,
+    task_memory_id: str,
+    root_task_id: str,
+) -> dict:
+    """Prefer this mission's checkpoint; inherit only from the same task page."""
+    current = _mission_workspace_checkpoint(mission)
+    if current:
+        return current
+    parent_id = _parent_skitarii_mission_id_from_payload(payload)
+    if not parent_id or not task_memory_id or not root_task_id:
+        return {}
+    parent = mission_store.get(parent_id)
+    if parent is None or getattr(parent, "_lock", None) is None:
+        return {}
+    with parent._lock:
+        parent_result = dict(parent.result) if isinstance(parent.result, dict) else {}
+    if str(parent_result.get("task_memory_id") or "").strip() != task_memory_id:
+        return {}
+    if str(parent_result.get("root_task_id") or "").strip() != root_task_id:
+        return {}
+    checkpoint = parent_result.get("workspace_checkpoint")
+    return dict(checkpoint) if isinstance(checkpoint, dict) else {}
+
+
+def _pending_task_checkpoint_for_attempt(
+    payload: dict,
+    mission: Any,
+    task_memory_id: str,
+    root_task_id: str,
+    parent_task_id: str = "",
+) -> dict[str, Any]:
+    """Find a prior memory-only finalization without treating another task as parent."""
+    candidates = [_mission_result_snapshot(mission)]
+    parent_id = _parent_skitarii_mission_id_from_payload(payload)
+    if parent_id:
+        candidates.append(_mission_result_snapshot(mission_store.get(parent_id)))
+    for result in candidates:
+        if result.get("error_code") != "task_checkpoint_commit_pending":
+            continue
+        if str(result.get("task_memory_id") or "") != task_memory_id:
+            continue
+        if str(result.get("root_task_id") or "") != root_task_id:
+            continue
+        if str(result.get("parent_task_id") or "") != parent_task_id:
+            continue
+        checkpoint = result.get("pending_task_checkpoint")
+        key = str(result.get("pending_task_checkpoint_key") or "")
+        original = result.get("checkpoint_pending_original")
+        if isinstance(checkpoint, dict) and key and isinstance(original, dict):
+            return result
+    return {}
+
+
+def _resume_pending_task_checkpoint(
+    pending: dict[str, Any],
+    *,
+    task_id: str,
+    task_memory_id: str,
+    root_task_id: str,
+    parent_task_id: str = "",
+) -> dict[str, Any]:
+    """Finish only the durable page commit; the verified candidate is not recoded."""
+    result = dict(pending)
+    for field in (
+        "error", "restart_recovery_required", "revision_exhausted",
+        "revision_attempts", "task_checkpoint_retry_exhausted",
+        "task_checkpoint_retry_after_seconds", "task_checkpoint_retry_at",
+    ):
+        result.pop(field, None)
+    result["revision_required"] = False
+    checkpoint = dict(result["pending_task_checkpoint"])
+    checkpoint_key = str(result["pending_task_checkpoint_key"])
+    try:
+        _persist_checkpoint(
+            task_memory_id,
+            checkpoint,
+            authoritative=True,
+            idempotency_key=checkpoint_key,
+        )
+    except Exception as exc:
+        result["task_id"] = task_id
+        result["task_checkpoint_error"] = f"{type(exc).__name__}: {exc}"[:500]
+        try:
+            previous_attempts = int(result.get("task_checkpoint_commit_attempts") or 1)
+        except (TypeError, ValueError):
+            previous_attempts = 1
+        result["task_checkpoint_commit_attempts"] = max(1, previous_attempts) + 1
+        return result
+    original = dict(result.get("checkpoint_pending_original") or {})
+    for field, value in original.items():
+        if value is None:
+            result.pop(field, None)
+        else:
+            result[field] = value
+    for field in (
+        "pending_task_checkpoint", "pending_task_checkpoint_key",
+        "checkpoint_pending_original", "task_checkpoint_error",
+        "error", "restart_recovery_required",
+        "task_checkpoint_commit_attempts", "task_checkpoint_retry_after_seconds",
+        "task_checkpoint_retry_at", "task_checkpoint_retry_exhausted",
+        "revision_exhausted", "revision_attempts",
+    ):
+        result.pop(field, None)
+    result["task_id"] = task_id
+    result["task_memory_id"] = task_memory_id
+    result["root_task_id"] = root_task_id
+    result["parent_task_id"] = parent_task_id
+    result["task_checkpoint_recovered"] = True
+    return result
+
+
+def _restore_workspace_checkpoint(
+    ex: VmExecutor,
+    base_commit: str,
+    checkpoint: dict,
+    *,
+    task_memory_id: str = "",
+    root_task_id: str = "",
+    parent_task_id: str = "",
+) -> bool:
+    """Replay only a controller-produced patch onto the identical caller snapshot."""
+    if not checkpoint:
+        return False
+    diff = checkpoint.get("unified_diff")
+    expected_sha = str(checkpoint.get("patch_sha256") or "")
+    expected_tree = str(checkpoint.get("base_tree") or "")
+    if task_memory_id and str(checkpoint.get("task_memory_id") or "") != task_memory_id:
+        raise ValueError("workspace checkpoint task memory identity mismatch")
+    if root_task_id and str(checkpoint.get("root_task_id") or "") != root_task_id:
+        raise ValueError("workspace checkpoint root task identity mismatch")
+    if parent_task_id and str(checkpoint.get("parent_task_id") or "") != parent_task_id:
+        raise ValueError("workspace checkpoint parent task identity mismatch")
+    if not isinstance(diff, str) or len(diff.encode("utf-8")) > MAX_PATCH_BYTES:
+        raise ValueError("workspace checkpoint patch is missing or oversized")
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
+        raise ValueError("workspace checkpoint hash is invalid")
+    if hashlib.sha256(diff.encode("utf-8")).hexdigest() != expected_sha:
+        raise ValueError("workspace checkpoint hash mismatch")
+    if not re.fullmatch(r"[0-9a-f]{40,64}", expected_tree):
+        raise ValueError("workspace checkpoint base tree is invalid")
+    if _baseline_tree(ex, base_commit) != expected_tree:
+        raise ValueError("workspace checkpoint belongs to a different baseline")
+    if not diff:
+        return False
+    ex.write_file(_PATCH_FILE, diff)
+    try:
+        _sanitize_git_control(ex, preserve_patch=True)
+        _checked_bash(
+            ex,
+            _TRUSTED_GIT_ENV
+            + f"set -eu; /usr/bin/git apply --check --binary {_PATCH_FILE}; "
+            + f"/usr/bin/git apply --binary {_PATCH_FILE}",
+            timeout=120,
+        )
+    finally:
+        try:
+            _checked_bash(ex, f"rm -f -- {_PATCH_FILE}", timeout=20)
+        except Exception:
+            pass
+    return True
+
+
+def _recoverable_pipeline_verdict(
+    exc: Exception,
+    *,
+    ex: VmExecutor,
+    base_commit: str,
+    task_id: str,
+    task_memory_id: str,
+    root_task_id: str,
+    parent_task_id: str = "",
+) -> dict[str, Any]:
+    """Turn an internal crash into evidence for an autonomous next attempt."""
+    is_context_overflow = bool(
+        isinstance(exc, LLMRequestError) and exc.context_overflow
+    )
+    error_code = (
+        "context_overflow"
+        if is_context_overflow
+        else str(getattr(exc, "code", "") or "internal_pipeline_error")
+    )
+    retryable = True if is_context_overflow else bool(getattr(exc, "retryable", True))
+    detail = str(exc)[:2_000]
+    checkpoint: dict[str, Any] = {}
+    checkpoint_error = ""
+    try:
+        checkpoint = _capture_workspace_checkpoint(
+            ex,
+            base_commit,
+            task_memory_id=task_memory_id,
+            root_task_id=root_task_id,
+            parent_task_id=parent_task_id,
+        )
+    except Exception as capture_exc:  # noqa: BLE001 - preserve the original failure
+        checkpoint_error = f"{type(capture_exc).__name__}: {capture_exc}"[:1_000]
+    remediation = (
+        "Restore the saved workspace patch, compact the fighter context into the task page, and retry the interrupted step."
+        if error_code == "context_overflow"
+        else "Restore the saved workspace patch, repair the internal execution path, and resume with a materially different step."
+    )
+    evidence = detail + (f"; checkpoint error: {checkpoint_error}" if checkpoint_error else "")
+    finding = review_finding(
+        error_code,
+        "The coding pipeline stopped internally before it could produce a trustworthy verdict.",
+        evidence[:2_000],
+        "Internal failures preserve work and automatically continue from a durable checkpoint.",
+        remediation,
+        "infrastructure",
+        retryable,
+        entity_kind="fighter_runtime",
+        entity_id="execution-loop",
+    )
+    return {
+        "status": "failed",
+        "accepted": False,
+        "task_id": task_id,
+        "task_memory_id": task_memory_id,
+        "root_task_id": root_task_id,
+        "parent_task_id": parent_task_id,
+        "summary": f"Internal repair required: {detail}",
+        "error": f"{type(exc).__name__}: {detail}"[:2_000],
+        "error_code": error_code,
+        "failure_class": "infrastructure",
+        "retryable": retryable,
+        "revision_required": retryable,
+        "verification_findings": [finding] if retryable else [],
+        "workspace_checkpoint": checkpoint,
+        "checkpoint_error": checkpoint_error,
+        "files": {},
+    }
+
+
+def _service_verdict_checkpoint(verdict: dict[str, Any]) -> dict[str, Any]:
+    findings = [
+        item for item in (verdict.get("verification_findings") or [])
+        if isinstance(item, dict)
+    ][:12]
+    patch_bundle = verdict.get("patch_bundle")
+    workspace_checkpoint = verdict.get("workspace_checkpoint")
+    if isinstance(patch_bundle, dict):
+        changed = list(patch_bundle.get("changed_files") or [])
+    elif isinstance(workspace_checkpoint, dict):
+        changed = list(workspace_checkpoint.get("changed_files") or [])
+    else:
+        changed = []
+    checks: list[str] = []
+    for round_item in (verdict.get("rounds") or [])[-3:]:
+        acceptance = round_item.get("acceptance") if isinstance(round_item, dict) else None
+        if not isinstance(acceptance, dict):
+            continue
+        for result in (acceptance.get("results") or [])[-6:]:
+            if isinstance(result, dict):
+                checks.append(
+                    f"{result.get('target') or 'check'}: "
+                    f"{'passed' if result.get('ok') else 'failed'}"
+                )
+    status = str(verdict.get("status") or "failed")
+    accepted = verdict.get("accepted") is True
+    return _normalize_checkpoint({
+        "current_state": f"Skitarii service verdict: {status}; accepted={accepted}.",
+        "decisions": [
+            f"held_out_status={verdict.get('held_out_status')}"
+        ] if verdict.get("held_out_status") else [],
+        "completed_work": [str(verdict.get("summary") or "")]
+        if accepted and verdict.get("summary") else [],
+        "failed_approaches": [
+            str(item.get("evidence") or item.get("what_failed") or "")
+            for item in findings
+        ],
+        "working_set": [str(path) for path in changed],
+        "checks": checks,
+        "next_actions": [
+            str(item.get("remediation") or "") for item in findings
+            if item.get("retryable") is True
+        ],
+    }, f"Skitarii service verdict: {status}")
+
+
+def _finalize_service_verdict(
+    verdict: dict[str, Any],
+    *,
+    ex: VmExecutor,
+    base_commit: str,
+    task_id: str,
+    task_memory_id: str,
+    root_task_id: str,
+    parent_task_id: str = "",
+    capture_workspace: bool = True,
+) -> dict[str, Any]:
+    """Bind lineage, preserve retry work, then publish one leader checkpoint."""
+    verdict["task_id"] = task_id
+    verdict["task_memory_id"] = task_memory_id
+    verdict["root_task_id"] = root_task_id
+    verdict["parent_task_id"] = parent_task_id
+    retryable = bool(
+        verdict.get("accepted") is False
+        and verdict.get("revision_required") is True
+        and verdict.get("retryable") is not False
+    )
+    if retryable and capture_workspace:
+        current = verdict.get("workspace_checkpoint")
+        if isinstance(current, dict) and current:
+            current = dict(current)
+            current["task_memory_id"] = task_memory_id
+            current["root_task_id"] = root_task_id
+            current["parent_task_id"] = parent_task_id
+            verdict["workspace_checkpoint"] = current
+        else:
+            try:
+                captured = _capture_workspace_checkpoint(
+                    ex,
+                    base_commit,
+                    task_memory_id=task_memory_id,
+                    root_task_id=root_task_id,
+                    parent_task_id=parent_task_id,
+                )
+                captured["task_memory_id"] = task_memory_id
+                captured["root_task_id"] = root_task_id
+                captured["parent_task_id"] = parent_task_id
+                verdict["workspace_checkpoint"] = captured
+            except Exception as exc:  # preserve the verdict even if capture fails
+                verdict["checkpoint_error"] = (
+                    f"{type(exc).__name__}: {exc}"
+                )[:1_000]
+    if task_memory_id:
+        service_checkpoint = _service_verdict_checkpoint(verdict)
+        checkpoint_rendered = json.dumps(
+            service_checkpoint,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        checkpoint_key = "skitarii-service-" + hashlib.sha256(
+            (task_id + "\0" + checkpoint_rendered).encode("utf-8")
+        ).hexdigest()
+        try:
+            _persist_checkpoint(
+                task_memory_id,
+                service_checkpoint,
+                authoritative=True,
+                idempotency_key=checkpoint_key,
+            )
+        except Exception as exc:
+            checkpoint_error = f"{type(exc).__name__}: {exc}"[:500]
+            verdict["task_checkpoint_error"] = checkpoint_error
+            if verdict.get("accepted") is not True:
+                return verdict
+            original = {
+                field: verdict.get(field)
+                for field in (
+                    "status", "accepted", "summary", "revision_required",
+                    "retryable", "error_code", "failure_class",
+                    "verification_findings",
+                )
+            }
+            if capture_workspace:
+                try:
+                    captured = _capture_workspace_checkpoint(
+                        ex,
+                        base_commit,
+                        task_memory_id=task_memory_id,
+                        root_task_id=root_task_id,
+                        parent_task_id=parent_task_id,
+                    )
+                    captured["task_memory_id"] = task_memory_id
+                    captured["root_task_id"] = root_task_id
+                    captured["parent_task_id"] = parent_task_id
+                    verdict["workspace_checkpoint"] = captured
+                except Exception as capture_exc:
+                    verdict["checkpoint_error"] = (
+                        f"{type(capture_exc).__name__}: {capture_exc}"
+                    )[:1_000]
+            pending_finding = review_finding(
+                "task_checkpoint_commit_pending",
+                "The verified service verdict could not be committed to the canonical task page.",
+                checkpoint_error,
+                "The canonical task page contains the consolidated leader verdict before the mission is published as accepted.",
+                "Retry only the idempotent task-page checkpoint commit; do not recode the verified candidate.",
+                "infrastructure",
+                True,
+                entity_kind="task_memory",
+                entity_id=task_memory_id,
+            )
+            verdict.update({
+                "status": "failed",
+                "accepted": False,
+                "summary": "Candidate verification completed, but task-memory finalization is pending.",
+                "error_code": "task_checkpoint_commit_pending",
+                "failure_class": "infrastructure",
+                "retryable": True,
+                "revision_required": False,
+                "verification_findings": [pending_finding],
+                "task_checkpoint_error": checkpoint_error,
+                "pending_task_checkpoint": service_checkpoint,
+                "pending_task_checkpoint_key": checkpoint_key,
+                "checkpoint_pending_original": original,
+                "task_checkpoint_commit_attempts": 1,
+            })
+    return verdict
+
+
 def _is_test_path(path: str) -> bool:
     parts = path.lower().split("/")
     name = parts[-1] if parts else ""
@@ -1482,6 +1969,131 @@ def _is_health_path(path: str) -> bool:
 
 def _valid_task_id(value: object) -> bool:
     return bool(_TASK_ID_RE.fullmatch(str(value or "")))
+
+
+def _task_memory_id_from_payload(payload: dict) -> str:
+    """Resolve only an explicit stable identity, never an execution-attempt id."""
+    return str(
+        payload.get("task_memory_id")
+        or payload.get("root_task_id")
+        or ""
+    ).strip()
+
+
+def _root_task_id_from_payload(payload: dict, task_memory_id: str) -> str:
+    """Resolve stable lineage without ever falling back to the attempt id."""
+    return str(payload.get("root_task_id") or task_memory_id or "").strip()
+
+
+def _parent_task_id_from_payload(payload: dict) -> str:
+    """Resolve the explicit immediate task ancestor, never a mission/run id."""
+    return str(payload.get("parent_task_id") or "").strip()
+
+
+def _delegation_lineage_error(
+    payload: dict,
+    task_id: str,
+    root_task_id: str,
+    parent_task_id: str,
+) -> tuple[int, dict] | None:
+    """Require the exact immutable run lineage emitted by Abaddon.
+
+    A valid Ceraxia directive proves who made the decision, but by itself does
+    not prove which durable Abaddon run/page it belongs to.  Keep that binding
+    explicit at the service door so a direct ``/mission(s)`` caller cannot
+    manufacture an orphan continuation around Abaddon's lineage checks.
+    """
+    delegating_task_id = str(payload.get("delegating_task_id") or "").strip()
+    if not _valid_task_id(task_id):
+        return 400, {
+            "error": "task_id is invalid",
+            "error_code": "invalid_task_id",
+        }
+    if not _valid_task_id(delegating_task_id):
+        return 400, {
+            "error": "delegating_task_id is required and must be valid",
+            "error_code": "invalid_delegating_task_id",
+        }
+    if parent_task_id and parent_task_id == delegating_task_id:
+        return 400, {
+            "error": "parent_task_id must differ from delegating_task_id",
+            "error_code": "parent_task_id_self_reference",
+        }
+    if delegating_task_id == root_task_id:
+        if parent_task_id:
+            return 400, {
+                "error": "a root task delegation cannot have parent_task_id",
+                "error_code": "root_task_parent_forbidden",
+            }
+    elif not parent_task_id:
+        return 400, {
+            "error": "a non-root task delegation requires parent_task_id provenance",
+            "error_code": "parent_task_id_required",
+        }
+    return None
+
+
+def _task_memory_page_preflight(
+    task_memory_id: str,
+    root_task_id: str,
+) -> dict[str, Any] | None:
+    """Require Abaddon's existing canonical page; Skitarii must never invent one."""
+    if not task_memory_id:
+        return None
+    try:
+        document = _task_page_document(task_memory_id)
+    except Exception as exc:
+        code = "task_memory_page_unavailable"
+        evidence = f"{type(exc).__name__}: {exc}"[:1_000]
+    else:
+        revision = document.get("revision")
+        page_memory_id = str(document.get("task_memory_id") or "").strip()
+        page_root_id = str(document.get("root_task_id") or "").strip()
+        if type(revision) is int and revision >= 1 and page_memory_id == task_memory_id:
+            if not root_task_id or page_root_id == root_task_id:
+                return None
+            code = "task_memory_page_identity_mismatch"
+            evidence = (
+                f"requested root_task_id={root_task_id!r}; "
+                f"page root_task_id={page_root_id!r}"
+            )
+        else:
+            code = "task_memory_page_not_initialized"
+            evidence = (
+                f"requested task_memory_id={task_memory_id!r}; "
+                f"page task_memory_id={page_memory_id!r}; revision={revision!r}"
+            )
+    retryable = code != "task_memory_page_identity_mismatch"
+    remediation = (
+        "Abaddon must initialize or restore the canonical task page with the same "
+        "task_memory_id and root_task_id, then retry this unchanged mission."
+        if retryable else
+        "Stop this lineage: repair the immutable task/root binding or issue a new explicit task identity before any retry."
+    )
+    return {
+        "status": "failed",
+        "accepted": False,
+        "task_memory_id": task_memory_id,
+        "root_task_id": root_task_id,
+        "summary": "Task memory is unavailable; coding did not start.",
+        "error": evidence,
+        "error_code": code,
+        "failure_class": "infrastructure",
+        "retryable": retryable,
+        "revision_required": retryable,
+        "verification_findings": [review_finding(
+            code,
+            "The canonical task wiki page was unavailable or had different lineage.",
+            evidence,
+            "Every coding attempt resumes from one existing canonical task page.",
+            remediation,
+            "infrastructure",
+            retryable,
+            entity_kind="task_memory",
+            entity_id=task_memory_id,
+        )],
+        "files": {},
+    }
 
 
 def _literal_loopback_authority(value: str) -> tuple[str, int] | None:
@@ -1629,6 +2241,44 @@ def execution_authorization_error(
     task_id: str,
 ) -> tuple[int, dict] | None:
     """Return an HTTP error unless Ceraxia delegated or test mode is double-gated."""
+    task_memory_id = _task_memory_id_from_payload(payload)
+    root_task_id = _root_task_id_from_payload(payload, task_memory_id)
+    parent_task_id = _parent_task_id_from_payload(payload)
+    if not task_memory_id or not root_task_id:
+        return 400, {
+            "error": "task_memory_id and root_task_id are required",
+            "error_code": "task_memory_identity_required",
+        }
+    if task_memory_id and not _valid_task_id(task_memory_id):
+        return 400, {
+            "error": "task_memory_id is invalid",
+            "error_code": "invalid_task_memory_id",
+        }
+    if root_task_id and not _valid_task_id(root_task_id):
+        return 400, {
+            "error": "root_task_id is invalid",
+            "error_code": "invalid_root_task_id",
+        }
+    if parent_task_id and not _valid_task_id(parent_task_id):
+        return 400, {
+            "error": "parent_task_id is invalid",
+            "error_code": "invalid_parent_task_id",
+        }
+    try:
+        _parent_skitarii_mission_id_from_payload(payload)
+    except ValueError as exc:
+        return 400, {
+            "error": str(exc),
+            "error_code": "invalid_parent_skitarii_mission_id",
+        }
+    lineage_error = _delegation_lineage_error(
+        payload,
+        task_id,
+        root_task_id,
+        parent_task_id,
+    )
+    if lineage_error is not None:
+        return lineage_error
     if payload.get("leadership_directive") is not None:
         try:
             directive, _context = leadership_context_from_payload(payload, task_id)
@@ -1724,6 +2374,72 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
     goal = str(payload.get("goal") or "").strip()
     original_goal = goal
     task_id = str(payload.get("task_id") or f"m{int(time.time())}")
+    task_memory_id = _task_memory_id_from_payload(payload)
+    root_task_id = _root_task_id_from_payload(payload, task_memory_id)
+    parent_task_id = _parent_task_id_from_payload(payload)
+    if not task_memory_id or not root_task_id:
+        return {
+            "status": "blocked",
+            "accepted": False,
+            "task_id": task_id,
+            "task_memory_id": task_memory_id,
+            "root_task_id": root_task_id,
+            "parent_task_id": parent_task_id,
+            "summary": "Task memory identity is required.",
+            "error_code": "task_memory_identity_required",
+            "files": {},
+        }
+    if task_memory_id and not _valid_task_id(task_memory_id):
+        return {
+            "status": "blocked",
+            "accepted": False,
+            "task_id": task_id,
+            "summary": "Task memory identity is invalid.",
+            "error_code": "invalid_task_memory_id",
+            "files": {},
+        }
+    if root_task_id and not _valid_task_id(root_task_id):
+        return {
+            "status": "blocked",
+            "accepted": False,
+            "task_id": task_id,
+            "task_memory_id": task_memory_id,
+            "summary": "Root task identity is invalid.",
+            "error_code": "invalid_root_task_id",
+            "files": {},
+        }
+    if parent_task_id and not _valid_task_id(parent_task_id):
+        return {
+            "status": "blocked",
+            "accepted": False,
+            "task_id": task_id,
+            "task_memory_id": task_memory_id,
+            "root_task_id": root_task_id,
+            "parent_task_id": parent_task_id,
+            "summary": "Parent task identity is invalid.",
+            "error_code": "invalid_parent_task_id",
+            "files": {},
+        }
+    pending_task_checkpoint = _pending_task_checkpoint_for_attempt(
+        payload,
+        mission,
+        task_memory_id,
+        root_task_id,
+        parent_task_id,
+    )
+    if pending_task_checkpoint:
+        return _resume_pending_task_checkpoint(
+            pending_task_checkpoint,
+            task_id=task_id,
+            task_memory_id=task_memory_id,
+            root_task_id=root_task_id,
+            parent_task_id=parent_task_id,
+        )
+    memory_preflight = _task_memory_page_preflight(task_memory_id, root_task_id)
+    if memory_preflight is not None:
+        memory_preflight["task_id"] = task_id
+        memory_preflight["parent_task_id"] = parent_task_id
+        return memory_preflight
     try:
         leadership_directive, leadership_context = leadership_context_from_payload(
             payload,
@@ -1860,9 +2576,107 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
         # Every mission, including greenfield work, gets an immutable empty-or-loaded
         # baseline so the real deliverable is always a reproducible patch.
         base_commit = _create_baseline(ex)
+        _EXECUTION_LOCAL.base_commit = base_commit
     except (OSError, RuntimeError, ValueError) as exc:
         return {"status": "blocked", "accepted": False,
                 "error": f"could not create workspace baseline: {exc}", "task_id": task_id}
+    try:
+        restored_checkpoint = _restore_workspace_checkpoint(
+            ex,
+            base_commit,
+            _workspace_checkpoint_for_attempt(
+                payload, mission, task_memory_id, root_task_id,
+            ),
+            task_memory_id=task_memory_id,
+            root_task_id=root_task_id,
+            parent_task_id=parent_task_id,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {
+            "status": "failed",
+            "accepted": False,
+            "task_id": task_id,
+            "task_memory_id": task_memory_id,
+            "root_task_id": root_task_id,
+            "summary": "The previous workspace checkpoint could not be restored safely.",
+            "error": f"{type(exc).__name__}: {exc}"[:1_000],
+            "error_code": "workspace_checkpoint_restore_failed",
+            "failure_class": "infrastructure",
+            "retryable": True,
+            "revision_required": True,
+            "verification_findings": [review_finding(
+                "workspace_checkpoint_restore_failed",
+                "The previous unaccepted patch could not be restored onto the current baseline.",
+                str(exc)[:2_000],
+                "A checkpoint is replayed only onto the byte-identical original snapshot.",
+                "Rebuild or repair the checkpoint from its persisted patch and baseline-tree hash.",
+                "infrastructure",
+                True,
+                entity_kind="workspace_checkpoint",
+                entity_id="latest",
+            )],
+            "files": {},
+        }
+    if restored_checkpoint:
+        note("Previous unaccepted workspace checkpoint was restored before the next attempt.")
+        _memory(task_memory_id, "Восстановлен незавершённый патч предыдущей попытки.")
+    active_checkpoint_lock = threading.Lock()
+    active_checkpoint_state = {"fingerprint": None}
+
+    def durable_workspace_checkpoint(
+        checkpoint_executor: Any,
+        *,
+        step: int,
+        boundary: str,
+    ) -> None:
+        """Atomically WAL the current patch after a safe fighter boundary."""
+        if mission is None:
+            return
+        with active_checkpoint_lock:
+            checkpoint = _capture_workspace_checkpoint(
+                checkpoint_executor,
+                base_commit,
+                task_memory_id=task_memory_id,
+                root_task_id=root_task_id,
+                parent_task_id=parent_task_id,
+            )
+            has_patch = bool(
+                checkpoint.get("unified_diff")
+                and checkpoint.get("changed_files")
+            )
+            fingerprint = (
+                str(checkpoint.get("patch_sha256") or "")
+                if has_patch else "clean"
+            )
+            if active_checkpoint_state["fingerprint"] == fingerprint:
+                return
+            active_result: dict[str, Any] = {
+                "status": "running",
+                "accepted": False,
+                "task_id": task_id,
+                "task_memory_id": task_memory_id,
+                "root_task_id": root_task_id,
+                "parent_task_id": parent_task_id,
+                "summary": "Active fighter state was durably checkpointed.",
+                "active_workspace_checkpoint": has_patch,
+                "workspace_checkpoint_step": max(0, int(step)),
+                "workspace_checkpoint_boundary": str(boundary)[:200],
+                "workspace_checkpoint_at": time.time(),
+            }
+            if has_patch:
+                active_result["workspace_checkpoint"] = checkpoint
+            with mission._lock:
+                mission.result = active_result
+                mission.record("workspace_checkpoint", {
+                    "step": max(0, int(step)),
+                    "boundary": str(boundary)[:200],
+                    "changed_file_count": len(checkpoint.get("changed_files") or []),
+                    "patch_sha256": str(checkpoint.get("patch_sha256") or ""),
+                    "has_patch": has_patch,
+                })
+                mission._persist(raise_errors=True)
+            active_checkpoint_state["fingerprint"] = fingerprint
+
     if preloaded or workspace_deleted or workspace_external_assets:
         goal += (f"\n\n(ПРАВКА СУЩЕСТВУЮЩЕГО кода: {visible_count} файл(ов) проекта уже лежат в рабочем "
                  "каталоге с их путями — читай и правь их, НЕ переписывай с нуля.)")
@@ -1870,7 +2684,7 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
             external_paths = sorted(_safe_workspace_path(path) for path in workspace_external_assets)
             goal += ("\nLarge Git-visible assets are inventory-only in the fighter VM and must remain "
                      "unchanged: " + ", ".join(external_paths[:50]))
-    _memory(task_id, f"Загружено {visible_count} файлов проекта." if visible_count else f"Старт: {goal[:200]}")
+    _memory(task_memory_id, f"Загружено {visible_count} файлов проекта." if visible_count else f"Старт: {goal[:200]}")
 
     exploration = explore(
         goal, workspace_files, ex, inventory=workspace_inventory,
@@ -1927,33 +2741,104 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
 
     try:
         if checks:
-            verdict = run_mission(goal, ex, checks=checks, task_id=task_id, ask_fn=ask_fn, cancel_fn=cancel_fn,
+            verdict = run_mission(goal, ex, checks=checks, task_id=task_id,
+                                  memory_task_id=task_memory_id,
+                                  ask_fn=ask_fn, cancel_fn=cancel_fn,
                                   max_fighter_rounds=int(payload.get("max_rounds") or 3),
                                   max_steps=int(payload.get("max_steps") or 40),
-                                  max_wall_sec=_remaining_mission_wall_seconds(payload, mission))
+                                  max_wall_sec=_remaining_mission_wall_seconds(payload, mission),
+                                  durable_checkpoint_fn=durable_workspace_checkpoint)
         else:
-            verdict = plan_and_run(goal, ex, task_id=task_id, ask_fn=ask_fn, cancel_fn=cancel_fn,
+            verdict = plan_and_run(goal, ex, task_id=task_id,
+                                   memory_task_id=task_memory_id,
+                                   ask_fn=ask_fn, cancel_fn=cancel_fn,
                                    max_wall_sec=_remaining_mission_wall_seconds(payload, mission),
-                                   memory=lambda m: (note(m), _memory(task_id, m)))
-    except BaseException:
-        raise
+                                   memory=lambda m: (note(m), _memory(task_memory_id, m)),
+                                   durable_checkpoint_fn=durable_workspace_checkpoint)
+    except Exception as exc:  # noqa: BLE001 - preserve work before outer cleanup
+        verdict = _recoverable_pipeline_verdict(
+            exc,
+            ex=ex,
+            base_commit=base_commit,
+            task_id=task_id,
+            task_memory_id=task_memory_id,
+            root_task_id=root_task_id,
+            parent_task_id=parent_task_id,
+        )
+        _memory(
+            task_memory_id,
+            f"Внутренняя авария {verdict.get('error_code')}: работа сохранена для автоматического продолжения.",
+        )
     # Stop every fighter descendant before freezing any artifact. From this point on
     # the primary worktree is read only; private checks run in a disposable copy.
     try:
         _stop_workspace_processes(ex, strict=True)
     except RuntimeError as exc:
+        retry_error = ""
+        try:
+            _stop_workspace_processes(ex, strict=True)
+        except Exception as retry_exc:
+            retry_error = f"{type(retry_exc).__name__}: {retry_exc}"[:500]
         verdict.update({
             "accepted": False,
             "status": "blocked",
             "summary": "Blocked: fighter processes could not be frozen safely.",
-            "freeze_error": str(exc)[:500],
+            "freeze_error": (
+                str(exc)[:500]
+                + (f"; stop retry failed: {retry_error}" if retry_error else "")
+            ),
             "task_id": task_id,
             "held_out_required": held_out_required,
             "held_out_check_count": len(held_out_checks),
             "held_out_status": "not_run_freeze_failed",
             "files": {},
         })
-        return verdict
+        if retry_error:
+            _EXECUTION_LOCAL.preserve_workspace = True
+            cleanup_finalizer = getattr(ex, "_cleanup_finalizer", None)
+            detach_finalizer = getattr(cleanup_finalizer, "detach", None)
+            if callable(detach_finalizer):
+                detach_finalizer()
+            try:
+                ex.quarantine_process_boundary()
+            except Exception:
+                pass
+            verdict.update({
+                "cleanup_complete": False,
+                "boundary_quarantined": True,
+                "workspace_preserved": True,
+                "recovery_handle": str(getattr(ex, "workdir", ""))[:500],
+                "retryable": False,
+                "revision_required": False,
+            })
+        else:
+            verdict.update({
+                "status": "failed",
+                "summary": "The fighter freeze initially failed, but stop was proven on retry and work was checkpointed.",
+                "retryable": True,
+                "revision_required": True,
+                "verification_findings": [review_finding(
+                    "freeze_retry_recovered",
+                    "The first fighter freeze attempt failed before artifact capture.",
+                    str(exc)[:1_000],
+                    "All fighter descendants are stopped before a durable patch is captured.",
+                    "Restore the saved workspace checkpoint and resume verification without discarding edits.",
+                    "infrastructure",
+                    True,
+                    entity_kind="fighter_runtime",
+                    entity_id="freeze",
+                )],
+            })
+        return _finalize_service_verdict(
+            verdict,
+            ex=ex,
+            base_commit=base_commit,
+            task_id=task_id,
+            task_memory_id=task_memory_id,
+            root_task_id=root_task_id,
+            parent_task_id=parent_task_id,
+            capture_workspace=not bool(retry_error),
+        )
     verdict["files"] = _collect_files(ex, verdict.get("artifacts") or [])
     verdict["task_id"] = task_id
     if leadership_directive:
@@ -1977,8 +2862,16 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
                 "base_commit": base_commit, "changed_files": [], "unified_diff": "",
                 "apply_gate": "blocked", "error": f"could not build complete patch: {exc}",
             }
-            _memory(task_id, "Patch bundle failed closed: " + str(exc)[:300])
-            return verdict
+            _memory(task_memory_id, "Patch bundle failed closed: " + str(exc)[:300])
+            return _finalize_service_verdict(
+                verdict,
+                ex=ex,
+                base_commit=base_commit,
+                task_id=task_id,
+                task_memory_id=task_memory_id,
+                root_task_id=root_task_id,
+                parent_task_id=parent_task_id,
+            )
         runner_violation = _runner_control_violation(
             list(patch_bundle.get("changed_files") or [])
         )
@@ -2005,7 +2898,15 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
             })
             patch_bundle["apply_gate"] = "blocked"
             verdict["patch_bundle"] = patch_bundle
-            return verdict
+            return _finalize_service_verdict(
+                verdict,
+                ex=ex,
+                base_commit=base_commit,
+                task_id=task_id,
+                task_memory_id=task_memory_id,
+                root_task_id=root_task_id,
+                parent_task_id=parent_task_id,
+            )
         if runner_violation:
             verdict.update({
                 "accepted": False,
@@ -2028,8 +2929,16 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
             })
             patch_bundle["apply_gate"] = "blocked"
             verdict["patch_bundle"] = patch_bundle
-            _memory(task_id, "Runner-control files were blocked: " + runner_violation[:300])
-            return verdict
+            _memory(task_memory_id, "Runner-control files were blocked: " + runner_violation[:300])
+            return _finalize_service_verdict(
+                verdict,
+                ex=ex,
+                base_commit=base_commit,
+                task_id=task_id,
+                task_memory_id=task_memory_id,
+                root_task_id=root_task_id,
+                parent_task_id=parent_task_id,
+            )
         if verdict.get("accepted"):
             public_child = None
             held_out_child = None
@@ -2262,6 +3171,9 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
                         held_out_checks=held_out_checks,
                         base_commit=base_commit,
                         task_id=task_id,
+                        task_memory_id=task_memory_id,
+                        root_task_id=root_task_id,
+                        parent_task_id=parent_task_id,
                         ask_fn=ask_fn,
                         cancel_fn=cancel_fn,
                         max_steps=int(payload.get("max_steps") or 40),
@@ -2320,7 +3232,7 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
                 entity_id="protected-paths",
             )]
             patch_bundle["apply_gate"] = "blocked"
-            _memory(task_id, "Protected files were changed: " + violation[:300])
+            _memory(task_memory_id, "Protected files were changed: " + violation[:300])
         last_acc = {}
         for r in reversed(verdict.get("rounds") or []):
             if isinstance(r.get("acceptance"), dict):
@@ -2340,8 +3252,16 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
                  + "; ".join(rev["issues"])[:300])
         patch_bundle["apply_gate"] = "accepted" if verdict.get("accepted") else "blocked"
         verdict["patch_bundle"] = patch_bundle
-    _memory(task_id, f"Итог: {verdict.get('status')} (accepted={verdict.get('accepted')}).")
-    return verdict
+    _memory(task_memory_id, f"Итог: {verdict.get('status')} (accepted={verdict.get('accepted')}).")
+    return _finalize_service_verdict(
+        verdict,
+        ex=ex,
+        base_commit=base_commit,
+        task_id=task_id,
+        task_memory_id=task_memory_id,
+        root_task_id=root_task_id,
+        parent_task_id=parent_task_id,
+    )
 
 
 def execute_mission(payload: dict, mission=None) -> dict:
@@ -2353,6 +3273,15 @@ def execute_mission(payload: dict, mission=None) -> dict:
     explicit standalone-test double gate.
     """
     task_id = str(payload.get("task_id") or "") if isinstance(payload, dict) else ""
+    task_memory_id = _task_memory_id_from_payload(payload) if isinstance(payload, dict) else ""
+    root_task_id = (
+        _root_task_id_from_payload(payload, task_memory_id)
+        if isinstance(payload, dict) else ""
+    )
+    parent_task_id = (
+        _parent_task_id_from_payload(payload)
+        if isinstance(payload, dict) else ""
+    )
     authorization_error = (
         execution_authorization_error(payload, task_id)
         if isinstance(payload, dict)
@@ -2370,13 +3299,36 @@ def execute_mission(payload: dict, mission=None) -> dict:
             "summary": (
                 "Blocked: commander acceptance source is invalid."
                 if error_code == "acceptance_source_invalid"
-                else "Blocked: Ceraxia leadership authorization is required."
+                else (
+                    "Blocked: canonical task memory identity is required or invalid."
+                    if error_code in {
+                        "task_memory_identity_required", "invalid_task_memory_id",
+                        "invalid_root_task_id", "invalid_parent_task_id",
+                    }
+                    else (
+                        "Rejected: durable Abaddon task lineage is invalid."
+                        if error_code in {
+                            "invalid_task_id", "invalid_delegating_task_id",
+                            "parent_task_id_required",
+                            "root_task_parent_forbidden",
+                            "parent_task_id_self_reference",
+                        }
+                        else (
+                            "Blocked: parent Skitarii mission identity is invalid."
+                            if error_code == "invalid_parent_skitarii_mission_id"
+                            else "Blocked: Ceraxia leadership authorization is required."
+                        )
+                    )
+                )
             ),
             "error": str(authorization_payload.get("error") or "unauthorized mission")[:500],
             "error_code": error_code,
             "cleanup_complete": True,
             "files": {},
         }
+        blocked["task_memory_id"] = task_memory_id
+        blocked["root_task_id"] = root_task_id
+        blocked["parent_task_id"] = parent_task_id
         if "leadership_directive_status" in authorization_payload:
             blocked["leadership_directive_status"] = str(
                 authorization_payload["leadership_directive_status"]
@@ -2389,18 +3341,50 @@ def execute_mission(payload: dict, mission=None) -> dict:
     token = uuid.uuid4().hex
     previous_executor = getattr(_EXECUTION_LOCAL, "executor", None)
     previous_token = getattr(_EXECUTION_LOCAL, "attempt_token", None)
+    previous_base_commit = getattr(_EXECUTION_LOCAL, "base_commit", None)
+    previous_preserve_workspace = getattr(_EXECUTION_LOCAL, "preserve_workspace", None)
     _EXECUTION_LOCAL.executor = None
     _EXECUTION_LOCAL.attempt_token = token
+    _EXECUTION_LOCAL.base_commit = None
+    _EXECUTION_LOCAL.preserve_workspace = False
     verdict: dict | None = None
     pipeline_error: Exception | None = None
     cleanup_error: Exception | None = None
     try:
         verdict = _execute_mission_body(payload, mission)
-    except Exception as exc:  # noqa: BLE001 - service boundary must fail closed
+    except Exception as exc:  # noqa: BLE001 - preserve post-baseline work before cleanup
         pipeline_error = exc
+        executor = getattr(_EXECUTION_LOCAL, "executor", None)
+        base_commit = str(getattr(_EXECUTION_LOCAL, "base_commit", None) or "")
+        if executor is not None and base_commit:
+            try:
+                verdict = _recoverable_pipeline_verdict(
+                    exc,
+                    ex=executor,
+                    base_commit=base_commit,
+                    task_id=task_id,
+                    task_memory_id=task_memory_id,
+                    root_task_id=root_task_id,
+                    parent_task_id=parent_task_id,
+                )
+                verdict = _finalize_service_verdict(
+                    verdict,
+                    ex=executor,
+                    base_commit=base_commit,
+                    task_id=task_id,
+                    task_memory_id=task_memory_id,
+                    root_task_id=root_task_id,
+                    parent_task_id=parent_task_id,
+                )
+                pipeline_error = None
+            except Exception:
+                # Keep the original exception as the primary diagnosis when the
+                # recovery path itself cannot be completed safely.
+                verdict = None
     finally:
         executor = getattr(_EXECUTION_LOCAL, "executor", None)
-        if executor is not None:
+        preserve_workspace = bool(getattr(_EXECUTION_LOCAL, "preserve_workspace", False))
+        if executor is not None and not preserve_workspace:
             try:
                 _cleanup_workspace_processes(executor)
             except Exception as exc:  # noqa: BLE001
@@ -2412,26 +3396,40 @@ def execute_mission(payload: dict, mission=None) -> dict:
                     mission.executor_attempt = None
         _EXECUTION_LOCAL.executor = previous_executor
         _EXECUTION_LOCAL.attempt_token = previous_token
+        _EXECUTION_LOCAL.base_commit = previous_base_commit
+        _EXECUTION_LOCAL.preserve_workspace = previous_preserve_workspace
 
     if cleanup_error is not None:
-        return {
+        blocked = dict(verdict) if isinstance(verdict, dict) else {}
+        blocked.update({
             "status": "blocked", "accepted": False, "task_id": task_id,
+            "task_memory_id": task_memory_id, "root_task_id": root_task_id,
+            "parent_task_id": parent_task_id,
             "summary": "Sandbox cleanup could not be proven; lifecycle quarantined.",
             "error": f"{type(cleanup_error).__name__}: {cleanup_error}"[:500],
             "cleanup_complete": False, "boundary_quarantined": True, "files": {},
-        }
+        })
+        return blocked
     if pipeline_error is not None:
         return {
             "status": "failed", "accepted": False, "task_id": task_id,
+            "task_memory_id": task_memory_id, "root_task_id": root_task_id,
+            "parent_task_id": parent_task_id,
             "summary": "Mission pipeline failed before a trustworthy verdict was produced.",
             "error": f"{type(pipeline_error).__name__}: {pipeline_error}"[:500],
             "cleanup_complete": True, "files": {},
         }
     if verdict is not None:
+        verdict["task_id"] = task_id
+        verdict["task_memory_id"] = task_memory_id
+        verdict["root_task_id"] = root_task_id
+        verdict["parent_task_id"] = parent_task_id
         verdict.setdefault("cleanup_complete", True)
         return verdict
     return {
         "status": "failed", "accepted": False, "task_id": task_id,
+        "task_memory_id": task_memory_id, "root_task_id": root_task_id,
+        "parent_task_id": parent_task_id,
         "summary": "Mission pipeline returned no verdict.",
         "cleanup_complete": True, "files": {},
     }
@@ -2648,12 +3646,55 @@ class Handler(BaseHTTPRequestHandler):
                 if authorization_error is not None:
                     code, error_payload = authorization_error
                     self._send(code, error_payload); return
-                ok = mission_store.resume(
-                    parts[1],
-                    lambda mm: execute_mission(mm.payload, mm),
-                    expected=m,
-                    require_payload=True,
+                with m._lock:
+                    prior_result = dict(m.result) if isinstance(m.result, dict) else {}
+                restart_salvage = prior_result.get("restart_recovery_required") is True
+                checkpoint_commit_pending = (
+                    prior_result.get("error_code") == "task_checkpoint_commit_pending"
                 )
+                if restart_salvage:
+                    sweep_executor = None
+                    try:
+                        sweep_executor = _mission_executor(m.id + "-restart-sweep")
+                        _cleanup_workspace_processes(sweep_executor)
+                        prepared = mission_store.prepare_restart_salvage(
+                            parts[1], expected=m,
+                        )
+                    except Exception as exc:
+                        self._send(409, {
+                            "ok": False,
+                            "status": "blocked",
+                            "error": f"restart boundary sweep failed: {type(exc).__name__}: {exc}"[:500],
+                        }); return
+                    if not prepared:
+                        self._send(409, {
+                            "ok": False,
+                            "status": "blocked",
+                            "error": "restart recovery envelope is not salvageable",
+                        }); return
+                try:
+                    ok = mission_store.resume(
+                        parts[1],
+                        lambda mm: execute_mission(mm.payload, mm),
+                        expected=m,
+                        require_payload=True,
+                        preserve_result=(restart_salvage or checkpoint_commit_pending),
+                    )
+                except mission_store.MissionPersistenceError as exc:
+                    self._send(507, {
+                        "ok": False,
+                        "status": m.status,
+                        "error": str(exc),
+                        "error_code": "mission_resume_persistence_failed",
+                    }); return
+                except mission_store.MissionCapacityError as exc:
+                    self._send(409, {
+                        "ok": False,
+                        "status": m.status,
+                        "error": str(exc),
+                        "error_code": "mission_resume_capacity_exhausted",
+                        "retryable": True,
+                    }); return
                 self._send(200 if ok else 409, {"ok": ok, "status": m.status}); return
         self._send(404, {"error": "not found"})
 

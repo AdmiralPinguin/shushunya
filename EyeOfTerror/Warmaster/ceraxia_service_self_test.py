@@ -81,6 +81,17 @@ def healthy_backend() -> dict:
     }
 
 
+def task_memory_context(task_memory_id: str) -> dict:
+    return {
+        "task_memory_id": task_memory_id,
+        "root_task_id": task_memory_id,
+        "available": True,
+        "revision": 1,
+        "sha256": "1" * 64,
+        "content": f"# Task memory\n\nGoal page for {task_memory_id}.",
+    }
+
+
 def request_json(url: str, payload: dict | None = None) -> tuple[int, dict]:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
@@ -140,6 +151,7 @@ def main() -> int:
         }
         with (
             mock.patch.object(service, "skitarii_backend_health", side_effect=lambda *a, **k: healthy_backend()),
+            mock.patch.object(service, "_load_task_memory_context", side_effect=task_memory_context),
             mock.patch.object(service, "request_model_decision", return_value=model_answer()) as brain,
         ):
             thread.start()
@@ -173,6 +185,15 @@ def main() -> int:
                 assert replayed["leadership_directive"] == prepared["leadership_directive"]
                 assert brain.call_count == 1, "idempotent replay must not ask the model again"
 
+                memory_conflicting = dict(prepare_payload)
+                memory_conflicting["task_memory_id"] = "different-goal-memory"
+                status, memory_conflict = request_json(
+                    base + "/prepare_run", memory_conflicting,
+                )
+                assert status == 409
+                assert memory_conflict["error_code"] == "prepare_identity_conflict"
+                assert brain.call_count == 1
+
                 conflicting = dict(prepare_payload)
                 conflicting["commander_order"] = command(
                     task,
@@ -203,6 +224,12 @@ def main() -> int:
                 gateway_run_dir = root / gateway_task_id
                 assert validate_native_code_run_package(gateway_run_dir) == []
                 assert (gateway_run_dir / "task_ledger.json").is_file()
+                gateway_memory_context = json.loads(
+                    (gateway_run_dir / "task_memory_context.json").read_text(
+                        encoding="utf-8",
+                    )
+                )
+                assert gateway_memory_context["task_memory_id"] == gateway_task_id
 
                 gateway_replayed = task_prepare.prepare_native_ceraxia_via_service(
                     task,
@@ -263,6 +290,33 @@ def main() -> int:
                 assert "different prepare request" in tampered["error"]
                 assert not (root / tampered_task_id).exists()
                 assert brain.call_count == 3
+
+                partial_task_id = "native-ceraxia-partial-publish"
+                partial_final = root / partial_task_id
+
+                def fail_during_staged_write(staging_dir: Path, *args, **kwargs):
+                    assert staging_dir.parent == root
+                    assert staging_dir.name.startswith(f".{partial_task_id}.prepare-")
+                    assert not partial_final.exists(), "partial final run became observable"
+                    (staging_dir / "partial.json").write_text("{}\n", encoding="utf-8")
+                    raise OSError("simulated package write failure")
+
+                with mock.patch.object(
+                    service,
+                    "write_native_code_run",
+                    side_effect=fail_during_staged_write,
+                ):
+                    status, partial = request_json(
+                        base + "/prepare_run",
+                        {
+                            "task_id": partial_task_id,
+                            "commander_order": command(task, partial_task_id),
+                            "run_dir": str(partial_final),
+                        },
+                    )
+                assert status == 500 and partial["ok"] is False
+                assert not partial_final.exists()
+                assert not list(root.glob(f".{partial_task_id}.prepare-*"))
             finally:
                 server.shutdown()
                 server.server_close()
@@ -277,6 +331,7 @@ def main() -> int:
         order = command("Reject this unsafe mission.", task_id)
         with (
             mock.patch.object(service, "skitarii_backend_health", side_effect=lambda *a, **k: healthy_backend()),
+            mock.patch.object(service, "_load_task_memory_context", side_effect=task_memory_context),
             mock.patch.object(service, "request_model_decision", return_value=model_answer("reject")) as brain,
         ):
             thread.start()

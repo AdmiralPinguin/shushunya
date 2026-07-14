@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import threading
 import urllib.error
@@ -22,6 +23,7 @@ from .ledger import TaskLedger
 from .local_executor import WORKER_COMMANDS, execute_run as execute_local_run, input_artifact_errors, ordered_dispatch_paths
 from .mission_control import (
     link_run_to_mission,
+    mission_dir_for,
     mission_id_for,
     open_mission,
     record_warmaster_acceptance,
@@ -52,6 +54,536 @@ _ORCHESTRATE_LOCKS: dict[str, tuple[threading.RLock, int]] = {}
 
 MAX_STANDARD_EXECUTION_TIMEOUT_SEC = 7_200
 MAX_RESEARCH_WARBAND_TIMEOUT_SEC = 604_800
+_TASK_MEMORY_IDENTITY_FIELDS = (
+    "task_memory_id",
+    "root_task_id",
+    "run_task_id",
+    "parent_task_id",
+)
+
+
+class TaskMemoryParentConflict(ValueError):
+    """A child attempt names ancestry that is not durably provable."""
+
+
+def _task_memory_ref(
+    task_id: str,
+    *,
+    task_memory_id: str = "",
+    root_task_id: str = "",
+    parent_task_id: str = "",
+) -> dict[str, Any]:
+    """Return the stable goal-memory identity for an immutable run attempt."""
+    memory_id = str(task_memory_id or root_task_id or task_id).strip()
+    root_id = str(root_task_id or memory_id or task_id).strip()
+    parent_id = str(parent_task_id or "").strip()
+    for field, value in (
+        ("task_id", task_id),
+        ("task_memory_id", memory_id),
+        ("root_task_id", root_id),
+    ):
+        if not valid_task_id(value):
+            raise ValueError(f"{field} is not a valid task identity")
+    if parent_id and not valid_task_id(parent_id):
+        raise ValueError("parent_task_id is not a valid task identity")
+    if task_id != root_id and not parent_id:
+        raise ValueError(
+            "non-root task attempt requires parent_task_id provenance"
+        )
+    if parent_id and parent_id == task_id:
+        raise ValueError("parent_task_id must differ from the child task_id")
+    if task_id == root_id and parent_id:
+        raise ValueError("root task attempt cannot have a parent_task_id")
+    return {
+        "schema_version": 1,
+        "task_memory_id": memory_id,
+        "root_task_id": root_id,
+        "run_task_id": task_id,
+        "parent_task_id": parent_id,
+    }
+
+
+def _load_persisted_task_memory_ref(
+    path: Path,
+    expected_task_id: str,
+) -> dict[str, Any]:
+    """Load one canonical immutable run-to-page binding without normalization."""
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("task-memory reference is missing or is not a regular file")
+    raw, error = load_json_object(path, "task memory reference")
+    if error:
+        raise ValueError(error)
+    expected_fields = {"schema_version", *_TASK_MEMORY_IDENTITY_FIELDS}
+    if set(raw) != expected_fields or raw.get("schema_version") != 1:
+        raise ValueError("task-memory reference is not the canonical schema")
+    if str(raw.get("run_task_id") or "") != expected_task_id:
+        raise ValueError("task-memory reference names a different run_task_id")
+    ref = _task_memory_ref(
+        expected_task_id,
+        task_memory_id=str(raw.get("task_memory_id") or ""),
+        root_task_id=str(raw.get("root_task_id") or ""),
+        parent_task_id=str(raw.get("parent_task_id") or ""),
+    )
+    if any(
+        str(raw.get(field) or "") != str(ref.get(field) or "")
+        for field in _TASK_MEMORY_IDENTITY_FIELDS
+    ):
+        raise ValueError("task-memory reference is not canonical")
+    return ref
+
+
+def _verify_parent_task_memory(
+    run_root: Path,
+    ref: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Prove a child attempt belongs to the same durable goal as its parent.
+
+    A syntactically valid ``parent_task_id`` is not provenance: without this
+    check any caller could attach a new run to an unrelated task page.  The
+    parent's immutable ``task_memory.json`` is the authority for ancestry.
+    """
+    first_parent_task_id = str(ref.get("parent_task_id") or "").strip()
+    if not first_parent_task_id:
+        return None
+    run_root = run_root.resolve()
+    expected_memory_id = str(ref.get("task_memory_id") or "")
+    expected_root_id = str(ref.get("root_task_id") or "")
+    current_task_id = first_parent_task_id
+    seen = {str(ref.get("run_task_id") or "")}
+    first_parent_ref: dict[str, Any] | None = None
+    while current_task_id:
+        if current_task_id in seen:
+            raise TaskMemoryParentConflict("task-memory ancestry contains a cycle")
+        seen.add(current_task_id)
+        if len(seen) > 128:
+            raise TaskMemoryParentConflict("task-memory ancestry exceeds 128 attempts")
+        parent_dir = run_root / current_task_id
+        if parent_dir.is_symlink() or not parent_dir.is_dir():
+            raise TaskMemoryParentConflict(
+                f"parent task {current_task_id!r} does not exist in this run root"
+            )
+        parent_path = parent_dir / "task_memory.json"
+        if parent_path.is_symlink() or not parent_path.is_file():
+            raise TaskMemoryParentConflict(
+                f"parent task {current_task_id!r} has no immutable task_memory.json"
+            )
+        try:
+            parent_ref = _load_persisted_task_memory_ref(
+                parent_path,
+                current_task_id,
+            )
+        except ValueError as exc:
+            raise TaskMemoryParentConflict(
+                f"parent task-memory reference is invalid: {exc}"
+            ) from exc
+        if first_parent_ref is None:
+            first_parent_ref = parent_ref
+        if str(parent_ref.get("task_memory_id") or "") != expected_memory_id:
+            raise TaskMemoryParentConflict(
+                "parent and child disagree on immutable task_memory_id"
+            )
+        if str(parent_ref.get("root_task_id") or "") != expected_root_id:
+            raise TaskMemoryParentConflict(
+                "parent and child disagree on immutable root_task_id"
+            )
+        next_parent = str(parent_ref.get("parent_task_id") or "").strip()
+        if current_task_id == expected_root_id:
+            if next_parent:
+                raise TaskMemoryParentConflict("root task has unexpected ancestry")
+            return first_parent_ref
+        if not next_parent:
+            raise TaskMemoryParentConflict(
+                f"ancestry stopped at {current_task_id!r} before root {expected_root_id!r}"
+            )
+        current_task_id = next_parent
+    raise TaskMemoryParentConflict("task-memory ancestry has no root")
+
+
+def _persist_task_memory_ref(run_dir: Path, ref: dict[str, Any]) -> dict[str, Any]:
+    """Atomically bind a run to one durable task page without rewriting lineage."""
+    path = run_dir / "task_memory.json"
+    if path.exists():
+        current = _load_persisted_task_memory_ref(path, run_dir.name)
+        if any(
+            str(current.get(key) or "") != str(ref.get(key) or "")
+            for key in _TASK_MEMORY_IDENTITY_FIELDS
+        ):
+            raise ValueError("run already belongs to a different task-memory lineage")
+        return current
+    _verify_existing_run_task_memory_provenance(run_dir, ref)
+    raw = json.dumps(ref, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    temporary.write_text(raw, encoding="utf-8")
+    os.replace(temporary, path)
+    try:
+        ledger = TaskLedger.load(run_dir / "task_ledger.json")
+        ledger.record_event(
+            "task_memory_bound",
+            {
+                "task_memory_id": ref["task_memory_id"],
+                "root_task_id": ref["root_task_id"],
+                "parent_task_id": ref["parent_task_id"],
+            },
+        )
+    except Exception:
+        # The immutable reference itself is already durable. Ledger event repair
+        # is observational and must not make a valid run unusable.
+        pass
+    return ref
+
+
+def _verify_existing_run_task_memory_provenance(
+    run_dir: Path, ref: dict[str, Any],
+) -> None:
+    """Refuse to bind a prepared run to lineage not proven by its durable inputs.
+
+    Ceraxia can finish writing a native package just before the gateway process
+    dies.  On retry ``task_memory.json`` is consequently absent even though the
+    package already exists.  The mission protocol (full lineage) and Ceraxia's
+    captured task-memory context (goal identity) are the durable witnesses for
+    that crash window; a retry must not be allowed to invent a different owner.
+    """
+    mission_paths: list[Path] = []
+    mission_ref_path = run_dir / "mission_ref.json"
+    mission_ref: dict[str, Any] = {}
+    if mission_ref_path.exists():
+        mission_ref, mission_ref_error = load_json_object(
+            mission_ref_path, "mission reference",
+        )
+        if mission_ref_error:
+            raise ValueError(mission_ref_error)
+    raw_mission_dir = str(mission_ref.get("mission_dir") or "").strip()
+    if raw_mission_dir:
+        mission_paths.append(Path(raw_mission_dir) / "mission.json")
+
+    contract_path = run_dir / "contract.json"
+    contract: dict[str, Any] = {}
+    if contract_path.exists():
+        contract, contract_error = load_json_object(contract_path, "contract")
+        if contract_error:
+            raise ValueError(contract_error)
+    mission_id = str(contract.get("mission_id") or "").strip()
+    if mission_id:
+        mission_paths.append(
+            Path(__file__).resolve().parents[1] / "missions" / mission_id / "mission.json"
+        )
+
+    seen: set[Path] = set()
+    for mission_path in mission_paths:
+        resolved = mission_path.resolve()
+        if resolved in seen or not resolved.is_file():
+            continue
+        seen.add(resolved)
+        mission, error = load_json_object(resolved, "mission")
+        if error:
+            raise ValueError(error)
+        mission_memory = (
+            mission.get("task_memory")
+            if isinstance(mission.get("task_memory"), dict)
+            else {}
+        )
+        if not mission_memory:
+            continue
+        if any(
+            str(mission_memory.get(key) or "") != str(ref.get(key) or "")
+            for key in _TASK_MEMORY_IDENTITY_FIELDS
+        ):
+            raise ValueError("prepared run mission belongs to a different task-memory lineage")
+        return
+
+    context_path = run_dir / "task_memory_context.json"
+    context: dict[str, Any] = {}
+    if context_path.exists():
+        context, context_error = load_json_object(
+            context_path, "task memory context",
+        )
+        if context_error:
+            raise ValueError(context_error)
+    context_memory_id = str(context.get("task_memory_id") or "").strip()
+    if context_memory_id:
+        if context_memory_id != str(ref.get("task_memory_id") or ""):
+            raise ValueError("prepared run context belongs to a different task memory")
+        # The service captures only the goal page id.  It is complete proof for
+        # a root run, while recovery ancestry still requires the mission record.
+        if (
+            str(ref.get("run_task_id") or "")
+            == str(ref.get("root_task_id") or "")
+            and not str(ref.get("parent_task_id") or "")
+        ):
+            return
+
+    run_task_id = str(ref.get("run_task_id") or "")
+    default_identity = (
+        str(ref.get("task_memory_id") or "") == run_task_id
+        and str(ref.get("root_task_id") or "") == run_task_id
+        and not str(ref.get("parent_task_id") or "")
+    )
+    if not default_identity:
+        raise ValueError("prepared run has no durable proof of the requested task-memory lineage")
+
+
+def _recovery_task_memory_fields(run_dir: Path) -> dict[str, Any]:
+    """Carry one goal page across immutable recovery attempts."""
+    path = run_dir / "task_memory.json"
+    current = _load_persisted_task_memory_ref(path, run_dir.name)
+    task_memory_id = str(current.get("task_memory_id") or "").strip()
+    root_task_id = str(current.get("root_task_id") or "").strip()
+    if not valid_task_id(task_memory_id) or not valid_task_id(root_task_id):
+        raise ValueError("run has an invalid task-memory lineage")
+    return {
+        "task_memory_id": task_memory_id,
+        "root_task_id": root_task_id,
+        "parent_task_id": run_dir.name,
+        "continuation_of": run_dir.name,
+    }
+
+
+def _existing_mission_request(
+    warmaster_root: Path,
+    *,
+    task_id: str,
+    message: str,
+    ref: dict[str, Any],
+) -> dict[str, Any]:
+    """Prove an existing run belongs to this exact immutable intake."""
+    mission_id = mission_id_for(task_id, message)
+    mission_dir = mission_dir_for(warmaster_root, mission_id)
+    if not (mission_dir / "mission.json").is_file():
+        raise ValueError("existing run has no durable commander intake")
+    replay = open_mission(
+        warmaster_root,
+        message,
+        task_id,
+        source_channel="main_chat",
+        task_memory=ref,
+    )
+    if not replay.get("ok"):
+        raise ValueError(str(replay.get("error") or "existing mission request mismatch"))
+    mission = replay.get("mission") if isinstance(replay.get("mission"), dict) else {}
+    return {**mission, "mission_id": mission_id}
+
+
+def _ensure_task_memory_page(
+    ref: dict[str, Any], message: str, mission: dict[str, Any],
+) -> dict[str, Any]:
+    """Initialise the required goal wiki before a governor reads it."""
+    base_url = os.environ.get(
+        "WARMMASTER_ARCHIVE_URL",
+        os.environ.get(
+            "CERAXIA_ARCHIVE_URL",
+            os.environ.get("SHUSHUNYA_CORE_ARCHIVE_URL", "http://127.0.0.1:8090"),
+        ),
+    ).rstrip("/")
+    memory_id = str(ref.get("task_memory_id") or "")
+    headers = {"Accept": "application/json"}
+    archive_key = os.environ.get("ARCHIVE_API_KEY", "").strip()
+    if archive_key:
+        if any(char in archive_key for char in "\r\n"):
+            return {
+                "stage": "task_memory_init",
+                "ok": False,
+                "retryable": False,
+                "error_code": "task_memory_auth_invalid",
+                "warning": "Archive API key is invalid; task page was not initialised",
+            }
+        headers["Authorization"] = f"Bearer {archive_key}"
+
+    def request_json(
+        method: str, path: str, payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        data = None
+        request_headers = dict(headers)
+        if payload is not None:
+            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            request_headers["Content-Type"] = "application/json"
+        request = urllib.request.Request(
+            f"{base_url}{path}", data=data, headers=request_headers, method=method,
+        )
+        with urllib.request.urlopen(request, timeout=3.0) as response:
+            raw = response.read(1_000_001)
+        if len(raw) > 1_000_000:
+            raise ValueError("Archive task-page response exceeds 1000000 bytes")
+        decoded = json.loads(raw.decode("utf-8"))
+        if not isinstance(decoded, dict):
+            raise ValueError("Archive task-page response is not an object")
+        return decoded
+
+    try:
+        current = request_json(
+            "GET", f"/archive/task-page?task_memory_id={quote(memory_id, safe='')}",
+        )
+        snapshot = current.get("snapshot") if isinstance(current.get("snapshot"), dict) else {}
+        exists = bool(current.get("task_memory_id"))
+        requested_root_task_id = str(ref.get("root_task_id") or "").strip()
+        stored_root_task_id = str(
+            current.get("root_task_id") or snapshot.get("root_task_id") or ""
+        ).strip()
+        if exists and stored_root_task_id != requested_root_task_id:
+            raise ValueError(
+                "Archive task page belongs to a different root_task_id"
+            )
+        root_task_id = stored_root_task_id if exists else requested_root_task_id
+        goal_verbatim = str(
+            snapshot.get("goal_verbatim") if exists else message
+        ).strip()
+        aliases = [str(ref.get("run_task_id") or "").strip()]
+        mission_id = str(mission.get("mission_id") or "").strip()
+        if mission_id:
+            aliases.append(mission_id)
+        initialised = request_json(
+            "POST",
+            "/archive/task-page/init",
+            {
+                "action": "init",
+                "task_id": str(ref.get("run_task_id") or ""),
+                "task_memory_id": memory_id,
+                "root_task_id": root_task_id,
+                "goal_verbatim": goal_verbatim,
+                "aliases": aliases,
+                "actor": "WarmasterGateway",
+            },
+        )
+        if initialised.get("ok") is not True:
+            raise ValueError(str(initialised.get("error") or "Archive rejected task-page init"))
+        return {
+            "stage": "task_memory_init",
+            "ok": True,
+            "retryable": False,
+            "task_memory_id": str(initialised.get("task_memory_id") or memory_id),
+            "root_task_id": str(initialised.get("root_task_id") or root_task_id),
+            "revision": int(initialised.get("revision") or 0),
+            "existing": exists,
+        }
+    except urllib.error.HTTPError as exc:
+        retryable = exc.code >= 500 or exc.code in {408, 425, 429}
+        return {
+            "stage": "task_memory_init",
+            "ok": False,
+            "retryable": retryable,
+            "error_code": (
+                "task_memory_unavailable" if retryable else "task_memory_rejected"
+            ),
+            "task_memory_id": memory_id,
+            "warning": f"Archive task page request failed with HTTP {exc.code}",
+        }
+    except (OSError, TimeoutError, urllib.error.URLError) as exc:
+        return {
+            "stage": "task_memory_init",
+            "ok": False,
+            "retryable": True,
+            "error_code": "task_memory_unavailable",
+            "task_memory_id": memory_id,
+            "warning": f"Archive task page is temporarily unavailable: {exc}",
+        }
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return {
+            "stage": "task_memory_init",
+            "ok": False,
+            "retryable": True,
+            "error_code": "task_memory_invalid_response",
+            "task_memory_id": memory_id,
+            "warning": f"Archive task page returned an invalid response: {exc}",
+        }
+    except ValueError as exc:
+        return {
+            "stage": "task_memory_init",
+            "ok": False,
+            "retryable": False,
+            "error_code": "task_memory_identity_conflict",
+            "task_memory_id": memory_id,
+            "warning": f"Archive task page identity was rejected: {exc}",
+        }
+
+
+def task_memory_start_guard(run_dir: Path) -> dict[str, Any]:
+    """Repair/verify the task page at the final execution boundary."""
+    ref_path = run_dir / "task_memory.json"
+    if not ref_path.is_file():
+        return {
+            "stage": "task_memory_start_guard",
+            "ok": False,
+            "retryable": False,
+            "error_code": "task_memory_reference_missing",
+            "warning": "run has no durable task_memory.json; reprepare it before execution",
+        }
+    try:
+        ref = _load_persisted_task_memory_ref(
+            ref_path,
+            run_dir.name,
+        )
+        _verify_parent_task_memory(run_dir.parent, ref)
+    except TaskMemoryParentConflict as exc:
+        return {
+            "stage": "task_memory_start_guard",
+            "ok": False,
+            "retryable": False,
+            "error_code": "task_memory_parent_conflict",
+            "warning": str(exc),
+        }
+    except ValueError as exc:
+        return {
+            "stage": "task_memory_start_guard",
+            "ok": False,
+            "retryable": False,
+            "error_code": "task_memory_reference_invalid",
+            "warning": str(exc),
+        }
+    contract, contract_error = load_json_object(run_dir / "contract.json", "contract")
+    mission_id = str(contract.get("mission_id") or "").strip() if not contract_error else ""
+    if not mission_id:
+        return {
+            "stage": "task_memory_start_guard",
+            "ok": False,
+            "retryable": False,
+            "error_code": "task_memory_mission_missing",
+            "warning": contract_error or "run contract has no mission_id",
+        }
+    warmaster_root = Path(__file__).resolve().parents[1]
+    mission_dir = mission_dir_for(warmaster_root, mission_id)
+    mission, mission_error = load_json_object(mission_dir / "mission.json", "mission")
+    intake, intake_error = load_json_object(
+        mission_dir / "mission_intake.json", "mission intake",
+    )
+    if mission_error or intake_error or not mission or not intake:
+        return {
+            "stage": "task_memory_start_guard",
+            "ok": False,
+            "retryable": False,
+            "error_code": "task_memory_mission_missing",
+            "warning": mission_error or intake_error or "mission provenance is missing",
+        }
+    guarded = _ensure_task_memory_page(
+        ref,
+        str(intake.get("user_request") or ""),
+        {**mission, "mission_id": mission_id},
+    )
+    return {**guarded, "stage": "task_memory_start_guard"}
+
+
+def ensure_task_memory_for_intake(
+    *,
+    run_root: Path,
+    task_id: str,
+    message: str,
+    mission_id: str,
+    task_memory_id: str = "",
+    root_task_id: str = "",
+    parent_task_id: str = "",
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Public preflight gate used before any governor receives the task."""
+    ref = _task_memory_ref(
+        task_id,
+        task_memory_id=task_memory_id,
+        root_task_id=root_task_id,
+        parent_task_id=parent_task_id,
+    )
+    _verify_parent_task_memory(run_root, ref)
+    result = _ensure_task_memory_page(
+        ref,
+        message,
+        {"mission_id": mission_id},
+    )
+    return result, ref
 
 
 def _execution_timeout_for_run(run_dir: Path, requested: int) -> int:
@@ -154,11 +686,7 @@ def _native_backend_health(
 def _reprepare_action(run_dir: Path, contract: dict[str, Any]) -> dict[str, Any]:
     stem = run_dir.name[:119].rstrip(".-_") or "ceraxia-code-run"
     fresh_task_id = f"{stem}-native"
-    suffix = 2
-    while (run_dir.parent / fresh_task_id).exists():
-        suffix_text = f"-native-{suffix}"
-        fresh_task_id = f"{stem[:127 - len(suffix_text)].rstrip('.-_')}{suffix_text}"
-        suffix += 1
+    lineage = _recovery_task_memory_fields(run_dir)
     return {
         "kind": "legacy_ceraxia_reprepare_required",
         "method": "POST",
@@ -169,7 +697,8 @@ def _reprepare_action(run_dir: Path, contract: dict[str, Any]) -> dict[str, Any]
             "governor_transport": "http",
             "run_mode": "http",
             "auto_start": True,
-            "reuse_existing": False,
+            "reuse_existing": True,
+            **lineage,
         },
         "reason": (
             "this legacy Ceraxia package has no native execution descriptor; "
@@ -185,11 +714,7 @@ def _native_reprepare_action(
         return _reprepare_action(run_dir, contract)
     stem = run_dir.name[:117].rstrip(".-_") or "iskandar-research-run"
     fresh_task_id = f"{stem}-native"
-    suffix = 2
-    while (run_dir.parent / fresh_task_id).exists():
-        suffix_text = f"-native-{suffix}"
-        fresh_task_id = f"{stem[:127 - len(suffix_text)].rstrip('.-_')}{suffix_text}"
-        suffix += 1
+    lineage = _recovery_task_memory_fields(run_dir)
     return {
         "kind": f"reprepare_{adapter.name}_run",
         "method": "POST",
@@ -200,12 +725,20 @@ def _native_reprepare_action(
             "governor_transport": "http",
             "run_mode": "http",
             "auto_start": True,
-            "reuse_existing": False,
+            "reuse_existing": True,
+            **lineage,
         },
         "reason": (
             "native terminal evidence is immutable; create a fresh "
             f"{adapter.governor} mission"
         ),
+    }
+
+
+def _task_memory_lineage_repair_action(reason: str) -> dict[str, Any]:
+    return {
+        "kind": "task_memory_lineage_repair_required",
+        "reason": reason,
     }
 
 
@@ -264,9 +797,24 @@ def execution_backend_route(run_dir: Path) -> dict[str, Any]:
         ) is None
     )
     if legacy_iskandar:
-        action = _native_reprepare_action(
-            run_dir, raw_contract, NATIVE_RESEARCH_ADAPTER,
-        )
+        try:
+            action = _native_reprepare_action(
+                run_dir, raw_contract, NATIVE_RESEARCH_ADAPTER,
+            )
+        except ValueError as exc:
+            repair = _task_memory_lineage_repair_action(
+                (
+                    "the removed legacy run has no canonical task-memory binding; "
+                    "reconcile its immutable page/root provenance before creating a child"
+                )
+            )
+            return _route_failure(
+                run_dir,
+                phase="legacy_iskandar_run_removed",
+                error=f"legacy Iskandar run cannot be migrated safely: {exc}",
+                error_code="task_memory_reference_missing",
+                next_action=repair,
+            )
         action["reason"] = (
             "the old Iskandar worker-plan executor was removed; create a fresh "
             "native ResearchWarband mission"
@@ -349,7 +897,18 @@ def execution_backend_route(run_dir: Path) -> dict[str, Any]:
         str(raw_contract.get("assigned_governor") or "") == "Ceraxia"
         and str(raw_contract.get("kind") or "").lower() == "code"
     ):
-        action = _reprepare_action(run_dir, raw_contract)
+        try:
+            action = _reprepare_action(run_dir, raw_contract)
+        except ValueError as exc:
+            return _route_failure(
+                run_dir,
+                phase="legacy_ceraxia_reprepare_required",
+                error=f"legacy Ceraxia run cannot be migrated safely: {exc}",
+                error_code="task_memory_reference_missing",
+                next_action=_task_memory_lineage_repair_action(
+                    "reconcile the legacy run's immutable task page before creating a child"
+                ),
+            )
         return _route_failure(
             run_dir,
             phase="legacy_ceraxia_reprepare_required",
@@ -530,12 +1089,18 @@ def _native_preflight(
         terminal_action = run_next_action
         if not terminal_action:
             contract, _ = load_json_object(run_dir / "contract.json", "contract")
-            terminal_action = _native_reprepare_action(run_dir, contract, adapter)
-            if adapter is NATIVE_CODE_ADAPTER:
-                terminal_action["kind"] = "reprepare_ceraxia_run"
-                terminal_action["reason"] = (
-                    "native terminal evidence is immutable; create a fresh Ceraxia mission"
+            try:
+                terminal_action = _native_reprepare_action(run_dir, contract, adapter)
+            except ValueError as exc:
+                terminal_action = _task_memory_lineage_repair_action(
+                    f"terminal run task-memory provenance must be reconciled first: {exc}"
                 )
+            if adapter is NATIVE_CODE_ADAPTER:
+                if terminal_action.get("kind") != "task_memory_lineage_repair_required":
+                    terminal_action["kind"] = "reprepare_ceraxia_run"
+                    terminal_action["reason"] = (
+                        "native terminal evidence is immutable; create a fresh Ceraxia mission"
+                    )
         preflight["actions"] = {
             "can_start_run": False,
             "can_inspect_package": True,
@@ -758,6 +1323,7 @@ def orchestrate_prepare_task(
     commander_order: dict[str, Any] | None = None,
     require_commander_order: bool = True,
     mission: dict[str, Any] | None = None,
+    task_memory_id: str = "",
 ) -> dict[str, Any]:
     if run_mode not in {"local", "http"}:
         raise ValueError("run_mode must be local or http")
@@ -795,6 +1361,7 @@ def orchestrate_prepare_task(
         forced_governor=forced_governor,
         commander_order=commander_order,
         require_commander_order=require_commander_order,
+        task_memory_id=task_memory_id,
     )
     task_actions = task.get("actions") if isinstance(task.get("actions"), dict) else {}
     trace.append({"stage": "task", "ok": bool(task.get("ok")), "task_id": str(task.get("task_id") or ""), "next_action": task_actions.get("next_action", {})})
@@ -901,6 +1468,9 @@ def _orchestrate_run_task_locked(
     auto_start: bool = True,
     force: bool = False,
     reuse_existing: bool = True,
+    task_memory_id: str = "",
+    root_task_id: str = "",
+    parent_task_id: str = "",
 ) -> dict[str, Any]:
     requested_timeout_sec = max(
         1, min(int(timeout_sec), MAX_RESEARCH_WARBAND_TIMEOUT_SEC)
@@ -918,8 +1488,62 @@ def _orchestrate_run_task_locked(
             "next_action": {},
             "client_action": {},
         }
+    warmaster_root = Path(__file__).resolve().parents[1]
     existing_run = run_root / task_id if task_id else None
     if existing_run is not None and existing_run.is_dir():
+        try:
+            requested_memory_ref = _task_memory_ref(
+                task_id,
+                task_memory_id=task_memory_id,
+                root_task_id=root_task_id,
+                parent_task_id=parent_task_id,
+            )
+            _verify_parent_task_memory(run_root, requested_memory_ref)
+            existing_mission = _existing_mission_request(
+                warmaster_root,
+                task_id=task_id,
+                message=message,
+                ref=requested_memory_ref,
+            )
+            memory_ref = _persist_task_memory_ref(
+                existing_run,
+                requested_memory_ref,
+            )
+        except (OSError, ValueError) as exc:
+            return {
+                "ok": False,
+                "phase": "task_preflight",
+                "task_id": task_id,
+                "error": f"task-memory lineage conflict: {exc}",
+                "error_code": (
+                    "task_memory_parent_conflict"
+                    if isinstance(exc, TaskMemoryParentConflict)
+                    else "task_memory_identity_conflict"
+                ),
+                "next_action": {},
+                "client_action": {},
+            }
+        task_memory_init = _ensure_task_memory_page(
+            memory_ref, message, existing_mission,
+        )
+        if not task_memory_init.get("ok"):
+            return {
+                "ok": False,
+                "retryable": bool(task_memory_init.get("retryable")),
+                "phase": "task_memory_retry",
+                "task_id": task_id,
+                "run_dir": str(existing_run),
+                "error": str(
+                    task_memory_init.get("warning")
+                    or "Archive task page is temporarily unavailable"
+                ),
+                "error_code": str(
+                    task_memory_init.get("error_code") or "task_memory_unavailable"
+                ),
+                "trace": [task_memory_init],
+                "next_action": {},
+                "client_action": {},
+            }
         # A task id owns one immutable mission protocol.  Never call
         # open_mission() or relink a durable run that already exists: doing so
         # would overwrite terminal evidence before start authorization runs.
@@ -971,12 +1595,15 @@ def _orchestrate_run_task_locked(
                 "run_dir": str(existing_run),
                 "run_mode": run_mode,
                 "reused_existing": True,
-                "trace": [{
-                    "stage": "existing_run",
-                    "ok": bool(started.get("ok")),
-                    "task_id": task_id,
-                    "next_action": started.get("next_action", {}),
-                }],
+                "trace": [
+                    task_memory_init,
+                    {
+                        "stage": "existing_run",
+                        "ok": bool(started.get("ok")),
+                        "task_id": task_id,
+                        "next_action": started.get("next_action", {}),
+                    },
+                ],
                 "start": started,
                 "orchestration": state,
                 "decision": state.get("decision", {}),
@@ -996,7 +1623,10 @@ def _orchestrate_run_task_locked(
             "run_dir": str(existing_run),
             "run_mode": run_mode,
             "reused_existing": True,
-            "trace": [{"stage": "existing_run", "ok": True, "task_id": task_id}],
+            "trace": [
+                task_memory_init,
+                {"stage": "existing_run", "ok": True, "task_id": task_id},
+            ],
             "orchestration": state,
             "decision": decision,
             "display": state.get("display", {}),
@@ -1004,8 +1634,41 @@ def _orchestrate_run_task_locked(
             "next_action": next_action,
             "client_action": state.get("client_action", {}),
         }
-    warmaster_root = Path(__file__).resolve().parents[1]
-    mission = open_mission(warmaster_root, message, task_id, source_channel="main_chat")
+    try:
+        requested_memory_ref = _task_memory_ref(
+            str(task_id or task_id_for_message(message)),
+            task_memory_id=task_memory_id,
+            root_task_id=root_task_id,
+            parent_task_id=parent_task_id,
+        )
+        _verify_parent_task_memory(run_root, requested_memory_ref)
+    except TaskMemoryParentConflict as exc:
+        return {
+            "ok": False,
+            "phase": "task_preflight",
+            "task_id": task_id or "",
+            "error": str(exc),
+            "error_code": "task_memory_parent_conflict",
+            "next_action": {},
+            "client_action": {},
+        }
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "phase": "task_preflight",
+            "task_id": task_id or "",
+            "error": str(exc),
+            "error_code": "invalid_task_memory_identity",
+            "next_action": {},
+            "client_action": {},
+        }
+    mission = open_mission(
+        warmaster_root,
+        message,
+        task_id,
+        source_channel="main_chat",
+        task_memory=requested_memory_ref,
+    )
     if not mission.get("ok"):
         return {
             "ok": False,
@@ -1025,6 +1688,37 @@ def _orchestrate_run_task_locked(
         }
     command = mission.get("commander_order") if isinstance(mission.get("commander_order"), dict) else {}
     governor_message = str(mission.get("governor_task") or message)
+    task_memory_init = _ensure_task_memory_page(
+        requested_memory_ref, message, mission,
+    )
+    if not task_memory_init.get("ok"):
+        return {
+            "ok": False,
+            "retryable": bool(task_memory_init.get("retryable")),
+            "phase": "task_memory_retry",
+            "task_id": task_id or "",
+            "mission_id": str(mission.get("mission_id") or ""),
+            "error": str(
+                task_memory_init.get("warning")
+                or "Archive task page is temporarily unavailable"
+            ),
+            "error_code": str(
+                task_memory_init.get("error_code") or "task_memory_unavailable"
+            ),
+            "trace": [
+                {
+                    "stage": "commander_intake",
+                    "ok": True,
+                    "mission_id": str(mission.get("mission_id") or ""),
+                    "assigned_governor": str(
+                        (mission.get("commander_order") or {}).get("to") or ""
+                    ),
+                },
+                task_memory_init,
+            ],
+            "next_action": {},
+            "client_action": {},
+        }
     prepared = orchestrate_prepare_task(
         governor_message,
         task_id,
@@ -1039,6 +1733,7 @@ def _orchestrate_run_task_locked(
         commander_order=command,
         require_commander_order=True,
         mission=mission,
+        task_memory_id=requested_memory_ref["task_memory_id"],
     )
     trace = list(prepared.get("trace") if isinstance(prepared.get("trace"), list) else [])
     trace.insert(
@@ -1050,6 +1745,7 @@ def _orchestrate_run_task_locked(
             "assigned_governor": str((mission.get("commander_order") or {}).get("to") or ""),
         },
     )
+    trace.insert(1, task_memory_init)
     run_task_id = str(prepared.get("task_id") or task_id or "")
     if not prepared.get("ok"):
         task_preflight = prepared.get("task_preflight") if isinstance(prepared.get("task_preflight"), dict) else {}
@@ -1136,6 +1832,15 @@ def _orchestrate_run_task_locked(
     try:
         if not run_task_id:
             raise ValueError("prepared run did not return a task_id")
+        memory_ref = _persist_task_memory_ref(
+            run_dir,
+            _task_memory_ref(
+                run_task_id,
+                task_memory_id=requested_memory_ref["task_memory_id"],
+                root_task_id=requested_memory_ref["root_task_id"],
+                parent_task_id=requested_memory_ref["parent_task_id"],
+            ),
+        )
         if prepared.get("mission_linked") is not True:
             link_run_to_mission(run_dir, mission)
     except Exception as exc:  # noqa: BLE001 - execution must not race an unlinked mission.
@@ -1207,6 +1912,7 @@ def _orchestrate_run_task_locked(
         "ok": bool(started.get("ok")),
         "phase": "started" if started.get("ok") else "start_failed",
         "task_id": run_task_id,
+        "task_memory": memory_ref,
         "mission_id": str(mission.get("mission_id") or ""),
         "mission": {
             "mission_id": str(mission.get("mission_id") or ""),
@@ -1239,6 +1945,9 @@ def orchestrate_run_task(
     auto_start: bool = True,
     force: bool = False,
     reuse_existing: bool = True,
+    task_memory_id: str = "",
+    root_task_id: str = "",
+    parent_task_id: str = "",
 ) -> dict[str, Any]:
     resolved_task_id = task_id or task_id_for_message(message)
     reservation_key = mission_id_for(resolved_task_id, message)
@@ -1256,6 +1965,9 @@ def orchestrate_run_task(
             auto_start=auto_start,
             force=force,
             reuse_existing=reuse_existing,
+            task_memory_id=task_memory_id,
+            root_task_id=root_task_id,
+            parent_task_id=parent_task_id,
         )
 
 
@@ -1342,6 +2054,24 @@ def execute_routed_run(
     route = execution_backend_route(run_dir)
     if not route.get("ok"):
         return route
+    task_memory_guard = task_memory_start_guard(run_dir)
+    if not task_memory_guard.get("ok"):
+        return {
+            "ok": False,
+            "retryable": bool(task_memory_guard.get("retryable")),
+            "status": "retry_wait" if task_memory_guard.get("retryable") else "failed",
+            "phase": "task_memory_retry",
+            "error_code": str(
+                task_memory_guard.get("error_code") or "task_memory_unavailable"
+            ),
+            "error": str(
+                task_memory_guard.get("warning")
+                or "task memory is not ready for execution"
+            ),
+            "task_memory": task_memory_guard,
+            "next_action": {},
+            "client_action": {},
+        }
     native_adapter = native_adapter_for_route(route)
     if native_adapter is not None:
         mission_ref_errors = _native_mission_ref_errors(run_dir)
@@ -1978,10 +2708,28 @@ def orchestrate_start_run(
     run_dir = run_root / task_id
     if not run_dir.exists():
         return {"ok": False, "phase": "missing_run", "task_id": task_id, "error": "run not found"}
-    timeout_sec = _execution_timeout_for_run(run_dir, timeout_sec)
     backend_route = execution_backend_route(run_dir)
     if not backend_route.get("ok"):
         return backend_route
+    task_memory_guard = task_memory_start_guard(run_dir)
+    if not task_memory_guard.get("ok"):
+        return {
+            "ok": False,
+            "retryable": bool(task_memory_guard.get("retryable")),
+            "phase": "task_memory_retry",
+            "task_id": task_id,
+            "error_code": str(
+                task_memory_guard.get("error_code") or "task_memory_unavailable"
+            ),
+            "error": str(
+                task_memory_guard.get("warning")
+                or "task memory is not ready for execution"
+            ),
+            "task_memory": task_memory_guard,
+            "next_action": {},
+            "client_action": {},
+        }
+    timeout_sec = _execution_timeout_for_run(run_dir, timeout_sec)
     summary = run_summary(run_dir)
     actions = summary.get("actions") if isinstance(summary.get("actions"), dict) else {}
     next_action = actions.get("next_action") if isinstance(actions.get("next_action"), dict) else {}

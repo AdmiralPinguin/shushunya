@@ -58,6 +58,27 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(len(self.ledger.list_commitments()), 1)
         self.assertEqual(self.ledger.status()["pending_effects"], 1)
 
+    def test_failed_delegate_attempt_remains_open_for_steward_recovery(self):
+        self.create_effect()
+        with self.ledger.write() as db:
+            db.execute(
+                "UPDATE commitments SET state='failed',diagnostic_json=? "
+                "WHERE id='commitment-1'",
+                ('{"code":"legacy_failed_attempt"}',),
+            )
+        open_items = self.ledger.list_commitments(include_terminal=False)
+        self.assertEqual([item["id"] for item in open_items], ["commitment-1"])
+        claim = self.ledger.claim_outbox("recovery-worker", 60, message_id="effect-1")
+        self.ledger.finish_effect(
+            effect_id="effect-1",
+            lease_token=claim["lease_token"],
+            ok=True,
+            result={"delegate_ref": "recovery-run", "explanation": "accepted"},
+        )
+        recovered = self.ledger.list_commitments(include_terminal=False)[0]
+        self.assertEqual(recovered["state"], "working")
+        self.assertEqual(recovered["delegate_ref"], "recovery-run")
+
     def test_same_key_with_different_request_is_conflict(self):
         self.create_effect()
         with self.assertRaises(IdempotencyConflict):

@@ -41,10 +41,12 @@ from .mission_control import (
     task_id_for_message,
 )
 from .orchestrator import (
+    TaskMemoryParentConflict,
     cancel_http_worker_tasks,
     execute_routed_run,
     execute_run_cycle,
     execute_with_ledger_failure_guard,
+    ensure_task_memory_for_intake,
     execution_backend_route,
     orchestrate_prepare_task,
     orchestrate_run_task,
@@ -62,6 +64,7 @@ from .orchestrator import (
     run_execution_preflight,
     start_background,
     start_recoverable_runs,
+    task_memory_start_guard,
     validate_requested_step_ids,
 )
 from .task_prepare import (
@@ -1046,6 +1049,9 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         auto_start=False,
                         force=bool(payload.get("force")),
                         reuse_existing=bool(payload.get("reuse_existing", True)),
+                        task_memory_id=str(payload.get("task_memory_id") or payload.get("goal_id") or "").strip(),
+                        root_task_id=str(payload.get("root_task_id") or "").strip(),
+                        parent_task_id=str(payload.get("parent_task_id") or payload.get("continuation_of") or "").strip(),
                     )
                     prepared = attach_model_brain(prepared, model_decision)
                     response(self, 200 if prepared.get("ok") else 409, prepared)
@@ -1084,7 +1090,15 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         revision_token=str(payload.get("revision_token") or ""),
                     )
                     started = attach_model_brain(started, model_decision)
-                    response(self, 202 if started.get("ok") else 409, started)
+                    response(
+                        self,
+                        202
+                        if started.get("ok")
+                        else 503
+                        if started.get("retryable")
+                        else 409,
+                        started,
+                    )
                     return
                 if self.path == "/orchestrate_run":
                     model_decision = gateway_model_decision("orchestrate_run", payload)
@@ -1125,12 +1139,23 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         auto_start=auto_start,
                         force=bool(payload.get("force")),
                         reuse_existing=bool(payload.get("reuse_existing", True)),
+                        task_memory_id=str(payload.get("task_memory_id") or payload.get("goal_id") or "").strip(),
+                        root_task_id=str(payload.get("root_task_id") or "").strip(),
+                        parent_task_id=str(payload.get("parent_task_id") or payload.get("continuation_of") or "").strip(),
                     )
                     submitted = attach_model_brain(submitted, model_decision)
                     if submitted.get("ok") and submitted.get("phase") == "started":
                         response(self, 202, submitted)
                     else:
-                        response(self, 200 if submitted.get("ok") else 409, submitted)
+                        response(
+                            self,
+                            200
+                            if submitted.get("ok")
+                            else 503
+                            if submitted.get("retryable")
+                            else 409,
+                            submitted,
+                        )
                     return
                 if self.path == "/task_preflight":
                     model_decision = gateway_model_decision("task_preflight", payload)
@@ -1161,6 +1186,72 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         response(self, 400, failed)
                         return
                     command = commander.get("commander_order") if isinstance(commander.get("commander_order"), dict) else {}
+                    try:
+                        task_memory_init, task_memory_ref = ensure_task_memory_for_intake(
+                            run_root=default_run_root,
+                            task_id=task_id,
+                            message=message,
+                            mission_id=mission_id,
+                            task_memory_id=str(
+                                payload.get("task_memory_id")
+                                or payload.get("goal_id")
+                                or ""
+                            ).strip(),
+                            root_task_id=str(payload.get("root_task_id") or "").strip(),
+                            parent_task_id=str(
+                                payload.get("parent_task_id")
+                                or payload.get("continuation_of")
+                                or ""
+                            ).strip(),
+                        )
+                    except TaskMemoryParentConflict as exc:
+                        response(
+                            self,
+                            409,
+                            {
+                                "ok": False,
+                                "phase": "task_memory_identity",
+                                "task_id": task_id,
+                                "error_code": "task_memory_parent_conflict",
+                                "error": str(exc),
+                            },
+                        )
+                        return
+                    except ValueError as exc:
+                        response(
+                            self,
+                            400,
+                            {
+                                "ok": False,
+                                "phase": "task_memory_identity",
+                                "task_id": task_id,
+                                "error_code": "invalid_task_memory_identity",
+                                "error": str(exc),
+                            },
+                        )
+                        return
+                    if not task_memory_init.get("ok"):
+                        failed = attach_model_brain(
+                            {
+                                "ok": False,
+                                "retryable": bool(task_memory_init.get("retryable")),
+                                "phase": "task_memory_retry",
+                                "task_id": task_id,
+                                "error_code": str(
+                                    task_memory_init.get("error_code")
+                                    or "task_memory_unavailable"
+                                ),
+                                "error": str(task_memory_init.get("warning") or ""),
+                                "task_memory": task_memory_init,
+                            },
+                            model_decision,
+                        )
+                        response(
+                            self,
+                            503 if failed.get("retryable") else 409,
+                            failed,
+                        )
+                        return
                     command_task = governor_task_from_order(command)
                     preflight = preflight_task(
                         command_task,
@@ -1178,6 +1269,14 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     body = next_action.get("body") if isinstance(next_action.get("body"), dict) else {}
                     if body:
                         body["message"] = message
+                        task_memory_id = str(task_memory_ref["task_memory_id"])
+                        root_task_id = str(task_memory_ref["root_task_id"])
+                        parent_task_id = str(task_memory_ref["parent_task_id"])
+                        body["task_memory_id"] = task_memory_id
+                        body["root_task_id"] = root_task_id
+                        if parent_task_id:
+                            body["parent_task_id"] = parent_task_id
+                            body["continuation_of"] = parent_task_id
                         next_action["body"] = body
                         actions["next_action"] = next_action
                         preflight["actions"] = actions
@@ -1333,6 +1432,28 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         backend_route = execution_backend_route(run_dir)
                         if not backend_route.get("ok"):
                             response(self, 409, backend_route)
+                            return
+                        task_memory_guard = task_memory_start_guard(run_dir)
+                        if not task_memory_guard.get("ok"):
+                            response(
+                                self,
+                                503 if task_memory_guard.get("retryable") else 409,
+                                {
+                                    "ok": False,
+                                    "phase": "clarification_task_memory_guard",
+                                    "task_id": task_id,
+                                    "retryable": bool(task_memory_guard.get("retryable")),
+                                    "error_code": str(
+                                        task_memory_guard.get("error_code")
+                                        or "task_memory_guard_failed"
+                                    ),
+                                    "error": str(
+                                        task_memory_guard.get("warning")
+                                        or "task-memory guard rejected clarification resume"
+                                    ),
+                                    "task_memory": task_memory_guard,
+                                },
+                            )
                             return
                         backend = str(backend_route.get("backend") or "")
                         if backend == "ResearchWarband":
@@ -1725,16 +1846,41 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     if not run_dir.exists():
                         response(self, 404, {"ok": False, "error": "run not found", "task_id": task_id})
                         return
+                    preflight_mode = parts[2] in {"preflight_local", "preflight_http"}
                     backend_route = execution_backend_route(run_dir)
                     if not backend_route.get("ok"):
                         response(self, 409, backend_route)
                         return
+                    if not preflight_mode:
+                        task_memory_guard = task_memory_start_guard(run_dir)
+                        if not task_memory_guard.get("ok"):
+                            response(
+                                self,
+                                503 if task_memory_guard.get("retryable") else 409,
+                                {
+                                    "ok": False,
+                                    "retryable": bool(task_memory_guard.get("retryable")),
+                                    "phase": "task_memory_retry",
+                                    "task_id": task_id,
+                                    "error_code": str(
+                                        task_memory_guard.get("error_code")
+                                        or "task_memory_unavailable"
+                                    ),
+                                    "error": str(
+                                        task_memory_guard.get("warning")
+                                        or "task memory is not ready for execution"
+                                    ),
+                                    "task_memory": task_memory_guard,
+                                    "next_action": {},
+                                    "client_action": {},
+                                },
+                            )
+                            return
                     native_backend = backend_route.get("backend") in {
                         "SkitariiWarband", "ResearchWarband"
                     }
                     ledger_path = run_dir / "task_ledger.json"
                     force = bool(payload.get("force"))
-                    preflight_mode = parts[2] in {"preflight_local", "preflight_http"}
                     revision_mode = "revision" in parts[2]
                     resume_mode = "resume" in parts[2]
                     if ledger_path.exists():

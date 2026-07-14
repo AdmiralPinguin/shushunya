@@ -259,6 +259,16 @@ CREATE INDEX IF NOT EXISTS agenda_pick ON agenda_items(state, next_eligible_at, 
 """
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """Make ``with ledger.connect()`` release the OS handle as callers expect."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 class Ledger:
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
@@ -267,7 +277,11 @@ class Ledger:
         self.integrity_error = ""
 
     def connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(self.db_path, timeout=5.0)
+        db = sqlite3.connect(
+            self.db_path,
+            timeout=5.0,
+            factory=_ClosingConnection,
+        )
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys = ON")
         db.execute("PRAGMA busy_timeout = 5000")
@@ -850,7 +864,7 @@ class Ledger:
             )
             if commitment_id:
                 row = db.execute("SELECT * FROM commitments WHERE id=?", (commitment_id,)).fetchone()
-                if row and row["state"] not in {"succeeded", "failed", "cancelled"}:
+                if row and row["state"] not in {"succeeded", "cancelled"}:
                     previous_state = str(row["state"] or "")
                     effect_payload = json.loads(effect["payload_json"] or "{}")
                     stable_ref = effect_payload.get("task_id") if effect["destination"] == "abaddon" else None
@@ -903,7 +917,10 @@ class Ledger:
         sql = "SELECT * FROM commitments"
         params: list[Any] = []
         if not include_terminal:
-            sql += " WHERE state NOT IN ('succeeded','failed','cancelled')"
+            # A failed delegate attempt is recoverable evidence, not a terminal
+            # durable goal.  The steward must keep seeing legacy ``failed`` rows
+            # so it can attach a new immutable Abaddon run to the same goal.
+            sql += " WHERE state NOT IN ('succeeded','cancelled')"
         sql += " ORDER BY updated_at DESC LIMIT ?"
         params.append(max(1, min(int(limit), 500)))
         with self.connect() as db:

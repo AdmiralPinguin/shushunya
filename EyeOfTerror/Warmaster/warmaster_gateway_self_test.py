@@ -452,12 +452,15 @@ def main() -> int:
             message: str,
             task_id: str | None,
             source_channel: str = "main_chat",
+            *,
+            task_memory: dict | None = None,
         ) -> dict:
             return mission_control.open_mission(
                 mission_warmaster_root,
                 message,
                 task_id,
                 source_channel=source_channel,
+                task_memory=task_memory,
             )
 
         with (
@@ -625,12 +628,45 @@ def main() -> int:
                 if local_preflight.get("error_code") != "ceraxia_leader_service_required":
                     raise AssertionError(f"local code planning bypassed live Ceraxia: {local_block}")
 
+                root_lineage_run = run_root / "root-native-code"
+                root_lineage_run.mkdir(parents=True, exist_ok=True)
+                (root_lineage_run / "task_memory.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "task_memory_id": "goal-native-code",
+                            "root_task_id": "root-native-code",
+                            "run_task_id": "root-native-code",
+                            "parent_task_id": "",
+                        },
+                        sort_keys=True,
+                    ) + "\n",
+                    encoding="utf-8",
+                )
+                parent_run = run_root / "native-code-parent"
+                parent_run.mkdir(parents=True, exist_ok=True)
+                (parent_run / "task_memory.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "task_memory_id": "goal-native-code",
+                            "root_task_id": "root-native-code",
+                            "run_task_id": "native-code-parent",
+                            "parent_task_id": "root-native-code",
+                        },
+                        sort_keys=True,
+                    ) + "\n",
+                    encoding="utf-8",
+                )
                 preflight = request_json(
                     gateway_base + "/task_preflight",
                     {
                         "message": "fix the python application",
                         "task_id": "native-code-preflight",
                         "governor_transport": "http",
+                        "goal_id": "goal-native-code",
+                        "root_task_id": "root-native-code",
+                        "continuation_of": "native-code-parent",
                     },
                 )
                 preflight_contract = (
@@ -643,6 +679,11 @@ def main() -> int:
                     if isinstance(preflight_contract, dict)
                     else {}
                 )
+                preflight_action_body = (
+                    preflight.get("actions", {}).get("next_action", {}).get("body", {})
+                    if isinstance(preflight.get("actions"), dict)
+                    else {}
+                )
                 if (
                     preflight.get("ok") is not True
                     or preflight.get("governor") != "Ceraxia"
@@ -650,8 +691,59 @@ def main() -> int:
                     or "worker_plan" in preflight_contract
                     or (run_root / "native-code-preflight").exists()
                     or ceraxia_brain.call_count != 0
+                    or preflight_action_body.get("task_memory_id") != "goal-native-code"
+                    or preflight_action_body.get("root_task_id") != "root-native-code"
+                    or preflight_action_body.get("parent_task_id") != "native-code-parent"
+                    or preflight_action_body.get("continuation_of") != "native-code-parent"
                 ):
                     raise AssertionError(f"native structural preflight drifted: {preflight}")
+
+                parent_payload = json.loads(
+                    (parent_run / "task_memory.json").read_text(encoding="utf-8")
+                )
+                parent_payload["run_task_id"] = "different-run"
+                (parent_run / "task_memory.json").write_text(
+                    json.dumps(parent_payload, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                mismatched_parent = request_json(
+                    gateway_base + "/task_preflight",
+                    {
+                        "message": "fix the python application",
+                        "task_id": "native-code-mismatched-child",
+                        "governor_transport": "http",
+                        "goal_id": "goal-native-code",
+                        "root_task_id": "root-native-code",
+                        "continuation_of": "native-code-parent",
+                    },
+                    expected_status=409,
+                )
+                if mismatched_parent.get("error_code") != "task_memory_parent_conflict":
+                    raise AssertionError(
+                        f"mismatched persisted parent was accepted: {mismatched_parent}"
+                    )
+                parent_payload["run_task_id"] = "native-code-parent"
+                (parent_run / "task_memory.json").write_text(
+                    json.dumps(parent_payload, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+
+                unproven_parent = request_json(
+                    gateway_base + "/task_preflight",
+                    {
+                        "message": "fix the python application",
+                        "task_id": "native-code-unproven-child",
+                        "governor_transport": "http",
+                        "goal_id": "goal-native-code",
+                        "root_task_id": "root-native-code",
+                        "continuation_of": "missing-parent-run",
+                    },
+                    expected_status=409,
+                )
+                if unproven_parent.get("error_code") != "task_memory_parent_conflict":
+                    raise AssertionError(
+                        f"unproven parent lineage was not rejected: {unproven_parent}"
+                    )
 
                 prepared = request_json(
                     gateway_base + "/orchestrate",

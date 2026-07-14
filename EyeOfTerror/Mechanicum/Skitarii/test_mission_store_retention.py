@@ -42,6 +42,9 @@ class MissionStoreRetentionTests(unittest.TestCase):
                 "MAX_STORE_MISSIONS",
                 "MAX_ACTIVE_MISSIONS",
                 "MAX_AUTO_REVISION_ATTEMPTS",
+                "MAX_TASK_CHECKPOINT_COMMIT_ATTEMPTS",
+                "TASK_CHECKPOINT_RETRY_BASE_SECONDS",
+                "TASK_CHECKPOINT_RETRY_MAX_SECONDS",
                 "MAX_REVISION_TURNS",
             )
         }
@@ -175,6 +178,168 @@ class MissionStoreRetentionTests(unittest.TestCase):
         self.assertTrue(result["revision_exhausted"])
         self.assertEqual(result["revision_attempts"], 2)
         self.assertEqual(result["verification_findings"][0]["code"], "still-failing")
+
+    def test_checkpoint_commit_retry_is_durable_and_does_not_spend_coding_attempts(self) -> None:
+        mission_store.MAX_TASK_CHECKPOINT_COMMIT_ATTEMPTS = 4
+        mission_store.TASK_CHECKPOINT_RETRY_BASE_SECONDS = 0
+        calls: list[int] = []
+
+        def worker(mission: mission_store.Mission) -> dict[str, object]:
+            calls.append(mission.attempt)
+            if len(calls) < 3:
+                return {
+                    "status": "failed",
+                    "accepted": False,
+                    "error_code": "task_checkpoint_commit_pending",
+                    "retryable": True,
+                    "revision_required": False,
+                    "pending_task_checkpoint": {"current_state": "verified"},
+                    "pending_task_checkpoint_key": "stable-key",
+                    "checkpoint_pending_original": {
+                        "status": "done", "accepted": True,
+                    },
+                    "task_checkpoint_commit_attempts": len(calls),
+                }
+            return {
+                "status": "done",
+                "accepted": True,
+                "task_checkpoint_recovered": True,
+            }
+
+        mission = mission_store.create_and_run(
+            "checkpoint-retry",
+            "commit verified candidate",
+            {"goal": "commit verified candidate", "max_wall_sec": 60},
+            worker,
+        )
+        deadline = time.time() + 5
+        while mission.inflight and time.time() < deadline:
+            time.sleep(0.01)
+
+        snapshot = mission.snapshot()
+        self.assertEqual(calls, [1, 1, 1])
+        self.assertEqual(snapshot["attempt"], 1)
+        self.assertEqual(snapshot["revision_turns"], [])
+        self.assertEqual(snapshot["status"], "done")
+        self.assertTrue(snapshot["result"]["accepted"])
+        scheduled = [
+            event for event in snapshot["events"]
+            if event.get("type") == "task_checkpoint_retry_scheduled"
+        ]
+        self.assertEqual(len(scheduled), 2)
+
+    def test_cancel_during_checkpoint_backoff_preserves_verified_candidate(self) -> None:
+        mission_store.MAX_TASK_CHECKPOINT_COMMIT_ATTEMPTS = 4
+        mission_store.TASK_CHECKPOINT_RETRY_BASE_SECONDS = 30
+        returned = threading.Event()
+        pending = {
+            "status": "failed",
+            "accepted": False,
+            "error_code": "task_checkpoint_commit_pending",
+            "pending_task_checkpoint": {"current_state": "verified"},
+            "pending_task_checkpoint_key": "stable-key",
+            "checkpoint_pending_original": {
+                "status": "done", "accepted": True,
+            },
+            "task_checkpoint_commit_attempts": 1,
+            "workspace_checkpoint": {"sentinel": "candidate patch"},
+        }
+
+        def worker(_mission: mission_store.Mission) -> dict[str, object]:
+            returned.set()
+            return dict(pending)
+
+        mission = mission_store.create_and_run(
+            "cancel-checkpoint-backoff", "goal", {"goal": "goal"}, worker,
+        )
+        self.assertTrue(returned.wait(timeout=2))
+        deadline = time.time() + 2
+        while mission.status != "queued" and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(mission.status, "queued")
+        self.assertTrue(mission_store.cancel(mission.id))
+        deadline = time.time() + 2
+        while mission.inflight and time.time() < deadline:
+            time.sleep(0.01)
+
+        result = mission.snapshot()["result"]
+        self.assertEqual(mission.status, "cancelled")
+        self.assertEqual(result["error_code"], "task_checkpoint_commit_pending")
+        self.assertEqual(result["pending_task_checkpoint_key"], "stable-key")
+        self.assertEqual(result["workspace_checkpoint"]["sentinel"], "candidate patch")
+        self.assertTrue(result["cancelled"])
+
+    def test_cancel_after_worker_returns_preserves_workspace_checkpoint(self) -> None:
+        checkpoint = {"sentinel": "durable patch"}
+
+        def worker(mission: mission_store.Mission) -> dict[str, object]:
+            mission.cancelled.set()
+            return {
+                "status": "failed",
+                "accepted": False,
+                "workspace_checkpoint": checkpoint,
+            }
+
+        mission = mission_store.create_and_run(
+            "cancel-after-verdict", "goal", {"goal": "goal"}, worker,
+        )
+        deadline = time.time() + 2
+        while mission.inflight and time.time() < deadline:
+            time.sleep(0.01)
+        result = mission.snapshot()["result"]
+        self.assertEqual(mission.status, "cancelled")
+        self.assertEqual(result["workspace_checkpoint"], checkpoint)
+        self.assertTrue(result["cancelled"])
+
+    def test_restart_salvage_requires_complete_identity_bound_patch(self) -> None:
+        self.assertFalse(mission_store._valid_restart_workspace_checkpoint({}))
+        diff = "diff --git a/app.py b/app.py\n"
+        valid = {
+            "schema_version": 1,
+            "base_tree": "a" * 40,
+            "patch_sha256": hashlib.sha256(diff.encode("utf-8")).hexdigest(),
+            "unified_diff": diff,
+            "changed_files": ["app.py"],
+            "task_memory_id": "stable-goal",
+            "root_task_id": "root-run",
+            "parent_task_id": "",
+        }
+        self.assertTrue(mission_store._valid_restart_workspace_checkpoint(valid))
+
+        mission = mission_store.create(
+            "false-salvage", "goal", payload={"goal": "goal"},
+        )
+        with mission._lock:
+            mission.status = "blocked"
+            mission.result = {
+                "status": "blocked",
+                "accepted": False,
+                "workspace_checkpoint": {},
+                "restart_recovery_required": True,
+            }
+            mission.cleanup_complete = False
+            mission._resume_disabled = True
+            mission._persist(raise_errors=True)
+        self.assertFalse(mission_store.prepare_restart_salvage(mission.id))
+
+        with mission._lock:
+            mission.status = "running"
+            mission.result = {
+                "status": "running",
+                "accepted": False,
+                "workspace_checkpoint": valid,
+            }
+            mission.inflight = True
+            mission.cleanup_complete = False
+            mission._resume_disabled = False
+            mission._persist(raise_errors=True)
+        mission_store._MISSIONS = {}
+        mission_store._rehydrate()
+        restored = mission_store.get(mission.id)
+        self.assertIsNotNone(restored)
+        assert restored is not None
+        self.assertTrue(restored.result["restart_recovery_required"])
+        self.assertEqual(restored.result["workspace_checkpoint"], valid)
 
     def test_active_and_still_executing_missions_are_never_pruned(self) -> None:
         mission_store.MAX_ACTIVE_MISSIONS = len(mission_store.ACTIVE_STATUSES) + 1

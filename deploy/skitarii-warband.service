@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 WorkingDirectory=/media/shushunya/SHUSHUNYA/shushunya
 Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/media/shushunya/SHUSHUNYA/shushunya/.secrets/archive-clients.env
 ExecStart=/usr/bin/python3 /media/shushunya/SHUSHUNYA/shushunya/EyeOfTerror/Mechanicum/Skitarii/service.py
 Restart=always
 RestartSec=5

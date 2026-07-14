@@ -421,12 +421,30 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             return
 
         if self.path.startswith("/archive/task-page"):
+            if not require_auth(self):
+                return
             import task_page
             params = parse_qs(urlsplit(self.path).query) if "?" in self.path else {}
-            task_id = (params.get("task_id") or [""])[0]
+            task_id = (params.get("task_id") or [""])[0] or None
+            task_memory_id = (params.get("task_memory_id") or [""])[0] or None
             namespace = (params.get("namespace") or [None])[0]
-            content = task_page.read_task_page(task_id, namespace=namespace) if task_id else ""
-            write_json(self, 200, {"task_id": task_id, "content": content})
+            try:
+                document = task_page.default_store().lookup(
+                    task_id=task_id,
+                    task_memory_id=task_memory_id,
+                    namespace=namespace,
+                ) if task_id or task_memory_id else None
+            except task_page.TaskPageError as exc:
+                write_json(self, exc.status, exc.response())
+                return
+            except sqlite3.Error as exc:
+                write_json(
+                    self,
+                    503,
+                    {"ok": False, "code": "task_page_store_unavailable", "error": str(exc)},
+                )
+                return
+            write_json(self, 200, document or task_page.empty_task_page_document(task_id or ""))
             return
 
         if self.path.startswith("/archive/graph/search"):
@@ -785,22 +803,42 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             return
 
         if self.path.startswith("/archive/task-page"):
+            if not require_auth(self):
+                return
+            try:
+                content_length = int(self.headers.get("Content-Length") or 0)
+            except (TypeError, ValueError):
+                content_length = -1
+            if content_length <= 0 or content_length > TASK_MEMORY_MAX_REQUEST_BYTES:
+                write_json(
+                    self,
+                    413,
+                    {"ok": False, "error": "invalid task-page request size"},
+                )
+                return
             try:
                 payload = read_json(self)
-            except json.JSONDecodeError as exc:
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                 write_json(self, 400, {"ok": False, "error": f"Invalid JSON: {exc}"})
                 return
             import task_page
-            task_id = str(payload.get("task_id") or "")
-            if not task_id:
-                write_json(self, 400, {"ok": False, "error": "task_id required"})
+            route_action = urlsplit(self.path).path.removeprefix("/archive/task-page/").strip("/")
+            if route_action in {"init", "event", "checkpoint"}:
+                payload = dict(payload)
+                payload.setdefault("action", route_action)
+            try:
+                document = task_page.handle_task_page_post(payload)
+            except task_page.TaskPageError as exc:
+                write_json(self, exc.status, exc.response())
                 return
-            namespace = payload.get("namespace")
-            if payload.get("note"):
-                task_page.append_task_note(task_id, str(payload["note"]), namespace=namespace)
-            elif payload.get("body") is not None:
-                task_page.write_task_page(task_id, str(payload["body"]), namespace=namespace)
-            write_json(self, 200, {"ok": True, "task_id": task_id})
+            except sqlite3.Error as exc:
+                write_json(
+                    self,
+                    503,
+                    {"ok": False, "code": "task_page_store_unavailable", "error": str(exc)},
+                )
+                return
+            write_json(self, 200, document)
             return
 
         if self.path in ("/archive/chat/reports/register-token", "/archive/mobile/chat/reports/register-token"):

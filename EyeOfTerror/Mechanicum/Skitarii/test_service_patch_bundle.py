@@ -1226,6 +1226,38 @@ class TestHttpRequestGate(unittest.TestCase):
         )
         execute.assert_not_called()
 
+    def test_http_resume_reports_persistence_failure_instead_of_dropping_connection(self):
+        class StoredMission:
+            def __init__(self):
+                self.id = "resume-persist-fail"
+                self.payload = {"goal": "resume"}
+                self.result = {"status": "failed", "accepted": False}
+                self.status = "failed"
+                self._lock = threading.RLock()
+
+        mission = StoredMission()
+        with (
+            patch.object(service.mission_store, "get", return_value=mission),
+            patch.object(service, "execution_authorization_error", return_value=None),
+            patch.object(
+                service.mission_store,
+                "resume",
+                side_effect=service.mission_store.MissionPersistenceError("disk full"),
+            ),
+        ):
+            code, payload = _http_request(
+                "POST", "/missions/resume-persist-fail/resume",
+                body=b"{}",
+                headers={"Content-Type": "application/json"},
+            )
+
+        self.assertEqual(code, 507)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["status"], "failed")
+        self.assertEqual(
+            payload["error_code"], "mission_resume_persistence_failed",
+        )
+
     def test_standalone_http_execution_requires_both_env_and_payload_flags(self):
         base = {"goal": "fix", "task_id": "standalone-matrix"}
         with patch.dict(os.environ, {"SKITARII_STANDALONE_TEST_MODE": "1"}):

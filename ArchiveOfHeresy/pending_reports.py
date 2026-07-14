@@ -59,16 +59,49 @@ def pending_summary():
         return {"count": 0, "announce": "", "topics": []}
 
 
-def task_roster_note():
-    """Live status of all brigade tasks, injected every chat turn so Shushunya
-    answers task status from truth (Vox pulls it fresh from Abaddon) instead
-    of confabulating from a stale ack line or focus note."""
+def task_roster_tasks(limit=20):
+    """Bounded trusted task identities and live state from Vox/Abaddon.
+
+    Callers may use the ids for correlation.  The state remains the authority;
+    Archive task pages are reference memory and must never override it.
+    """
     try:
         roster = _get("/roster")
     except Exception as exc:  # noqa: BLE001
         print(f"Vox roster failed: {exc}", flush=True)
-        return None
-    tasks = [t for t in (roster.get("tasks") or []) if t.get("state") not in ("completed", "cancelled")]
+        return []
+    try:
+        safe_limit = max(1, min(int(limit or 20), 50))
+    except (TypeError, ValueError):
+        safe_limit = 20
+    result = []
+    for item in roster.get("tasks") or []:
+        if not isinstance(item, dict):
+            continue
+        task = {
+            "task_id": str(item.get("task_id") or "").strip()[:240],
+            "goal": str(item.get("goal") or "").strip()[:1_200],
+            "state": str(item.get("state") or "").strip().lower()[:80],
+            "state_label": str(item.get("state_label") or "").strip()[:300],
+            "user_visible_state": str(item.get("user_visible_state") or "").strip()[:80],
+            "active": item.get("active") is True,
+            "needs_user": item.get("needs_user") is True,
+        }
+        if task["task_id"] or task["goal"]:
+            result.append(task)
+        if len(result) >= safe_limit:
+            break
+    return result
+
+
+def task_roster_note(tasks=None):
+    """Live status of all brigade tasks, injected every chat turn so Shushunya
+    answers task status from truth (Vox pulls it fresh from Abaddon) instead
+    of confabulating from a stale ack line or focus note."""
+    tasks = task_roster_tasks() if tasks is None else [
+        dict(item) for item in tasks if isinstance(item, dict)
+    ]
+    tasks = [t for t in tasks if t.get("state") not in ("completed", "cancelled")]
     if not tasks:
         return None
     lines = []

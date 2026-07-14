@@ -98,8 +98,15 @@ RUNTIME_DIR="$ROOT/runtime"
 PID_FILE="$RUNTIME_DIR/archive-main.pid"
 LOG_FILE="$RUNTIME_DIR/archive-main.log"
 ENV_FILE="$ROOT/.env"
+ARCHIVE_CLIENT_SECRET="$PROJECT_ROOT/.secrets/archive-clients.env"
 
 if [[ -f "$ENV_FILE" ]]; then set -a; . "$ENV_FILE"; set +a; fi
+if [[ -r "$ARCHIVE_CLIENT_SECRET" ]]; then
+  set -a
+  # Shared operator-owned mode-0600 key for the local task-page clients.
+  . "$ARCHIVE_CLIENT_SECRET"
+  set +a
+fi
 if [[ ! -x "$ENV_DIR/bin/python" ]]; then
   echo "Python environment not found: $ENV_DIR" >&2
   exit 1

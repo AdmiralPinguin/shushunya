@@ -125,6 +125,8 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         warmaster_request: dict,
         explanation: str,
         required_action: str,
+        goal_id: str = "",
+        root_task_id: str = "",
     ) -> None:
         key = f"seed:{task_id}"
         turn_id, _ = self.ledger.accept_turn(
@@ -144,6 +146,9 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
                 "spec": {
                     "message": message,
                     "task_id": task_id,
+                    "goal_id": goal_id or task_id,
+                    "task_memory_id": goal_id or task_id,
+                    "root_task_id": root_task_id or task_id,
                     "warmaster_request": warmaster_request,
                 },
                 "state": "failed",
@@ -254,6 +259,10 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         # The model's fake completion claim was structurally discarded; Archive
         # receives only the typed effect and the durable truth exists now.
         self.assertEqual(result["effect"]["destination"], "abaddon")
+        payload = result["effect"]["payload"]
+        self.assertEqual(payload["goal_id"], payload["task_id"])
+        self.assertEqual(payload["task_memory_id"], payload["goal_id"])
+        self.assertEqual(payload["root_task_id"], payload["task_id"])
         self.assertEqual(self.ledger.list_commitments()[0]["state"], "queued")
 
     async def test_continuation_binds_trusted_parent_and_creates_new_linked_mission(self):
@@ -290,13 +299,9 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         envelope = self.envelope(key="continue-linked", text="Пиздуй доделывай")
         envelope.capability_manifest = manifest
 
-        with patch.object(
-            self.situation,
-            "assemble",
-            side_effect=ValueError("an explicit bound command must not build a prompt"),
-        ):
-            result = await engine.resolve(envelope)
+        result = await engine.resolve(envelope)
 
+        self.assertEqual(engine.calls, 1)
         self.assertEqual(result["decision"]["action"], "continue_warmaster_mission")
         self.assertEqual(result["decision"]["continue_parent_task_id"], "task-parent")
         self.assertEqual(result["decision"]["reply"], "")
@@ -304,10 +309,12 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(effect["destination"], "abaddon")
         self.assertEqual(effect["payload"]["parent_task_id"], "task-parent")
         self.assertNotEqual(effect["payload"]["task_id"], "task-parent")
+        self.assertEqual(effect["payload"]["goal_id"], "task-parent")
+        self.assertEqual(effect["payload"]["root_task_id"], "task-parent")
         self.assertIn("Терминальный родительский run неизменяем", effect["payload"]["message"])
         self.assertIn("skeleton без APK", effect["payload"]["message"])
 
-    async def test_truth_guard_continues_exact_recent_task_instead_of_fake_chat_promise(self):
+    async def test_literal_truth_guard_is_fallback_after_model_speech(self):
         manifest = json.loads(json.dumps(CAPABILITIES))
         manifest["continuation_parent_task_id"] = "core-galaga-failed"
         manifest["capabilities"].append(
@@ -349,9 +356,9 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
 
         result = await engine.resolve(envelope)
 
-        # The trusted parent plus a real imperative is complete intent. The
-        # model must not get a chance to erase it with a harmless chat reply.
-        self.assertEqual(engine.calls, 0)
+        # The model reasons first. The literal guard only takes over because a
+        # bound imperative otherwise degraded into speech without an effect.
+        self.assertEqual(engine.calls, 1)
         self.assertEqual(result["decision"]["action"], "continue_warmaster_mission")
         self.assertEqual(
             result["decision"]["continue_parent_task_id"],
@@ -407,13 +414,13 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["decision"]["action"], "answer_in_chat")
                 self.assertIsNone(result["effect"])
 
-    async def test_direct_continuation_action_requires_real_imperative(self):
+    async def test_semantic_continuation_does_not_require_literal_regex_match(self):
         manifest = self.continuation_manifest()
         for index, text in enumerate(
             [
-                "Не продолжай эту задачу",
-                "Почему не продолжил эту задачу?",
-                "Если продолжить эту задачу, что произойдет?",
+                "Вернись к той работе и добейся результата",
+                "Возьми снова остановившуюся задачу в работу",
+                "Нужен всё-таки результат по той миссии",
             ]
         ):
             with self.subTest(text=text):
@@ -430,9 +437,8 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
 
                 result = await engine.resolve(envelope)
 
-                self.assertEqual(result["decision"]["action"], "answer_in_chat")
-                self.assertEqual(result["decision"]["reason"], "continuation_requires_imperative")
-                self.assertIsNone(result["effect"])
+                self.assertEqual(result["decision"]["action"], "continue_warmaster_mission")
+                self.assertIsNotNone(result["effect"])
 
     async def test_clause_aware_imperatives_survive_mixed_context(self):
         manifest = self.continuation_manifest()
@@ -603,6 +609,8 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
             warmaster_request=parent_request,
             explanation=explanation,
             required_action=required_action,
+            goal_id="goal-galaga-android",
+            root_task_id="root-galaga-android",
         )
         manifest = json.loads(json.dumps(CAPABILITIES))
         manifest["continuation_parent_task_id"] = parent_task_id
@@ -638,6 +646,9 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["parent_spec"]["warmaster_request"], parent_request)
         self.assertEqual(payload["failure_guidance"]["explanation"], explanation)
         self.assertEqual(payload["failure_guidance"]["required_action"], required_action)
+        self.assertEqual(payload["goal_id"], "goal-galaga-android")
+        self.assertEqual(payload["task_memory_id"], "goal-galaga-android")
+        self.assertEqual(payload["root_task_id"], "root-galaga-android")
         self.assertIn("Финальный APK обязан устанавливаться", payload["message"])
         self.assertIn(required_action, payload["message"])
         child = self.ledger.list_commitments()[0]
@@ -668,10 +679,10 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
 
         result = await engine.resolve(envelope)
 
-        self.assertEqual(engine.calls, 0)
-        self.assertEqual(result["decision"]["action"], "continue_warmaster_mission")
-        self.assertEqual(result["decision"]["continue_parent_task_id"], "task-real")
-        self.assertEqual(result["effect"]["payload"]["parent_task_id"], "task-real")
+        self.assertEqual(engine.calls, 1)
+        self.assertEqual(result["decision"]["action"], "ask_clarification")
+        self.assertEqual(result["decision"]["reason"], "continuation_task_mismatch")
+        self.assertIsNone(result["effect"])
 
     async def test_pending_decision_binds_trusted_task_and_exact_user_text(self):
         manifest = json.loads(json.dumps(CAPABILITIES))
