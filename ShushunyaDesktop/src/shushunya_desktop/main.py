@@ -187,6 +187,8 @@ class WindowManager(QObject):
         for index, (screen, descriptor) in enumerate(zip(screens, descriptors, strict=True)):
             role = roles[descriptor.key]
             profile = _display_profile(descriptor.key, display_profiles)
+            target = screen.geometry()
+            virtual = screen.virtualGeometry()
             window = self._create(
                 {
                     "width": descriptor.width,
@@ -197,6 +199,12 @@ class WindowManager(QObject):
                     "screenOrdinal": index,
                     "displayCount": len(screens),
                     "previewMode": False,
+                    "screenOriginX": target.x(),
+                    "screenOriginY": target.y(),
+                    "virtualOriginX": virtual.x(),
+                    "virtualOriginY": virtual.y(),
+                    "virtualDesktopWidth": virtual.width(),
+                    "virtualDesktopHeight": virtual.height(),
                     "scaleMultiplier": profile["scale_multiplier"],
                     "extraSafeLeft": profile["extra_safe_left"],
                     "extraSafeRight": profile["extra_safe_right"],
@@ -205,7 +213,6 @@ class WindowManager(QObject):
                 },
                 screen=screen,
             )
-            target = screen.geometry()
             window.setScreen(screen)
             window.setGeometry(target)
             self.expected_screens[descriptor.key] = {
@@ -334,11 +341,19 @@ class WindowManager(QObject):
         width, height = size
         window = self._create(
             {
+                "width": width,
+                "height": height,
                 "screenRole": role,
                 "screenKey": f"preview|{role}",
                 "screenLabel": f"PREVIEW · {width}×{height}",
                 "screenOrdinal": 0,
                 "previewMode": True,
+                "screenOriginX": 0,
+                "screenOriginY": 0,
+                "virtualOriginX": 0,
+                "virtualOriginY": 0,
+                "virtualDesktopWidth": width,
+                "virtualDesktopHeight": height,
             }
         )
         window.setWidth(width)

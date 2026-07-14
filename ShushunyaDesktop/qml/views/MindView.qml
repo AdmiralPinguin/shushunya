@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Shapes
 import "../components"
 
 Item {
@@ -11,239 +11,137 @@ Item {
     property bool motionEnabled: true
     readonly property bool compact: viewportWidth < 1000
     readonly property bool carriesResults: totalScreens < 3
+    readonly property color mindColor: backend.companion.presence === "waiting" ? "#88152d" : "#745080"
+    clip: true
+
+    Shape {
+        anchors.fill: parent
+        opacity: .30 + backend.pulse * .05
+        antialiasing: true
+
+        ShapePath {
+            fillColor: "transparent"
+            strokeColor: view.mindColor
+            strokeWidth: 2.2
+            capStyle: ShapePath.RoundCap
+            startX: view.width * .52
+            startY: -20
+            PathLine { x: view.width * .47; y: view.height * .18 }
+            PathLine { x: view.width * .54; y: view.height * .34 }
+            PathLine { x: view.width * .48; y: view.height * .51 }
+            PathLine { x: view.width * .55; y: view.height * .70 }
+            PathLine { x: view.width * .49; y: view.height * 1.04 }
+        }
+
+        ShapePath {
+            fillColor: "transparent"
+            strokeColor: "#9b7658"
+            strokeWidth: 1
+            startX: view.width * .22
+            startY: view.height * .13
+            PathLine { x: view.width * .50; y: view.height * .30 }
+            PathLine { x: view.width * .82; y: view.height * .43 }
+            PathLine { x: view.width * .50; y: view.height * .57 }
+            PathLine { x: view.width * .18; y: view.height * .77 }
+        }
+    }
 
     LivingSeal {
-        width: Math.min(view.width * .94, view.height * .52)
+        id: thoughtCore
+        width: Math.min(view.width * .82, view.height * .43)
         height: width
-        anchors.horizontalCenter: parent.horizontalCenter
-        y: view.height * .24
-        intensity: .25
+        x: (view.width - width) / 2
+        y: view.height * .285
+        stateColor: view.mindColor
+        intensity: .82
         motion: view.motionEnabled
     }
 
-    Flickable {
-        id: scroll
-        anchors.fill: parent
-        contentWidth: width
-        contentHeight: content.implicitHeight + 70
-        boundsBehavior: Flickable.StopAtBounds
-        flickableDirection: Flickable.VerticalFlick
-        clip: true
+    IncisedText {
+        id: currentThought
+        width: view.width * .82
+        x: view.width * .09
+        y: view.height * .045
+        label: backend.companion.hasActivities ? "СЕЙЧАС" : "ТИШИНА ВНУТРИ"
+        heading: backend.companion.currentActivity.length > 0
+                 ? backend.companion.currentActivity
+                 : "Я ничего не изображаю. Я просто рядом."
+        accent: backend.companion.hasActivities ? "#8b7194" : "#786f76"
+        headingPixelSize: view.compact ? 27 : 32
+        headingLines: 4
+    }
 
-        Column {
-            id: content
-            width: scroll.width - (view.compact ? 38 : 58)
-            x: (scroll.width - width) / 2
-            y: view.compact ? 22 : 30
-            spacing: view.compact ? 17 : 23
+    IncisedText {
+        visible: backend.companion.ownerRequest.length > 0
+        width: view.width * .76
+        x: view.width * .12
+        y: view.height * .205
+        label: "МНЕ НУЖНО ТВОЁ РЕШЕНИЕ"
+        heading: backend.companion.ownerRequest
+        accent: "#9b1d37"
+        headingPixelSize: view.compact ? 20 : 23
+        headingLines: 4
+        reverseCut: true
+    }
 
-            QuietHeader {
-                width: parent.width
-                title: backend.companion.name
-                subtitle: "то, что шевелится внутри"
-                accent: backend.companion.presence === "waiting" ? "#b52a46" : "#a855f7"
-            }
+    Column {
+        id: agendaSpine
+        width: view.width * .82
+        x: view.width * .09
+        y: view.height * .69
+        spacing: view.compact ? 14 : 18
 
-            Column {
-                width: parent.width
-                spacing: 8
-                Text {
-                    text: "ВНУТРИ МЕНЯ"
-                    color: "#c6a0df"
-                    font.family: "DejaVu Sans"
-                    font.pixelSize: 12
-                    font.bold: true
-                    font.letterSpacing: 3
-                }
-                Text {
+        IncisedText {
+            visible: !backend.companion.hasAgenda
+            width: parent.width
+            label: "ДАЛЬШЕ"
+            heading: "Пока не строю замыслов за твоей спиной."
+            accent: "#746678"
+            headingPixelSize: view.compact ? 21 : 24
+            headingLines: 2
+        }
+
+        Repeater {
+            model: backend.companion.agenda
+            delegate: Item {
+                id: agendaRow
+                required property int index
+                required property string text
+                required property string detail
+                required property string phase
+                visible: index < 2
+                width: agendaSpine.width
+                implicitHeight: agendaNode.implicitHeight
+                height: visible ? implicitHeight : 0
+
+                IncisedText {
+                    id: agendaNode
                     width: parent.width
-                    text: "Сейчас и дальше"
-                    color: "#f2e7d2"
-                    font.family: "DejaVu Serif"
-                    font.pixelSize: view.compact ? 34 : 43
-                    font.bold: true
-                    wrapMode: Text.WordWrap
+                    label: agendaRow.phase === "now" ? "УЖЕ НАЧАЛ" : agendaRow.phase === "next" ? "СЛЕДУЮЩЕЕ" : "ПОТОМ"
+                    heading: agendaRow.text
+                    detail: agendaRow.index === 0 ? agendaRow.detail : ""
+                    accent: agendaRow.phase === "now" ? "#3b7f89" : agendaRow.phase === "next" ? "#9b7658" : "#70527a"
+                    headingPixelSize: view.compact ? 19 : 22
+                    detailPixelSize: 12
+                    headingLines: 3
+                    detailLines: 2
+                    reverseCut: agendaRow.index % 2 === 1
                 }
             }
-
-            RitualInscription {
-                visible: backend.companion.ownerRequest.length > 0
-                width: parent.width
-                label: "нужно от тебя"
-                heading: backend.companion.ownerRequest
-                accent: "#b52a46"
-                glyphSource: Qt.resolvedUrl("../../assets/heresy/horus-eye.svg")
-                headingPixelSize: view.compact ? 20 : 24
-                headingLines: 5
-                backgroundColor: "#8c160713"
-            }
-
-            Text {
-                text: "ЧЕМ Я ЗАНЯТ"
-                color: "#4debff"
-                font.family: "DejaVu Sans"
-                font.pixelSize: 12
-                font.bold: true
-                font.letterSpacing: 2.6
-            }
-
-            RitualInscription {
-                visible: !backend.companion.hasActivities
-                width: parent.width
-                label: "тишина"
-                heading: "Сейчас я ничего не тащу за кулисами. Я рядом."
-                accent: "#6d5a7b"
-                glyphSource: Qt.resolvedUrl("../../assets/heresy/broken-halo-rune.svg")
-                headingPixelSize: view.compact ? 21 : 25
-                backgroundColor: "#3707040c"
-            }
-
-            Repeater {
-                model: backend.companion.activities
-                delegate: Item {
-                    id: activityRow
-                    required property string text
-                    required property string detail
-                    required property string phase
-                    width: content.width
-                    implicitHeight: activityNode.implicitHeight
-                    height: implicitHeight
-
-                    RitualInscription {
-                        id: activityNode
-                        width: parent.width
-                        label: activityRow.phase === "waiting" ? "жду тебя" : activityRow.phase === "now" ? "сейчас" : "держу в работе"
-                        heading: activityRow.text
-                        detail: activityRow.detail
-                        accent: activityRow.phase === "waiting" ? "#b52a46" : activityRow.phase === "now" ? "#4debff" : "#b89552"
-                        glyphSource: activityRow.phase === "waiting"
-                                     ? Qt.resolvedUrl("../../assets/heresy/horus-eye.svg")
-                                     : Qt.resolvedUrl("../../assets/heresy/chaos-star.svg")
-                        headingPixelSize: view.compact ? 19 : 23
-                        detailPixelSize: view.compact ? 12 : 14
-                        headingLines: 4
-                        detailLines: 4
-                        backgroundColor: activityRow.phase === "waiting" ? "#72150713" : "#4d07040c"
-                    }
-                }
-            }
-
-            Rectangle { width: parent.width; height: 1; color: "#4fb89552" }
-
-            Text {
-                text: "ДАЛЬШЕ"
-                color: "#b89552"
-                font.family: "DejaVu Sans"
-                font.pixelSize: 12
-                font.bold: true
-                font.letterSpacing: 2.6
-            }
-
-            RitualInscription {
-                visible: !backend.companion.hasAgenda
-                width: parent.width
-                label: "без тайного плана"
-                heading: "Пока не строю замыслов за твоей спиной."
-                accent: "#7a687d"
-                glyphSource: Qt.resolvedUrl("../../assets/heresy/broken-halo-rune.svg")
-                headingPixelSize: view.compact ? 20 : 24
-                backgroundColor: "#3707040c"
-            }
-
-            Repeater {
-                model: backend.companion.agenda
-                delegate: Item {
-                    id: agendaRow
-                    required property string text
-                    required property string detail
-                    required property string phase
-                    width: content.width
-                    implicitHeight: agendaNode.implicitHeight
-                    height: implicitHeight
-
-                    RitualInscription {
-                        id: agendaNode
-                        width: parent.width
-                        label: agendaRow.phase === "now" ? "уже начал" : agendaRow.phase === "next" ? "следующее" : "потом"
-                        heading: agendaRow.text
-                        detail: agendaRow.detail
-                        accent: agendaRow.phase === "now" ? "#4debff" : agendaRow.phase === "next" ? "#b89552" : "#8b6da0"
-                        glyphSource: Qt.resolvedUrl("../../assets/heresy/broken-halo-rune.svg")
-                        headingPixelSize: view.compact ? 19 : 22
-                        detailPixelSize: view.compact ? 12 : 13
-                        headingLines: 3
-                        detailLines: 3
-                        backgroundColor: "#4307040c"
-                    }
-                }
-            }
-
-            Rectangle {
-                visible: view.carriesResults
-                width: parent.width
-                height: visible ? 1 : 0
-                color: "#4fa855f7"
-            }
-
-            Text {
-                visible: view.carriesResults
-                text: "ЧТО Я ПРИНЁС"
-                color: "#b782e2"
-                font.family: "DejaVu Sans"
-                font.pixelSize: 12
-                font.bold: true
-                font.letterSpacing: 2.6
-            }
-
-            RitualInscription {
-                visible: view.carriesResults && !backend.companion.hasResults
-                width: parent.width
-                label: "пока пусто"
-                heading: "Ничего нового ещё не принёс."
-                accent: "#77647c"
-                glyphSource: Qt.resolvedUrl("../../assets/heresy/horus-eye.svg")
-                headingPixelSize: view.compact ? 20 : 24
-                backgroundColor: "#3707040c"
-            }
-
-            RitualInscription {
-                visible: view.carriesResults && backend.companion.hasResults
-                width: parent.width
-                label: "последняя печать"
-                heading: backend.companion.latestResult
-                accent: "#4debff"
-                glyphSource: Qt.resolvedUrl("../../assets/heresy/chaos-star.svg")
-                headingPixelSize: view.compact ? 20 : 23
-                headingLines: 3
-                backgroundColor: "#5007040c"
-            }
         }
+    }
 
-        ScrollBar.vertical: ScrollBar {
-            policy: scroll.contentHeight > scroll.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
-            width: 3
-            opacity: .28
-        }
-
-        SequentialAnimation {
-            running: scroll.contentHeight > scroll.height + 24
-            loops: Animation.Infinite
-            PauseAnimation { duration: 5200 }
-            NumberAnimation {
-                target: scroll
-                property: "contentY"
-                to: Math.max(0, scroll.contentHeight - scroll.height)
-                duration: Math.max(6500, (scroll.contentHeight - scroll.height) * 16)
-                easing.type: Easing.InOutSine
-            }
-            PauseAnimation { duration: 4200 }
-            NumberAnimation {
-                target: scroll
-                property: "contentY"
-                to: 0
-                duration: 1400
-                easing.type: Easing.InOutCubic
-            }
-        }
+    IncisedText {
+        visible: view.carriesResults && backend.companion.hasResults
+        width: view.width * .72
+        x: view.width * .14
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 16
+        label: "ПРИНЕСЕНО"
+        heading: backend.companion.latestResult
+        accent: "#3b7f89"
+        headingPixelSize: view.compact ? 18 : 21
+        headingLines: 2
+        centered: true
     }
 }

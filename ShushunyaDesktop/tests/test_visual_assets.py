@@ -39,7 +39,7 @@ class VisualAssetTests(unittest.TestCase):
                 self.assertEqual(QSize(256, 256), image.size())
                 self.assertTrue(image.hasAlphaChannel())
 
-    def test_active_qml_is_vector_only_and_contains_no_cat_art(self) -> None:
+    def test_active_qml_uses_the_sanctum_but_contains_no_cat_art(self) -> None:
         active_paths = [ROOT / "qml" / "ScreenWindow.qml"]
         active_paths.extend(sorted((ROOT / "qml" / "views").glob("*.qml")))
         active_paths.extend(sorted((ROOT / "qml" / "components").glob("*.qml")))
@@ -47,30 +47,61 @@ class VisualAssetTests(unittest.TestCase):
         active_lower = active.lower()
 
         self.assertIn("assets/heresy", active_lower)
-        self.assertNotIn(".png", active_lower)
-        for retired_asset in (
+        self.assertIn("chaos-sanctum-panorama.png", active_lower)
+        self.assertEqual(1, active_lower.count("chaos-sanctum-panorama.png"))
+        for retired_cat_asset in (
             "shushunya-presence-v2",
             "shushunya-mind-v2",
             "shushunya-hero",
-            "chaos-sanctum-panorama",
         ):
-            with self.subTest(retired_asset=retired_asset):
-                self.assertNotIn(retired_asset, active_lower)
+            with self.subTest(retired_cat_asset=retired_cat_asset):
+                self.assertNotIn(retired_cat_asset, active_lower)
 
-    def test_living_seal_is_the_canonical_two_layer_mark(self) -> None:
+    def test_living_seal_restores_the_old_body_without_icon_orbit(self) -> None:
         source = (ROOT / "qml" / "components" / "LivingSeal.qml").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn("chaos-star.svg", source)
+        self.assertIn("fractured-chaos-seal.svg", source)
         self.assertIn("horus-eye.svg", source)
-        self.assertEqual(2, source.count("Image {"))
-        self.assertEqual(1, source.count("RotationAnimator"))
+        self.assertIn("broken-halo-rune.svg", source)
+        self.assertEqual(4, source.count("Image {"))
+        self.assertEqual(2, source.count("SequentialAnimation on rotation"))
         self.assertNotIn("Repeater", source)
         self.assertNotIn("horned-skull.svg", source)
-        self.assertNotIn("broken-halo-rune.svg", source)
-        self.assertNotIn("fractured-chaos-seal.svg", source)
         self.assertNotIn("warp-eye.svg", source)
+
+    def test_active_views_are_scenes_not_dashboard_cards(self) -> None:
+        screen = (ROOT / "qml" / "ScreenWindow.qml").read_text(encoding="utf-8")
+        views = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted((ROOT / "qml" / "views").glob("*.qml"))
+        )
+
+        self.assertIn("LivingEnvironment", screen)
+        self.assertNotIn("HeresyField {", screen)
+        self.assertIn("IncisedText", views)
+        self.assertNotIn("RitualInscription", views)
+        self.assertNotIn("QuietHeader", views)
+        self.assertNotIn("ScrollBar", views)
+
+    def test_global_virtual_desktop_coordinates_reach_the_scene(self) -> None:
+        screen = (ROOT / "qml" / "ScreenWindow.qml").read_text(encoding="utf-8")
+        main = (ROOT / "src" / "shushunya_desktop" / "main.py").read_text(
+            encoding="utf-8"
+        )
+
+        for name in (
+            "screenOriginX",
+            "screenOriginY",
+            "virtualOriginX",
+            "virtualOriginY",
+            "virtualDesktopWidth",
+            "virtualDesktopHeight",
+        ):
+            with self.subTest(property=name):
+                self.assertIn(name, screen)
+                self.assertIn(f'"{name}"', main)
 
 
 if __name__ == "__main__":

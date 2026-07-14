@@ -9,60 +9,65 @@ Item {
     property bool motionEnabled: true
     readonly property bool compact: viewportWidth < 1500 || viewportHeight < 820
     readonly property bool portrait: viewportHeight > viewportWidth
-    readonly property color moodColor: backend.companion.presence === "waiting" ? "#b52a46"
-                                      : backend.companion.presence === "thinking" ? "#a855f7"
-                                      : backend.companion.presence === "speaking" ? "#4debff"
-                                      : "#e8dec7"
-    readonly property string moodText: backend.companion.presence === "waiting" ? "жду тебя"
-                                       : backend.companion.presence === "thinking" ? "мыслю"
-                                       : backend.companion.presence === "speaking" ? "говорю"
-                                       : "рядом"
+    readonly property color moodColor: backend.companion.presence === "waiting" ? "#88152d"
+                                      : backend.companion.presence === "thinking" ? "#745080"
+                                      : backend.companion.presence === "speaking" ? "#3b7f89"
+                                      : "#b6aa96"
+    readonly property string moodText: backend.companion.presence === "waiting" ? "МОЙ ХОД ОСТАНОВЛЕН ТВОИМ СЛОВОМ"
+                                       : backend.companion.presence === "thinking" ? "МЫСЛЬ ШЕВЕЛИТСЯ"
+                                       : backend.companion.presence === "speaking" ? "ГОЛОС"
+                                       : "ПРИСУТСТВИЕ"
+    clip: true
 
     LivingSeal {
         id: presenceSeal
-        width: Math.min(view.width * (view.portrait ? .86 : .61), view.height * (view.portrait ? .54 : .86))
+        width: view.portrait
+               ? Math.min(view.width * .88, view.height * .56)
+               : Math.min(view.width * .53, view.height * .84)
         height: width
-        anchors.horizontalCenter: parent.horizontalCenter
-        y: view.portrait ? view.height * .04 : -view.height * .015
-        intensity: .96
+        x: view.portrait ? (view.width - width) / 2 : (view.width - width) / 2 + view.width * .035
+        y: view.portrait ? view.height * .07 : -view.height * .015
+        stateColor: view.moodColor
+        intensity: .97
         motion: view.motionEnabled
+    }
+
+    Rectangle {
+        visible: backend.companion.presence === "waiting"
+        width: 3
+        height: presenceSeal.height * .64
+        x: presenceSeal.x + presenceSeal.width * .69
+        y: presenceSeal.y + presenceSeal.height * .18
+        rotation: 42
+        color: "#88152d"
+        opacity: .30 + backend.pulse * .28
     }
 
     Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: parent.height * .44
+        height: parent.height * .43
         gradient: Gradient {
-            GradientStop { position: 0; color: "#00030107" }
-            GradientStop { position: 1; color: "#f2030107" }
+            GradientStop { position: 0; color: "#00020104" }
+            GradientStop { position: .46; color: "#98020104" }
+            GradientStop { position: 1; color: "#f2020104" }
         }
     }
 
-    QuietHeader {
-        anchors.left: parent.left
-        anchors.leftMargin: 20
-        anchors.top: parent.top
-        anchors.topMargin: 13
-        title: backend.companion.name
-        subtitle: view.moodText
-        accent: view.moodColor
-    }
-
-    RitualInscription {
-        width: Math.min(view.width * (view.compact ? .86 : .72), 1220)
+    IncisedText {
+        width: Math.min(view.width * (view.compact ? .82 : .67), 1180)
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: view.compact ? 28 : 45
+        anchors.bottomMargin: view.compact ? 26 : 40
         label: view.moodText
         heading: backend.companion.utterance
         detail: backend.companion.currentActivity
         accent: view.moodColor
-        glyphSource: Qt.resolvedUrl("../../assets/heresy/horus-eye.svg")
-        headingPixelSize: view.compact ? 27 : 35
+        headingPixelSize: view.compact ? 31 : 39
         detailPixelSize: view.compact ? 13 : 15
         headingLines: view.compact ? 3 : 4
+        detailLines: 2
         centered: true
-        backgroundColor: "#c407040d"
     }
 }

@@ -18,6 +18,12 @@ Window {
     property int screenOrdinal: 0
     property int displayCount: 2
     property bool previewMode: false
+    property real screenOriginX: 0
+    property real screenOriginY: 0
+    property real virtualOriginX: 0
+    property real virtualOriginY: 0
+    property real virtualDesktopWidth: width
+    property real virtualDesktopHeight: height
     property real scaleMultiplier: 1.0
     property real extraSafeLeft: 0
     property real extraSafeRight: 0
@@ -37,11 +43,17 @@ Window {
     )
     readonly property real contentScale: Math.max(.62, Math.min(1.18, naturalScale * scaleMultiplier))
 
-    HeresyField {
+    LivingEnvironment {
         anchors.fill: parent
         variant: root.screenRole
         ordinal: root.screenOrdinal
         motion: !root.previewMode
+        screenX: root.screenOriginX
+        screenY: root.screenOriginY
+        virtualX: root.virtualOriginX
+        virtualY: root.virtualOriginY
+        virtualWidth: root.virtualDesktopWidth
+        virtualHeight: root.virtualDesktopHeight
         intensity: root.screenRole === "ambient" ? 1.0
                  : root.screenRole === "presence" ? .92
                  : root.screenRole === "mind" ? .72 : .82
@@ -108,6 +120,7 @@ Window {
             viewportWidth: root.width
             viewportHeight: root.height
             motionEnabled: !root.previewMode
+            screenOrdinal: root.screenOrdinal
         }
     }
 

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Расколотая восьмеричная печать</title>
+  <desc id="desc">Оригинальная асимметричная хаотическая печать с восемью разными лучами, разорванными кольцами и орбитальными знаками.</desc>
+  <defs>
+    <radialGradient id="core" cx="50%" cy="45%" r="60%">
+      <stop offset="0" stop-color="#4debff"/>
+      <stop offset=".42" stop-color="#7b38bd"/>
+      <stop offset="1" stop-color="#241134"/>
+    </radialGradient>
+  </defs>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="256" r="106" stroke="#a855f7" stroke-width="13" stroke-dasharray="92 22 37 17 68 28" transform="rotate(-17 256 256)"/>
+    <circle cx="256" cy="256" r="77" stroke="#4debff" stroke-width="5" stroke-dasharray="42 16 8 13" transform="rotate(11 256 256)" opacity=".82"/>
+
+    <path d="M256 151V57l-18 24 18-58 18 58-18-24" stroke="#a855f7" stroke-width="12"/>
+    <path d="M330 182l65-65-5 31 34-52-53 33 32-4-74 74" stroke="#4debff" stroke-width="10"/>
+    <path d="M361 256h88l-25-17 66 17-66 17 25-17" stroke="#a855f7" stroke-width="12"/>
+    <path d="M330 330l59 59 2-29 26 57-57-26 29-2-70-70" stroke="#e8dec7" stroke-width="10"/>
+    <path d="M256 361v89l19-24-19 64-19-64 19 24" stroke="#4debff" stroke-width="12"/>
+    <path d="M182 330l-67 67 32-7-51 34 33-53-5 32 71-71" stroke="#a855f7" stroke-width="10"/>
+    <path d="M151 256H62l24 19-64-19 64-19-24 19" stroke="#e8dec7" stroke-width="12"/>
+    <path d="M182 182l-62-62-1 29-27-56 57 26-29 1 73 73" stroke="#4debff" stroke-width="10"/>
+  </g>
+
+  <path d="M256 181l36 18 39-7-7 39 18 36-35 20-20 35-36-18-39 7 7-39-18-36 35-20Z"
+        fill="url(#core)" stroke="#e8dec7" stroke-width="7" stroke-linejoin="round"/>
+  <path d="M232 253l19-19 29 9 9 29-19 19-29-9Z" fill="#14091f" stroke="#4debff" stroke-width="6"/>
+  <circle cx="262" cy="262" r="8" fill="#fff7e5"/>
+
+  <g fill="#241134" stroke="#a855f7" stroke-width="5">
+    <circle cx="119" cy="204" r="11"/>
+    <circle cx="386" cy="218" r="8"/>
+    <path d="M176 386l13-19 13 19-13 19Z"/>
+    <path d="M326 105l11-18 11 18-11 18Z"/>
+  </g>
+</svg>

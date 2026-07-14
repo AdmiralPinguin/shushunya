@@ -139,14 +139,12 @@ def _commitment_items(commitments: list[dict[str, Any]]) -> tuple[tuple[Companio
         prefix = prefixes.get(state, "Держу в работе")
         detail = _diagnostic_text(item.get("diagnostic")) if state in WAITING_STATES else ""
         if state == "quarantined":
-            # Quarantine means that an internal acknowledgement or recovery proof is
-            # missing. It is never, by itself, a decision the user can make.
+            # Missing internal acknowledgement/recovery proof is Shushunya's
+            # repair responsibility, never an implicit owner decision.
             detail = "Я не смог доказать продолжение и разбираюсь с этим внутри."
         if state == "waiting_user":
             phase = "waiting"
         elif state in {"waiting_external", "retry_wait", "quarantined"}:
-            # These are internal/external recovery states.  They must never be
-            # rendered as if Shushunya were waiting for the user's decision.
             phase = "recovering"
         else:
             phase = "now" if state in {"working", "revising"} else "queued"

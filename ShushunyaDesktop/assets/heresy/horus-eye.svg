@@ -1,23 +1,39 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
-  <title id="title">Око Хоруса</title>
-  <desc id="desc">Лаконичная оригинальная интерпретация Ока Хоруса в костяном, фиолетовом и циановом цветах.</desc>
+  <title id="title">Ритуальное Око Хоруса</title>
+  <desc id="desc">Око Хоруса из нескольких строгих штрихов: веко, вертикальный зрачок и нижний крюк без белого глазного яблока и декоративной каши.</desc>
+  <defs>
+    <linearGradient id="bone" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#6f4c79"/>
+      <stop offset=".46" stop-color="#c9bca5"/>
+      <stop offset="1" stop-color="#765181"/>
+    </linearGradient>
+    <radialGradient id="nerve" cx="42%" cy="34%" r="68%">
+      <stop offset="0" stop-color="#d7efea"/>
+      <stop offset=".22" stop-color="#3bb8c5"/>
+      <stop offset=".64" stop-color="#254f59"/>
+      <stop offset="1" stop-color="#09030b"/>
+    </radialGradient>
+  </defs>
 
-  <path d="M58 211C151 114 326 105 454 189C339 155 197 158 58 211Z"
-        fill="#a855f7"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M55 233C139 142 293 126 456 203C339 170 191 178 55 233Z"
+          fill="#130719" stroke="url(#bone)" stroke-width="13"/>
+    <path d="M61 252C134 190 204 171 279 178C349 185 403 215 454 250
+             C392 280 328 294 258 294C179 294 112 280 61 252Z"
+          stroke="#73507d" stroke-width="10"/>
+    <path d="M62 250C139 233 201 208 248 178M454 249C388 241 337 218 296 181"
+          stroke="#aa8e6a" stroke-width="5" opacity=".78"/>
+  </g>
 
-  <path d="M54 250C111 193 181 168 259 171C337 174 398 211 458 249C397 291 332 312 256 312C178 312 108 291 54 250Z"
-        fill="#e8dec7" stroke="#4a216a" stroke-width="15" stroke-linejoin="round"/>
+  <ellipse cx="263" cy="237" rx="47" ry="59" fill="url(#nerve)" stroke="#b9ad99" stroke-width="8"/>
+  <ellipse cx="263" cy="238" rx="15" ry="43" fill="#070209"/>
+  <ellipse cx="253" cy="211" rx="6" ry="10" fill="#e0d8ca" opacity=".78"/>
 
-  <path d="M54 250C126 237 183 220 236 188C172 188 108 210 54 250ZM458 249C401 244 351 227 304 193C363 207 415 226 458 249Z"
-        fill="#a855f7" opacity=".88"/>
-
-  <ellipse cx="260" cy="246" rx="62" ry="68"
-           fill="#4debff" stroke="#4a216a" stroke-width="13"/>
-  <ellipse cx="260" cy="246" rx="25" ry="48" fill="#251032"/>
-  <ellipse cx="247" cy="224" rx="9" ry="14" fill="#fff7e5"/>
-
-  <path d="M260 313C252 347 232 375 195 397C231 402 270 383 286 350C292 337 294 324 293 310Z"
-        fill="#a855f7" stroke="#4a216a" stroke-width="9" stroke-linejoin="round"/>
-  <path d="M294 309C310 334 340 347 383 347C352 363 331 383 318 415C311 378 294 349 273 326Z"
-        fill="#4debff" stroke="#4a216a" stroke-width="9" stroke-linejoin="round"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M263 299C253 338 226 367 183 390C225 397 270 374 287 335
+             C292 323 294 310 292 299" stroke="#c2b5a1" stroke-width="12"/>
+    <path d="M293 299C312 326 342 340 389 338C352 359 330 387 321 425
+             C308 380 286 347 260 325" stroke="#6f477b" stroke-width="11"/>
+    <path d="M322 422L337 381" stroke="#3b8d97" stroke-width="5" opacity=".82"/>
+  </g>
 </svg>

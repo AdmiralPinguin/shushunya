@@ -15,13 +15,14 @@ scene.
 - Third display: `canvas` — actual results and material he has brought back.
 - Further displays: `ambient` — quiet synchronized presence.
 
-Every role is an opaque full-screen ritual scene built from the original SVG
-pack under `assets/heresy/`. One canonical mark — a clean eight-rayed chaos
-star carrying a simple Eye of Horus — identifies Shushunya on every display;
-skulls, broken halos and lesser runes remain peripheral texture. Active QML
-deliberately contains no generated cat PNGs or raster panoramas. Symbols form
-the space and respond to Shushunya's state; they are not status icons,
-navigation controls, or a technical dashboard.
+Every role is an opaque full-screen organ of one possessed sanctum. The
+cat-free `chaos-sanctum-panorama.png` supplies architecture and depth while the
+original SVG pack under `assets/heresy/` supplies the living mark, fixed runes
+and state fractures. The canonical face restores the richer fractured star
+from the liked portrait-screen prototype, masks only its old crowded core and
+places one restrained Eye of Horus there. Presence, Mind, Canvas and Ambient
+now have different compositions; none is a dashboard, overlay or reskinned
+copy of the same centered logo.
 
 Roles are assigned by display identity and orientation, not by a hardcoded
 monitor count. Hot-plug is supported. No window uses always-on-top,
