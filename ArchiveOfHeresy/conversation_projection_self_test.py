@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import archive_ops
@@ -764,7 +765,7 @@ def test_failed_turn_job_reopens_same_identity():
     with tempfile.TemporaryDirectory() as temp:
         archive_ops.SQLITE_PATH = Path(temp) / "archive.sqlite3"
         try:
-            with sqlite3.connect(archive_ops.SQLITE_PATH) as db:
+            with closing(sqlite3.connect(archive_ops.SQLITE_PATH)) as db:
                 db.execute(
                     "CREATE TABLE mobile_jobs ("
                     "id TEXT PRIMARY KEY,type TEXT,status TEXT,created_at TEXT,updated_at TEXT,"
@@ -791,6 +792,40 @@ def test_failed_turn_job_reopens_same_identity():
             duplicate_id, duplicate_created, duplicate_status = archive_ops.create_mobile_turn_job_once(dict(payload))
             require(duplicate_id == job_id, "concurrent recovery changed identity")
             require(duplicate_created is False and duplicate_status == "queued", "queued recovery ran twice")
+        finally:
+            archive_ops.SQLITE_PATH = original_path
+
+
+def test_explained_core_degradation_remains_deliverable():
+    original_path = archive_ops.SQLITE_PATH
+    with tempfile.TemporaryDirectory() as temp:
+        archive_ops.SQLITE_PATH = Path(temp) / "archive.sqlite3"
+        try:
+            with closing(sqlite3.connect(archive_ops.SQLITE_PATH)) as db:
+                db.execute(
+                    "CREATE TABLE mobile_jobs ("
+                    "id TEXT PRIMARY KEY,type TEXT,status TEXT,created_at TEXT,updated_at TEXT,"
+                    "request_json TEXT,response_json TEXT,error TEXT)"
+                )
+            job_id = archive_ops.create_mobile_job("turn", {"text": "продолжай"})
+            expected = {
+                "ok": False,
+                "degraded": True,
+                "message": "Это ошибка Шушуни; сообщение сохранено.",
+                "response": {
+                    "core_degraded": {
+                        "error_code": "core_contract_rejected",
+                        "retryable": False,
+                    }
+                },
+            }
+            worker = archive_ops.run_mobile_job(job_id, lambda: expected)
+            worker.join(timeout=5)
+            require(not worker.is_alive(), "degraded chat worker did not finish")
+            snapshot = archive_ops.mobile_job_snapshot(job_id)
+            require(snapshot.get("status") == "done", "delivered degradation became a hidden failed job")
+            require(snapshot.get("response") == expected, "degraded explanation was not persisted for polling clients")
+            require(snapshot.get("error") is None, "delivered degradation was replaced by a transport error")
         finally:
             archive_ops.SQLITE_PATH = original_path
 
@@ -941,7 +976,7 @@ def test_core_stall_notification_is_durable_explanatory_and_not_a_question():
     try:
         with tempfile.TemporaryDirectory() as tmp:
             archive_ops.SQLITE_PATH = Path(tmp) / "archive.sqlite3"
-            with sqlite3.connect(archive_ops.SQLITE_PATH) as db:
+            with closing(sqlite3.connect(archive_ops.SQLITE_PATH)) as db:
                 db.execute(
                     """
                     CREATE TABLE core_effect_receipts (

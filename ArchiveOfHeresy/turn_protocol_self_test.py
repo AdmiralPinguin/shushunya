@@ -8,10 +8,12 @@ from archive_handler import ArchiveHandler
 from archive_ops import (
     CORE_DEGRADED_SAFE_REPLY,
     continuation_candidates_for_history,
+    core_degradation,
     decide_chat_turn_action,
     prompt_diagnostics,
     run_mobile_chat_payload,
 )
+from shushunya_core_client import CoreRequestError
 from ShushunyaCore.decide import normalize_decision
 from ShushunyaCore.ledger import MIGRATION_1
 from turn_protocol import (
@@ -169,10 +171,28 @@ def main() -> int:
     require("core_resolve_turn" in decide_source, "Archive still owns the turn decision")
     require("build_turn_decision_request" not in decide_source, "old poor-context controller remains live")
     require("assemble_shushunya_turn_context" in decide_source, "Core is not fed the rich context")
-    require("speech-only degradation" in decide_source, "Core failure does not fail open into chat")
+    require("explicit no-effect degradation" in decide_source, "Core failure does not fail open into chat")
+
+    degraded = core_degradation(
+        CoreRequestError(
+            "ShushunyaCore returned HTTP 422: context.task_page_context: Extra inputs are not permitted",
+            status=422,
+            retryable=False,
+            error_code="core_contract_rejected",
+        )
+    )
+    require(degraded["error_code"] == "core_contract_rejected", "Core contract error lost its type")
+    require(degraded["retryable"] is False, "non-retryable contract error became retryable")
+    require("ошибка Шушуни" in degraded["reply"], "contract rejection blames the owner command")
+    require("task_page_context" in degraded["reply"], "safe concrete Core diagnostic was hidden")
 
     start_source = inspect.getsource(ArchiveHandler.mobile_chat_start)
     require("run_core_turn_payload" in start_source, "mobile job does not delegate the complete Core-owned turn")
+    stream_source = inspect.getsource(ArchiveHandler.mobile_chat_stream)
+    require(
+        '"turn_protocol_degraded"' in stream_source and '"core_degraded"' in stream_source,
+        "SSE chat hides an explicit Core degradation as an ordinary success",
+    )
     core_turn_source = inspect.getsource(ArchiveHandler.run_core_turn_payload)
     require("core_context_bundle" in core_turn_source and "core_effect" in core_turn_source, "queued turn loses Core truth")
     require(

@@ -2204,6 +2204,22 @@ class ArchiveHandler(BaseHTTPRequestHandler):
             result = outcome.get("result") if isinstance(outcome.get("result"), dict) else {}
             message = str(result.get("message") or "")
             artifact = result.get("artifact") if isinstance(result.get("artifact"), dict) else None
+            if result.get("degraded") is True:
+                response = result.get("response") if isinstance(result.get("response"), dict) else {}
+                if not collected and message:
+                    collected.append(message)
+                    sse({"type": "token", "text": message})
+                sse(
+                    {
+                        "type": "done",
+                        "full": "".join(collected),
+                        "degraded": True,
+                        "finish_reason": "turn_protocol_degraded",
+                        "core_degraded": response.get("core_degraded", {}),
+                        "client_request_id": request_id,
+                    }
+                )
+                return
             if result.get("action") == "deliver_artifact":
                 sse(
                     {
@@ -2636,9 +2652,21 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                 write_json(self, 502, {"error": f"chat pipeline failed: {exc}", "session_id": session_id})
                 return
             response = result.get("response") if isinstance(result.get("response"), dict) else {}
+            degraded = result.get("degraded") is True
             if stream:
-                self.stream_static_mobile_chat_completion(str(result.get("message") or ""), finish_reason="stop")
+                self.stream_static_mobile_chat_completion(
+                    str(result.get("message") or ""),
+                    finish_reason=("turn_protocol_degraded" if degraded else "stop"),
+                    extra=(
+                        {"core_degraded": response.get("core_degraded", {})}
+                        if degraded
+                        else None
+                    ),
+                )
             else:
+                # The endpoint delivered an explicit degraded turn.  Keep the
+                # transport successful so clients render the explanation
+                # instead of hiding it behind a generic retry/error screen.
                 write_json(self, 200, response)
 
     def chat_completion(self):

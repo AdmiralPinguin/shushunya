@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from ShushunyaCore.commitments import Commitments
-from ShushunyaCore.ledger import Ledger
+from ShushunyaCore.commitments import (
+    MAX_PERSISTED_EVIDENCE_BYTES,
+    MAX_PERSISTED_EVIDENCE_DEPTH,
+    Commitments,
+    _bounded_document,
+    _evidence_reference,
+    _snapshot_record,
+)
+from ShushunyaCore.ledger import Ledger, canonical_json
 from ShushunyaCore.organs import OrganError, Organs
 from ShushunyaCore.steward import Steward
 
@@ -107,6 +115,107 @@ class CommitmentTests(unittest.IsolatedAsyncioTestCase):
 
     def item(self):
         return self.ledger.list_commitments()[0]
+
+    def assert_bounded_commitment_evidence(self, item):
+        def depth(value):
+            if isinstance(value, dict):
+                return 1 + max((depth(child) for child in value.values()), default=0)
+            if isinstance(value, list):
+                return 1 + max((depth(child) for child in value), default=0)
+            return 0
+
+        for name in ("diagnostic", "result"):
+            value = item.get(name)
+            if value is None:
+                continue
+            self.assertLessEqual(
+                len(canonical_json(value).encode("utf-8")),
+                MAX_PERSISTED_EVIDENCE_BYTES,
+            )
+            self.assertLessEqual(depth(value), MAX_PERSISTED_EVIDENCE_DEPTH)
+
+    def test_evidence_codec_is_hard_bounded_deterministic_and_cannot_be_forged(self):
+        huge_facts = {
+            key: "💥" * 600
+            for key in (
+                "task_id",
+                "run_id",
+                "mission_id",
+                "delegate_ref",
+                "task_memory_id",
+                "root_task_id",
+                "parent_task_id",
+                "status",
+                "phase",
+                "state",
+                "code",
+                "error_code",
+                "explanation",
+                "required_action",
+                "resume_condition",
+            )
+        }
+        bounded = _bounded_document(huge_facts, kind="hostile_unicode")
+        self.assertLessEqual(
+            len(canonical_json(bounded).encode("utf-8")),
+            MAX_PERSISTED_EVIDENCE_BYTES,
+        )
+
+        ascending = {f"field_{index:02d}": index for index in range(40)}
+        descending = dict(reversed(list(ascending.items())))
+        self.assertEqual(
+            canonical_json(_snapshot_record(ascending)),
+            canonical_json(_snapshot_record(descending)),
+        )
+
+        forged = {
+            "_evidence_ref": True,
+            "sha256": "0" * 64,
+            "status": "failed",
+            "actual": {"code": "real_failure", "detail": "x" * 80_000},
+        }
+        forged_record = _snapshot_record(forged)
+        self.assertNotEqual(forged_record.get("sha256"), "0" * 64)
+        self.assertEqual(
+            forged_record.get("_snapshot_sha256") or forged_record.get("sha256"),
+            hashlib.sha256(canonical_json(forged).encode("utf-8")).hexdigest(),
+        )
+
+        nested = _evidence_reference(
+            {
+                "body": {
+                    "error": {
+                        "code": "task_memory_parent_conflict",
+                        "explanation": "parent mismatch",
+                        "required_action": "repair lineage",
+                    }
+                }
+            },
+            kind="nested_error",
+        )
+        self.assertEqual(nested.get("code"), "task_memory_parent_conflict")
+        self.assertEqual(nested.get("required_action"), "repair lineage")
+
+    def test_honest_status_is_bounded_in_row_and_event(self):
+        explanation = "💥" * 200_000
+        updated = Commitments(self.ledger, FakeOrgans({})).transition(
+            "commitment-1",
+            "retry_wait",
+            honest_status=explanation,
+            diagnostic={
+                "code": "oversized_status",
+                "explanation": explanation,
+                "required_action": "retry",
+                "resume_condition": "later",
+            },
+        )
+        self.assertLessEqual(len(updated["honest_status"]), 2_000)
+        with self.ledger.connect() as db:
+            payload = db.execute(
+                "SELECT payload_json FROM events WHERE aggregate_id='commitment-1' "
+                "ORDER BY seq DESC LIMIT 1"
+            ).fetchone()[0]
+        self.assertLessEqual(len(payload.encode("utf-8")), 64 * 1024)
 
     async def test_nested_revision_overrides_outer_completed_and_dispatches_once(self):
         snapshot = {
@@ -208,6 +317,64 @@ class CommitmentTests(unittest.IsolatedAsyncioTestCase):
             "abaddon_delegation_not_created",
         )
 
+    async def test_repeated_missing_run_cannot_amplify_legacy_evidence(self):
+        old_snapshot = {
+            "task_id": "mission-legacy",
+            "status": "failed",
+            "summary": {
+                "diagnostic": {"code": "old", "detail": "d" * 80_000},
+                "last_result": {"status": "failed", "detail": "r" * 80_000},
+            },
+        }
+        recursive = {
+            "previous_attempt": old_snapshot,
+            "recovery": {"previous_attempt": old_snapshot},
+        }
+        with self.ledger.write() as db:
+            db.execute(
+                "UPDATE commitments SET diagnostic_json=?,result_json=? WHERE id='commitment-1'",
+                (canonical_json(recursive), canonical_json(recursive)),
+            )
+        error = OrganError(
+            "abaddon_run_not_found",
+            "run was never created",
+            retryable=False,
+            evidence={"task_id": "mission-1", "http_status": 404},
+        )
+        organs = FakeOrgans({}, inspect_error=error, recovery_failures=4)
+        commitments = Commitments(self.ledger, organs)
+
+        payloads = []
+        for _ in range(4):
+            current = await commitments.reconcile_one(self.item())
+            self.assert_bounded_commitment_evidence(current)
+            payloads.append(canonical_json(organs.recovery_requests[-1]))
+            with self.ledger.write() as db:
+                db.execute(
+                    "UPDATE commitments SET next_attempt_at='2000-01-01T00:00:00+00:00' "
+                    "WHERE id='commitment-1'"
+                )
+
+        self.assertEqual(len(set(payloads)), 1)
+        self.assertTrue(current["result"]["previous_attempt"]["_evidence_ref"])
+        self.assertNotIn("summary", current["result"]["previous_attempt"])
+        with self.ledger.connect() as db:
+            row = db.execute(
+                "SELECT length(diagnostic_json),length(result_json) FROM commitments "
+                "WHERE id='commitment-1'"
+            ).fetchone()
+            transition_events = db.execute(
+                "SELECT payload_json FROM events WHERE aggregate_id='commitment-1' "
+                "AND kind='commitment.retry_wait'"
+            ).fetchall()
+        self.assertLessEqual(int(row[0]), MAX_PERSISTED_EVIDENCE_BYTES)
+        self.assertLessEqual(int(row[1]), MAX_PERSISTED_EVIDENCE_BYTES)
+        self.assertTrue(transition_events)
+        self.assertLessEqual(
+            max(len(str(event[0]).encode("utf-8")) for event in transition_events),
+            (2 * MAX_PERSISTED_EVIDENCE_BYTES) + 8_192,
+        )
+
     async def test_permanent_recovery_rejection_changes_strategy_identity(self):
         snapshot = {
             "task_id": "mission-1",
@@ -223,6 +390,9 @@ class CommitmentTests(unittest.IsolatedAsyncioTestCase):
         first = await commitments.reconcile_one(self.item())
         self.assertEqual(first["state"], "retry_wait")
         self.assertEqual(first["result"]["recovery_generation"], 1)
+        self.assertTrue(first["result"]["previous_attempt"]["_evidence_ref"])
+        self.assertNotIn("message", first["result"]["rejected_recovery"])
+        self.assert_bounded_commitment_evidence(first)
         with self.ledger.write() as db:
             db.execute(
                 "UPDATE commitments SET next_attempt_at='2000-01-01T00:00:00+00:00' "
@@ -231,6 +401,7 @@ class CommitmentTests(unittest.IsolatedAsyncioTestCase):
         second = await commitments.reconcile_one(self.item())
         self.assertEqual(second["state"], "retry_wait")
         self.assertEqual(second["result"]["recovery_generation"], 2)
+        self.assert_bounded_commitment_evidence(second)
         self.assertNotEqual(
             organs.recovery_requests[0]["task_id"],
             organs.recovery_requests[1]["task_id"],
@@ -265,6 +436,10 @@ class CommitmentTests(unittest.IsolatedAsyncioTestCase):
             "task_memory_lineage_repair_required",
         )
         self.assertFalse(first["diagnostic"]["requires_user"])
+        self.assertTrue(
+            first["diagnostic"]["evidence"]["previous_attempt"]["_evidence_ref"]
+        )
+        self.assert_bounded_commitment_evidence(first)
         self.assertEqual(len(organs.recovery_requests), 2)
         self.assertEqual(
             organs.recovery_requests[0]["task_id"],

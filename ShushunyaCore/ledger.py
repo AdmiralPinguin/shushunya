@@ -28,6 +28,27 @@ COMMITMENT_STATES = {
     "succeeded",
     "cancelled",
 }
+MAX_PERSISTED_EVIDENCE_BYTES = 24 * 1024
+MAX_PERSISTED_STATUS_CHARS = 2_000
+_PERSISTED_FACT_FIELDS = (
+    "task_id",
+    "run_id",
+    "mission_id",
+    "delegate_ref",
+    "task_memory_id",
+    "root_task_id",
+    "parent_task_id",
+    "status",
+    "phase",
+    "state",
+    "code",
+    "error_code",
+    "explanation",
+    "required_action",
+    "resume_condition",
+    "http_status",
+    "retryable",
+)
 
 
 class LedgerError(RuntimeError):
@@ -52,6 +73,59 @@ def canonical_json(value: Any) -> str:
 
 def sha256_json(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _json_digest_and_size(value: Any) -> tuple[str, int]:
+    encoder = json.JSONEncoder(ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256()
+    size = 0
+    for chunk in encoder.iterencode(value):
+        encoded = chunk.encode("utf-8")
+        digest.update(encoded)
+        size += len(encoded)
+    return digest.hexdigest(), size
+
+
+def bounded_persisted_text(value: Any) -> str:
+    text = str(value or "")
+    if len(text) <= MAX_PERSISTED_STATUS_CHARS:
+        return text
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    suffix = f"… [text_sha256:{digest}]"
+    return text[: MAX_PERSISTED_STATUS_CHARS - len(suffix)] + suffix
+
+
+def bounded_persisted_document(value: dict[str, Any], *, kind: str) -> dict[str, Any]:
+    """Hard storage boundary for evidence written directly by the ledger.
+
+    Oversized organ output stays verifiable by digest and byte length; selected
+    top-level facts survive only while the complete reference remains bounded.
+    """
+    digest, byte_length = _json_digest_and_size(value)
+    if byte_length <= MAX_PERSISTED_EVIDENCE_BYTES:
+        return value
+    reference: dict[str, Any] = {
+        "_evidence_ref": True,
+        "evidence_kind": str(kind or "evidence")[:80],
+        "sha256": digest,
+        "source_type": "dict",
+        "source_items": len(value),
+        "byte_length": byte_length,
+    }
+    for key in _PERSISTED_FACT_FIELDS:
+        item = value.get(key)
+        if item in (None, "") or isinstance(item, (dict, list)):
+            continue
+        if isinstance(item, str):
+            item = bounded_persisted_text(item)[:512]
+        elif not isinstance(item, (bool, int, float)):
+            continue
+        candidate = {**reference, key: item}
+        if len(canonical_json(candidate).encode("utf-8")) <= MAX_PERSISTED_EVIDENCE_BYTES:
+            reference[key] = item
+    if len(canonical_json(reference).encode("utf-8")) > MAX_PERSISTED_EVIDENCE_BYTES:
+        raise InvariantViolation(f"{kind} evidence reference exceeds persistence budget")
+    return reference
 
 
 def new_id(prefix: str) -> str:
@@ -555,22 +629,37 @@ class Ledger:
                 payload=resolution,
             )
             if commitment:
-                spec = dict(commitment.get("spec") or {})
-                state = str(commitment.get("state") or "queued")
+                stored_commitment = dict(commitment)
+                spec = dict(stored_commitment.get("spec") or {})
+                state = str(stored_commitment.get("state") or "queued")
                 if state not in COMMITMENT_STATES:
                     raise InvariantViolation(f"invalid commitment state: {state}")
-                diagnostic = commitment.get("diagnostic")
+                diagnostic = stored_commitment.get("diagnostic")
                 if state in UNHAPPY_STATES and not isinstance(diagnostic, dict):
                     raise InvariantViolation(f"{state} requires a diagnostic")
+                bounded_diagnostic = (
+                    bounded_persisted_document(diagnostic, kind="commitment_diagnostic")
+                    if isinstance(diagnostic, dict)
+                    else None
+                )
+                stored_commitment["diagnostic"] = bounded_diagnostic
+                stored_commitment["honest_status"] = bounded_persisted_text(
+                    stored_commitment.get("honest_status")
+                    or "Принял обязательство и готовлю исполнение."
+                )
+                bounded_commit_event = bounded_persisted_document(
+                    stored_commitment,
+                    kind="commitment_opened",
+                )
                 commit_event = self._append_event(
                     db,
                     aggregate_type="commitment",
-                    aggregate_id=str(commitment["id"]),
+                    aggregate_id=str(stored_commitment["id"]),
                     kind="commitment.opened",
                     actor="shushunya-core",
                     correlation_id=turn_id,
                     causation_event_id=str(event["event_id"]),
-                    payload=commitment,
+                    payload=bounded_commit_event,
                 )
                 now = utc_now()
                 db.execute(
@@ -582,23 +671,23 @@ class Ledger:
                     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
-                        commitment["id"],
-                        commitment.get("kind") or "task",
-                        commitment.get("owner") or "shushunya",
-                        commitment.get("goal") or "",
+                        stored_commitment["id"],
+                        stored_commitment.get("kind") or "task",
+                        stored_commitment.get("owner") or "shushunya",
+                        stored_commitment.get("goal") or "",
                         canonical_json(spec),
                         sha256_json(spec),
                         state,
                         1,
-                        int(commitment.get("priority") or 0),
-                        commitment.get("due_at"),
-                        commitment.get("next_attempt_at"),
+                        int(stored_commitment.get("priority") or 0),
+                        stored_commitment.get("due_at"),
+                        stored_commitment.get("next_attempt_at"),
                         0,
-                        int(commitment.get("max_attempts") or 3),
-                        commitment.get("delegate_kind"),
-                        commitment.get("delegate_ref"),
-                        commitment.get("honest_status") or "Принял обязательство и готовлю исполнение.",
-                        canonical_json(diagnostic) if diagnostic else None,
+                        int(stored_commitment.get("max_attempts") or 3),
+                        stored_commitment.get("delegate_kind"),
+                        stored_commitment.get("delegate_ref"),
+                        stored_commitment["honest_status"],
+                        canonical_json(bounded_diagnostic) if bounded_diagnostic else None,
                         None,
                         int(commit_event["seq"]),
                         now,
@@ -771,7 +860,9 @@ class Ledger:
                 effect_state = "delivered"
                 commitment_state = "working" if effect["destination"] == "abaddon" else "succeeded"
                 diagnostic = None
-                honest = str(result.get("explanation") or "Действие подтверждено фактическим результатом.")
+                honest = bounded_persisted_text(
+                    result.get("explanation") or "Действие подтверждено фактическим результатом."
+                )
                 next_attempt = None
             else:
                 can_retry = retryable and attempts < max_attempts
@@ -833,7 +924,13 @@ class Ledger:
                         )
                     ),
                 }
-                honest = diagnostic["explanation"]
+                honest = bounded_persisted_text(diagnostic["explanation"])
+            bounded_result = bounded_persisted_document(result, kind="effect_result")
+            bounded_diagnostic = (
+                bounded_persisted_document(diagnostic, kind="commitment_diagnostic")
+                if isinstance(diagnostic, dict)
+                else None
+            )
             db.execute(
                 """
                 UPDATE outbox SET state=?,next_attempt_at=?,lease_owner=NULL,lease_token=NULL,lease_until=NULL,
@@ -843,14 +940,14 @@ class Ledger:
                     outbox_state,
                     next_attempt,
                     None if ok else str(result.get("code") or "effect_failed"),
-                    None if ok else str(result.get("explanation") or ""),
+                    None if ok else bounded_persisted_text(result.get("explanation") or ""),
                     now if ok else None,
                     effect_id,
                 ),
             )
             db.execute(
                 "UPDATE effects SET state=?,result_json=?,updated_at=? WHERE id=?",
-                (effect_state, canonical_json(result), now, effect_id),
+                (effect_state, canonical_json(bounded_result), now, effect_id),
             )
             self._append_event(
                 db,
@@ -860,7 +957,7 @@ class Ledger:
                 actor="shushunya-core",
                 correlation_id=str(effect["turn_id"]),
                 causation_event_id=None,
-                payload=result,
+                payload=bounded_result,
             )
             if commitment_id:
                 row = db.execute("SELECT * FROM commitments WHERE id=?", (commitment_id,)).fetchone()
@@ -877,7 +974,11 @@ class Ledger:
                         actor="shushunya-core",
                         correlation_id=str(effect["turn_id"]),
                         causation_event_id=None,
-                        payload={"state": commitment_state, "result": result, "diagnostic": diagnostic},
+                        payload={
+                            "state": commitment_state,
+                            "result": bounded_result,
+                            "diagnostic": bounded_diagnostic,
+                        },
                     )
                     db.execute(
                         """
@@ -891,8 +992,8 @@ class Ledger:
                             next_attempt,
                             delegate_ref,
                             honest,
-                            canonical_json(diagnostic) if diagnostic else None,
-                            canonical_json(result),
+                            canonical_json(bounded_diagnostic) if bounded_diagnostic else None,
+                            canonical_json(bounded_result),
                             int(commit_event["seq"]),
                             now,
                             commitment_id,
@@ -906,7 +1007,7 @@ class Ledger:
                         db,
                         commitment_row=updated_commitment,
                         previous_state=previous_state,
-                        diagnostic=diagnostic or {},
+                        diagnostic=bounded_diagnostic or {},
                         event_seq=int(commit_event["seq"]),
                         delegate_ref=str(delegate_ref or ""),
                     )
