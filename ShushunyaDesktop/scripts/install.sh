@@ -10,6 +10,12 @@ if [[ -z "$UV" && -x /home/codexbox/.local/bin/uv ]]; then
 fi
 PYTHON="${SHUSHUNYA_PYTHON:-/usr/bin/python3}"
 
+# Maintenance may deploy files through the codexbox account, while the
+# fullscreen application belongs to the graphical shushunya account.  Source
+# and visual assets are runtime inputs, so both accounts must be able to
+# traverse and read them.
+chmod -R a+rX src qml assets config
+
 if [[ -n "$UV" ]]; then
   "$UV" venv --clear --python "$PYTHON" .venv
   "$UV" pip install --python .venv/bin/python -e .

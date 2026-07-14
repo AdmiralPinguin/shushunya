@@ -18,6 +18,7 @@ from PySide6.QtCore import (
 )
 
 from .companion import CompanionItem, CompanionProvider, CompanionSnapshot, idle_snapshot
+from .demo_state import DEMO_STATES, demo_snapshot, next_demo_state, previous_demo_state
 
 
 class CompanionListModel(QAbstractListModel):
@@ -134,11 +135,20 @@ class CompanionViewModel(QObject):
 class AppBackend(QObject):
     clockChanged = Signal()
     pulseChanged = Signal()
+    visualStateChanged = Signal()
+    demoCycleChanged = Signal()
     quitRequested = Signal()
     snapshotRequested = Signal()
     _pollComplete = Signal(object)
 
-    def __init__(self, provider: CompanionProvider) -> None:
+    def __init__(
+        self,
+        provider: CompanionProvider,
+        *,
+        demo_mode: bool = False,
+        initial_demo_state: str = "attention",
+        demo_cycle: bool = True,
+    ) -> None:
         super().__init__()
         self._provider = provider
         self._companion = CompanionViewModel()
@@ -146,6 +156,9 @@ class AppBackend(QObject):
         self._date_text = ""
         self._pulse = 0.0
         self._polling = False
+        self._demo_mode = demo_mode
+        self._visual_state = initial_demo_state if demo_mode else "sleep"
+        self._demo_cycle_running = bool(demo_mode and demo_cycle)
 
         self._pollComplete.connect(self._apply_poll)
 
@@ -157,9 +170,18 @@ class AppBackend(QObject):
         self._core_timer = QTimer(self)
         self._core_timer.setInterval(4000)
         self._core_timer.timeout.connect(self.refresh)
-        self._core_timer.start()
+
+        self._demo_timer = QTimer(self)
+        self._demo_timer.setSingleShot(True)
+        self._demo_timer.timeout.connect(self.nextDemoState)
+
         self._tick()
-        QTimer.singleShot(50, self.refresh)
+        if self._demo_mode:
+            self._companion.apply(demo_snapshot(self._visual_state))
+            self._schedule_demo_advance()
+        else:
+            self._core_timer.start()
+            QTimer.singleShot(50, self.refresh)
 
     @Property(QObject, constant=True)
     def companion(self) -> CompanionViewModel:
@@ -177,6 +199,18 @@ class AppBackend(QObject):
     def pulse(self) -> float:
         return self._pulse
 
+    @Property(str, notify=visualStateChanged)
+    def visualState(self) -> str:  # noqa: N802
+        return self._visual_state
+
+    @Property(bool, constant=True)
+    def demoMode(self) -> bool:  # noqa: N802
+        return self._demo_mode
+
+    @Property(bool, notify=demoCycleChanged)
+    def demoCycleRunning(self) -> bool:  # noqa: N802
+        return self._demo_cycle_running
+
     @Slot()
     def requestQuit(self) -> None:  # noqa: N802
         self.quitRequested.emit()
@@ -186,7 +220,44 @@ class AppBackend(QObject):
         self.snapshotRequested.emit()
 
     @Slot()
+    def nextDemoState(self) -> None:  # noqa: N802
+        if not self._demo_mode:
+            return
+        self._set_demo_state(next_demo_state(self._visual_state))
+
+    @Slot()
+    def previousDemoState(self) -> None:  # noqa: N802
+        if not self._demo_mode:
+            return
+        self._set_demo_state(previous_demo_state(self._visual_state))
+
+    @Slot(str)
+    def setDemoState(self, state: str) -> None:  # noqa: N802
+        if not self._demo_mode or state not in DEMO_STATES:
+            return
+        self._set_demo_state(state)
+
+    @Slot(int)
+    def setDemoStateIndex(self, index: int) -> None:  # noqa: N802
+        if not self._demo_mode:
+            return
+        self._set_demo_state(DEMO_STATES[index % len(DEMO_STATES)])
+
+    @Slot()
+    def toggleDemoCycle(self) -> None:  # noqa: N802
+        if not self._demo_mode:
+            return
+        self._demo_cycle_running = not self._demo_cycle_running
+        if self._demo_cycle_running:
+            self._schedule_demo_advance()
+        else:
+            self._demo_timer.stop()
+        self.demoCycleChanged.emit()
+
+    @Slot()
     def refresh(self) -> None:
+        if self._demo_mode:
+            return
         if self._polling:
             return
         self._polling = True
@@ -211,8 +282,43 @@ class AppBackend(QObject):
             snapshot = idle_snapshot()
         self._pollComplete.emit(snapshot)
 
+    def _set_visual_state(self, state: str) -> None:
+        if state == self._visual_state:
+            return
+        self._visual_state = state
+        self.visualStateChanged.emit()
+
+    def _set_demo_state(self, state: str) -> None:
+        self._demo_timer.stop()
+        self._set_visual_state(state)
+        self._companion.apply(demo_snapshot(state))
+        self._schedule_demo_advance()
+
+    def _schedule_demo_advance(self) -> None:
+        if not self._demo_cycle_running:
+            return
+        dwell_ms = {
+            "sleep": 6500,
+            "attention": 7000,
+            "thinking": 10000,
+            "forging": 10000,
+            "waiting": 9000,
+            "speaking": 9000,
+            "triumph": 9500,
+            "wounded": 8000,
+            "sealing": 7000,
+        }[self._visual_state]
+        self._demo_timer.start(dwell_ms)
+
     @Slot(object)
     def _apply_poll(self, payload: object) -> None:
         self._polling = False
         if isinstance(payload, CompanionSnapshot):
+            state = payload.presence if payload.presence in DEMO_STATES else {
+                "idle": "sleep",
+                "waiting": "waiting",
+                "thinking": "thinking",
+                "speaking": "speaking",
+            }.get(payload.presence, "attention")
+            self._set_visual_state(state)
             self._companion.apply(payload)

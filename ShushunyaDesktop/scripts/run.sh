@@ -9,6 +9,13 @@ if [[ ! -x .venv/bin/python ]]; then
   exit 2
 fi
 
+# The project uses a src/ layout.  Do not rely exclusively on the editable
+# install's .pth file: it may have been created by the maintenance SSH user
+# while the graphical session belongs to shushunya.  The launcher must resolve
+# the local package identically for either account.
+unset PYTHONHOME
+export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+
 export QSG_RHI_BACKEND="${QSG_RHI_BACKEND:-opengl}"
 export SHUSHUNYA_DIAGNOSTICS_DIR="${SHUSHUNYA_DIAGNOSTICS_DIR:-$ROOT/runtime/live}"
 

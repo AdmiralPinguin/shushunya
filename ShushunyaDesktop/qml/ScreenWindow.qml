@@ -48,6 +48,7 @@ Window {
         variant: root.screenRole
         ordinal: root.screenOrdinal
         motion: !root.previewMode
+        visualState: backend.visualState
         screenX: root.screenOriginX
         screenY: root.screenOriginY
         virtualX: root.virtualOriginX
@@ -126,6 +127,31 @@ Window {
 
     Shortcut { sequence: "Ctrl+Shift+Q"; onActivated: backend.requestQuit() }
     Shortcut { sequence: "Ctrl+Shift+S"; onActivated: backend.requestSnapshot() }
+    Shortcut {
+        sequence: "Right"
+        enabled: backend.demoMode
+        onActivated: backend.nextDemoState()
+    }
+    Shortcut {
+        sequence: "Left"
+        enabled: backend.demoMode
+        onActivated: backend.previousDemoState()
+    }
+    Shortcut {
+        sequence: "Space"
+        enabled: backend.demoMode
+        onActivated: backend.toggleDemoCycle()
+    }
+    Shortcut {
+        sequence: "Home"
+        enabled: backend.demoMode
+        onActivated: backend.setDemoState("sleep")
+    }
+    Shortcut {
+        sequence: "End"
+        enabled: backend.demoMode
+        onActivated: backend.setDemoState("sealing")
+    }
     Shortcut {
         sequence: "F11"
         onActivated: {

@@ -15,6 +15,7 @@ from PySide6.QtQuick import QQuickWindow
 
 from .backend import AppBackend
 from .companion import CoreCompanionProvider, DemoCompanionProvider
+from .demo_state import DEMO_STATES
 from .screen_roles import ScreenDescriptor, assign_roles
 
 
@@ -377,6 +378,17 @@ class WindowManager(QObject):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Shushunya fullscreen visual shell")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--demo",
+        action="store_true",
+        help="run the disconnected visual prototype (the default)",
+    )
+    mode.add_argument(
+        "--core",
+        action="store_true",
+        help="read live state from Shushunya Core instead of the visual demo",
+    )
     parser.add_argument(
         "--preview-role",
         choices=("presence", "mind", "canvas", "ambient"),
@@ -384,6 +396,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--preview-size", type=_parse_size, default=(1920, 1080))
     parser.add_argument("--capture", type=Path, help="save preview screenshot and exit")
+    parser.add_argument(
+        "--demo-state",
+        choices=DEMO_STATES,
+        help="start or capture one exact visual state",
+    )
+    parser.add_argument(
+        "--no-demo-cycle",
+        action="store_true",
+        help="keep the selected demo state instead of advancing automatically",
+    )
     return parser
 
 
@@ -394,12 +416,31 @@ def main() -> int:
     app.setApplicationName("Shushunya Desktop")
     app.setOrganizationName("Shushunya")
 
-    provider = (
-        DemoCompanionProvider(os.environ.get("SHUSHUNYA_PREVIEW_SCENARIO", "demo"))
-        if args.preview_role
-        else CoreCompanionProvider(os.environ.get("SHUSHUNYA_CORE_URL", "http://127.0.0.1:7600"))
+    preview_scenario = os.environ.get("SHUSHUNYA_PREVIEW_SCENARIO", "demo")
+    if args.preview_role:
+        demo_mode = args.demo_state is not None
+        provider = DemoCompanionProvider(preview_scenario)
+    else:
+        demo_mode = not args.core
+        provider = (
+            DemoCompanionProvider("demo")
+            if demo_mode
+            else CoreCompanionProvider(
+                os.environ.get("SHUSHUNYA_CORE_URL", "http://127.0.0.1:7600")
+            )
+        )
+    initial_demo_state = (
+        args.demo_state
+        or os.environ.get("SHUSHUNYA_DEMO_STATE", "attention")
     )
-    backend = AppBackend(provider)
+    if initial_demo_state not in DEMO_STATES:
+        initial_demo_state = "attention"
+    backend = AppBackend(
+        provider,
+        demo_mode=demo_mode,
+        initial_demo_state=initial_demo_state,
+        demo_cycle=demo_mode and not args.preview_role and not args.no_demo_cycle,
+    )
     backend.quitRequested.connect(app.quit)
     manager = WindowManager(app, backend)
     if args.preview_role:

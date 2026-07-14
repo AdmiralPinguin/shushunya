@@ -52,6 +52,12 @@ Exit the development build with `Ctrl+Shift+Q`. Toggle fullscreen on the
 focused display with `F11`. `Ctrl+Shift+S` refreshes live screenshots and
 screen geometry under `runtime/live/` for layout diagnostics.
 
+The normal launch is the disconnected visual prototype. It advances through
+sleep, attention, thinking, forging, waiting, speaking, triumph, wounded and
+sealing on every screen at once. `Right`/`Left` move through the states and
+`Space` pauses or resumes the cycle; no control overlay is drawn. Live Core
+data remains available explicitly with `./scripts/run.sh --core`.
+
 If the launching terminal is still open, `Ctrl+C` stops the application. A
 detached instance owned by the current graphical user can be stopped safely
 with `./scripts/stop.sh`; it never tries to kill another user's process.
@@ -110,13 +116,19 @@ Empty and deliberately overloaded state captures are generated with:
 These exercise quiet idle screens, long owner questions, multiple concurrent
 thoughts, five agenda items, several results, wrapping, clamping and scrolling.
 
+The complete nine-state visual matrix is generated with:
+
+```bash
+./scripts/capture-demo-states.sh
+```
+
 ## Runtime data
 
-The visible model reads human-facing truth from ShushunyaCore on loopback:
-identity, commitments, agenda, and a sanitized cursor over resolved turns. Raw
-event payloads, prompts, health data, ports, delegates, governors, and task IDs
-never enter QML. Preview capture uses a deterministic companion provider and
-never records private live state.
+The default prototype uses deterministic fake snapshots and does not require
+Core. In explicit `--core` mode the visible model reads human-facing truth from
+ShushunyaCore on loopback: identity, commitments, agenda, and a sanitized cursor
+over resolved turns. Raw event payloads, prompts, health data, ports, delegates,
+governors, and task IDs never enter QML.
 
 Canonical conversation remains an Archive transport responsibility. The
 Desktop does not manufacture Core turn envelopes or bypass memory assembly.

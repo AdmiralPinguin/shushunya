@@ -13,6 +13,8 @@ HERESY_ASSETS = (
     "broken-halo-rune.svg",
     "chaos-star.svg",
     "horus-eye.svg",
+    "horus-eye-closed.svg",
+    "wound-fracture.svg",
 )
 
 
@@ -72,11 +74,44 @@ class VisualAssetTests(unittest.TestCase):
         self.assertIn("fractured-chaos-seal.svg", source)
         self.assertIn("horus-eye.svg", source)
         self.assertIn("broken-halo-rune.svg", source)
-        self.assertEqual(4, source.count("Image {"))
+        self.assertEqual(6, source.count("Image {"))
         self.assertEqual(2, source.count("SequentialAnimation on rotation"))
+        self.assertIn("horus-eye-closed.svg", source)
+        self.assertIn("wound-fracture.svg", source)
+        self.assertIn("visualState", source)
         self.assertNotIn("Repeater", source)
         self.assertNotIn("horned-skull.svg", source)
         self.assertNotIn("warp-eye.svg", source)
+
+    def test_demo_states_drive_the_scene_without_a_control_overlay(self) -> None:
+        screen = (ROOT / "qml" / "ScreenWindow.qml").read_text(encoding="utf-8")
+        environment = (ROOT / "qml" / "components" / "LivingEnvironment.qml").read_text(
+            encoding="utf-8"
+        )
+        views = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted((ROOT / "qml" / "views").glob("*.qml"))
+        )
+
+        self.assertIn("backend.visualState", screen)
+        self.assertIn('sequence: "Right"', screen)
+        self.assertIn('sequence: "Left"', screen)
+        self.assertIn('sequence: "Space"', screen)
+        for state in (
+            "sleep",
+            "attention",
+            "thinking",
+            "forging",
+            "waiting",
+            "speaking",
+            "triumph",
+            "wounded",
+            "sealing",
+        ):
+            with self.subTest(state=state):
+                self.assertIn(f'"{state}"', environment)
+                self.assertIn(f'"{state}"', views)
+        self.assertNotIn("DemoControls", screen)
 
     def test_active_views_are_scenes_not_dashboard_cards(self) -> None:
         screen = (ROOT / "qml" / "ScreenWindow.qml").read_text(encoding="utf-8")
