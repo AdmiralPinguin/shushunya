@@ -177,7 +177,7 @@ def main() -> int:
         "foreground chat route drops the linked continuation effect",
     )
     require(
-        completion_source.index('dedupe_key=f"core-turn:{request_id}:user"')
+        completion_source.index('dedupe_key=f"turn:{request_id}:user"')
         < completion_source.index('dedupe_key=f"core-effect:{effect_id}:queued"')
         < completion_source.index('create_mobile_job("warmaster", payload)'),
         "Android action route queues before persisting the ordered user turn and factual ack",

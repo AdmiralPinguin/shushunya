@@ -2498,7 +2498,10 @@ class ArchiveHandler(BaseHTTPRequestHandler):
                     # but every distinct owner turn must remain in history.
                     # Transport retries keep the same request id and still
                     # dedupe safely; a new request id preserves the new turn.
-                    dedupe_key=f"core-turn:{request_id}:user",
+                    # Match the ordinary chat path's request-scoped key so a
+                    # retry that changes from safe speech to a durable action
+                    # cannot append the same owner turn a second time.
+                    dedupe_key=f"turn:{request_id}:user",
                 )
                 append_chat_message(
                     session_id,
