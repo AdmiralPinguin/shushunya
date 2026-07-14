@@ -115,7 +115,7 @@ public class MainActivity extends Activity {
     private static final String SERVER_MEMORY_NAMESPACE = "shushunya";
     private static final int REQUEST_NOTIFICATIONS = 42;
     private static final String DEFAULT_BASE_URL = "https://chat.shushunya.com";
-    private static final String CLIENT_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; ShushunyaM/7.5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36";
+    private static final String CLIENT_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; ShushunyaM/7.6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36";
     private static final String MODEL = "gemma-4-12b-it-UD-Q5_K_XL.gguf";
     private static final int AUDIO_SAMPLE_RATE = 16000;
     private static final int REQUEST_RECORD_AUDIO = 41;
@@ -545,7 +545,7 @@ public class MainActivity extends Activity {
         title.setText("Шушуня");
         title.setTextColor(TEXT);
         title.setTextSize(27);
-        title.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         title.setLetterSpacing(-0.02f);
         title.setGravity(Gravity.CENTER_VERTICAL);
         title.setSingleLine(true);
@@ -677,7 +677,7 @@ public class MainActivity extends Activity {
         input.setHintTextColor(TEXT_MUTED);
         input.setHint("Сообщение Шушуне…");
         input.setTextSize(17);
-        input.setTypeface(Typeface.SERIF, Typeface.NORMAL);
+        input.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
         input.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         input.setSingleLine(false);
@@ -1191,7 +1191,7 @@ public class MainActivity extends Activity {
         edit.setHint(hint);
         edit.setHintTextColor(TEXT_MUTED);
         edit.setTextSize(17);
-        edit.setTypeface(Typeface.SERIF, Typeface.NORMAL);
+        edit.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
         edit.setGravity(Gravity.TOP | Gravity.START);
         edit.setMinLines(3);
         edit.setSingleLine(false);
@@ -1235,7 +1235,7 @@ public class MainActivity extends Activity {
         memorySearch.setTextColor(TEXT);
         memorySearch.setHintTextColor(TEXT_MUTED);
         memorySearch.setTextSize(15);
-        memorySearch.setTypeface(Typeface.SERIF, Typeface.NORMAL);
+        memorySearch.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
         memorySearch.setPadding(dp(14), 0, dp(14), 0);
         memorySearch.setBackground(pill(SURFACE_RAISED, LINE, dp(18)));
         searchRow.addView(memorySearch, new LinearLayout.LayoutParams(0, dp(48), 1));
@@ -1381,7 +1381,7 @@ public class MainActivity extends Activity {
         text.setTextColor(color);
         text.setTextSize(size);
         text.setLineSpacing(dp(2), 1f);
-        text.setTypeface(Typeface.SERIF, bold ? Typeface.BOLD : Typeface.NORMAL);
+        text.setTypeface(Typeface.DEFAULT, bold ? Typeface.BOLD : Typeface.NORMAL);
         return text;
     }
 
@@ -2386,7 +2386,7 @@ public class MainActivity extends Activity {
         title.setText(brigade.isEmpty() ? "Warband" : brigade);
         title.setTextColor(TEXT);
         title.setTextSize(16);
-        title.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
         top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
@@ -2409,7 +2409,7 @@ public class MainActivity extends Activity {
             step.setText("Сейчас: " + currentStep);
             step.setTextColor(TEXT_SOFT);
             step.setTextSize(14);
-            step.setTypeface(Typeface.SERIF, Typeface.NORMAL);
+            step.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
             step.setLineSpacing(dp(2), 1.0f);
             step.setPadding(0, dp(8), 0, 0);
             card.addView(step, new LinearLayout.LayoutParams(-1, -2));
@@ -2452,7 +2452,7 @@ public class MainActivity extends Activity {
         title.setText(headline.isEmpty() ? "Шаг " + (index + 1) : headline);
         title.setTextColor(TEXT);
         title.setTextSize(14);
-        title.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         title.setSingleLine(false);
         top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         top.addView(agentSmallLabel((index + 1) + "/" + Math.max(total, 1), accent), new LinearLayout.LayoutParams(-2, -2));
@@ -2463,7 +2463,7 @@ public class MainActivity extends Activity {
             body.setText(detail);
             body.setTextColor(TEXT_SOFT);
             body.setTextSize(13);
-            body.setTypeface(Typeface.SERIF, Typeface.NORMAL);
+            body.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
             body.setLineSpacing(dp(2), 1.0f);
             body.setPadding(0, dp(6), 0, 0);
             card.addView(body, new LinearLayout.LayoutParams(-1, -2));
@@ -2512,7 +2512,7 @@ public class MainActivity extends Activity {
         applyRichText(body, finalText);
         body.setTextColor(TEXT);
         body.setTextSize(14);
-        body.setTypeface(Typeface.SERIF, Typeface.NORMAL);
+        body.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
         body.setLineSpacing(dp(2), 1.0f);
         body.setPadding(0, dp(6), 0, 0);
         card.addView(body, new LinearLayout.LayoutParams(-1, -2));
@@ -2907,7 +2907,7 @@ public class MainActivity extends Activity {
         name.setText("Шушуня");
         name.setTextColor(TEXT);
         name.setTextSize(26);
-        name.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         name.setLetterSpacing(-0.02f);
         name.setContentDescription("Закрыть живую сводку");
         name.setText("Шушуня    ‹");
@@ -2998,7 +2998,7 @@ public class MainActivity extends Activity {
         agentOverviewList.addView(eyebrow, new LinearLayout.LayoutParams(-1, dp(24)));
 
         TextView heading = curtainText("Сейчас и дальше", 31, RITUAL_BONE, true);
-        heading.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         heading.setLetterSpacing(-0.02f);
         heading.setPadding(0, 0, 0, dp(3));
         agentOverviewList.addView(heading, new LinearLayout.LayoutParams(-1, -2));
@@ -3104,7 +3104,7 @@ public class MainActivity extends Activity {
         kicker.setLetterSpacing(0.16f);
         card.addView(kicker, new LinearLayout.LayoutParams(-1, -2));
         TextView body = curtainText(text, 17, TEXT, false);
-        body.setTypeface(Typeface.SERIF, Typeface.NORMAL);
+        body.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
         body.setPadding(0, dp(5), 0, 0);
         card.addView(body, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
@@ -3168,7 +3168,7 @@ public class MainActivity extends Activity {
         content.addView(label, new LinearLayout.LayoutParams(-1, -2));
 
         TextView titleTextView = curtainText(titleText, 18, TEXT, false);
-        titleTextView.setTypeface(Typeface.SERIF, Typeface.NORMAL);
+        titleTextView.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
         titleTextView.setMaxLines("result".equals(kind) ? 5 : 4);
         titleTextView.setEllipsize(TextUtils.TruncateAt.END);
         titleTextView.setPadding(0, dp(5), 0, 0);
@@ -4585,7 +4585,7 @@ public class MainActivity extends Activity {
         TextView bubble = new TextView(this);
         applyRichText(bubble, text);
         bubble.setTextSize(16);
-        bubble.setTypeface(Typeface.SERIF, Typeface.NORMAL);
+        bubble.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
         bubble.setLineSpacing(dp(2), 1.0f);
         bubble.setTextColor(TEXT);
         bubble.setPadding(dp(16), dp(12), dp(16), dp(12));
@@ -4657,7 +4657,7 @@ public class MainActivity extends Activity {
             TextView caption = new TextView(this);
             applyRichText(caption, text.trim());
             caption.setTextSize(16);
-            caption.setTypeface(Typeface.SERIF, Typeface.NORMAL);
+            caption.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
             caption.setLineSpacing(dp(2), 1.0f);
             caption.setTextColor(TEXT);
             caption.setPadding(dp(6), dp(8), dp(6), dp(2));
@@ -4699,7 +4699,7 @@ public class MainActivity extends Activity {
         TextView bubble = new TextView(this);
         applyRichText(bubble, text);
         bubble.setTextSize(16);
-        bubble.setTypeface(Typeface.SERIF, Typeface.NORMAL);
+        bubble.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
         bubble.setLineSpacing(dp(2), 1.0f);
         bubble.setTextColor(TEXT);
         bubble.setPadding(dp(16), dp(12), dp(16), dp(12));
@@ -5023,7 +5023,7 @@ public class MainActivity extends Activity {
         name.setText(artifact.displayName);
         name.setTextColor(TEXT);
         name.setTextSize(15);
-        name.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         name.setMaxLines(2);
         name.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(0, -2, 1);
@@ -5045,7 +5045,7 @@ public class MainActivity extends Activity {
             applyRichText(captionView, caption.trim());
             captionView.setTextColor(TEXT);
             captionView.setTextSize(14);
-            captionView.setTypeface(Typeface.SERIF, Typeface.NORMAL);
+            captionView.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
             captionView.setPadding(0, dp(9), 0, 0);
             card.addView(captionView, new LinearLayout.LayoutParams(-1, -2));
         }
