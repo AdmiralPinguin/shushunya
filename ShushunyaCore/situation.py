@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from .config import Settings
@@ -335,6 +336,201 @@ def _compact_current_turn(value: Any, limit: int, fallback: str = "?") -> str:
     return text[:head_chars].rstrip() + marker + text[-tail_chars:].lstrip()
 
 
+_MEMORY_FRAGMENT_BOUNDARY = re.compile(r"(?<=[.!?])\s+|\n+")
+_MEMORY_WORD = re.compile(r"[^\W_]+", re.UNICODE)
+
+
+def _memory_terms(value: Any) -> tuple[set[str], set[str], set[str]]:
+    """Return language-agnostic lexical features for relevance compaction.
+
+    Three- and four-character prefixes retain useful inflectional affinity in
+    both Russian and English (e.g. ``красную``/``красной`` and
+    ``buttons``/``button``) without encoding domain words or choosing an
+    action.  They are used only to decide which already-recalled prose survives
+    a character budget.
+    """
+
+    words = {
+        match.group(0).casefold()
+        for match in _MEMORY_WORD.finditer(str(value or ""))
+        if len(match.group(0)) >= 4
+    }
+    prefixes_four = {word[:4] for word in words if len(word) >= 5}
+    prefixes_three = {word[:3] for word in words if len(word) >= 5}
+    return words, prefixes_four, prefixes_three
+
+
+def _memory_relevance(
+    value: str,
+    query_features: tuple[set[str], set[str], set[str]],
+) -> int:
+    query_words, query_four, query_three = query_features
+    words, prefixes_four, prefixes_three = _memory_terms(value)
+    return (
+        8 * len(query_words & words)
+        + 4 * len(query_four & prefixes_four)
+        + len(query_three & prefixes_three)
+    )
+
+
+def _relevant_memory_excerpt(value: str, query: str, limit: int) -> str:
+    """Clip one long fragment around the query-related evidence it contains."""
+
+    if len(value) <= limit:
+        return value
+    query_features = _memory_terms(query)
+    query_words, query_four, query_three = query_features
+    matches: list[int] = []
+    for match in _MEMORY_WORD.finditer(value):
+        word = match.group(0).casefold()
+        if len(word) < 4:
+            continue
+        if (
+            word in query_words
+            or (len(word) >= 5 and word[:4] in query_four)
+            or (len(word) >= 5 and word[:3] in query_three)
+        ):
+            matches.append(match.start())
+    if not matches:
+        return _compact_current_turn(value, limit, "")
+
+    # Leave more space after the lexical anchor: recalled snippets commonly
+    # introduce the subject first and state the decisive condition next.
+    anchor = matches[len(matches) // 2]
+    start = max(0, anchor - limit // 3)
+    start = min(start, len(value) - limit)
+    excerpt = value[start : start + limit].strip()
+    if start > 0 and len(excerpt) > 2:
+        excerpt = "… " + excerpt[2:]
+    if start + limit < len(value) and len(excerpt) > 2:
+        excerpt = excerpt[:-2] + " …"
+    return excerpt[:limit]
+
+
+def _compact_recalled_memory(value: Any, current_turn: Any, limit: int) -> str:
+    """Keep the evidence most related to the current turn, not a blind prefix.
+
+    Magos may lead a synthesis with a recent but unrelated episode before the
+    exact older fact requested by the user.  Under emergency compaction, prefix
+    slicing turned that ordering accident into false amnesia.  This function
+    chooses a contiguous evidence window using generic lexical salience only;
+    it never classifies intent, selects an action or blocks a model decision.
+    """
+
+    text = str(value or "").strip()
+    limit = max(1, int(limit))
+    if len(text) <= limit:
+        return text
+
+    query_features = _memory_terms(current_turn)
+    if not any(query_features):
+        return _compact_current_turn(text, limit, "")
+
+    fragments = [
+        fragment.strip()
+        for fragment in _MEMORY_FRAGMENT_BOUNDARY.split(text)
+        if fragment.strip()
+    ]
+    if not fragments:
+        return _compact_current_turn(text, limit, "")
+    scores = [_memory_relevance(fragment, query_features) for fragment in fragments]
+    best_score = max(scores, default=0)
+    if best_score <= 0:
+        return _compact_current_turn(text, limit, "")
+
+    def candidate_window(index: int, candidate_limit: int) -> str:
+        """Keep a candidate label and the prose that immediately explains it."""
+
+        candidate_limit = max(1, candidate_limit)
+        primary = fragments[index]
+        if len(primary) >= candidate_limit:
+            return _relevant_memory_excerpt(
+                primary, str(current_turn or ""), candidate_limit
+            )
+        if index + 1 >= len(fragments):
+            return primary
+        remaining = candidate_limit - len(primary) - 1
+        if remaining <= 0:
+            return primary
+        following = _compact_current_turn(fragments[index + 1], remaining, "")
+        return primary + ((" " + following) if following else "")
+
+    # Two separated, equally strong exact fragments may describe distinct
+    # candidates.  Preserve both pieces of evidence instead of silently
+    # collapsing the recalled material to the first one.
+    tied = [index for index, score in enumerate(scores) if score == best_score]
+    tied_pair = next(
+        (
+            (left, right)
+            for position, left in enumerate(tied)
+            for right in tied[position + 1 :]
+            if right - left > 1
+        ),
+        None,
+    )
+    if best_score >= 8 and tied_pair is not None and limit >= 96:
+        separator = "\n…\n"
+        first_limit = (limit - len(separator)) // 2
+        second_limit = limit - len(separator) - first_limit
+        first = candidate_window(tied_pair[0], first_limit)
+        second = candidate_window(tied_pair[1], second_limit)
+        return first + separator + second
+
+    anchor = max(range(len(fragments)), key=lambda index: (scores[index], -index))
+    if len(fragments[anchor]) > limit:
+        return _relevant_memory_excerpt(fragments[anchor], str(current_turn or ""), limit)
+
+    start = end = anchor
+    used = len(fragments[anchor])
+    if anchor + 1 < len(fragments):
+        following = fragments[anchor + 1]
+        extra = 1 + len(following)
+        if used + extra <= limit:
+            # The identifying sentence commonly carries the query nouns while
+            # the next sentence states the condition with pronouns.  Preserve
+            # that local discourse even when it has no repeated query token.
+            end = anchor + 1
+            used += extra
+        else:
+            prefix = "… " if anchor > 0 else ""
+            suffix = " …"
+            remaining = limit - len(prefix) - len(suffix) - used - 1
+            if remaining > 0:
+                clipped = _compact_current_turn(following, remaining, "")
+                return prefix + fragments[anchor] + " " + clipped + suffix
+
+    while True:
+        candidates: list[tuple[int, int, int]] = []
+        if start > 0:
+            candidates.append((scores[start - 1], 0, start - 1))
+        if end + 1 < len(fragments):
+            # On equal relevance prefer what follows the anchor: memory prose
+            # normally names an episode and then states its conditions.
+            candidates.append((scores[end + 1], 1, end + 1))
+        candidates.sort(reverse=True)
+        expanded = False
+        for score, _prefer_right, index in candidates:
+            if score <= 0:
+                continue
+            extra = 1 + len(fragments[index])
+            if used + extra > limit:
+                continue
+            start = min(start, index)
+            end = max(end, index)
+            used += extra
+            expanded = True
+            break
+        if not expanded:
+            break
+
+    excerpt = " ".join(fragments[start : end + 1])
+    prefix = "… " if start > 0 else ""
+    suffix = " …" if end + 1 < len(fragments) else ""
+    if len(prefix) + len(excerpt) + len(suffix) <= limit:
+        return prefix + excerpt + suffix
+    return _relevant_memory_excerpt(excerpt, str(current_turn or ""), limit)
+
+
 def _priority_identity_invariants(identity_snapshot: dict[str, Any]) -> list[str]:
     """Keep the two invariants that make agency useful instead of paralysed."""
     raw = identity_snapshot.get("invariants")
@@ -539,7 +735,11 @@ def _adaptive_emergency_situation(
         },
         **_irreducible_personality_kernel(personality_kernel),
         "recent_history": [],
-        "recalled_memory": _compact_scalar(recalled_facts, 64),
+        "recalled_memory": _compact_recalled_memory(
+            recalled_facts,
+            envelope.text,
+            min(480, max(160, budget // 7)),
+        ),
         "task_page_context": _compact_scalar(task_page_facts, 72),
         "live_roster": _compact_scalar(roster_facts, 64),
         "open_commitments": [],
@@ -565,7 +765,10 @@ def _adaptive_emergency_situation(
     if _json_size(situation) > budget:
         situation["recent_history"] = []
         situation["open_commitments"] = []
-        for key in ("recalled_memory", "task_page_context", "live_roster"):
+        situation["recalled_memory"] = _compact_recalled_memory(
+            recalled_facts, envelope.text, 64
+        )
+        for key in ("task_page_context", "live_roster"):
             situation[key] = _compact_scalar(situation.get(key), 24)
         situation["current_turn"]["text"] = _compact_current_turn(
             envelope.text, 72, "?"
@@ -600,9 +803,9 @@ def _adaptive_emergency_situation(
             (situation["persistent_self"]["identity"], "metaphor"),
             (situation["relationship"]["conversation_contract"], "profanity_between_us"),
             (situation, "archive_persona"),
-            (situation, "recalled_memory"),
             (situation, "task_page_context"),
             (situation, "live_roster"),
+            (situation, "recalled_memory"),
             (situation["current_turn"], "text"),
         ]
         for container, key in reducible:
@@ -614,6 +817,10 @@ def _adaptive_emergency_situation(
             if container is situation["current_turn"] and key == "text":
                 container[key] = _compact_current_turn(
                     envelope.text, target_length, "?"
+                )
+            elif container is situation and key == "recalled_memory":
+                container[key] = _compact_recalled_memory(
+                    recalled_facts, envelope.text, target_length
                 )
             else:
                 container[key] = value[:target_length]
@@ -704,7 +911,9 @@ class SituationAssembler:
             "relationship": relationship_snapshot,
             "archive_persona": _text(envelope.context.persona, persona_limit),
             "recent_history": compact_history,
-            "recalled_memory": _text(recalled_facts, memory_limit),
+            "recalled_memory": _compact_recalled_memory(
+                recalled_facts, envelope.text, memory_limit
+            ),
             "task_page_context": _text(task_page_facts, task_page_limit),
             "live_roster": _text(roster_facts, roster_limit),
             "pending_reports": envelope.context.pending_reports,
@@ -742,7 +951,9 @@ class SituationAssembler:
                 },
                 **personality_kernel,
                 "recent_history": compact_history,
-                "recalled_memory": _text(recalled_facts, max(500, budget // 10)),
+                "recalled_memory": _compact_recalled_memory(
+                    recalled_facts, envelope.text, max(500, budget // 10)
+                ),
                 "task_page_context": _text(task_page_facts, max(600, budget // 6)),
                 "live_roster": _text(roster_facts, max(300, budget // 18)),
                 "pending_reports": _text(envelope.context.pending_reports, max(240, budget // 24)),
@@ -783,8 +994,9 @@ class SituationAssembler:
                     limit=3,
                     chars=min(280, max(180, budget // 12)),
                 ),
-                "recalled_memory": _text(
+                "recalled_memory": _compact_recalled_memory(
                     recalled_facts,
+                    envelope.text,
                     min(340, max(220, budget // 10)),
                 ),
                 "task_page_context": _text(
@@ -825,7 +1037,9 @@ class SituationAssembler:
                 },
                 **personality_kernel,
                 "recent_history": _last_resort_history(compact_history, limit=2, chars=220),
-                "recalled_memory": _text(recalled_facts, 180),
+                "recalled_memory": _compact_recalled_memory(
+                    recalled_facts, envelope.text, 180
+                ),
                 "task_page_context": _text(task_page_facts, 300),
                 "live_roster": _text(roster_facts, 180),
                 "open_commitments": _last_resort_commitments(

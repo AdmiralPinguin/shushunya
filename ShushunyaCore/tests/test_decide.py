@@ -27,7 +27,11 @@ from ShushunyaCore.organs import Organs
 from ShushunyaCore.preferences import Preferences
 from ShushunyaCore.relationship import Relationship
 from ShushunyaCore.schema import TurnContext, TurnEnvelope
-from ShushunyaCore.situation import SituationAssembler, _priority_identity_invariants
+from ShushunyaCore.situation import (
+    SituationAssembler,
+    _compact_recalled_memory,
+    _priority_identity_invariants,
+)
 
 
 def settings(root: Path) -> Settings:
@@ -1522,6 +1526,100 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(situation["task_page_context"]), 520)
         self.assertNotIn("<task_memory_reference>", situation["task_page_context"])
         self.assertIn("core-galaga", situation["live_roster"])
+
+    def test_emergency_compaction_keeps_query_relevant_memory_after_unrelated_prefix(self):
+        assembler = SituationAssembler(
+            replace(self.settings, context_char_budget=2_800),
+            self.ledger,
+            self.identity,
+            self.relationship,
+            self.preferences,
+            self.organs,
+        )
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        for capability in manifest["capabilities"]:
+            capability["description"] = "verbose capability prose " * 800
+            capability["limits"] = ["verbose capability limit " * 400]
+        recalled_memory = (
+            (
+                "Недавнее в этом разговоре: пользователь просил сделать галагу на андроид, "
+                "связь подтверждена. "
+            )
+            * 5
+            + "Похожее из памяти: пользователь предложил задачу с двумя кнопками, красной "
+            "и синей. "
+            "Условие: если большинство выберет красную, нажавшие синюю умрут, красные "
+            "выживут; если большинство выберет синюю — никто не умрет. "
+            "Ранее Шушуня выбрал красную кнопку и объяснил этот выбор."
+        )
+        envelope = TurnEnvelope(
+            idempotency_key="compact-query-relevant-red-blue-memory",
+            text="А помнишь задачку про красную и синюю кнопки?",
+            source="app",
+            recent_history=[
+                {"role": "assistant", "content": "unrelated Galaga history " * 200}
+                for _ in range(6)
+            ],
+            capability_manifest=manifest,
+            context=TurnContext(
+                persona="persistent persona " * 700,
+                recalled_memory=recalled_memory,
+                task_page_context="unrelated task page " * 700,
+                live_roster="- unrelated Galaga task — failed\n" * 100,
+            ),
+        )
+
+        situation = assembler.assemble(envelope)
+
+        encoded = json.dumps(situation, ensure_ascii=False, separators=(",", ":"))
+        compacted_memory = situation["recalled_memory"]
+        self.assertLessEqual(len(encoded), 2_800)
+        self.assertTrue(situation["context_compacted"])
+        self.assertIn("если большинство выберет красную", compacted_memory)
+        self.assertIn("нажавшие синюю умрут", compacted_memory)
+        self.assertIn("если большинство выберет синюю", compacted_memory)
+        self.assertIn("никто не умрет", compacted_memory)
+        self.assertNotIn("просил сделать галагу", compacted_memory)
+
+    def test_relevance_compaction_keeps_pronoun_condition_after_matching_sentence(self):
+        recalled_memory = (
+            "Недавняя задача про Galaga на Android завершилась ошибкой. "
+            "Эпизод: пользователь предложил дилемму с красной и синей кнопками. "
+            "Условие было таким: если большинство выбрало первый вариант, нажавшие "
+            "второй погибают; иначе все выживают. "
+            "Шушуня объяснил свой выбор раньше."
+        )
+
+        compacted = _compact_recalled_memory(
+            recalled_memory,
+            "Помнишь задачку про красную и синюю кнопки?",
+            180,
+        )
+
+        self.assertLessEqual(len(compacted), 180)
+        self.assertIn("красной и синей кнопками", compacted)
+        self.assertIn("Условие было таким", compacted)
+        self.assertIn("иначе все выживают", compacted)
+        self.assertNotIn("Galaga", compacted)
+
+    def test_relevance_compaction_preserves_two_tied_exact_candidates(self):
+        recalled_memory = (
+            "Кандидат один: задача про красные и синие кнопки в старой дилемме. "
+            "Там выбор определял, кто выживет. "
+            "Совсем другой эпизод про Galaga на Android. "
+            "Кандидат два: задача про красные и синие кнопки на панели управления. "
+            "Там требовалось проверить два физических входа."
+        )
+
+        compacted = _compact_recalled_memory(
+            recalled_memory,
+            "Помнишь задачу про красные и синие кнопки?",
+            180,
+        )
+
+        self.assertLessEqual(len(compacted), 180)
+        self.assertIn("Кандидат один", compacted)
+        self.assertIn("Кандидат два", compacted)
 
     def test_personality_kernel_survives_emergency_compaction_at_supported_budgets(self):
         self.ledger.projection_put(
