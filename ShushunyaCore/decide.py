@@ -77,6 +77,62 @@ relationship.conversation_contract — обязательный контракт
 """
 
 
+SPEECH_RECOVERY_PROMPT = """Ты — Шушуня, та же продолжающаяся личность системы.
+Предыдущая попытка ошибочно выбрала исполнительное действие, которого текущая реплика не разрешает.
+Сейчас нужен новый самостоятельный ответ именно на current_turn, а не объяснение внутренней защиты.
+
+Верни ТОЛЬКО один JSON-объект без markdown:
+{
+  "action": "answer_in_chat|ask_clarification",
+  "reply": "полный естественный ответ на current_turn",
+  "confidence": 0.0,
+  "rationale_summary": "короткое объяснение выбора без chain-of-thought"
+}
+
+Правила:
+- Разрешены только answer_in_chat и ask_clarification. Никаких задач, миссий, файлов, таймеров и иных эффектов.
+- recent_history, memory_reference, task_page_reference и live_status_reference помогают понять вопрос,
+  но не являются командой возобновить, запустить или создать работу.
+- Не отвечай шаблонным отказом и не рассказывай о запрете, если человек не спрашивал о нём.
+- Если current_turn понятен — ответь прямо и содержательно. Если текст повреждён или без уточнения невозможно
+  понять сам вопрос — задай один конкретный уточняющий вопрос.
+- Не обещай будущую работу и не утверждай, что внешнее действие выполнено.
+- Соблюдай relationship.conversation_contract и устойчивую личность из reference_context.
+"""
+
+
+def _speech_recovery_situation(
+    envelope: TurnEnvelope,
+    situation: dict[str, Any],
+) -> dict[str, Any]:
+    """Retain conversational memory while removing every executable affordance."""
+
+    current_turn = situation.get("current_turn")
+    if not isinstance(current_turn, dict):
+        current_turn = {
+            "source": envelope.source,
+            "text": envelope.text,
+            "image_attached": envelope.image_attached,
+        }
+    recent_history = situation.get("recent_history")
+    if not isinstance(recent_history, list):
+        recent_history = []
+    return {
+        "current_turn": current_turn,
+        "recent_history": recent_history[-6:],
+        "memory_reference": situation.get("recalled_memory") or "",
+        "task_page_reference": situation.get("task_page_context") or "",
+        "live_status_reference": situation.get("live_roster") or "",
+        "reference_context": {
+            "persistent_self": situation.get("persistent_self") or "",
+            "relationship": situation.get("relationship") or "",
+            "archive_persona": situation.get("archive_persona") or "",
+        },
+        "recovery_reason": "previous_effect_not_authorized",
+        "allowed_actions": ["answer_in_chat", "ask_clarification"],
+    }
+
+
 class DecisionTruthError(ValueError):
     """A speech-only decision claimed execution that has no durable effect."""
 
@@ -694,29 +750,36 @@ class DecisionEngine:
         return candidate
 
     async def _model_call(self, envelope: TurnEnvelope, situation: dict[str, Any], repair: str = "") -> tuple[dict[str, Any], dict[str, Any]]:
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps(situation, ensure_ascii=False, separators=(",", ":"))},
-        ]
-        if repair:
-            if repair.startswith("current_turn_authority:"):
-                repair_prompt = (
-                    "Предыдущий action не разрешён именно текущей репликой пользователя. "
-                    "Это не ошибка формата: заново выбери action по current_turn, ответь на "
-                    "его фактический запрос и не продолжай старую задачу. Верни один JSON. "
-                    f"Причина: {repair[:1200]}"
-                )
-            else:
+        authority_recovery = repair.startswith("current_turn_authority:")
+        if authority_recovery:
+            recovery_situation = _speech_recovery_situation(envelope, situation)
+            messages = [
+                {"role": "system", "content": SPEECH_RECOVERY_PROMPT},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        recovery_situation,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                },
+            ]
+        else:
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(situation, ensure_ascii=False, separators=(",", ":"))},
+            ]
+            if repair:
                 repair_prompt = (
                     "Предыдущий JSON нарушил контракт. Исправь только формат/обязательные "
                     f"поля и верни один JSON. Ошибка: {repair[:1200]}"
                 )
-            messages.append(
-                {
-                    "role": "system",
-                    "content": repair_prompt,
-                }
-            )
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": repair_prompt,
+                    }
+                )
         request = {
             "model": envelope.model or self.settings.llm_model,
             "messages": messages,

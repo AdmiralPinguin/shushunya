@@ -10,7 +10,7 @@ from unittest.mock import patch
 from ShushunyaCore.authority import Authority
 from ShushunyaCore.commitments import Commitments
 from ShushunyaCore.config import Settings
-from ShushunyaCore.decide import DecisionEngine
+from ShushunyaCore.decide import DecisionEngine, _speech_recovery_situation
 from ShushunyaCore.identity import Identity
 from ShushunyaCore.ledger import Ledger
 from ShushunyaCore.organs import Organs
@@ -578,6 +578,42 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result["effect"])
         self.assertTrue(result["core"]["degraded"])
         self.assertEqual(self.ledger.list_commitments(), [])
+
+    def test_authority_recovery_keeps_memory_but_strips_every_effect_affordance(self):
+        envelope = self.envelope(
+            key="speech-recovery-context",
+            text="Почему он ответил одинаково?",
+        )
+        situation = {
+            "current_turn": {"source": "app", "text": envelope.text},
+            "recent_history": [{"role": "user", "content": "предыдущий вопрос"}],
+            "recalled_memory": "память разговора",
+            "task_page_context": "справка по текущей задаче",
+            "live_roster": "живой статус",
+            "persistent_self": {"name": "Шушуня"},
+            "relationship": {"conversation_contract": "на равных"},
+            "archive_persona": "прямой ответ",
+            "open_commitments": [{"id": "must-not-leak"}],
+            "available_artifacts": [{"artifact_id": "must-not-leak"}],
+            "pending_decisions": [{"task_id": "must-not-leak"}],
+            "capability_manifest": {
+                "available_actions": ["continue_warmaster_mission"],
+                "continuable_tasks": [{"parent_task_id": "must-not-leak"}],
+            },
+        }
+
+        recovery = _speech_recovery_situation(
+            envelope,
+            situation,
+        )
+
+        self.assertEqual(recovery["current_turn"]["text"], envelope.text)
+        self.assertEqual(recovery["memory_reference"], "память разговора")
+        self.assertEqual(recovery["task_page_reference"], "справка по текущей задаче")
+        self.assertEqual(recovery["allowed_actions"], ["answer_in_chat", "ask_clarification"])
+        serialized = json.dumps(recovery, ensure_ascii=False)
+        self.assertNotIn("must-not-leak", serialized)
+        self.assertNotIn("continue_warmaster_mission", serialized)
 
     async def test_unauthorized_continuation_repair_cannot_substitute_another_effect(self):
         manifest = self.continuation_manifest()
