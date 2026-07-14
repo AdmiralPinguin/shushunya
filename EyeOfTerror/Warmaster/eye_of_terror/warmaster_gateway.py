@@ -1188,7 +1188,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     command = commander.get("commander_order") if isinstance(commander.get("commander_order"), dict) else {}
                     try:
                         task_memory_init, task_memory_ref = ensure_task_memory_for_intake(
-                            run_root=default_run_root,
+                            run_root=run_root,
                             task_id=task_id,
                             message=message,
                             mission_id=mission_id,
