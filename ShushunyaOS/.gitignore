@@ -1,0 +1,14 @@
+runtime/logs/*
+runtime/run/*
+runtime/snapshots/*
+runtime/vm/*.qcow2
+runtime/vm/OVMF_VARS.fd
+runtime/vm/os-installed
+kernel/source/
+kernel/build/
+*.iso
+
+!runtime/logs/.gitkeep
+!runtime/run/.gitkeep
+!runtime/snapshots/.gitkeep
+!runtime/vm/.gitkeep
