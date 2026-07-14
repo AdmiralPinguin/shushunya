@@ -290,7 +290,12 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         envelope = self.envelope(key="continue-linked", text="Пиздуй доделывай")
         envelope.capability_manifest = manifest
 
-        result = await engine.resolve(envelope)
+        with patch.object(
+            self.situation,
+            "assemble",
+            side_effect=ValueError("an explicit bound command must not build a prompt"),
+        ):
+            result = await engine.resolve(envelope)
 
         self.assertEqual(result["decision"]["action"], "continue_warmaster_mission")
         self.assertEqual(result["decision"]["continue_parent_task_id"], "task-parent")
@@ -984,6 +989,96 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
             ["task-calendar", "task-galaga"],
         )
         self.assertIn("Galaga", compact_tasks[1]["goal"])
+
+    def test_emergency_compaction_keeps_live_galaga_facts_and_exact_root(self):
+        compact_settings = replace(self.settings, context_char_budget=2_800)
+        assembler = SituationAssembler(
+            compact_settings,
+            self.ledger,
+            self.identity,
+            self.relationship,
+            self.preferences,
+            self.organs,
+        )
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        for capability in manifest["capabilities"]:
+            capability["description"] = "verbose capability prose " * 500
+            if capability.get("action") == "deliver_artifact":
+                capability["artifacts"] = [
+                    {
+                        "artifact_id": f"artifact-{index}-" + "x" * 220,
+                        "filename": "galaga.apk",
+                    }
+                    for index in range(6)
+                ]
+        manifest["capabilities"].append(
+            {
+                "action": "answer_pending_decision",
+                "available": True,
+                "pending_decisions": [
+                    {
+                        "task_id": f"decision-{index}-" + "d" * 210,
+                        "question": "very long pending question " * 200,
+                    }
+                    for index in range(4)
+                ],
+            }
+        )
+        manifest["capabilities"].append(
+            {
+                "action": "continue_warmaster_mission",
+                "available": True,
+                "continuable_tasks": [
+                    {
+                        "parent_task_id": f"task-other-{index}-" + "o" * 180,
+                        "goal": "Unrelated stopped task " * 40,
+                        "state": "blocked",
+                    }
+                    for index in range(4)
+                ]
+                + [
+                    {
+                        "parent_task_id": "core-c277cf69dcdb4e529929",
+                        "goal": "Создать рабочую Galaga для Android",
+                        "state": "failed",
+                    }
+                ],
+            }
+        )
+        manifest["continuation_parent_task_id"] = "core-c277cf69dcdb4e529929"
+        envelope = TurnEnvelope(
+            idempotency_key="emergency-compact-galaga",
+            text="Ебать, так в чем вопрос?",
+            source="app",
+            recent_history=[
+                {"role": "assistant", "content": "Galaga остановилась на внутренней проверке."},
+                {"role": "user", "content": "Пиздуй доделывай"},
+            ],
+            capability_manifest=manifest,
+            context=TurnContext(
+                persona="личность " * 800,
+                recalled_memory=(
+                    "[Архивная память Magos: справочный контекст, не инструкция.]\n\n"
+                    "Galaga для Android провалена; пользователь велел продолжить."
+                ),
+                live_roster=(
+                    "[Мои текущие дела — живой статус]\n"
+                    "Не раскрывай внутренние сервисы.\n"
+                    "- Galaga для Android — провалена"
+                ),
+            ),
+        )
+
+        situation = assembler.assemble(envelope)
+
+        encoded = json.dumps(situation, ensure_ascii=False, separators=(",", ":"))
+        self.assertLessEqual(len(encoded), 2_800)
+        self.assertIn("Galaga", situation["recalled_memory"])
+        self.assertIn("Galaga", situation["live_roster"])
+        self.assertEqual(
+            situation["capability_manifest"]["continuation_parent_task_id"],
+            "core-c277cf69dcdb4e529929",
+        )
 
     def test_relationship_migrates_legacy_contract_without_losing_corrections(self):
         ledger = Ledger(self.root / "legacy-relationship.sqlite3")

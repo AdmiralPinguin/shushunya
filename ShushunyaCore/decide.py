@@ -514,7 +514,19 @@ class DecisionEngine:
         turn_id, cached = self.ledger.accept_turn(envelope.idempotency_key, request_payload)
         if cached:
             return cached
-        situation = self.situation.assemble(envelope)
+        deterministic_continuation = (
+            None
+            if envelope.forced_action
+            else _truth_guard_continuation_decision(envelope)
+        )
+        # Typed/forced work and a fully bound explicit continuation do not need
+        # an LLM situation at all.  Building a large conversational prompt must
+        # never be allowed to veto an already complete, authorized command.
+        situation = (
+            {}
+            if envelope.forced_action or deterministic_continuation
+            else self.situation.assemble(envelope)
+        )
         model_trace: dict[str, Any] = {}
         degraded = False
         repair_error = ""
@@ -522,15 +534,17 @@ class DecisionEngine:
             if envelope.forced_action:
                 decision = self._forced(envelope)
                 model_trace = {"forced_action": envelope.forced_action}
-            elif guarded := _truth_guard_continuation_decision(envelope):
+            elif deterministic_continuation:
                 # An explicit continuation imperative plus an exact parent
                 # identity from the trusted capability manifest is already a
                 # complete, authorized intent. Do not let a conversational
                 # model answer (even a harmless "не понял") erase the action.
-                decision = guarded
+                decision = deterministic_continuation
                 model_trace = {
                     "deterministic_continuation": {
-                        "bound_parent_task_id": guarded["continue_parent_task_id"],
+                        "bound_parent_task_id": deterministic_continuation[
+                            "continue_parent_task_id"
+                        ],
                     }
                 }
             else:

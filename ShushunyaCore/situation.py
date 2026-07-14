@@ -196,6 +196,44 @@ def _compact_capability_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _essential_capability_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Small authority index for the final emergency context tier.
+
+    Authority still receives the original manifest.  This copy exists only so
+    the model can see which actions exist and the exact identity of the recent
+    stopped task without dragging descriptions, artifacts and every candidate
+    through a 2.8k-character envelope.
+    """
+    available_actions = []
+    for raw in manifest.get("capabilities", []):
+        if not isinstance(raw, dict) or raw.get("available") is not True:
+            continue
+        action = str(raw.get("action") or "").strip()[:80]
+        if action and action not in available_actions:
+            available_actions.append(action)
+    catalog = continuable_task_catalog(manifest)
+    catalog_by_id = {item["parent_task_id"]: item for item in catalog}
+    root_id = str(manifest.get("continuation_parent_task_id") or "").strip()[:240]
+    if root_id in catalog_by_id:
+        selected = [catalog_by_id[root_id]]
+    else:
+        root_id = ""
+        selected = catalog[:2]
+    result: dict[str, Any] = {"available_actions": available_actions[:12]}
+    if root_id:
+        result["continuation_parent_task_id"] = root_id
+    if selected:
+        result["continuable_tasks"] = [
+            {
+                "parent_task_id": item["parent_task_id"],
+                "goal": str(item.get("goal") or "")[:100],
+                "state": str(item.get("state") or "")[:32],
+            }
+            for item in selected
+        ]
+    return result
+
+
 def _last_resort_history(history: list[dict[str, Any]], *, limit: int, chars: int) -> list[dict[str, str]]:
     return [
         {
@@ -423,5 +461,53 @@ class SituationAssembler:
                 "rules": ["Never claim an unconfirmed external effect."],
             }
         if _json_size(situation) > budget:
-            raise ValueError("essential Core situation exceeds the configured context budget")
+            # Production may have several long opaque artifact/decision ids at
+            # the same time as multiple stopped missions.  The previous final
+            # tier still carried all of those catalogs and could reject every
+            # subsequent chat turn.  Keep the conversational facts and exact
+            # trusted root, but collapse optional catalogs to one id each.
+            artifact_ids = _available_artifacts(
+                envelope.capability_manifest,
+                max_items=1,
+                max_chars=260,
+            )
+            minimal_pending = [
+                {"task_id": str(item.get("task_id") or "")[:160]}
+                for item in pending_decisions[:1]
+            ]
+            situation = {
+                "current_turn": {
+                    "source": envelope.source,
+                    "text": _text(envelope.text, 240),
+                    "image_attached": envelope.image_attached,
+                },
+                "recent_history": _last_resort_history(
+                    compact_history,
+                    limit=2,
+                    chars=150,
+                ),
+                "recalled_memory": _text(recalled_facts, 160),
+                "live_roster": _text(roster_facts, 160),
+                "open_commitments": _last_resort_commitments(
+                    compact_commitments,
+                    limit=1,
+                    goal_chars=90,
+                    status_chars=40,
+                ),
+                "available_artifacts": [
+                    {"artifact_id": str(item.get("artifact_id") or "")[:160]}
+                    for item in artifact_ids
+                ],
+                "pending_decisions": minimal_pending,
+                "capability_manifest": _essential_capability_manifest(
+                    envelope.capability_manifest
+                ),
+                "context_compacted": True,
+                "rules": ["Never claim an unconfirmed external effect."],
+            }
+        if _json_size(situation) > budget:
+            raise ValueError(
+                "essential Core situation exceeds the configured context budget "
+                f"after emergency compaction: {_json_size(situation)}>{budget}"
+            )
         return situation
