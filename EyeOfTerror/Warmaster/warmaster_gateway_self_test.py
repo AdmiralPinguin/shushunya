@@ -178,6 +178,15 @@ class TerminalSkitariiHandler(BaseHTTPRequestHandler):
                     "inflight": False,
                     "cleanup_complete": True,
                     "result": {
+                        "task_memory_id": str(
+                            mission["payload"].get("task_memory_id") or ""
+                        ),
+                        "root_task_id": str(
+                            mission["payload"].get("root_task_id") or ""
+                        ),
+                        "parent_task_id": str(
+                            mission["payload"].get("parent_task_id") or ""
+                        ),
                         "accepted": True,
                         "needs_user": False,
                         "status": "done",
@@ -1205,8 +1214,10 @@ def main() -> int:
                 }
                 if (
                     rejected_rerun.get("ok") is not False
-                    or rejected_rerun.get("start", {}).get("error_code")
-                    != "native_preflight_failed"
+                    or rejected_rerun.get("error_code")
+                    != "mission_request_identity_conflict"
+                    or "different commander request"
+                    not in str(rejected_rerun.get("error") or "")
                     or immutable_after != immutable_before
                     or len(skitarii_server.mission_requests) != 1  # type: ignore[attr-defined]
                 ):
