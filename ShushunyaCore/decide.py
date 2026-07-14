@@ -119,7 +119,10 @@ def _speech_recovery_situation(
         recent_history = []
     return {
         "current_turn": current_turn,
-        "recent_history": recent_history[-6:],
+        # SituationAssembler already applies the shared context budget.  Do not
+        # compact a second time here: recovery is exactly where older turns can
+        # be needed to resolve a short follow-up without asking the user again.
+        "recent_history": recent_history,
         "memory_reference": situation.get("recalled_memory") or "",
         "task_page_reference": situation.get("task_page_context") or "",
         "live_status_reference": situation.get("live_roster") or "",

@@ -586,7 +586,10 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         )
         situation = {
             "current_turn": {"source": "app", "text": envelope.text},
-            "recent_history": [{"role": "user", "content": "предыдущий вопрос"}],
+            "recent_history": [
+                {"role": "user", "content": f"предыдущий вопрос {index}"}
+                for index in range(10)
+            ],
             "recalled_memory": "память разговора",
             "task_page_context": "справка по текущей задаче",
             "live_roster": "живой статус",
@@ -610,6 +613,7 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recovery["current_turn"]["text"], envelope.text)
         self.assertEqual(recovery["memory_reference"], "память разговора")
         self.assertEqual(recovery["task_page_reference"], "справка по текущей задаче")
+        self.assertEqual(len(recovery["recent_history"]), 10)
         self.assertEqual(recovery["allowed_actions"], ["answer_in_chat", "ask_clarification"])
         serialized = json.dumps(recovery, ensure_ascii=False)
         self.assertNotIn("must-not-leak", serialized)
