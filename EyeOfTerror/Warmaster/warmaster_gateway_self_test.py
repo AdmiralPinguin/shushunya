@@ -463,6 +463,26 @@ def main() -> int:
                 task_memory=task_memory,
             )
 
+        def test_task_memory_page(ref: dict, *_args, **_kwargs) -> dict:
+            return {
+                "stage": "task_memory_init",
+                "ok": True,
+                "retryable": False,
+                "task_memory_id": str(ref.get("task_memory_id") or ""),
+                "root_task_id": str(ref.get("root_task_id") or ""),
+                "revision": 1,
+            }
+
+        def test_ceraxia_task_memory(task_memory_id: str) -> dict:
+            return {
+                "task_memory_id": task_memory_id,
+                "root_task_id": task_memory_id,
+                "available": True,
+                "revision": 1,
+                "sha256": "1" * 64,
+                "content": f"# Test task memory\n\nGoal page for {task_memory_id}.",
+            }
+
         with (
             mock.patch.dict(
                 os.environ,
@@ -487,11 +507,21 @@ def main() -> int:
                 return_value=ceraxia_model_answer(),
             ) as ceraxia_brain,
             mock.patch.object(
+                ceraxia_service,
+                "_load_task_memory_context",
+                side_effect=test_ceraxia_task_memory,
+            ),
+            mock.patch.object(
                 task_prepare,
                 "governor_by_name",
                 side_effect=gateway_test_governor,
             ),
             mock.patch.object(orchestrator, "open_mission", side_effect=temporary_open_mission),
+            mock.patch.object(
+                orchestrator,
+                "_ensure_task_memory_page",
+                side_effect=test_task_memory_page,
+            ),
         ):
             skitarii_server.expected_source_sha256 = (  # type: ignore[attr-defined]
                 ceraxia_service.expected_skitarii_source_sha256()
