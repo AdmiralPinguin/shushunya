@@ -24,6 +24,11 @@ class StrictModel(BaseModel):
 class TurnContext(StrictModel):
     persona: str = ""
     recalled_memory: str = ""
+    # Archive renders the selected task's canonical, priority-compacted wiki
+    # page into this field.  Keep the transport strict, but accept Archive's
+    # rendered-page upper bound plus its transport wrapper, so a valid task
+    # handoff cannot fail before the assembler applies its tighter model budget.
+    task_page_context: str = Field(default="", max_length=60_000)
     live_roster: str = ""
     pending_reports: dict[str, Any] = Field(default_factory=dict)
     diagnostics: dict[str, Any] = Field(default_factory=dict)

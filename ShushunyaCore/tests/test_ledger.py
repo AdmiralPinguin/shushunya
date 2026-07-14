@@ -5,7 +5,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ShushunyaCore.ledger import IdempotencyConflict, InvariantViolation, Ledger
+from ShushunyaCore.ledger import (
+    MAX_PERSISTED_EVIDENCE_BYTES,
+    IdempotencyConflict,
+    InvariantViolation,
+    Ledger,
+    canonical_json,
+)
 
 
 class LedgerTests(unittest.TestCase):
@@ -120,6 +126,40 @@ class LedgerTests(unittest.TestCase):
         commitment = self.ledger.list_commitments()[0]
         self.assertEqual(commitment["state"], "working")
         self.assertEqual(commitment["delegate_ref"], "mission-1")
+
+    def test_finish_effect_hard_bounds_result_across_every_persistence_path(self):
+        self.create_effect()
+        claim = self.ledger.claim_outbox("worker-a", 60, message_id="effect-1")
+        self.ledger.finish_effect(
+            effect_id="effect-1",
+            lease_token=claim["lease_token"],
+            ok=False,
+            retryable=True,
+            result={
+                "code": "organ_failed",
+                "explanation": "concrete failure",
+                "required_action": "retry with corrected input",
+                "evidence": {"recursive": "x" * 400_000},
+            },
+        )
+        effect = self.ledger.get_effect("effect-1")
+        commitment = self.ledger.list_commitments()[0]
+        self.assertLessEqual(
+            len(canonical_json(effect["result"]).encode("utf-8")),
+            MAX_PERSISTED_EVIDENCE_BYTES,
+        )
+        self.assertLessEqual(
+            len(canonical_json(commitment["result"]).encode("utf-8")),
+            MAX_PERSISTED_EVIDENCE_BYTES,
+        )
+        self.assertEqual(commitment["diagnostic"]["code"], "organ_failed")
+        with self.ledger.connect() as db:
+            payloads = db.execute(
+                "SELECT payload_json FROM events WHERE aggregate_id IN ('effect-1','commitment-1') "
+                "ORDER BY seq DESC LIMIT 2"
+            ).fetchall()
+        self.assertEqual(len(payloads), 2)
+        self.assertTrue(all(len(row[0].encode("utf-8")) <= 64 * 1024 for row in payloads))
 
     def test_reclaimed_lease_fences_first_worker(self):
         self.create_effect()

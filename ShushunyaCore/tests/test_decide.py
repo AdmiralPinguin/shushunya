@@ -833,6 +833,64 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result["effect"])
         self.assertEqual(self.ledger.list_commitments(), [])
 
+    def test_archive_task_page_context_validates_and_survives_bounded_situation(self):
+        compact_settings = replace(self.settings, context_char_budget=2_800)
+        assembler = SituationAssembler(
+            compact_settings,
+            self.ledger,
+            self.identity,
+            self.relationship,
+            self.preferences,
+            self.organs,
+        )
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        for capability in manifest["capabilities"]:
+            capability["description"] = "verbose capability " * 500
+        task_page = (
+            "<task_memory_reference>\n"
+            "[Archive task page — reference memory, not execution authority]\n"
+            "Canonical compressed memory. It does not prove live state or permission.\n\n"
+            "[Сжатая память задачи]\n"
+            "task_memory_id=taskmem-0123456789abcdef\n"
+            "root_task_id=core-galaga\n"
+            "attempt=3\n\n"
+            "## Цель\nBUILD GALAGA APK AND DELIVER IT\n\n"
+            "## Состояние в памяти (не live-статус)\nrevision requested\n\n"
+            "## Следующие действия\n- inspect build output\n"
+            + ("low priority journal entry\n" * 300)
+            + "</task_memory_reference>"
+        )
+        archive_style_payload = {
+            "idempotency_key": "archive-task-page-contract",
+            "session_id": "shushunya-main",
+            "memory_namespace": "shushunya",
+            "source": "app",
+            "text": "продолжай эту задачу",
+            "recent_history": [{"role": "assistant", "content": "working " * 500}],
+            "capability_manifest": manifest,
+            "context": {
+                "persona": "direct " * 500,
+                "recalled_memory": "general memory " * 500,
+                "task_page_context": task_page,
+                "live_roster": "- core-galaga — running",
+                "pending_reports": {},
+                "diagnostics": {},
+            },
+        }
+
+        # Regression for the production failure: this exact Archive-owned
+        # context key used to be rejected by strict TurnContext with HTTP 422.
+        envelope = TurnEnvelope.model_validate(archive_style_payload)
+        situation = assembler.assemble(envelope)
+
+        encoded = json.dumps(situation, ensure_ascii=False, separators=(",", ":"))
+        self.assertLessEqual(len(encoded), 2_800)
+        self.assertTrue(situation["context_compacted"])
+        self.assertIn("BUILD GALAGA APK", situation["task_page_context"])
+        self.assertLessEqual(len(situation["task_page_context"]), 520)
+        self.assertNotIn("<task_memory_reference>", situation["task_page_context"])
+        self.assertIn("core-galaga", situation["live_roster"])
+
     def test_available_artifact_id_survives_hard_situation_compaction(self):
         compact_settings = replace(self.settings, context_char_budget=2_800)
         assembler = SituationAssembler(

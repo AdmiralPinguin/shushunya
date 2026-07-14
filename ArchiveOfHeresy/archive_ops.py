@@ -7,6 +7,7 @@ import re
 import sqlite3
 import threading
 import uuid
+from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
@@ -33,6 +34,7 @@ from turn_protocol import (
     warmaster_request_to_message,
 )
 from shushunya_core_client import (
+    CoreRequestError,
     dispatch_effect as core_dispatch_effect,
     resolve_turn as core_resolve_turn,
 )
@@ -101,8 +103,44 @@ PERSONA_PAGE_ORDER = [
 ]
 
 CORE_DEGRADED_SAFE_REPLY = (
-    "Я сейчас не смог надёжно определить действие. Ничего не запущено и не изменено."
+    "Внутренний контур решений не обработал сообщение. Это сбой Шушуни, а не "
+    "непонятная команда. Ничего не запущено; исходное сообщение сохранено в чате."
 )
+
+
+def core_degradation(exc):
+    """Return an explicit, bounded failure instead of normal assistant speech."""
+    if isinstance(exc, CoreRequestError):
+        error_code = exc.error_code
+        retryable = exc.retryable
+        status = exc.status
+    else:
+        error_code = "core_internal_error"
+        retryable = True
+        status = 0
+    diagnostic = " ".join(str(exc).split())[:500]
+    if error_code == "core_contract_rejected":
+        explanation = (
+            "Внутренний контур решений отклонил формат сообщения"
+            + (f" (HTTP {status})" if status else "")
+            + ". Это ошибка Шушуни, а не твоей команды. "
+            "Ничего не запущено; исходное сообщение сохранено в чате."
+        )
+    else:
+        explanation = (
+            "Внутренний контур решений временно не обработал сообщение"
+            + (f" (HTTP {status})" if status else "")
+            + ". Ничего не запущено; исходное сообщение сохранено в чате."
+        )
+    if diagnostic:
+        explanation += f" Диагностика: {diagnostic}"
+    return {
+        "reply": explanation,
+        "error_code": error_code,
+        "retryable": retryable,
+        "status": status,
+        "diagnostic": diagnostic,
+    }
 
 
 def allow_gateway_namespace(handler, namespace, create=False):
@@ -531,6 +569,12 @@ def run_mobile_chat_payload(payload, on_token=None, *, trusted_turn_context=None
                 "client_request_id": client_request_id,
             }
         if forced_chat_reply:
+            core_state = (
+                core_resolution.get("core")
+                if isinstance(core_resolution.get("core"), dict)
+                else {}
+            )
+            core_degraded = core_state.get("degraded") is True
             assistant = {"role": "assistant", "content": forced_chat_reply}
             append_chat_message(
                 session_id,
@@ -546,11 +590,22 @@ def run_mobile_chat_payload(payload, on_token=None, *, trusted_turn_context=None
                 "choices": [
                     {
                         "index": 0,
-                        "finish_reason": "turn_protocol_reply",
+                        "finish_reason": (
+                            "turn_protocol_degraded"
+                            if core_degraded
+                            else "turn_protocol_reply"
+                        ),
                         "message": assistant,
                     }
                 ],
             }
+            if core_degraded:
+                response["core_degraded"] = {
+                    "error_code": str(core_state.get("error_code") or "core_degraded"),
+                    "retryable": bool(core_state.get("retryable")),
+                    "upstream_http_status": int(core_state.get("status") or 0),
+                    "diagnostic": str(core_state.get("diagnostic") or "")[:500],
+                }
             record = {
                 "turn_id": turn_id,
                 "created_at": created_at,
@@ -590,11 +645,19 @@ def run_mobile_chat_payload(payload, on_token=None, *, trusted_turn_context=None
                     query_messages=memory_messages,
                     memory_namespace=memory_namespace,
                 ),
-                "status": "ok",
+                "status": "degraded" if core_degraded else "ok",
+                # The chat transport succeeded and delivered an explicit
+                # degraded outcome.  The failed Core decision remains visible
+                # in ``status`` and ``core_degraded`` instead of being turned
+                # into a polling failure that clients hide or auto-retry.
                 "http_status": 200,
                 "response": response,
                 "assistant_message": assistant,
-                "error": None,
+                "error": (
+                    str(core_state.get("diagnostic") or core_state.get("error_code") or "")
+                    if core_degraded
+                    else None
+                ),
             }
             maybe_write_archives(record)
             threading.Thread(
@@ -603,7 +666,18 @@ def run_mobile_chat_payload(payload, on_token=None, *, trusted_turn_context=None
                 daemon=True,
                 name=f"librarian-{turn_id}",
             ).start()
-            return {"ok": True, "session_id": session_id, "response": response, "message": forced_chat_reply}
+            return {
+                "ok": not core_degraded,
+                "degraded": core_degraded,
+                "session_id": session_id,
+                "response": response,
+                "message": forced_chat_reply,
+                "error": (
+                    str(core_state.get("diagnostic") or core_state.get("error_code") or "")
+                    if core_degraded
+                    else ""
+                ),
+            }
         administratum_intent = None
         administratum_result = None
         administratum_message = None
@@ -1086,7 +1160,7 @@ def chat_history(session_id, limit=CHAT_HISTORY_LIMIT, after_id=0, before_id=0, 
         parsed_before_id = max(0, int(before_id or 0))
     except (TypeError, ValueError):
         parsed_before_id = 0
-    with sqlite3.connect(SQLITE_PATH) as db:
+    with closing(sqlite3.connect(SQLITE_PATH)) as db:
         db.row_factory = sqlite3.Row
         if parsed_after_id > 0:
             rows = db.execute(
@@ -1293,7 +1367,7 @@ def bind_artifact_message_request_id(message_id, session_id, artifact_id, client
 def create_mobile_job(job_type, request_payload):
     job_id = f"{safe_chat_session_id(job_type)}-{uuid.uuid4().hex[:12]}"
     created_at = now_iso()
-    with sqlite3.connect(SQLITE_PATH) as db:
+    with closing(sqlite3.connect(SQLITE_PATH)) as db:
         db.execute(
             """
             INSERT INTO mobile_jobs (id, type, status, created_at, updated_at, request_json, response_json, error)
@@ -1301,6 +1375,7 @@ def create_mobile_job(job_type, request_payload):
             """,
             (job_id, job_type, "queued", created_at, created_at, json.dumps(request_payload, ensure_ascii=False), None, None),
         )
+        db.commit()
     return job_id
 
 
@@ -1337,7 +1412,7 @@ def create_mobile_turn_job_once(request_payload):
     job_id = f"turn-{digest[:32]}"
     created_at = now_iso()
     encoded = json.dumps(request_payload, ensure_ascii=False, sort_keys=True)
-    with MOBILE_JOB_LOCK, sqlite3.connect(SQLITE_PATH) as db:
+    with MOBILE_JOB_LOCK, closing(sqlite3.connect(SQLITE_PATH)) as db:
         db.execute("BEGIN IMMEDIATE")
         row = db.execute("SELECT request_json,status FROM mobile_jobs WHERE id=?", (job_id,)).fetchone()
         if row:
@@ -1366,7 +1441,9 @@ def create_mobile_turn_job_once(request_payload):
                     "WHERE id=? AND status IN ('interrupted','failed')",
                     (created_at, job_id),
                 )
+                db.commit()
                 return job_id, True, "queued"
+            db.commit()
             return job_id, False, str(row[1])
         db.execute(
             """
@@ -1375,6 +1452,7 @@ def create_mobile_turn_job_once(request_payload):
             """,
             (job_id, created_at, created_at, encoded),
         )
+        db.commit()
     return job_id, True, "queued"
 
 
@@ -1383,7 +1461,7 @@ def update_mobile_job(job_id, status, response=None, error=None):
     # explicit busy timeout also covers a short-lived writer in another
     # Archive process during deployment/recovery instead of losing the
     # transition immediately with ``database is locked``.
-    with MOBILE_JOB_LOCK, sqlite3.connect(SQLITE_PATH, timeout=30) as db:
+    with MOBILE_JOB_LOCK, closing(sqlite3.connect(SQLITE_PATH, timeout=30)) as db:
         db.execute("PRAGMA busy_timeout=30000")
         cursor = db.execute(
             """
@@ -1401,6 +1479,7 @@ def update_mobile_job(job_id, status, response=None, error=None):
         )
         if cursor.rowcount != 1:
             raise KeyError(f"mobile job not found: {job_id}")
+        db.commit()
 
 
 def mark_mobile_job_interrupted(job_id, diagnostic):
@@ -1413,7 +1492,7 @@ def mark_mobile_job_interrupted(job_id, diagnostic):
 
 
 def mobile_job_snapshot(job_id):
-    with sqlite3.connect(SQLITE_PATH) as db:
+    with closing(sqlite3.connect(SQLITE_PATH)) as db:
         db.row_factory = sqlite3.Row
         row = db.execute(
             """
@@ -1468,6 +1547,9 @@ def run_mobile_job(job_id, worker):
                 )
             return
         try:
+            # The worker completed even when its factual outcome is
+            # ``ok=false``.  Keep that structured outcome deliverable to chat
+            # clients; only an exception means the job itself failed.
             update_mobile_job(job_id, "done", response=response)
         except Exception as exc:
             mark_mobile_job_interrupted(
@@ -2751,19 +2833,26 @@ def decide_chat_turn_action(session_id, text, image_data_url="", model=None, pay
     except Exception as exc:
         # A failed Core decision must not launch a second unvalidated model
         # whose streamed promise could escape before any truth guard runs.
+        degradation = core_degradation(exc)
         return {
             "decision": {
                 "action": "answer_in_chat",
-                "reply": CORE_DEGRADED_SAFE_REPLY,
+                "reply": degradation["reply"],
                 "task": "",
                 "warmaster_request": {},
                 "confidence": 0.0,
-                "reason": f"ShushunyaCore speech-only degradation: {exc}",
+                "reason": (
+                    "ShushunyaCore explicit no-effect degradation: "
+                    f"{degradation['error_code']}"
+                ),
             },
             "capabilities": manifest,
             "request": {"core_turn": idempotency_key},
-            "response": {"degraded": True, "error": str(exc)},
-            "core_resolution": {"ok": False, "core": {"degraded": True, "error": str(exc)}},
+            "response": {"degraded": True, **degradation},
+            "core_resolution": {
+                "ok": False,
+                "core": {"degraded": True, **degradation},
+            },
             "context_bundle": context_bundle,
             "effect": None,
         }
@@ -2884,7 +2973,10 @@ def create_administratum_task_from_intent(
 
 
 def _core_effect_receipt(effect_id, request_sha256):
-    with sqlite3.connect(SQLITE_PATH, timeout=30) as db:
+    # sqlite3.Connection.__exit__ commits/rolls back but does not close the
+    # handle.  Close explicitly so maintenance/tests can atomically replace a
+    # database immediately after reading the receipt (notably on Windows).
+    with closing(sqlite3.connect(SQLITE_PATH, timeout=30)) as db:
         db.row_factory = sqlite3.Row
         row = db.execute("SELECT * FROM core_effect_receipts WHERE effect_id=?", (effect_id,)).fetchone()
     if not row:
