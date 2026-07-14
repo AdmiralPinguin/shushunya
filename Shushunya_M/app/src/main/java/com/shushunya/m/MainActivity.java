@@ -20,12 +20,8 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
-import android.graphics.Path;
 import android.graphics.Rect;
-import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
@@ -53,6 +49,7 @@ import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
@@ -98,15 +95,14 @@ public class MainActivity extends Activity {
     private static final int SURFACE_RAISED = Color.rgb(22, 23, 37);
     private static final int SURFACE_SOFT = Color.rgb(29, 30, 47);
     private static final int LINE = Color.rgb(48, 49, 70);
-    private static final int TEXT = Color.rgb(246, 244, 249);
-    private static final int TEXT_MUTED = Color.rgb(151, 150, 169);
+    private static final int TEXT = Color.rgb(232, 222, 199);
+    private static final int TEXT_SOFT = Color.rgb(184, 179, 193);
+    private static final int TEXT_MUTED = Color.rgb(160, 157, 174);
     private static final int WARP = Color.rgb(151, 91, 255);
     private static final int WARP_DEEP = Color.rgb(83, 48, 151);
     private static final int ACID = Color.rgb(196, 255, 91);
     private static final int CYAN = Color.rgb(76, 224, 215);
-    private static final int RITUAL_GOLD = Color.rgb(184, 149, 82);
-    private static final int RITUAL_LAVENDER = Color.rgb(183, 130, 226);
-    private static final int RITUAL_BONE = Color.rgb(232, 222, 199);
+    private static final int RITUAL_BONE = TEXT;
 
     private static final String PREFS = "shushunya_m";
     private static final String PENDING_CHAT_FILENAME = "pending-chat-turn.json";
@@ -119,7 +115,7 @@ public class MainActivity extends Activity {
     private static final String SERVER_MEMORY_NAMESPACE = "shushunya";
     private static final int REQUEST_NOTIFICATIONS = 42;
     private static final String DEFAULT_BASE_URL = "https://chat.shushunya.com";
-    private static final String CLIENT_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; ShushunyaM/7.4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36";
+    private static final String CLIENT_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; ShushunyaM/7.5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36";
     private static final String MODEL = "gemma-4-12b-it-UD-Q5_K_XL.gguf";
     private static final int AUDIO_SAMPLE_RATE = 16000;
     private static final int REQUEST_RECORD_AUDIO = 41;
@@ -129,6 +125,9 @@ public class MainActivity extends Activity {
     private static final String TAB_TRANSLATOR = "translator";
     private static final String TAB_AGENT = "agent";
     private static final String TAB_MEMORY = "memory";
+    private static final int CURTAIN_SWIPE_TRIGGER_DP = 24;
+    private static final float CURTAIN_OPEN_ZONE = 0.75f;
+    private static final float CURTAIN_HORIZONTAL_BIAS = 1.20f;
     private static final String[] TRANSLATOR_NAMES = {"Русский", "Корейский", "Алж. арабский", "Турецкий"};
     private static final String[] TRANSLATOR_CODES = {"ru", "ko", "ar_dz", "tr"};
     private static final String[] TRANSLATOR_STT_CODES = {"ru", "ko", "ar", "tr"};
@@ -184,110 +183,6 @@ public class MainActivity extends Activity {
         final java.util.ArrayList<String> cardKeys = new java.util.ArrayList<>();
     }
 
-    private final class MindSigilView extends View {
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Path path = new Path();
-
-        MindSigilView() {
-            super(MainActivity.this);
-            setClickable(false);
-            setFocusable(false);
-            setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            float width = getWidth();
-            float height = getHeight();
-            if (width <= 0 || height <= 0) return;
-
-            float cx = width * 0.50f;
-            float cy = height * 0.72f;
-            float eyeRadius = Math.min(width * 0.34f, height * 0.15f);
-            float eyeHeight = eyeRadius * 0.52f;
-
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(dp(3));
-            paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setStrokeJoin(Paint.Join.ROUND);
-            paint.setColor(WARP);
-            paint.setAlpha(52);
-            path.reset();
-            path.moveTo(cx - eyeRadius, cy);
-            path.quadTo(cx, cy - eyeHeight * 1.28f, cx + eyeRadius, cy);
-            path.quadTo(cx, cy + eyeHeight * 1.28f, cx - eyeRadius, cy);
-            path.close();
-            canvas.drawPath(path, paint);
-
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(CYAN);
-            paint.setAlpha(34);
-            canvas.drawOval(new RectF(
-                    cx - eyeRadius * 0.35f,
-                    cy - eyeHeight * 0.94f,
-                    cx + eyeRadius * 0.35f,
-                    cy + eyeHeight * 0.94f), paint);
-            paint.setColor(WARP);
-            paint.setAlpha(64);
-            canvas.drawOval(new RectF(
-                    cx - eyeRadius * 0.14f,
-                    cy - eyeHeight * 0.72f,
-                    cx + eyeRadius * 0.14f,
-                    cy + eyeHeight * 0.72f), paint);
-            paint.setColor(INK);
-            paint.setAlpha(210);
-            canvas.drawOval(new RectF(
-                    cx - eyeRadius * 0.055f,
-                    cy - eyeHeight * 0.60f,
-                    cx + eyeRadius * 0.055f,
-                    cy + eyeHeight * 0.60f), paint);
-
-            float[][] directions = {
-                    {-0.86f, -0.32f}, {-0.35f, -0.92f}, {0.35f, -0.92f}, {0.88f, -0.24f},
-                    {0.94f, 0.34f}, {0.34f, 0.94f}, {-0.28f, 0.95f}, {-0.90f, 0.31f}
-            };
-            int[] colors = {WARP, CYAN, RITUAL_BONE, WARP, CYAN, RITUAL_BONE, WARP, CYAN};
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(dp(4));
-            for (int i = 0; i < directions.length; i++) {
-                float dx = directions[i][0];
-                float dy = directions[i][1];
-                float start = eyeRadius * 1.18f;
-                float end = eyeRadius * 1.72f;
-                paint.setColor(colors[i]);
-                paint.setAlpha(42);
-                drawArrow(canvas, cx + dx * start, cy + dy * start, cx + dx * end, cy + dy * end);
-            }
-
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(dp(1));
-            paint.setColor(RITUAL_LAVENDER);
-            paint.setAlpha(18);
-            canvas.drawCircle(cx, cy, eyeRadius * 1.12f, paint);
-            canvas.drawCircle(cx, cy, eyeRadius * 1.48f, paint);
-            canvas.drawLine(cx, cy - eyeRadius * 2.4f, cx, cy + eyeRadius * 2.2f, paint);
-        }
-
-        private void drawArrow(Canvas canvas, float startX, float startY, float endX, float endY) {
-            canvas.drawLine(startX, startY, endX, endY, paint);
-            float angle = (float) Math.atan2(endY - startY, endX - startX);
-            float head = dp(14);
-            float wing = 0.58f;
-            canvas.drawLine(
-                    endX,
-                    endY,
-                    endX - head * (float) Math.cos(angle - wing),
-                    endY - head * (float) Math.sin(angle - wing),
-                    paint);
-            canvas.drawLine(
-                    endX,
-                    endY,
-                    endX - head * (float) Math.cos(angle + wing),
-                    endY - head * (float) Math.sin(angle + wing),
-                    paint);
-        }
-    }
     private volatile boolean chatDeltaLoopRunning;
     private volatile boolean activityDestroyed;
     private final java.util.concurrent.atomic.AtomicLong chatHistoryRequestSequence =
@@ -322,8 +217,6 @@ public class MainActivity extends Activity {
     private EditText memorySearch;
     private TextView memoryStatus;
     private LinearLayout commandPalette;
-    private LinearLayout bottomNavigation;
-    private final java.util.LinkedHashMap<String, TextView> navItems = new java.util.LinkedHashMap<>();
     private final java.util.LinkedHashMap<String, Button> agentFilterButtons = new java.util.LinkedHashMap<>();
     private FrameLayout appRoot;
     private LinearLayout appMainColumn;
@@ -362,7 +255,6 @@ public class MainActivity extends Activity {
     private boolean translating;
     private boolean agentRunning;
     private View scrim;
-    private View drawerHandle;
     private LinearLayout drawer;
     private String baseUrl;
     private String currentTab = TAB_CHAT;
@@ -438,49 +330,54 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_DOWN) {
             downX = event.getRawX();
             downY = event.getRawY();
-            float openGestureLimit = getResources().getDisplayMetrics().widthPixels * 0.75f;
+            float openGestureLimit = getResources().getDisplayMetrics().widthPixels * CURTAIN_OPEN_ZONE;
             drawerSwipeCandidate = !drawerOpen && downX < openGestureLimit;
             drawerSwipeConsumed = false;
         } else if (action == MotionEvent.ACTION_MOVE) {
             float dx = event.getRawX() - downX;
             float dy = event.getRawY() - downY;
             if (drawerSwipeCandidate
-                    && dx > dp(12)
-                    && Math.abs(dx) > Math.abs(dy) * 1.15f) {
-                drawerSwipeCandidate = false;
+                    && !drawerSwipeConsumed
+                    && dx > ViewConfiguration.get(this).getScaledTouchSlop()
+                    && Math.abs(dx) > Math.abs(dy) * CURTAIN_HORIZONTAL_BIAS) {
                 drawerSwipeConsumed = true;
-
-                // The child that received ACTION_DOWN must be cancelled before
-                // the curtain takes over, otherwise a swipe across chat text can
-                // also trigger Android's text-selection toolbar.
-                MotionEvent cancel = MotionEvent.obtain(event);
-                cancel.setAction(MotionEvent.ACTION_CANCEL);
-                super.dispatchTouchEvent(cancel);
-                cancel.recycle();
-
-                setDrawerOpen(true);
-                return true;
+                cancelTouchTarget(event);
             }
             if (drawerSwipeConsumed) {
+                if (!drawerOpen
+                        && dx >= dp(CURTAIN_SWIPE_TRIGGER_DP)
+                        && Math.abs(dx) > Math.abs(dy) * CURTAIN_HORIZONTAL_BIAS) {
+                    drawerSwipeCandidate = false;
+                    setDrawerOpen(true);
+                }
                 return true;
             }
         } else if (action == MotionEvent.ACTION_UP) {
             if (drawerSwipeConsumed) {
+                float dx = event.getRawX() - downX;
+                float dy = event.getRawY() - downY;
+                if (!drawerOpen
+                        && dx >= dp(CURTAIN_SWIPE_TRIGGER_DP)
+                        && Math.abs(dx) > Math.abs(dy) * CURTAIN_HORIZONTAL_BIAS) {
+                    setDrawerOpen(true);
+                }
                 drawerSwipeConsumed = false;
                 drawerSwipeCandidate = false;
                 return true;
             }
             float dx = event.getRawX() - downX;
             float dy = event.getRawY() - downY;
-            float openGestureLimit = getResources().getDisplayMetrics().widthPixels * 0.75f;
+            float openGestureLimit = getResources().getDisplayMetrics().widthPixels * CURTAIN_OPEN_ZONE;
             if (!drawerOpen
                     && downX < openGestureLimit
-                    && dx > dp(24)
-                    && Math.abs(dx) > Math.abs(dy) * 1.15f) {
+                    && dx >= dp(CURTAIN_SWIPE_TRIGGER_DP)
+                    && Math.abs(dx) > Math.abs(dy) * CURTAIN_HORIZONTAL_BIAS) {
+                cancelTouchTarget(event);
                 setDrawerOpen(true);
                 return true;
             }
-            if (drawerOpen && dx < -dp(32) && Math.abs(dx) > Math.abs(dy) * 1.15f) {
+            if (drawerOpen && dx < -dp(32) && Math.abs(dx) > Math.abs(dy) * CURTAIN_HORIZONTAL_BIAS) {
+                cancelTouchTarget(event);
                 setDrawerOpen(false);
                 return true;
             }
@@ -490,6 +387,13 @@ public class MainActivity extends Activity {
             drawerSwipeConsumed = false;
         }
         return super.dispatchTouchEvent(event);
+    }
+
+    private void cancelTouchTarget(MotionEvent source) {
+        MotionEvent cancel = MotionEvent.obtain(source);
+        cancel.setAction(MotionEvent.ACTION_CANCEL);
+        super.dispatchTouchEvent(cancel);
+        cancel.recycle();
     }
 
     @Override
@@ -606,7 +510,7 @@ public class MainActivity extends Activity {
 
         FrameLayout root = new FrameLayout(this);
         appRoot = root;
-        root.setBackground(makeBackground());
+        root.setBackgroundColor(INK);
 
         LinearLayout mainColumn = new LinearLayout(this);
         appMainColumn = mainColumn;
@@ -640,8 +544,8 @@ public class MainActivity extends Activity {
         title = new TextView(this);
         title.setText("Шушуня");
         title.setTextColor(TEXT);
-        title.setTextSize(25);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextSize(27);
+        title.setTypeface(Typeface.SERIF, Typeface.BOLD);
         title.setLetterSpacing(-0.02f);
         title.setGravity(Gravity.CENTER_VERTICAL);
         title.setSingleLine(true);
@@ -673,11 +577,6 @@ public class MainActivity extends Activity {
         endpoint.setSingleLine(true);
         endpoint.setPadding(dp(51), 0, 0, 0);
         header.addView(endpoint, new LinearLayout.LayoutParams(-1, dp(24)));
-
-        bottomNavigation = buildBottomNavigation();
-        LinearLayout.LayoutParams navLp = new LinearLayout.LayoutParams(-1, dp(54));
-        navLp.bottomMargin = dp(4);
-        mainColumn.addView(bottomNavigation, navLp);
 
         contentHost = new FrameLayout(this);
         mainColumn.addView(contentHost, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -777,7 +676,8 @@ public class MainActivity extends Activity {
         input.setTextColor(TEXT);
         input.setHintTextColor(TEXT_MUTED);
         input.setHint("Сообщение Шушуне…");
-        input.setTextSize(16);
+        input.setTextSize(17);
+        input.setTypeface(Typeface.SERIF, Typeface.NORMAL);
         input.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         input.setSingleLine(false);
@@ -936,49 +836,6 @@ public class MainActivity extends Activity {
         boolean canSend = hasText || hasAttachment;
         send.setVisibility(canSend ? View.VISIBLE : View.GONE);
         chatVoiceButton.setVisibility(canSend ? View.GONE : View.VISIBLE);
-    }
-
-    private LinearLayout buildBottomNavigation() {
-        LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setGravity(Gravity.CENTER);
-        bar.setPadding(0, dp(3), 0, dp(3));
-        bar.setBackgroundColor(Color.TRANSPARENT);
-        addNavItem(bar, TAB_CHAT, "ЧАТ");
-        addNavItem(bar, TAB_AGENT, "WARBANDS");
-        addNavItem(bar, TAB_TRANSLATOR, "ПЕРЕВОД");
-        addNavItem(bar, TAB_MEMORY, "ПАМЯТЬ");
-        updateBottomNavigation();
-        return bar;
-    }
-
-    private void addNavItem(LinearLayout bar, String tab, String label) {
-        TextView item = new TextView(this);
-        item.setText(label);
-        item.setTextSize(10);
-        item.setTypeface(Typeface.DEFAULT_BOLD);
-        item.setGravity(Gravity.CENTER);
-        item.setLetterSpacing(0.06f);
-        item.setContentDescription("Открыть раздел " + label);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(48), 1);
-        if (bar.getChildCount() > 0) lp.leftMargin = dp(4);
-        bar.addView(item, lp);
-        navItems.put(tab, item);
-        item.setOnClickListener(v -> {
-            v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-            showTab(tab);
-        });
-    }
-
-    private void updateBottomNavigation() {
-        for (java.util.Map.Entry<String, TextView> entry : navItems.entrySet()) {
-            boolean selected = entry.getKey().equals(currentTab);
-            TextView item = entry.getValue();
-            item.setTextColor(selected ? ACID : TEXT_MUTED);
-            item.setBackground(selected
-                    ? pill(SURFACE_RAISED, ACID, dp(14))
-                    : pill(Color.TRANSPARENT, Color.TRANSPARENT, dp(14)));
-        }
     }
 
     private void startWarpPulse() {
@@ -1334,6 +1191,7 @@ public class MainActivity extends Activity {
         edit.setHint(hint);
         edit.setHintTextColor(TEXT_MUTED);
         edit.setTextSize(17);
+        edit.setTypeface(Typeface.SERIF, Typeface.NORMAL);
         edit.setGravity(Gravity.TOP | Gravity.START);
         edit.setMinLines(3);
         edit.setSingleLine(false);
@@ -1377,6 +1235,7 @@ public class MainActivity extends Activity {
         memorySearch.setTextColor(TEXT);
         memorySearch.setHintTextColor(TEXT_MUTED);
         memorySearch.setTextSize(15);
+        memorySearch.setTypeface(Typeface.SERIF, Typeface.NORMAL);
         memorySearch.setPadding(dp(14), 0, dp(14), 0);
         memorySearch.setBackground(pill(SURFACE_RAISED, LINE, dp(18)));
         searchRow.addView(memorySearch, new LinearLayout.LayoutParams(0, dp(48), 1));
@@ -1522,7 +1381,7 @@ public class MainActivity extends Activity {
         text.setTextColor(color);
         text.setTextSize(size);
         text.setLineSpacing(dp(2), 1f);
-        if (bold) text.setTypeface(Typeface.DEFAULT_BOLD);
+        text.setTypeface(Typeface.SERIF, bold ? Typeface.BOLD : Typeface.NORMAL);
         return text;
     }
 
@@ -2527,7 +2386,7 @@ public class MainActivity extends Activity {
         title.setText(brigade.isEmpty() ? "Warband" : brigade);
         title.setTextColor(TEXT);
         title.setTextSize(16);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTypeface(Typeface.SERIF, Typeface.BOLD);
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
         top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
@@ -2548,8 +2407,9 @@ public class MainActivity extends Activity {
         if (!currentStep.isEmpty()) {
             TextView step = new TextView(this);
             step.setText("Сейчас: " + currentStep);
-            step.setTextColor(Color.rgb(218, 215, 228));
+            step.setTextColor(TEXT_SOFT);
             step.setTextSize(14);
+            step.setTypeface(Typeface.SERIF, Typeface.NORMAL);
             step.setLineSpacing(dp(2), 1.0f);
             step.setPadding(0, dp(8), 0, 0);
             card.addView(step, new LinearLayout.LayoutParams(-1, -2));
@@ -2592,7 +2452,7 @@ public class MainActivity extends Activity {
         title.setText(headline.isEmpty() ? "Шаг " + (index + 1) : headline);
         title.setTextColor(TEXT);
         title.setTextSize(14);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTypeface(Typeface.SERIF, Typeface.BOLD);
         title.setSingleLine(false);
         top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         top.addView(agentSmallLabel((index + 1) + "/" + Math.max(total, 1), accent), new LinearLayout.LayoutParams(-2, -2));
@@ -2601,8 +2461,9 @@ public class MainActivity extends Activity {
         if (!detail.isEmpty()) {
             TextView body = new TextView(this);
             body.setText(detail);
-            body.setTextColor(Color.rgb(218, 215, 228));
+            body.setTextColor(TEXT_SOFT);
             body.setTextSize(13);
+            body.setTypeface(Typeface.SERIF, Typeface.NORMAL);
             body.setLineSpacing(dp(2), 1.0f);
             body.setPadding(0, dp(6), 0, 0);
             card.addView(body, new LinearLayout.LayoutParams(-1, -2));
@@ -2651,6 +2512,7 @@ public class MainActivity extends Activity {
         applyRichText(body, finalText);
         body.setTextColor(TEXT);
         body.setTextSize(14);
+        body.setTypeface(Typeface.SERIF, Typeface.NORMAL);
         body.setLineSpacing(dp(2), 1.0f);
         body.setPadding(0, dp(6), 0, 0);
         card.addView(body, new LinearLayout.LayoutParams(-1, -2));
@@ -3044,8 +2906,8 @@ public class MainActivity extends Activity {
         TextView name = new TextView(this);
         name.setText("Шушуня");
         name.setTextColor(TEXT);
-        name.setTextSize(24);
-        name.setTypeface(Typeface.DEFAULT_BOLD);
+        name.setTextSize(26);
+        name.setTypeface(Typeface.SERIF, Typeface.BOLD);
         name.setLetterSpacing(-0.02f);
         name.setContentDescription("Закрыть живую сводку");
         name.setText("Шушуня    ‹");
@@ -3106,28 +2968,12 @@ public class MainActivity extends Activity {
             setDrawerOpen(false);
         });
         updateDrawerSelection();
-
-        TextView handle = new TextView(this);
-        drawerHandle = handle;
-        handle.setText("◈");
-        handle.setTextColor(RITUAL_BONE);
-        handle.setTextSize(12);
-        handle.setGravity(Gravity.CENTER);
-        handle.setAlpha(0.78f);
-        handle.setBackground(gradientPill(WARP_DEEP, Color.rgb(28, 18, 48), WARP, dp(9)));
-        handle.setContentDescription("Потянуть живую сводку Шушуни");
-        FrameLayout.LayoutParams handleLp = new FrameLayout.LayoutParams(dp(20), dp(72), Gravity.LEFT | Gravity.CENTER_VERTICAL);
-        root.addView(handle, handleLp);
-        handle.setOnClickListener(v -> setDrawerOpen(true));
     }
 
     private FrameLayout buildAgentCurtainOverview() {
         FrameLayout frame = new FrameLayout(this);
         frame.setClipToPadding(false);
-        frame.setBackground(pill(Color.argb(218, 7, 4, 13), Color.argb(130, 155, 77, 255), dp(3)));
-
-        MindSigilView sigil = new MindSigilView();
-        frame.addView(sigil, new FrameLayout.LayoutParams(-1, -1));
+        frame.setBackgroundColor(Color.TRANSPARENT);
 
         agentOverviewScroll = new ScrollView(this);
         agentOverviewScroll.setFillViewport(false);
@@ -3147,7 +2993,7 @@ public class MainActivity extends Activity {
         int preservedY = agentOverviewScroll == null ? 0 : agentOverviewScroll.getScrollY();
         agentOverviewList.removeAllViews();
 
-        TextView eyebrow = curtainText("ВНУТРИ МЕНЯ", 10, RITUAL_LAVENDER, true);
+        TextView eyebrow = curtainText("ВНУТРИ МЕНЯ", 10, WARP, true);
         eyebrow.setLetterSpacing(0.24f);
         agentOverviewList.addView(eyebrow, new LinearLayout.LayoutParams(-1, dp(24)));
 
@@ -3199,7 +3045,7 @@ public class MainActivity extends Activity {
             }
         }
 
-        addCurtainSection("ДАЛЬШЕ", RITUAL_GOLD);
+        addCurtainSection("ДАЛЬШЕ", ACID);
         boolean hasNext = false;
         for (JSONObject task : active) {
             String nextStep = agentTaskNextStep(task);
@@ -3217,26 +3063,12 @@ public class MainActivity extends Activity {
             addCurtainEmpty("БЕЗ ТАЙНОГО ПЛАНА", "Пока не строю замыслов за твоей спиной.", Color.rgb(122, 104, 125));
         }
 
-        addCurtainSection("ЧТО Я ПРИНЁС", RITUAL_LAVENDER);
+        addCurtainSection("ЧТО Я ПРИНЁС", WARP);
         if (finished.isEmpty()) {
             addCurtainEmpty("ПОКА ПУСТО", "Ничего нового ещё не принёс.", Color.rgb(119, 100, 124));
         } else {
             addCurtainTask(finished.get(0), "result");
         }
-
-        TextView details = curtainText("ВСЯ ИСТОРИЯ И WARBANDS  →", 11, RITUAL_BONE, true);
-        details.setGravity(Gravity.CENTER);
-        details.setLetterSpacing(0.08f);
-        details.setPadding(dp(12), 0, dp(12), 0);
-        details.setBackground(pill(Color.argb(218, 16, 11, 24), RITUAL_GOLD, dp(3)));
-        details.setContentDescription("Открыть подробный ход всех работ");
-        LinearLayout.LayoutParams detailsLp = new LinearLayout.LayoutParams(-1, dp(48));
-        detailsLp.topMargin = dp(14);
-        agentOverviewList.addView(details, detailsLp);
-        details.setOnClickListener(v -> {
-            setDrawerOpen(false);
-            showTab(TAB_AGENT);
-        });
 
         if (agentOverviewScroll != null) {
             agentOverviewScroll.post(() -> {
@@ -3259,13 +3091,7 @@ public class MainActivity extends Activity {
     private void addCurtainSection(String label, int accent) {
         TextView section = curtainText(label, 10, accent, true);
         section.setLetterSpacing(0.20f);
-        section.setPadding(0, dp(14), 0, dp(8));
-        GradientDrawable divider = new GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{Color.argb(110, Color.red(accent), Color.green(accent), Color.blue(accent)), Color.TRANSPARENT});
-        divider.setSize(dp(180), dp(1));
-        section.setCompoundDrawables(null, null, null, divider);
-        section.setCompoundDrawablePadding(dp(7));
+        section.setPadding(0, dp(16), 0, dp(8));
         agentOverviewList.addView(section, new LinearLayout.LayoutParams(-1, -2));
     }
 
@@ -3277,7 +3103,7 @@ public class MainActivity extends Activity {
         TextView kicker = curtainText(label, 9, accent, true);
         kicker.setLetterSpacing(0.16f);
         card.addView(kicker, new LinearLayout.LayoutParams(-1, -2));
-        TextView body = curtainText(text, 17, RITUAL_BONE, false);
+        TextView body = curtainText(text, 17, TEXT, false);
         body.setTypeface(Typeface.SERIF, Typeface.NORMAL);
         body.setPadding(0, dp(5), 0, 0);
         card.addView(body, new LinearLayout.LayoutParams(-1, -2));
@@ -3294,8 +3120,8 @@ public class MainActivity extends Activity {
         int accent = waitingForUser
                 ? Color.rgb(181, 42, 70)
                 : "active".equals(kind) ? CYAN
-                : "next".equals(kind) ? RITUAL_GOLD
-                : (task.optBoolean("success", false) || "final_ready".equals(visible)) ? CYAN : RITUAL_LAVENDER;
+                : "next".equals(kind) ? ACID
+                : (task.optBoolean("success", false) || "final_ready".equals(visible)) ? CYAN : WARP;
 
         String prompt = task.optString("task", "").trim();
         String currentStep = task.optString("current_step", "").trim();
@@ -3325,8 +3151,12 @@ public class MainActivity extends Activity {
         card.setFocusable(true);
 
         View rail = new View(this);
-        rail.setBackgroundColor(accent);
-        card.addView(rail, new LinearLayout.LayoutParams(dp(3), -1));
+        rail.setBackground(pill(accent, accent, dp(2)));
+        LinearLayout.LayoutParams railLp = new LinearLayout.LayoutParams(dp(3), -1);
+        railLp.leftMargin = dp(12);
+        railLp.topMargin = dp(12);
+        railLp.bottomMargin = dp(12);
+        card.addView(rail, railLp);
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
@@ -3337,7 +3167,7 @@ public class MainActivity extends Activity {
         label.setLetterSpacing(0.17f);
         content.addView(label, new LinearLayout.LayoutParams(-1, -2));
 
-        TextView titleTextView = curtainText(titleText, 18, RITUAL_BONE, false);
+        TextView titleTextView = curtainText(titleText, 18, TEXT, false);
         titleTextView.setTypeface(Typeface.SERIF, Typeface.NORMAL);
         titleTextView.setMaxLines("result".equals(kind) ? 5 : 4);
         titleTextView.setEllipsize(TextUtils.TruncateAt.END);
@@ -3345,7 +3175,7 @@ public class MainActivity extends Activity {
         content.addView(titleTextView, new LinearLayout.LayoutParams(-1, -2));
 
         if (!detailText.isEmpty()) {
-            TextView detail = curtainText(detailText, 12, Color.rgb(184, 179, 193), false);
+            TextView detail = curtainText(detailText, 12, TEXT_SOFT, false);
             detail.setMaxLines(3);
             detail.setEllipsize(TextUtils.TruncateAt.END);
             detail.setPadding(0, dp(6), 0, 0);
@@ -3402,9 +3232,9 @@ public class MainActivity extends Activity {
 
     private GradientDrawable ritualBackground(int accent) {
         GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(Color.argb(218, 12, 8, 20));
-        drawable.setCornerRadius(dp(3));
-        drawable.setStroke(dp(1), Color.argb(125, Color.red(accent), Color.green(accent), Color.blue(accent)));
+        drawable.setColor(SURFACE_RAISED);
+        drawable.setCornerRadius(dp(18));
+        drawable.setStroke(dp(1), Color.argb(135, Color.red(accent), Color.green(accent), Color.blue(accent)));
         return drawable;
     }
 
@@ -3553,7 +3383,6 @@ public class MainActivity extends Activity {
             loadMemoryDashboard();
         }
         updateDrawerSelection();
-        updateBottomNavigation();
         restoreHeaderState();
         if (appRoot != null) appRoot.requestApplyInsets();
     }
@@ -3595,7 +3424,6 @@ public class MainActivity extends Activity {
         scrim.animate().cancel();
         if (open) {
             scrim.setVisibility(View.VISIBLE);
-            if (drawerHandle != null) drawerHandle.setVisibility(View.GONE);
             drawer.setPivotX(0f);
             drawer.setScaleX(0.965f);
             drawer.setAlpha(0.88f);
@@ -3620,7 +3448,6 @@ public class MainActivity extends Activity {
                 .withEndAction(() -> {
                     if (!drawerOpen) {
                         scrim.setVisibility(View.GONE);
-                        if (drawerHandle != null) drawerHandle.setVisibility(View.VISIBLE);
                     }
                 })
                 .start();
@@ -3787,27 +3614,12 @@ public class MainActivity extends Activity {
         return out.toByteArray();
     }
 
-    private GradientDrawable makeBackground() {
-        return new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{
-                        Color.rgb(18, 13, 31),
-                        INK,
-                        Color.rgb(8, 9, 18)
-                });
-    }
-
     private GradientDrawable drawerBackground() {
-        GradientDrawable drawable = new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                new int[]{
-                        Color.rgb(24, 13, 38),
-                        Color.rgb(7, 4, 13),
-                        Color.rgb(14, 8, 24)
-                });
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(SURFACE);
         float corner = dp(18);
         drawable.setCornerRadii(new float[]{0, 0, corner, corner, corner, corner, 0, 0});
-        drawable.setStroke(dp(1), Color.argb(160, 155, 77, 255));
+        drawable.setStroke(dp(1), Color.argb(170, Color.red(WARP), Color.green(WARP), Color.blue(WARP)));
         return drawable;
     }
 
@@ -4773,6 +4585,7 @@ public class MainActivity extends Activity {
         TextView bubble = new TextView(this);
         applyRichText(bubble, text);
         bubble.setTextSize(16);
+        bubble.setTypeface(Typeface.SERIF, Typeface.NORMAL);
         bubble.setLineSpacing(dp(2), 1.0f);
         bubble.setTextColor(TEXT);
         bubble.setPadding(dp(16), dp(12), dp(16), dp(12));
@@ -4844,6 +4657,7 @@ public class MainActivity extends Activity {
             TextView caption = new TextView(this);
             applyRichText(caption, text.trim());
             caption.setTextSize(16);
+            caption.setTypeface(Typeface.SERIF, Typeface.NORMAL);
             caption.setLineSpacing(dp(2), 1.0f);
             caption.setTextColor(TEXT);
             caption.setPadding(dp(6), dp(8), dp(6), dp(2));
@@ -4885,6 +4699,7 @@ public class MainActivity extends Activity {
         TextView bubble = new TextView(this);
         applyRichText(bubble, text);
         bubble.setTextSize(16);
+        bubble.setTypeface(Typeface.SERIF, Typeface.NORMAL);
         bubble.setLineSpacing(dp(2), 1.0f);
         bubble.setTextColor(TEXT);
         bubble.setPadding(dp(16), dp(12), dp(16), dp(12));
@@ -5208,7 +5023,7 @@ public class MainActivity extends Activity {
         name.setText(artifact.displayName);
         name.setTextColor(TEXT);
         name.setTextSize(15);
-        name.setTypeface(Typeface.DEFAULT_BOLD);
+        name.setTypeface(Typeface.SERIF, Typeface.BOLD);
         name.setMaxLines(2);
         name.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(0, -2, 1);
@@ -5230,6 +5045,7 @@ public class MainActivity extends Activity {
             applyRichText(captionView, caption.trim());
             captionView.setTextColor(TEXT);
             captionView.setTextSize(14);
+            captionView.setTypeface(Typeface.SERIF, Typeface.NORMAL);
             captionView.setPadding(0, dp(9), 0, 0);
             card.addView(captionView, new LinearLayout.LayoutParams(-1, -2));
         }
