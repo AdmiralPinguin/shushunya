@@ -121,6 +121,15 @@ _CONTINUATION_SEMANTIC_REACTIVATION_PATTERN = re.compile(
     r"доведи|доведите|заверши|завершите|возобнови|возобновите)\b",
     re.IGNORECASE,
 )
+_CONTINUATION_SEMANTIC_POLITE_PATTERN = re.compile(
+    r"\b(?:можешь|можете|сможешь|сможете)\s+"
+    r"(?:вернуться|возобновить|продолжить|доделать|довести|завершить)\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_SEMANTIC_COLLABORATIVE_PATTERN = re.compile(
+    r"\bдавай\s+(?:продолжим|доделаем|возобновим|вернемся|вернёмся)\b",
+    re.IGNORECASE,
+)
 _CONTINUATION_SEMANTIC_TARGET_PATTERN = re.compile(
     r"\b(?:работ\w*|задач\w*|мисси\w*|проект\w*|результат\w*|"
     r"итог\w*|сборк\w*|приложен\w*|apk|апк)\b",
@@ -151,8 +160,20 @@ _CONTINUATION_NEGATED_ACTION_PATTERN = re.compile(
 _CONTINUATION_INFORMATION_OBJECT_PATTERN = re.compile(
     r"^\s*(?:(?:мне|еще|снова|опять|эту|этот|тот|ту|свой|свою)\s+)*"
     r"(?:что\s+ты\s+(?:сказал|написал)|мысл\w*|рассказ\w*|истори\w*|"
-    r"провер\w*\s+связ\w*|объясн\w*|разбор\w*|статус\w*|оценк\w*|"
-    r"ответ\w*|описан\w*|вопрос\w*|фраз\w*)\b",
+    r"провер\w*\s+связ\w*|объясн\w*|разбор\w*|анализ\w*|обсужден\w*|"
+    r"статус\w*|оценк\w*|услови\w*|требован\w*|формулировк\w*|"
+    r"назван\w*|формулир\w*|контекст\w*|содержан\w*|детал\w*|план\w*|ответ\w*|"
+    r"описан\w*|вопрос\w*|фраз\w*)\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_PARAPHRASE_PATTERN = re.compile(
+    r"\b(?:(?:своими|другими)\s+словами|перефразир\w*|перескаж\w*|"
+    r"кратк\w*|подробн\w*|понятн\w*)\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_REPORTED_SPEECH_PATTERN = re.compile(
+    r"\b(?:я|ты|он|она|мы|вы|они)?\s*"
+    r"(?:сказал\w*|написал\w*|просил\w*|приказал\w*|велел\w*)\b",
     re.IGNORECASE,
 )
 _CONTINUATION_CONSTRAINT_SUFFIX_PATTERN = re.compile(
@@ -163,6 +184,8 @@ _CONTINUATION_FILLER_WORDS = frozenset(
     {
         "ну",
         "так",
+        "а",
+        "и",
         "ладно",
         "давай",
         "ты",
@@ -246,30 +269,40 @@ def _looks_like_continuation_directive(text: str) -> bool:
     clauses = re.split(r"(?<=[.!?;])\s+|[\n\r]+|[—–]+", normalized)
     for clause in clauses:
         clause = clause.strip(" \t,.;:—–")
-        if (
-            not clause
-            or "?" in clause
-            or _CONTINUATION_NON_COMMAND_PATTERN.search(clause)
-        ):
+        if not clause:
             continue
         for command in _CONTINUATION_IMPERATIVE_PATTERN.finditer(clause):
             prefix = clause[: command.start()].rstrip()
             suffix = clause[command.end():]
+            if (
+                command.group(0).startswith("повтор")
+                and _CONTINUATION_PARAPHRASE_PATTERN.search(suffix)
+            ):
+                continue
+            if _CONTINUATION_REPORTED_SPEECH_PATTERN.search(prefix):
+                continue
+            local_prefix = re.split(r"[,;:]", prefix)[-1].strip()
+            if _CONTINUATION_NON_COMMAND_PATTERN.search(local_prefix):
+                continue
             negated_tail = re.search(
                 r"\b(?:не|никогда(?:\s+\w+){0,3}\s+не|ни\s+за\s+что|перестань|хватит)\s*$",
-                prefix[-64:],
+                local_prefix[-64:],
                 re.IGNORECASE,
             )
             if negated_tail or re.match(r"^\s+не\b", suffix, re.IGNORECASE):
                 continue
+            prefix_authorizes_object = (
+                _only_continuation_fillers(local_prefix)
+                or _task_execution_reference(local_prefix)
+            )
             if (
-                _only_continuation_fillers(prefix)
+                prefix_authorizes_object
                 and _CONTINUATION_CONSTRAINT_SUFFIX_PATTERN.search(suffix)
             ):
                 return True
-            if _task_execution_reference(prefix) or _task_execution_reference(suffix):
+            if prefix_authorizes_object and _task_execution_reference(suffix):
                 return True
-            if _only_continuation_fillers(prefix) and _only_continuation_fillers(suffix):
+            if prefix_authorizes_object and _only_continuation_fillers(suffix):
                 return True
     return False
 
@@ -282,26 +315,59 @@ def _current_turn_authorizes_continuation(text: str) -> bool:
     clauses = re.split(r"(?<=[.!?;])\s+|[\n\r]+|[—–]+", normalized)
     for clause in clauses:
         clause = clause.strip(" \t,.;:—–")
-        if (
-            not clause
-            or "?" in clause
-            or _CONTINUATION_NON_COMMAND_PATTERN.search(clause)
-            or _CONTINUATION_NEGATED_ACTION_PATTERN.search(clause)
-        ):
+        if not clause or _CONTINUATION_REPORTED_SPEECH_PATTERN.search(clause):
             continue
-        reactivation_action = _CONTINUATION_SEMANTIC_REACTIVATION_PATTERN.search(clause)
-        reactivation = (
-            reactivation_action
-            and _task_execution_reference(clause[reactivation_action.end():])
-            and _CONTINUATION_SEMANTIC_RESUME_PATTERN.search(clause)
-        )
-        result_request = (
-            _CONTINUATION_SEMANTIC_RESULT_REQUEST_PATTERN.search(clause)
-            and _CONTINUATION_SEMANTIC_RESULT_PATTERN.search(clause)
-            and _CONTINUATION_SEMANTIC_RESUME_PATTERN.search(clause)
-        )
-        if reactivation or result_request:
-            return True
+        # Negation and meta-discussion apply to their comma-delimited part,
+        # not to a later explicit command in the same user turn.
+        for semantic_clause in re.split(r",+", clause):
+            semantic_clause = semantic_clause.strip(" \t,.;:—–")
+            if (
+                not semantic_clause
+                or _CONTINUATION_NON_COMMAND_PATTERN.search(semantic_clause)
+                or _CONTINUATION_NEGATED_ACTION_PATTERN.search(semantic_clause)
+            ):
+                continue
+            reactivation_action = _CONTINUATION_SEMANTIC_REACTIVATION_PATTERN.search(
+                semantic_clause
+            )
+            reactivation = (
+                reactivation_action
+                and _task_execution_reference(
+                    semantic_clause[reactivation_action.end():]
+                )
+                and _CONTINUATION_SEMANTIC_RESUME_PATTERN.search(semantic_clause)
+            )
+            polite_action = _CONTINUATION_SEMANTIC_POLITE_PATTERN.search(
+                semantic_clause
+            )
+            polite_reactivation = bool(
+                polite_action
+                and _task_execution_reference(semantic_clause[polite_action.end():])
+            )
+            collaborative_action = _CONTINUATION_SEMANTIC_COLLABORATIVE_PATTERN.search(
+                semantic_clause
+            )
+            collaborative_reactivation = bool(
+                collaborative_action
+                and _task_execution_reference(
+                    semantic_clause[collaborative_action.end():]
+                )
+            )
+            result_request = (
+                "?" not in semantic_clause
+                and _CONTINUATION_SEMANTIC_RESULT_REQUEST_PATTERN.search(
+                    semantic_clause
+                )
+                and _CONTINUATION_SEMANTIC_RESULT_PATTERN.search(semantic_clause)
+                and _CONTINUATION_SEMANTIC_RESUME_PATTERN.search(semantic_clause)
+            )
+            if (
+                reactivation
+                or polite_reactivation
+                or collaborative_reactivation
+                or result_request
+            ):
+                return True
     return False
 
 
@@ -784,8 +850,10 @@ class DecisionEngine:
                     repair=authority_error,
                 )
                 repaired = normalize_decision(raw)
-                if repaired["action"] == "continue_warmaster_mission":
-                    raise DecisionTruthError("continuation_not_authorized_by_current_turn")
+                if repaired["action"] not in {"answer_in_chat", "ask_clarification"}:
+                    raise DecisionTruthError(
+                        "current_turn_authority_repair_must_be_speech_only"
+                    )
                 decision = repaired
                 repair_error = authority_error
                 model_trace = {

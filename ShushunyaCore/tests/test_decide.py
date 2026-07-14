@@ -421,6 +421,9 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
                 "Вернись к той работе и добейся результата",
                 "Возьми снова остановившуюся задачу в работу",
                 "Нужен всё-таки результат по той миссии",
+                "Можешь вернуться к той работе?",
+                "Давай продолжим ту задачу",
+                "Не нужен статус, нужен всё-таки результат по той миссии",
             ]
         ):
             with self.subTest(text=text):
@@ -496,6 +499,12 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
             "Закрой эту задачу.",
             "Повтори, пожалуйста, статус той задачи.",
             "Возьми снова статус той работы.",
+            "Повтори условия задачи.",
+            "Продолжай анализ проекта.",
+            "Я сказал ему: продолжай задачу.",
+            "Повтори задачу своими словами.",
+            "Я сказал ему: можешь вернуться к той работе?",
+            "Он написал: давай продолжим ту задачу.",
         ]
         for index, text in enumerate(non_mandates):
             with self.subTest(text=text):
@@ -556,6 +565,41 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["core"]["degraded"])
         self.assertEqual(self.ledger.list_commitments(), [])
 
+    async def test_unauthorized_continuation_repair_cannot_substitute_another_effect(self):
+        manifest = self.continuation_manifest()
+        engine = FakeDecisionEngine(
+            *self.args,
+            replies=[
+                {
+                    "action": "continue_warmaster_mission",
+                    "continue_parent_task_id": "core-galaga-failed",
+                    "confidence": 1.0,
+                },
+                {
+                    "action": "request_warmaster_mission",
+                    "warmaster_request": {
+                        "user_request": "создать новую задачу вместо старой",
+                        "expected_outcome": "новая задача",
+                        "capability_area": "code",
+                    },
+                    "confidence": 1.0,
+                },
+            ],
+        )
+        envelope = self.envelope(
+            key="unauthorized-continuation-effect-substitution",
+            text="Кратко подтверди, что связь есть.",
+        )
+        envelope.capability_manifest = manifest
+
+        result = await engine.resolve(envelope)
+
+        self.assertEqual(engine.calls, 2)
+        self.assertEqual(result["decision"]["action"], "ask_clarification")
+        self.assertIsNone(result["effect"])
+        self.assertTrue(result["core"]["degraded"])
+        self.assertEqual(self.ledger.list_commitments(), [])
+
     async def test_clause_aware_imperatives_survive_mixed_context(self):
         manifest = self.continuation_manifest()
         valid = [
@@ -564,6 +608,7 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
             "Ты закончил? Если нет — продолжай",
             "Продолжай, но не удаляй готовые файлы",
             "Давай ещё раз",
+            "Обсудим позже, а сейчас продолжай задачу",
         ]
         for index, text in enumerate(valid):
             with self.subTest(text=text):
