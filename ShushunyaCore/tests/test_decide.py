@@ -440,6 +440,122 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["decision"]["action"], "continue_warmaster_mission")
                 self.assertIsNotNone(result["effect"])
 
+    async def test_task_page_cannot_authorize_continuation_for_unrelated_current_turn(self):
+        manifest = self.continuation_manifest()
+        engine = FakeDecisionEngine(
+            *self.args,
+            replies=[
+                {
+                    "action": "continue_warmaster_mission",
+                    "continue_parent_task_id": "core-galaga-failed",
+                    "confidence": 1.0,
+                },
+                {
+                    "action": "answer_in_chat",
+                    "reply": "Связь есть.",
+                    "confidence": 1.0,
+                },
+            ],
+        )
+        envelope = self.envelope(
+            key="unrelated-turn-with-old-task-page",
+            text=(
+                "Техническая проверка после исправления контракта. "
+                "Кратко подтверди, что связь есть."
+            ),
+        )
+        envelope.capability_manifest = manifest
+        envelope.context.task_page_context = (
+            "<task_memory_reference>\n"
+            "## Цель\nСобрать Galaga APK\n"
+            "## Следующие действия\nПродолжить остановившуюся сборку\n"
+            "</task_memory_reference>"
+        )
+
+        result = await engine.resolve(envelope)
+
+        self.assertEqual(engine.calls, 2)
+        self.assertEqual(result["decision"]["action"], "answer_in_chat")
+        self.assertEqual(result["decision"]["reply"], "Связь есть.")
+        self.assertIsNone(result["effect"])
+        self.assertEqual(self.ledger.list_commitments(), [])
+
+    async def test_chat_objects_status_and_negation_cannot_authorize_old_task(self):
+        manifest = self.continuation_manifest()
+        non_mandates = [
+            "Повтори, что ты сказал.",
+            "Закончи мысль.",
+            "Продолжай рассказ.",
+            "Давай ещё раз проверим связь.",
+            "Попробуй ещё раз объяснить.",
+            "Делай дальше разбор архитектуры.",
+            "Не нужен результат по той миссии.",
+            "Нужен статус по той миссии.",
+            "Нужна оценка той работы.",
+            "Требуется объяснение по той задаче.",
+            "Закрой эту задачу.",
+            "Повтори, пожалуйста, статус той задачи.",
+            "Возьми снова статус той работы.",
+        ]
+        for index, text in enumerate(non_mandates):
+            with self.subTest(text=text):
+                engine = FakeDecisionEngine(
+                    *self.args,
+                    replies=[
+                        {
+                            "action": "continue_warmaster_mission",
+                            "continue_parent_task_id": "core-galaga-failed",
+                            "confidence": 1.0,
+                        },
+                        {
+                            "action": "answer_in_chat",
+                            "reply": "Ответил только на текущую реплику.",
+                            "confidence": 1.0,
+                        },
+                    ],
+                )
+                envelope = self.envelope(key=f"non-mandate-object-{index}", text=text)
+                envelope.capability_manifest = manifest
+
+                result = await engine.resolve(envelope)
+
+                self.assertEqual(engine.calls, 2)
+                self.assertEqual(result["decision"]["action"], "answer_in_chat")
+                self.assertIsNone(result["effect"])
+
+        self.assertEqual(self.ledger.list_commitments(), [])
+
+    async def test_repeated_unauthorized_continuation_fails_closed_without_effect(self):
+        manifest = self.continuation_manifest()
+        engine = FakeDecisionEngine(
+            *self.args,
+            replies=[
+                {
+                    "action": "continue_warmaster_mission",
+                    "continue_parent_task_id": "core-galaga-failed",
+                    "confidence": 1.0,
+                },
+                {
+                    "action": "continue_warmaster_mission",
+                    "continue_parent_task_id": "core-galaga-failed",
+                    "confidence": 1.0,
+                },
+            ],
+        )
+        envelope = self.envelope(
+            key="unauthorized-continuation-repeated",
+            text="Кратко подтверди, что связь есть.",
+        )
+        envelope.capability_manifest = manifest
+
+        result = await engine.resolve(envelope)
+
+        self.assertEqual(engine.calls, 2)
+        self.assertEqual(result["decision"]["action"], "ask_clarification")
+        self.assertIsNone(result["effect"])
+        self.assertTrue(result["core"]["degraded"])
+        self.assertEqual(self.ledger.list_commitments(), [])
+
     async def test_clause_aware_imperatives_survive_mixed_context(self):
         manifest = self.continuation_manifest()
         valid = [

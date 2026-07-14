@@ -58,6 +58,8 @@ relationship.conversation_contract — обязательный контракт
 - Явная команда продолжить/доделать/повторить недавно остановившуюся работу = continue_warmaster_mission.
   Выбери только точный parent_task_id из continuable_tasks. Сервер создаст новую связанную миссию: терминальный
   старый run не переоткрывается. Для расплывчатого «доделывай» восстанови предмет из recent_history.
+- Наличие task page или доступной continuable_tasks — только контекст, не разрешение. Не выбирай
+  continue_warmaster_mission, если именно ТЕКУЩАЯ реплика не просит возобновить/довести старую работу.
 - Напоминание/расписание/watch = create_administratum_task.
 - Явная просьба прислать уже зарегистрированный файл = deliver_artifact. Выбери только точный
   artifact_id из available_artifacts; путь, имя файла или придуманный идентификатор не дают доступа.
@@ -114,6 +116,83 @@ _CONTINUATION_NON_COMMAND_PATTERN = re.compile(
     r"обсудим|обсуждаем|обсуждать|означает|значит)\b",
     re.IGNORECASE,
 )
+_CONTINUATION_SEMANTIC_REACTIVATION_PATTERN = re.compile(
+    r"\b(?:вернись|вернитесь|возьми|возьмите|добейся|добейтесь|"
+    r"доведи|доведите|заверши|завершите|возобнови|возобновите)\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_SEMANTIC_TARGET_PATTERN = re.compile(
+    r"\b(?:работ\w*|задач\w*|мисси\w*|проект\w*|результат\w*|"
+    r"итог\w*|сборк\w*|приложен\w*|apk|апк)\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_SEMANTIC_RESULT_REQUEST_PATTERN = re.compile(
+    r"\b(?:нужен|нужна|нужно|требуется)\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_SEMANTIC_RESULT_PATTERN = re.compile(
+    r"\b(?:результат\w*|итог(?:а|у|ом|е|и|ов|ам|ами|ах)?|"
+    r"готов\w*\s+(?:артефакт\w*|файл\w*|сборк\w*|apk|апк))\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_SEMANTIC_RESUME_PATTERN = re.compile(
+    r"\b(?:снова|опять|все[-\s]?таки|той|ту|этой|эту|"
+    r"останов\w*|прерван\w*|незаверш\w*|недодел\w*|"
+    r"верн\w*|по\s+(?:ней|нему|той|этому))\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_NEGATED_ACTION_PATTERN = re.compile(
+    r"\b(?:не\s+(?:нужен|нужна|нужно|требуется|вернись|вернитесь|возьми|возьмите|"
+    r"добейся|добейтесь|доведи|доведите|заверши|завершите|возобнови|возобновите|"
+    r"доделай|доделывай|продолжи|продолжай)|никогда\b.{0,40}\bне|"
+    r"ни\s+за\s+что|перестань|хватит)\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_INFORMATION_OBJECT_PATTERN = re.compile(
+    r"^\s*(?:(?:мне|еще|снова|опять|эту|этот|тот|ту|свой|свою)\s+)*"
+    r"(?:что\s+ты\s+(?:сказал|написал)|мысл\w*|рассказ\w*|истори\w*|"
+    r"провер\w*\s+связ\w*|объясн\w*|разбор\w*|статус\w*|оценк\w*|"
+    r"ответ\w*|описан\w*|вопрос\w*|фраз\w*)\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_CONSTRAINT_SUFFIX_PATTERN = re.compile(
+    r"^\s*,?\s*(?:но|только|при\s+этом|с\s+условием|без)\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_FILLER_WORDS = frozenset(
+    {
+        "ну",
+        "так",
+        "ладно",
+        "давай",
+        "ты",
+        "тогда",
+        "теперь",
+        "сейчас",
+        "просто",
+        "уже",
+        "еще",
+        "снова",
+        "опять",
+        "все",
+        "всё",
+        "сам",
+        "сама",
+        "быстро",
+        "молча",
+        "дальше",
+        "пожалуйста",
+        "плиз",
+        "пиздуй",
+        "бля",
+        "блять",
+        "блядь",
+        "нахуй",
+        "же",
+        "ка",
+        "уж",
+    }
+)
 _PARENT_GOAL_LIMIT = 8_000
 _PARENT_MESSAGE_LIMIT = 24_000
 _PARENT_FIELD_LIMIT = 6_000
@@ -141,6 +220,25 @@ def _trusted_continuation_parent(manifest: dict[str, Any]) -> str:
     return ""
 
 
+def _only_continuation_fillers(text: str) -> bool:
+    words = re.findall(r"[a-zа-я0-9]+", str(text or "").lower().replace("ё", "е"))
+    return all(word in _CONTINUATION_FILLER_WORDS for word in words)
+
+
+def _task_execution_reference(text: str) -> bool:
+    candidate = str(text or "").strip(" \t,.;:—–")
+    while candidate:
+        leading_word = re.match(r"^([a-zа-я0-9]+)\b[\s,]*", candidate, re.IGNORECASE)
+        if not leading_word or leading_word.group(1) not in _CONTINUATION_FILLER_WORDS:
+            break
+        candidate = candidate[leading_word.end():].lstrip(" \t,.;:—–")
+    return bool(
+        candidate
+        and _CONTINUATION_SEMANTIC_TARGET_PATTERN.search(candidate)
+        and not _CONTINUATION_INFORMATION_OBJECT_PATTERN.search(candidate)
+    )
+
+
 def _looks_like_continuation_directive(text: str) -> bool:
     normalized = str(text or "").strip().lower().replace("ё", "е")
     if not normalized:
@@ -156,14 +254,69 @@ def _looks_like_continuation_directive(text: str) -> bool:
             continue
         for command in _CONTINUATION_IMPERATIVE_PATTERN.finditer(clause):
             prefix = clause[: command.start()].rstrip()
+            suffix = clause[command.end():]
             negated_tail = re.search(
                 r"\b(?:не|никогда(?:\s+\w+){0,3}\s+не|ни\s+за\s+что|перестань|хватит)\s*$",
                 prefix[-64:],
                 re.IGNORECASE,
             )
-            if not negated_tail:
+            if negated_tail or re.match(r"^\s+не\b", suffix, re.IGNORECASE):
+                continue
+            if (
+                _only_continuation_fillers(prefix)
+                and _CONTINUATION_CONSTRAINT_SUFFIX_PATTERN.search(suffix)
+            ):
+                return True
+            if _task_execution_reference(prefix) or _task_execution_reference(suffix):
+                return True
+            if _only_continuation_fillers(prefix) and _only_continuation_fillers(suffix):
                 return True
     return False
+
+
+def _current_turn_authorizes_continuation(text: str) -> bool:
+    """Require evidence in this turn; task memory can never grant authority."""
+    if _looks_like_continuation_directive(text):
+        return True
+    normalized = str(text or "").strip().lower().replace("ё", "е")
+    clauses = re.split(r"(?<=[.!?;])\s+|[\n\r]+|[—–]+", normalized)
+    for clause in clauses:
+        clause = clause.strip(" \t,.;:—–")
+        if (
+            not clause
+            or "?" in clause
+            or _CONTINUATION_NON_COMMAND_PATTERN.search(clause)
+            or _CONTINUATION_NEGATED_ACTION_PATTERN.search(clause)
+        ):
+            continue
+        reactivation_action = _CONTINUATION_SEMANTIC_REACTIVATION_PATTERN.search(clause)
+        reactivation = (
+            reactivation_action
+            and _task_execution_reference(clause[reactivation_action.end():])
+            and _CONTINUATION_SEMANTIC_RESUME_PATTERN.search(clause)
+        )
+        result_request = (
+            _CONTINUATION_SEMANTIC_RESULT_REQUEST_PATTERN.search(clause)
+            and _CONTINUATION_SEMANTIC_RESULT_PATTERN.search(clause)
+            and _CONTINUATION_SEMANTIC_RESUME_PATTERN.search(clause)
+        )
+        if reactivation or result_request:
+            return True
+    return False
+
+
+def _continuation_not_authorized_decision() -> dict[str, Any]:
+    return normalize_decision(
+        {
+            "action": "ask_clarification",
+            "reply": (
+                "Я не запустил старую задачу: текущая реплика не даёт команды её продолжать. "
+                "Если ты хотел возобновить именно её — скажи это прямо; иначе повтори текущий вопрос."
+            ),
+            "confidence": 1.0,
+            "rationale_summary": "continuation_not_authorized_by_current_turn",
+        }
+    )
 
 
 def _truth_guard_continuation_decision(envelope: TurnEnvelope) -> dict[str, Any] | None:
@@ -424,13 +577,22 @@ class DecisionEngine:
             {"role": "user", "content": json.dumps(situation, ensure_ascii=False, separators=(",", ":"))},
         ]
         if repair:
+            if repair.startswith("current_turn_authority:"):
+                repair_prompt = (
+                    "Предыдущий action не разрешён именно текущей репликой пользователя. "
+                    "Это не ошибка формата: заново выбери action по current_turn, ответь на "
+                    "его фактический запрос и не продолжай старую задачу. Верни один JSON. "
+                    f"Причина: {repair[:1200]}"
+                )
+            else:
+                repair_prompt = (
+                    "Предыдущий JSON нарушил контракт. Исправь только формат/обязательные "
+                    f"поля и верни один JSON. Ошибка: {repair[:1200]}"
+                )
             messages.append(
                 {
                     "role": "system",
-                    "content": (
-                        "Предыдущий JSON нарушил контракт. Исправь только формат/обязательные поля и верни один JSON. "
-                        f"Ошибка: {repair[:1200]}"
-                    ),
+                    "content": repair_prompt,
                 }
             )
         request = {
@@ -520,6 +682,10 @@ class DecisionEngine:
         turn_id, cached = self.ledger.accept_turn(envelope.idempotency_key, request_payload)
         if cached:
             return cached
+        continuation_authorized = bool(
+            envelope.forced_action == "continue_warmaster_mission"
+            or _current_turn_authorizes_continuation(envelope.text)
+        )
         literal_continuation_fallback = (
             None
             if envelope.forced_action
@@ -597,6 +763,45 @@ class DecisionEngine:
             model_trace = {"degraded_error": str(exc)[:2_000]}
 
         if (
+            decision["action"] == "continue_warmaster_mission"
+            and not continuation_authorized
+        ):
+            # A visible old task may inform an answer, but it cannot authorize
+            # an effect.  Give the model one constrained repair pass so an
+            # ordinary question still receives its actual answer instead of a
+            # generic refusal.
+            authority_error = (
+                "current_turn_authority: continue_warmaster_mission is not authorized by "
+                "the current user text; "
+                "task_page_context, recent history and available continuations are reference "
+                "context only. Answer the current message or choose another action that it "
+                "actually requests. Do not continue the old task."
+            )
+            try:
+                raw, repaired_trace = await self._model_call(
+                    envelope,
+                    situation,
+                    repair=authority_error,
+                )
+                repaired = normalize_decision(raw)
+                if repaired["action"] == "continue_warmaster_mission":
+                    raise DecisionTruthError("continuation_not_authorized_by_current_turn")
+                decision = repaired
+                repair_error = authority_error
+                model_trace = {
+                    "first": model_trace,
+                    "current_turn_authority_repair": repaired_trace,
+                }
+            except Exception as exc:
+                decision = _continuation_not_authorized_decision()
+                degraded = True
+                repair_error = f"{authority_error}; repair failed: {type(exc).__name__}: {exc}"[:2_000]
+                model_trace = {
+                    "first": model_trace,
+                    "current_turn_authority_repair_error": str(exc)[:2_000],
+                }
+
+        if (
             literal_continuation_fallback
             and decision["action"] in {"answer_in_chat", "ask_clarification"}
         ):
@@ -631,6 +836,15 @@ class DecisionEngine:
                 "task_id": bound_task_id,
                 "answer": envelope.text.strip(),
             }
+
+        if (
+            decision["action"] == "continue_warmaster_mission"
+            and not continuation_authorized
+        ):
+            # Final fail-closed boundary: no later binding/authority code may
+            # turn reference memory into permission even if a repair regresses.
+            decision = _continuation_not_authorized_decision()
+            degraded = True
 
         if decision["action"] == "continue_warmaster_mission":
             trusted_ids = continuable_task_ids(envelope.capability_manifest)
