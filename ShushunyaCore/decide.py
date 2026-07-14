@@ -113,7 +113,8 @@ _CONTINUATION_IMPERATIVE_PATTERN = re.compile(
 _CONTINUATION_NON_COMMAND_PATTERN = re.compile(
     r"\b(?:если|допустим|предположим|гипотетически|почему|зачем|"
     r"стоит\s+ли|можно\s+ли|надо\s+ли|что\s+если|слово|фраза|"
-    r"обсудим|обсуждаем|обсуждать|означает|значит)\b",
+    r"цитат\w*|пример\w*|условно|обсудим|обсуждаем|обсуждать|"
+    r"означает|значит)\b",
     re.IGNORECASE,
 )
 _CONTINUATION_SEMANTIC_REACTIVATION_PATTERN = re.compile(
@@ -160,7 +161,9 @@ _CONTINUATION_NEGATED_ACTION_PATTERN = re.compile(
 _CONTINUATION_INFORMATION_OBJECT_PATTERN = re.compile(
     r"^\s*(?:(?:мне|еще|снова|опять|эту|этот|тот|ту|свой|свою)\s+)*"
     r"(?:что\s+ты\s+(?:сказал|написал)|мысл\w*|рассказ\w*|истори\w*|"
-    r"провер\w*\s+связ\w*|объясн\w*|разбор\w*|анализ\w*|обсужден\w*|"
+    r"провер\w*\s+связ\w*|объясн\w*|разбор\w*|анализ\w*|обсуд\w*|"
+    r"обсужд\w*|разговор\w*|диалог\w*|"
+    r"подума\w*|размышл\w*|"
     r"статус\w*|оценк\w*|услови\w*|требован\w*|формулировк\w*|"
     r"назван\w*|формулир\w*|контекст\w*|содержан\w*|детал\w*|план\w*|ответ\w*|"
     r"описан\w*|вопрос\w*|фраз\w*)\b",
@@ -173,8 +176,33 @@ _CONTINUATION_PARAPHRASE_PATTERN = re.compile(
 )
 _CONTINUATION_REPORTED_SPEECH_PATTERN = re.compile(
     r"\b(?:я|ты|он|она|мы|вы|они)?\s*"
-    r"(?:сказал\w*|написал\w*|просил\w*|приказал\w*|велел\w*)\b",
+    r"(?:сказал\w*|написал\w*|просил\w*|приказал\w*|велел\w*|"
+    r"говорит|говорил\w*|говорят|произнес\w*|произнёс\w*|цитиру\w*)\b",
     re.IGNORECASE,
+)
+_CONTINUATION_EXECUTION_VETO_PATTERN = re.compile(
+    r"\b(?:не\s+(?:запускай|запускать|выполняй|выполнять|делай|делать|"
+    r"продолжай|продолжать|доделывай|доделывать|возобновляй|возобновлять)|"
+    r"без\s+(?:запуска|выполнения|продолжения|возобновления))\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_QUOTE_PATTERN = re.compile(r"[\"«»„“”]")
+_CONTINUATION_SAFE_LEADING_CONTEXT_PATTERNS = (
+    re.compile(
+        r"^почему\b[^?]{0,120}\b(?:встал\w*|останов\w*|завис\w*|"
+        r"не\s+готов\w*)[^?]*\?\s*",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^ты\s+закончил\?\s*(?:если\s+нет\s*[—–-]\s*)?",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^так\s+если\s+мой\s+выбор\s+не\s+нужен[.!]\s*",
+        re.IGNORECASE,
+    ),
+    re.compile(r"^обсудим\s+позже,\s*а\s+сейчас\s+", re.IGNORECASE),
+    re.compile(r"^не\s+нужен\s+статус,\s*", re.IGNORECASE),
 )
 _CONTINUATION_CONSTRAINT_SUFFIX_PATTERN = re.compile(
     r"^\s*,?\s*(?:но|только|при\s+этом|с\s+условием|без)\b",
@@ -206,6 +234,10 @@ _CONTINUATION_FILLER_WORDS = frozenset(
         "дальше",
         "пожалуйста",
         "плиз",
+        "мне",
+        "нам",
+        "брат",
+        "братец",
         "пиздуй",
         "бля",
         "блять",
@@ -255,6 +287,12 @@ def _task_execution_reference(text: str) -> bool:
         if not leading_word or leading_word.group(1) not in _CONTINUATION_FILLER_WORDS:
             break
         candidate = candidate[leading_word.end():].lstrip(" \t,.;:—–")
+    candidate = re.sub(
+        r"^(?:(?:к|ко|о|об|про|по|над)\b[\s,]*)+",
+        "",
+        candidate,
+        flags=re.IGNORECASE,
+    )
     return bool(
         candidate
         and _CONTINUATION_SEMANTIC_TARGET_PATTERN.search(candidate)
@@ -262,112 +300,130 @@ def _task_execution_reference(text: str) -> bool:
     )
 
 
-def _looks_like_continuation_directive(text: str) -> bool:
+def _positive_continuation_scope(text: str) -> str:
+    """Return only a whole-turn scope that matches a small positive grammar."""
     normalized = str(text or "").strip().lower().replace("ё", "е")
-    if not normalized:
+    if (
+        not normalized
+        or "\n" in normalized
+        or "\r" in normalized
+        or _CONTINUATION_QUOTE_PATTERN.search(normalized)
+    ):
+        return ""
+    for pattern in _CONTINUATION_SAFE_LEADING_CONTEXT_PATTERNS:
+        match = pattern.match(normalized)
+        if match:
+            normalized = normalized[match.end():].lstrip()
+            break
+    # The safe leading context was removed above. Any remaining sentence,
+    # explanation or dash-tail means this is not a bare execution mandate.
+    if re.search(r"[.!?;:]\s+\S", normalized):
+        return ""
+    if re.search(r"\s[—–-]\s*\S", normalized):
+        return ""
+    return normalized.strip(" \t,.;:—–")
+
+
+def _bounded_command_object(text: str) -> str:
+    """Keep an object only when any comma tail is a constraint or filler."""
+    candidate = str(text or "").strip()
+    if not candidate:
+        return ""
+    head, separator, tail = candidate.partition(",")
+    head = head.strip()
+    if not separator:
+        return head
+    decorated_tail = "," + tail
+    if _only_continuation_fillers(tail) or _CONTINUATION_CONSTRAINT_SUFFIX_PATTERN.search(
+        decorated_tail
+    ):
+        return head
+    return ""
+
+
+def _looks_like_continuation_directive(text: str) -> bool:
+    scope = _positive_continuation_scope(text)
+    if (
+        not scope
+        or _CONTINUATION_NON_COMMAND_PATTERN.search(scope)
+        or _CONTINUATION_REPORTED_SPEECH_PATTERN.search(scope)
+        or _CONTINUATION_EXECUTION_VETO_PATTERN.search(scope)
+    ):
         return False
-    clauses = re.split(r"(?<=[.!?;])\s+|[\n\r]+|[—–]+", normalized)
-    for clause in clauses:
-        clause = clause.strip(" \t,.;:—–")
-        if not clause:
+    for command in _CONTINUATION_IMPERATIVE_PATTERN.finditer(scope):
+        prefix = scope[: command.start()].rstrip()
+        suffix = scope[command.end():]
+        if not _only_continuation_fillers(prefix):
             continue
-        for command in _CONTINUATION_IMPERATIVE_PATTERN.finditer(clause):
-            prefix = clause[: command.start()].rstrip()
-            suffix = clause[command.end():]
-            if (
-                command.group(0).startswith("повтор")
-                and _CONTINUATION_PARAPHRASE_PATTERN.search(suffix)
-            ):
-                continue
-            if _CONTINUATION_REPORTED_SPEECH_PATTERN.search(prefix):
-                continue
-            local_prefix = re.split(r"[,;:]", prefix)[-1].strip()
-            if _CONTINUATION_NON_COMMAND_PATTERN.search(local_prefix):
-                continue
-            negated_tail = re.search(
-                r"\b(?:не|никогда(?:\s+\w+){0,3}\s+не|ни\s+за\s+что|перестань|хватит)\s*$",
-                local_prefix[-64:],
-                re.IGNORECASE,
-            )
-            if negated_tail or re.match(r"^\s+не\b", suffix, re.IGNORECASE):
-                continue
-            prefix_authorizes_object = (
-                _only_continuation_fillers(local_prefix)
-                or _task_execution_reference(local_prefix)
-            )
-            if (
-                prefix_authorizes_object
-                and _CONTINUATION_CONSTRAINT_SUFFIX_PATTERN.search(suffix)
-            ):
-                return True
-            if prefix_authorizes_object and _task_execution_reference(suffix):
-                return True
-            if prefix_authorizes_object and _only_continuation_fillers(suffix):
-                return True
+        if (
+            command.group(0).startswith("повтор")
+            and _CONTINUATION_PARAPHRASE_PATTERN.search(suffix)
+        ):
+            continue
+        if re.search(
+            r"\b(?:не|никогда(?:\s+\w+){0,3}\s+не|ни\s+за\s+что|перестань|хватит)\s*$",
+            prefix[-64:],
+            re.IGNORECASE,
+        ) or re.match(r"^\s+не\b", suffix, re.IGNORECASE):
+            continue
+        if _CONTINUATION_CONSTRAINT_SUFFIX_PATTERN.search(suffix):
+            return True
+        command_object = _bounded_command_object(suffix)
+        if command_object and _task_execution_reference(command_object):
+            return True
+        if _only_continuation_fillers(suffix):
+            return True
     return False
 
 
 def _current_turn_authorizes_continuation(text: str) -> bool:
     """Require evidence in this turn; task memory can never grant authority."""
-    if _looks_like_continuation_directive(text):
+    scope = _positive_continuation_scope(text)
+    if not scope:
+        return False
+    if _looks_like_continuation_directive(scope):
         return True
-    normalized = str(text or "").strip().lower().replace("ё", "е")
-    clauses = re.split(r"(?<=[.!?;])\s+|[\n\r]+|[—–]+", normalized)
-    for clause in clauses:
-        clause = clause.strip(" \t,.;:—–")
-        if not clause or _CONTINUATION_REPORTED_SPEECH_PATTERN.search(clause):
-            continue
-        # Negation and meta-discussion apply to their comma-delimited part,
-        # not to a later explicit command in the same user turn.
-        for semantic_clause in re.split(r",+", clause):
-            semantic_clause = semantic_clause.strip(" \t,.;:—–")
-            if (
-                not semantic_clause
-                or _CONTINUATION_NON_COMMAND_PATTERN.search(semantic_clause)
-                or _CONTINUATION_NEGATED_ACTION_PATTERN.search(semantic_clause)
-            ):
-                continue
-            reactivation_action = _CONTINUATION_SEMANTIC_REACTIVATION_PATTERN.search(
-                semantic_clause
-            )
-            reactivation = (
-                reactivation_action
-                and _task_execution_reference(
-                    semantic_clause[reactivation_action.end():]
-                )
-                and _CONTINUATION_SEMANTIC_RESUME_PATTERN.search(semantic_clause)
-            )
-            polite_action = _CONTINUATION_SEMANTIC_POLITE_PATTERN.search(
-                semantic_clause
-            )
-            polite_reactivation = bool(
-                polite_action
-                and _task_execution_reference(semantic_clause[polite_action.end():])
-            )
-            collaborative_action = _CONTINUATION_SEMANTIC_COLLABORATIVE_PATTERN.search(
-                semantic_clause
-            )
-            collaborative_reactivation = bool(
-                collaborative_action
-                and _task_execution_reference(
-                    semantic_clause[collaborative_action.end():]
-                )
-            )
-            result_request = (
-                "?" not in semantic_clause
-                and _CONTINUATION_SEMANTIC_RESULT_REQUEST_PATTERN.search(
-                    semantic_clause
-                )
-                and _CONTINUATION_SEMANTIC_RESULT_PATTERN.search(semantic_clause)
-                and _CONTINUATION_SEMANTIC_RESUME_PATTERN.search(semantic_clause)
-            )
-            if (
-                reactivation
-                or polite_reactivation
-                or collaborative_reactivation
-                or result_request
-            ):
-                return True
+    if (
+        _CONTINUATION_NON_COMMAND_PATTERN.search(scope)
+        or _CONTINUATION_REPORTED_SPEECH_PATTERN.search(scope)
+        or _CONTINUATION_EXECUTION_VETO_PATTERN.search(scope)
+        or _CONTINUATION_NEGATED_ACTION_PATTERN.search(scope)
+    ):
+        return False
+
+    def object_after(action: re.Match[str] | None) -> str:
+        if not action or not _only_continuation_fillers(scope[:action.start()]):
+            return ""
+        return _bounded_command_object(scope[action.end():])
+
+    reactivation_action = _CONTINUATION_SEMANTIC_REACTIVATION_PATTERN.search(scope)
+    reactivation_object = object_after(reactivation_action)
+    if (
+        reactivation_object
+        and _task_execution_reference(reactivation_object)
+        and _CONTINUATION_SEMANTIC_RESUME_PATTERN.search(scope)
+    ):
+        return True
+
+    polite_object = object_after(_CONTINUATION_SEMANTIC_POLITE_PATTERN.search(scope))
+    if polite_object and _task_execution_reference(polite_object):
+        return True
+
+    collaborative_object = object_after(
+        _CONTINUATION_SEMANTIC_COLLABORATIVE_PATTERN.search(scope)
+    )
+    if collaborative_object and _task_execution_reference(collaborative_object):
+        return True
+
+    result_action = _CONTINUATION_SEMANTIC_RESULT_REQUEST_PATTERN.search(scope)
+    result_object = object_after(result_action)
+    if (
+        "?" not in scope
+        and result_object
+        and _CONTINUATION_SEMANTIC_RESULT_PATTERN.search(result_object)
+        and _CONTINUATION_SEMANTIC_RESUME_PATTERN.search(result_object)
+    ):
+        return True
     return False
 
 
@@ -752,14 +808,6 @@ class DecisionEngine:
             envelope.forced_action == "continue_warmaster_mission"
             or _current_turn_authorizes_continuation(envelope.text)
         )
-        literal_continuation_fallback = (
-            None
-            if envelope.forced_action
-            else _truth_guard_continuation_decision(envelope)
-        )
-        # Literal matching is only a fallback. The model gets the full
-        # situation first so a valid semantic continuation is not constrained
-        # by a small Russian imperative regex.
         situation = {} if envelope.forced_action else self.situation.assemble(envelope)
         model_trace: dict[str, Any] = {}
         degraded = False
@@ -868,22 +916,6 @@ class DecisionEngine:
                     "first": model_trace,
                     "current_turn_authority_repair_error": str(exc)[:2_000],
                 }
-
-        if (
-            literal_continuation_fallback
-            and decision["action"] in {"answer_in_chat", "ask_clarification"}
-        ):
-            # The model was allowed to reason first, but an unambiguous literal
-            # command bound to a trusted parent must not degrade into speech.
-            decision = literal_continuation_fallback
-            model_trace = {
-                "first": model_trace,
-                "literal_continuation_fallback": {
-                    "bound_parent_task_id": literal_continuation_fallback[
-                        "continue_parent_task_id"
-                    ],
-                },
-            }
 
         if decision["action"] == "answer_pending_decision":
             trusted_ids = pending_decision_ids(envelope.capability_manifest)

@@ -340,7 +340,7 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
             *self.args,
             replies=[{
                 "action": "answer_in_chat",
-                "reply": "Не понял, что именно продолжать.",
+                "reply": "Сам дожму, жди результат.",
                 "confidence": 1.0,
             }],
         )
@@ -356,8 +356,8 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
 
         result = await engine.resolve(envelope)
 
-        # The model reasons first. The literal guard only takes over because a
-        # bound imperative otherwise degraded into speech without an effect.
+        # The model's own execution claim cannot remain speech-only. The guard
+        # binds the explicit current command to the trusted parent as an effect.
         self.assertEqual(engine.calls, 1)
         self.assertEqual(result["decision"]["action"], "continue_warmaster_mission")
         self.assertEqual(
@@ -505,6 +505,20 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
             "Повтори задачу своими словами.",
             "Я сказал ему: можешь вернуться к той работе?",
             "Он написал: давай продолжим ту задачу.",
+            "Давай ещё раз обсудим проект.",
+            "Попробуй ещё раз подумать над задачей.",
+            "Повтори задачу, но не запускай её.",
+            "Гипотетически, продолжай задачу.",
+            "Он говорит: продолжай задачу.",
+            "Цитата: продолжай задачу.",
+            "Он говорит: можешь вернуться к той работе?",
+            "Он попросил: продолжай задачу.",
+            "Он спросил: можешь вернуться к той работе?",
+            "Он сказал: а сейчас продолжай задачу.",
+            "«Продолжай задачу» — это пример команды.",
+            "Продолжай разговор о проекте.",
+            "Можешь вернуться к обсуждению проекта?",
+            "Давай вернёмся к обсуждению проекта.",
         ]
         for index, text in enumerate(non_mandates):
             with self.subTest(text=text):
