@@ -20,8 +20,12 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
@@ -100,6 +104,9 @@ public class MainActivity extends Activity {
     private static final int WARP_DEEP = Color.rgb(83, 48, 151);
     private static final int ACID = Color.rgb(196, 255, 91);
     private static final int CYAN = Color.rgb(76, 224, 215);
+    private static final int RITUAL_GOLD = Color.rgb(184, 149, 82);
+    private static final int RITUAL_LAVENDER = Color.rgb(183, 130, 226);
+    private static final int RITUAL_BONE = Color.rgb(232, 222, 199);
 
     private static final String PREFS = "shushunya_m";
     private static final String PENDING_CHAT_FILENAME = "pending-chat-turn.json";
@@ -112,7 +119,7 @@ public class MainActivity extends Activity {
     private static final String SERVER_MEMORY_NAMESPACE = "shushunya";
     private static final int REQUEST_NOTIFICATIONS = 42;
     private static final String DEFAULT_BASE_URL = "https://chat.shushunya.com";
-    private static final String CLIENT_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; ShushunyaM/7.3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36";
+    private static final String CLIENT_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; ShushunyaM/7.4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36";
     private static final String MODEL = "gemma-4-12b-it-UD-Q5_K_XL.gguf";
     private static final int AUDIO_SAMPLE_RATE = 16000;
     private static final int REQUEST_RECORD_AUDIO = 41;
@@ -176,6 +183,111 @@ public class MainActivity extends Activity {
         String finalKey = "";
         final java.util.ArrayList<String> cardKeys = new java.util.ArrayList<>();
     }
+
+    private final class MindSigilView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path path = new Path();
+
+        MindSigilView() {
+            super(MainActivity.this);
+            setClickable(false);
+            setFocusable(false);
+            setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float width = getWidth();
+            float height = getHeight();
+            if (width <= 0 || height <= 0) return;
+
+            float cx = width * 0.50f;
+            float cy = height * 0.72f;
+            float eyeRadius = Math.min(width * 0.34f, height * 0.15f);
+            float eyeHeight = eyeRadius * 0.52f;
+
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(3));
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeJoin(Paint.Join.ROUND);
+            paint.setColor(WARP);
+            paint.setAlpha(52);
+            path.reset();
+            path.moveTo(cx - eyeRadius, cy);
+            path.quadTo(cx, cy - eyeHeight * 1.28f, cx + eyeRadius, cy);
+            path.quadTo(cx, cy + eyeHeight * 1.28f, cx - eyeRadius, cy);
+            path.close();
+            canvas.drawPath(path, paint);
+
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(CYAN);
+            paint.setAlpha(34);
+            canvas.drawOval(new RectF(
+                    cx - eyeRadius * 0.35f,
+                    cy - eyeHeight * 0.94f,
+                    cx + eyeRadius * 0.35f,
+                    cy + eyeHeight * 0.94f), paint);
+            paint.setColor(WARP);
+            paint.setAlpha(64);
+            canvas.drawOval(new RectF(
+                    cx - eyeRadius * 0.14f,
+                    cy - eyeHeight * 0.72f,
+                    cx + eyeRadius * 0.14f,
+                    cy + eyeHeight * 0.72f), paint);
+            paint.setColor(INK);
+            paint.setAlpha(210);
+            canvas.drawOval(new RectF(
+                    cx - eyeRadius * 0.055f,
+                    cy - eyeHeight * 0.60f,
+                    cx + eyeRadius * 0.055f,
+                    cy + eyeHeight * 0.60f), paint);
+
+            float[][] directions = {
+                    {-0.86f, -0.32f}, {-0.35f, -0.92f}, {0.35f, -0.92f}, {0.88f, -0.24f},
+                    {0.94f, 0.34f}, {0.34f, 0.94f}, {-0.28f, 0.95f}, {-0.90f, 0.31f}
+            };
+            int[] colors = {WARP, CYAN, RITUAL_BONE, WARP, CYAN, RITUAL_BONE, WARP, CYAN};
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(4));
+            for (int i = 0; i < directions.length; i++) {
+                float dx = directions[i][0];
+                float dy = directions[i][1];
+                float start = eyeRadius * 1.18f;
+                float end = eyeRadius * 1.72f;
+                paint.setColor(colors[i]);
+                paint.setAlpha(42);
+                drawArrow(canvas, cx + dx * start, cy + dy * start, cx + dx * end, cy + dy * end);
+            }
+
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(1));
+            paint.setColor(RITUAL_LAVENDER);
+            paint.setAlpha(18);
+            canvas.drawCircle(cx, cy, eyeRadius * 1.12f, paint);
+            canvas.drawCircle(cx, cy, eyeRadius * 1.48f, paint);
+            canvas.drawLine(cx, cy - eyeRadius * 2.4f, cx, cy + eyeRadius * 2.2f, paint);
+        }
+
+        private void drawArrow(Canvas canvas, float startX, float startY, float endX, float endY) {
+            canvas.drawLine(startX, startY, endX, endY, paint);
+            float angle = (float) Math.atan2(endY - startY, endX - startX);
+            float head = dp(14);
+            float wing = 0.58f;
+            canvas.drawLine(
+                    endX,
+                    endY,
+                    endX - head * (float) Math.cos(angle - wing),
+                    endY - head * (float) Math.sin(angle - wing),
+                    paint);
+            canvas.drawLine(
+                    endX,
+                    endY,
+                    endX - head * (float) Math.cos(angle + wing),
+                    endY - head * (float) Math.sin(angle + wing),
+                    paint);
+        }
+    }
     private volatile boolean chatDeltaLoopRunning;
     private volatile boolean activityDestroyed;
     private final java.util.concurrent.atomic.AtomicLong chatHistoryRequestSequence =
@@ -202,6 +314,9 @@ public class MainActivity extends Activity {
     private LinearLayout chatView;
     private LinearLayout translatorView;
     private LinearLayout agentView;
+    private FrameLayout agentOverviewView;
+    private ScrollView agentOverviewScroll;
+    private LinearLayout agentOverviewList;
     private LinearLayout memoryView;
     private LinearLayout memoryList;
     private EditText memorySearch;
@@ -247,6 +362,7 @@ public class MainActivity extends Activity {
     private boolean translating;
     private boolean agentRunning;
     private View scrim;
+    private View drawerHandle;
     private LinearLayout drawer;
     private String baseUrl;
     private String currentTab = TAB_CHAT;
@@ -269,6 +385,8 @@ public class MainActivity extends Activity {
     private int lastKeyboardHeight;
     private float downX;
     private float downY;
+    private boolean drawerSwipeCandidate;
+    private boolean drawerSwipeConsumed;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -309,27 +427,67 @@ public class MainActivity extends Activity {
             manager.cancel(1002);  // the in-app badge takes over while foreground
         }
         pollPendingReports();
-        if (TAB_AGENT.equals(currentTab)) {
+        if (TAB_AGENT.equals(currentTab) || drawerOpen) {
             startBrigadeDeltaLoop();
         }
     }
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
-        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
             downX = event.getRawX();
             downY = event.getRawY();
-        } else if (event.getAction() == MotionEvent.ACTION_UP) {
+            float openGestureLimit = getResources().getDisplayMetrics().widthPixels * 0.75f;
+            drawerSwipeCandidate = !drawerOpen && downX < openGestureLimit;
+            drawerSwipeConsumed = false;
+        } else if (action == MotionEvent.ACTION_MOVE) {
             float dx = event.getRawX() - downX;
             float dy = event.getRawY() - downY;
-            if (!drawerOpen && downX < dp(32) && dx > dp(86) && Math.abs(dx) > Math.abs(dy) * 1.5f) {
+            if (drawerSwipeCandidate
+                    && dx > dp(12)
+                    && Math.abs(dx) > Math.abs(dy) * 1.15f) {
+                drawerSwipeCandidate = false;
+                drawerSwipeConsumed = true;
+
+                // The child that received ACTION_DOWN must be cancelled before
+                // the curtain takes over, otherwise a swipe across chat text can
+                // also trigger Android's text-selection toolbar.
+                MotionEvent cancel = MotionEvent.obtain(event);
+                cancel.setAction(MotionEvent.ACTION_CANCEL);
+                super.dispatchTouchEvent(cancel);
+                cancel.recycle();
+
                 setDrawerOpen(true);
                 return true;
             }
-            if (drawerOpen && dx < -dp(70) && Math.abs(dx) > Math.abs(dy) * 1.5f) {
+            if (drawerSwipeConsumed) {
+                return true;
+            }
+        } else if (action == MotionEvent.ACTION_UP) {
+            if (drawerSwipeConsumed) {
+                drawerSwipeConsumed = false;
+                drawerSwipeCandidate = false;
+                return true;
+            }
+            float dx = event.getRawX() - downX;
+            float dy = event.getRawY() - downY;
+            float openGestureLimit = getResources().getDisplayMetrics().widthPixels * 0.75f;
+            if (!drawerOpen
+                    && downX < openGestureLimit
+                    && dx > dp(24)
+                    && Math.abs(dx) > Math.abs(dy) * 1.15f) {
+                setDrawerOpen(true);
+                return true;
+            }
+            if (drawerOpen && dx < -dp(32) && Math.abs(dx) > Math.abs(dy) * 1.15f) {
                 setDrawerOpen(false);
                 return true;
             }
+            drawerSwipeCandidate = false;
+        } else if (action == MotionEvent.ACTION_CANCEL) {
+            drawerSwipeCandidate = false;
+            drawerSwipeConsumed = false;
         }
         return super.dispatchTouchEvent(event);
     }
@@ -476,6 +634,8 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams orbLp = new LinearLayout.LayoutParams(dp(42), dp(42));
         titleRow.addView(warpOrb, orbLp);
         startWarpPulse();
+        warpOrb.setContentDescription("Открыть живую сводку");
+        warpOrb.setOnClickListener(v -> setDrawerOpen(true));
 
         title = new TextView(this);
         title.setText("Шушуня");
@@ -1846,16 +2006,15 @@ public class MainActivity extends Activity {
             // Same delta model as the chat: one held request at a time, the
             // server answers when the meaningful brigade state changed.
             try {
-                while (appInForeground && TAB_AGENT.equals(currentTab)) {
+                while (appInForeground && (TAB_AGENT.equals(currentTab) || drawerOpen)) {
                     try {
-                        JSONObject payload = requestAgentTaskList(brigadeStateKey, 25);
+                        JSONObject payload = requestAgentTaskList(brigadeStateKey, drawerOpen ? 6 : 25);
                         String newKey = payload.optString("state_key", "");
-                        boolean changed = payload.optBoolean("changed", true);
                         if (!newKey.isEmpty()) {
                             brigadeStateKey = newKey;
                         }
-                        if (changed) {
-                            JSONArray tasks = payload.optJSONArray("tasks");
+                        JSONArray tasks = payload.optJSONArray("tasks");
+                        if (tasks != null) {
                             main.post(() -> renderAgentTaskHistory(tasks));
                         }
                     } catch (Exception transient_) {
@@ -2077,7 +2236,36 @@ public class MainActivity extends Activity {
                     .append(task.optString("final", "").hashCode()).append('|')
                     .append(task.optString("task", "").hashCode()).append('|');
             JSONObject missionState = task.optJSONObject("mission_state");
-            sb.append(missionState == null ? "" : missionState.optString("user_visible_state", "")).append('|');
+            sb.append(missionState == null ? "" : missionState.optString("user_visible_state", "")).append('|')
+                    .append(missionState == null ? "" : missionState.optString("status", "")).append('|')
+                    .append(missionState == null ? "" : missionState.optString("phase", "")).append('|')
+                    .append(missionState == null ? "" : missionState.optString("next_owner", "")).append('|')
+                    .append(missionState != null && missionState.optBoolean("needs_user", false)).append('|');
+            JSONObject progressState = task.optJSONObject("progress");
+            if (progressState != null) {
+                sb.append(progressState.optInt("planned", 0)).append('~')
+                        .append(progressState.optInt("completed", 0)).append('~')
+                        .append(progressState.optInt("failed", 0)).append('~')
+                        .append(progressState.optInt("blocked", 0)).append('~')
+                        .append(progressState.optInt("pending", 0)).append('~')
+                        .append(progressState.optInt("ready", 0)).append('~')
+                        .append(progressState.optInt("waiting", 0)).append('~')
+                        .append(progressState.optString("next_step", "")).append('~')
+                        .append(progressState.optString("next_step_id", "")).append('|');
+            }
+            JSONArray brigadeTabs = task.optJSONArray("brigade_tabs");
+            if (brigadeTabs != null) {
+                for (int j = 0; j < brigadeTabs.length(); j++) {
+                    JSONObject tab = brigadeTabs.optJSONObject(j);
+                    if (tab == null) continue;
+                    JSONObject latest = tab.optJSONObject("latest_card");
+                    sb.append(tab.optString("key", "")).append('~')
+                            .append(tab.optString("status", "")).append('~')
+                            .append(tab.optBoolean("active", false)).append('~')
+                            .append(tab.optInt("card_count", 0)).append('~')
+                            .append(latest == null ? 0 : latest.optString("headline", "").hashCode()).append(';');
+                }
+            }
             JSONArray cards = task.optJSONArray("activity_cards");
             if (cards == null) {
                 cards = task.optJSONArray("activity_entries");
@@ -2108,6 +2296,7 @@ public class MainActivity extends Activity {
             return;
         }
         lastAgentTasksJson = key;
+        renderAgentCurtain(tasks);
         applyBrigadeTasks(tasks);
     }
 
@@ -2843,10 +3032,10 @@ public class MainActivity extends Activity {
         root.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
         scrim.setOnClickListener(v -> setDrawerOpen(false));
 
-        int drawerWidth = Math.min(dp(316), getResources().getDisplayMetrics().widthPixels - dp(52));
+        int drawerWidth = Math.min(dp(430), getResources().getDisplayMetrics().widthPixels - dp(18));
         drawer = new LinearLayout(this);
         drawer.setOrientation(LinearLayout.VERTICAL);
-        drawer.setPadding(dp(20), dp(34), dp(20), dp(20));
+        drawer.setPadding(dp(18), dp(24), dp(14), dp(14));
         drawer.setBackground(drawerBackground());
         drawer.setTranslationX(-drawerWidth);
         FrameLayout.LayoutParams drawerLp = new FrameLayout.LayoutParams(drawerWidth, -1, Gravity.LEFT);
@@ -2855,10 +3044,13 @@ public class MainActivity extends Activity {
         TextView name = new TextView(this);
         name.setText("Шушуня");
         name.setTextColor(TEXT);
-        name.setTextSize(28);
+        name.setTextSize(24);
         name.setTypeface(Typeface.DEFAULT_BOLD);
         name.setLetterSpacing(-0.02f);
-        drawer.addView(name, new LinearLayout.LayoutParams(-1, dp(44)));
+        name.setContentDescription("Закрыть живую сводку");
+        name.setText("Шушуня    ‹");
+        name.setOnClickListener(v -> setDrawerOpen(false));
+        drawer.addView(name, new LinearLayout.LayoutParams(-1, dp(38)));
 
         TextView signature = new TextView(this);
         signature.setText("ПЕРСОНАЛЬНЫЙ ДЕМОН • ONLINE");
@@ -2866,18 +3058,36 @@ public class MainActivity extends Activity {
         signature.setTextSize(10);
         signature.setTypeface(Typeface.DEFAULT_BOLD);
         signature.setLetterSpacing(0.10f);
-        LinearLayout.LayoutParams signatureLp = new LinearLayout.LayoutParams(-1, dp(34));
-        signatureLp.bottomMargin = dp(14);
+        LinearLayout.LayoutParams signatureLp = new LinearLayout.LayoutParams(-1, dp(28));
+        signatureLp.bottomMargin = dp(4);
         drawer.addView(signature, signatureLp);
+
+        agentOverviewView = buildAgentCurtainOverview();
+        LinearLayout.LayoutParams overviewLp = new LinearLayout.LayoutParams(-1, 0, 1);
+        overviewLp.bottomMargin = dp(8);
+        drawer.addView(agentOverviewView, overviewLp);
 
         drawerChat = drawerItem("Шушуня");
         drawerTranslator = drawerItem("Переводчик");
         drawerAgent = drawerItem("Warbands");
         drawerMemory = drawerItem("Память");
-        drawer.addView(drawerChat);
-        drawer.addView(drawerTranslator);
-        drawer.addView(drawerAgent);
-        drawer.addView(drawerMemory);
+        LinearLayout primaryNav = new LinearLayout(this);
+        primaryNav.setOrientation(LinearLayout.HORIZONTAL);
+        primaryNav.addView(drawerChat, new LinearLayout.LayoutParams(0, dp(42), 1));
+        LinearLayout.LayoutParams agentNavLp = new LinearLayout.LayoutParams(0, dp(42), 1);
+        agentNavLp.leftMargin = dp(6);
+        primaryNav.addView(drawerAgent, agentNavLp);
+        drawer.addView(primaryNav, new LinearLayout.LayoutParams(-1, dp(42)));
+
+        LinearLayout secondaryNav = new LinearLayout(this);
+        secondaryNav.setOrientation(LinearLayout.HORIZONTAL);
+        secondaryNav.addView(drawerTranslator, new LinearLayout.LayoutParams(0, dp(42), 1));
+        LinearLayout.LayoutParams memoryNavLp = new LinearLayout.LayoutParams(0, dp(42), 1);
+        memoryNavLp.leftMargin = dp(6);
+        secondaryNav.addView(drawerMemory, memoryNavLp);
+        LinearLayout.LayoutParams secondaryNavLp = new LinearLayout.LayoutParams(-1, dp(42));
+        secondaryNavLp.topMargin = dp(6);
+        drawer.addView(secondaryNav, secondaryNavLp);
 
         drawerChat.setOnClickListener(v -> {
             showTab(TAB_CHAT);
@@ -2896,17 +3106,411 @@ public class MainActivity extends Activity {
             setDrawerOpen(false);
         });
         updateDrawerSelection();
+
+        TextView handle = new TextView(this);
+        drawerHandle = handle;
+        handle.setText("◈");
+        handle.setTextColor(RITUAL_BONE);
+        handle.setTextSize(12);
+        handle.setGravity(Gravity.CENTER);
+        handle.setAlpha(0.78f);
+        handle.setBackground(gradientPill(WARP_DEEP, Color.rgb(28, 18, 48), WARP, dp(9)));
+        handle.setContentDescription("Потянуть живую сводку Шушуни");
+        FrameLayout.LayoutParams handleLp = new FrameLayout.LayoutParams(dp(20), dp(72), Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        root.addView(handle, handleLp);
+        handle.setOnClickListener(v -> setDrawerOpen(true));
+    }
+
+    private FrameLayout buildAgentCurtainOverview() {
+        FrameLayout frame = new FrameLayout(this);
+        frame.setClipToPadding(false);
+        frame.setBackground(pill(Color.argb(218, 7, 4, 13), Color.argb(130, 155, 77, 255), dp(3)));
+
+        MindSigilView sigil = new MindSigilView();
+        frame.addView(sigil, new FrameLayout.LayoutParams(-1, -1));
+
+        agentOverviewScroll = new ScrollView(this);
+        agentOverviewScroll.setFillViewport(false);
+        agentOverviewScroll.setClipToPadding(false);
+        agentOverviewScroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        agentOverviewList = new LinearLayout(this);
+        agentOverviewList.setOrientation(LinearLayout.VERTICAL);
+        agentOverviewList.setPadding(dp(14), dp(14), dp(14), dp(24));
+        agentOverviewScroll.addView(agentOverviewList, new ScrollView.LayoutParams(-1, -2));
+        frame.addView(agentOverviewScroll, new FrameLayout.LayoutParams(-1, -1));
+        renderAgentCurtain(null);
+        return frame;
+    }
+
+    private void renderAgentCurtain(JSONArray tasks) {
+        if (agentOverviewList == null) return;
+        int preservedY = agentOverviewScroll == null ? 0 : agentOverviewScroll.getScrollY();
+        agentOverviewList.removeAllViews();
+
+        TextView eyebrow = curtainText("ВНУТРИ МЕНЯ", 10, RITUAL_LAVENDER, true);
+        eyebrow.setLetterSpacing(0.24f);
+        agentOverviewList.addView(eyebrow, new LinearLayout.LayoutParams(-1, dp(24)));
+
+        TextView heading = curtainText("Сейчас и дальше", 31, RITUAL_BONE, true);
+        heading.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        heading.setLetterSpacing(-0.02f);
+        heading.setPadding(0, 0, 0, dp(3));
+        agentOverviewList.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+
+        java.util.ArrayList<JSONObject> needsUser = new java.util.ArrayList<>();
+        java.util.ArrayList<JSONObject> active = new java.util.ArrayList<>();
+        java.util.ArrayList<JSONObject> pending = new java.util.ArrayList<>();
+        java.util.ArrayList<JSONObject> finished = new java.util.ArrayList<>();
+        int length = tasks == null ? 0 : tasks.length();
+        for (int i = length - 1; i >= 0; i--) {
+            JSONObject task = tasks.optJSONObject(i);
+            if (task == null) continue;
+            if (agentTaskNeedsUser(task)) {
+                needsUser.add(task);
+            } else if (agentTaskIsTerminal(task)) {
+                finished.add(task);
+            } else if (agentTaskIsActive(task)) {
+                active.add(task);
+            } else {
+                pending.add(task);
+            }
+        }
+
+        String summary = (needsUser.size() + active.size()) + " в работе  •  "
+                + pending.size() + " дальше  •  " + finished.size() + " принесено";
+        TextView summaryText = curtainText(summary.toUpperCase(java.util.Locale.ROOT), 9, TEXT_MUTED, true);
+        summaryText.setLetterSpacing(0.10f);
+        summaryText.setPadding(0, dp(4), 0, dp(12));
+        agentOverviewList.addView(summaryText, new LinearLayout.LayoutParams(-1, -2));
+
+        if (!needsUser.isEmpty()) {
+            addCurtainSection("МНЕ НУЖНО ТВОЁ РЕШЕНИЕ", Color.rgb(181, 42, 70));
+            for (JSONObject task : needsUser) {
+                addCurtainTask(task, "waiting");
+            }
+        }
+
+        addCurtainSection("ЧЕМ Я ЗАНЯТ", CYAN);
+        if (active.isEmpty() && needsUser.isEmpty()) {
+            addCurtainEmpty("ТИШИНА", "Сейчас я ничего не тащу за кулисами. Я рядом.", Color.rgb(109, 90, 123));
+        } else {
+            for (JSONObject task : active) {
+                addCurtainTask(task, "active");
+            }
+        }
+
+        addCurtainSection("ДАЛЬШЕ", RITUAL_GOLD);
+        boolean hasNext = false;
+        for (JSONObject task : active) {
+            String nextStep = agentTaskNextStep(task);
+            String currentStep = task.optString("current_step", "").trim();
+            if (!nextStep.isEmpty() && !nextStep.equalsIgnoreCase(currentStep)) {
+                addCurtainTask(task, "next");
+                hasNext = true;
+            }
+        }
+        for (JSONObject task : pending) {
+            addCurtainTask(task, "next");
+            hasNext = true;
+        }
+        if (!hasNext) {
+            addCurtainEmpty("БЕЗ ТАЙНОГО ПЛАНА", "Пока не строю замыслов за твоей спиной.", Color.rgb(122, 104, 125));
+        }
+
+        addCurtainSection("ЧТО Я ПРИНЁС", RITUAL_LAVENDER);
+        if (finished.isEmpty()) {
+            addCurtainEmpty("ПОКА ПУСТО", "Ничего нового ещё не принёс.", Color.rgb(119, 100, 124));
+        } else {
+            addCurtainTask(finished.get(0), "result");
+        }
+
+        TextView details = curtainText("ВСЯ ИСТОРИЯ И WARBANDS  →", 11, RITUAL_BONE, true);
+        details.setGravity(Gravity.CENTER);
+        details.setLetterSpacing(0.08f);
+        details.setPadding(dp(12), 0, dp(12), 0);
+        details.setBackground(pill(Color.argb(218, 16, 11, 24), RITUAL_GOLD, dp(3)));
+        details.setContentDescription("Открыть подробный ход всех работ");
+        LinearLayout.LayoutParams detailsLp = new LinearLayout.LayoutParams(-1, dp(48));
+        detailsLp.topMargin = dp(14);
+        agentOverviewList.addView(details, detailsLp);
+        details.setOnClickListener(v -> {
+            setDrawerOpen(false);
+            showTab(TAB_AGENT);
+        });
+
+        if (agentOverviewScroll != null) {
+            agentOverviewScroll.post(() -> {
+                int maxY = Math.max(0, agentOverviewList.getHeight() - agentOverviewScroll.getHeight());
+                agentOverviewScroll.scrollTo(0, Math.min(preservedY, maxY));
+            });
+        }
+    }
+
+    private TextView curtainText(String text, int size, int color, boolean bold) {
+        TextView view = new TextView(this);
+        view.setText(text);
+        view.setTextColor(color);
+        view.setTextSize(size);
+        view.setTypeface(Typeface.DEFAULT, bold ? Typeface.BOLD : Typeface.NORMAL);
+        view.setLineSpacing(dp(2), 1.0f);
+        return view;
+    }
+
+    private void addCurtainSection(String label, int accent) {
+        TextView section = curtainText(label, 10, accent, true);
+        section.setLetterSpacing(0.20f);
+        section.setPadding(0, dp(14), 0, dp(8));
+        GradientDrawable divider = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{Color.argb(110, Color.red(accent), Color.green(accent), Color.blue(accent)), Color.TRANSPARENT});
+        divider.setSize(dp(180), dp(1));
+        section.setCompoundDrawables(null, null, null, divider);
+        section.setCompoundDrawablePadding(dp(7));
+        agentOverviewList.addView(section, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    private void addCurtainEmpty(String label, String text, int accent) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+        card.setBackground(ritualBackground(accent));
+        TextView kicker = curtainText(label, 9, accent, true);
+        kicker.setLetterSpacing(0.16f);
+        card.addView(kicker, new LinearLayout.LayoutParams(-1, -2));
+        TextView body = curtainText(text, 17, RITUAL_BONE, false);
+        body.setTypeface(Typeface.SERIF, Typeface.NORMAL);
+        body.setPadding(0, dp(5), 0, 0);
+        card.addView(body, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = dp(8);
+        agentOverviewList.addView(card, lp);
+    }
+
+    private void addCurtainTask(JSONObject task, String kind) {
+        final String taskId = task.optString("task_id", "").trim();
+        JSONObject mission = task.optJSONObject("mission_state");
+        String visible = mission == null ? "" : mission.optString("user_visible_state", "").trim();
+        boolean waitingForUser = "waiting".equals(kind) || (mission != null && mission.optBoolean("needs_user", false));
+        int accent = waitingForUser
+                ? Color.rgb(181, 42, 70)
+                : "active".equals(kind) ? CYAN
+                : "next".equals(kind) ? RITUAL_GOLD
+                : (task.optBoolean("success", false) || "final_ready".equals(visible)) ? CYAN : RITUAL_LAVENDER;
+
+        String prompt = task.optString("task", "").trim();
+        String currentStep = task.optString("current_step", "").trim();
+        String finalText = task.optString("final", "").trim();
+        String nextStep = agentTaskNextStep(task);
+        String titleText;
+        String detailText = "";
+        String kicker;
+        if ("result".equals(kind)) {
+            kicker = task.optBoolean("success", false) ? "ПОСЛЕДНЯЯ ПЕЧАТЬ" : agentTaskStatusLabel(task).toUpperCase(java.util.Locale.ROOT);
+            titleText = !finalText.isEmpty() ? finalText : (!prompt.isEmpty() ? prompt : agentTaskStatusLabel(task));
+            if (!finalText.isEmpty() && !prompt.isEmpty()) detailText = prompt;
+        } else if ("next".equals(kind)) {
+            kicker = "СЛЕДУЮЩЕЕ";
+            titleText = !nextStep.isEmpty() ? nextStep : (!prompt.isEmpty() ? prompt : "Следующий ритуал ещё получает имя");
+            if (!nextStep.isEmpty() && !prompt.isEmpty() && !nextStep.equalsIgnoreCase(prompt)) detailText = prompt;
+        } else {
+            kicker = waitingForUser ? "ЖДУ ТЕБЯ" : task.optBoolean("running", false) ? "СЕЙЧАС" : "ДЕРЖУ В РАБОТЕ";
+            titleText = !currentStep.isEmpty() ? currentStep : (!prompt.isEmpty() ? prompt : agentTaskStatusLabel(task));
+            if (!currentStep.isEmpty() && !prompt.isEmpty() && !currentStep.equalsIgnoreCase(prompt)) detailText = prompt;
+        }
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setBackground(ritualBackground(accent));
+        card.setClickable(true);
+        card.setFocusable(true);
+
+        View rail = new View(this);
+        rail.setBackgroundColor(accent);
+        card.addView(rail, new LinearLayout.LayoutParams(dp(3), -1));
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(13), dp(11), dp(12), dp(11));
+        card.addView(content, new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView label = curtainText(kicker, 9, accent, true);
+        label.setLetterSpacing(0.17f);
+        content.addView(label, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView titleTextView = curtainText(titleText, 18, RITUAL_BONE, false);
+        titleTextView.setTypeface(Typeface.SERIF, Typeface.NORMAL);
+        titleTextView.setMaxLines("result".equals(kind) ? 5 : 4);
+        titleTextView.setEllipsize(TextUtils.TruncateAt.END);
+        titleTextView.setPadding(0, dp(5), 0, 0);
+        content.addView(titleTextView, new LinearLayout.LayoutParams(-1, -2));
+
+        if (!detailText.isEmpty()) {
+            TextView detail = curtainText(detailText, 12, Color.rgb(184, 179, 193), false);
+            detail.setMaxLines(3);
+            detail.setEllipsize(TextUtils.TruncateAt.END);
+            detail.setPadding(0, dp(6), 0, 0);
+            content.addView(detail, new LinearLayout.LayoutParams(-1, -2));
+        }
+
+        String metaText = agentCurtainMeta(task);
+        if (!metaText.isEmpty()) {
+            TextView meta = curtainText(metaText.toUpperCase(java.util.Locale.ROOT), 9, TEXT_MUTED, true);
+            meta.setLetterSpacing(0.07f);
+            meta.setMaxLines(2);
+            meta.setEllipsize(TextUtils.TruncateAt.END);
+            meta.setPadding(0, dp(7), 0, 0);
+            content.addView(meta, new LinearLayout.LayoutParams(-1, -2));
+        }
+
+        addCurtainProgress(content, task, accent);
+        card.setContentDescription(kicker + ". " + titleText + ". Открыть подробный ход.");
+        card.setOnClickListener(v -> openAgentTaskFromCurtain(taskId));
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = dp(8);
+        agentOverviewList.addView(card, lp);
+    }
+
+    private void addCurtainProgress(LinearLayout content, JSONObject task, int accent) {
+        JSONObject progressState = task.optJSONObject("progress");
+        if (progressState == null) return;
+        int completed = Math.max(0, progressState.optInt("completed", 0));
+        int failed = Math.max(0, progressState.optInt("failed", 0));
+        int blocked = Math.max(0, progressState.optInt("blocked", 0));
+        int pending = Math.max(0, progressState.optInt("pending", 0));
+        int ready = Math.max(0, progressState.optInt("ready", 0));
+        int waiting = Math.max(0, progressState.optInt("waiting", 0));
+        int planned = Math.max(0, progressState.optInt("planned", 0));
+        if (planned <= 0) planned = completed + failed + blocked + pending + ready + waiting;
+        if (planned <= 0) return;
+
+        TextView caption = curtainText(completed + " / " + planned + " шагов", 9, accent, true);
+        caption.setPadding(0, dp(7), 0, dp(4));
+        content.addView(caption, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout track = new LinearLayout(this);
+        track.setOrientation(LinearLayout.HORIZONTAL);
+        track.setBackgroundColor(Color.argb(110, 48, 49, 70));
+        View done = new View(this);
+        done.setBackgroundColor(accent);
+        track.addView(done, new LinearLayout.LayoutParams(0, dp(3), Math.max(0.001f, completed)));
+        View rest = new View(this);
+        rest.setBackgroundColor(Color.TRANSPARENT);
+        track.addView(rest, new LinearLayout.LayoutParams(0, dp(3), Math.max(0.001f, planned - completed)));
+        content.addView(track, new LinearLayout.LayoutParams(-1, dp(3)));
+    }
+
+    private GradientDrawable ritualBackground(int accent) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(Color.argb(218, 12, 8, 20));
+        drawable.setCornerRadius(dp(3));
+        drawable.setStroke(dp(1), Color.argb(125, Color.red(accent), Color.green(accent), Color.blue(accent)));
+        return drawable;
+    }
+
+    private boolean agentTaskNeedsUser(JSONObject task) {
+        JSONObject mission = task == null ? null : task.optJSONObject("mission_state");
+        if (mission != null && mission.optBoolean("needs_user", false)) return true;
+        String visible = mission == null ? "" : mission.optString("user_visible_state", "").trim();
+        return "needs_user_decision".equals(visible)
+                || "needs_user_or_operator_decision".equals(visible);
+    }
+
+    private boolean agentTaskIsActive(JSONObject task) {
+        if (task == null) return false;
+        if (task.optBoolean("running", false)) return true;
+        JSONObject mission = task.optJSONObject("mission_state");
+        String visible = mission == null ? "" : mission.optString("user_visible_state", "").trim();
+        return "working".equals(visible)
+                || "accepted".equals(visible)
+                || "internal_repair_required".equals(visible);
+    }
+
+    private boolean agentTaskIsTerminal(JSONObject task) {
+        if (task == null) return false;
+        if (task.optBoolean("success", false) || task.optBoolean("cancelled", false)) return true;
+        JSONObject mission = task.optJSONObject("mission_state");
+        String status = mission == null ? "" : mission.optString("status", "").trim().toLowerCase(java.util.Locale.ROOT);
+        if (status.isEmpty()) status = task.optString("status", "").trim().toLowerCase(java.util.Locale.ROOT);
+        return "completed".equals(status)
+                || "failed".equals(status)
+                || "cancelled".equals(status)
+                || "blocked".equals(status)
+                || "preflight_failed".equals(status)
+                || "corrupt".equals(status);
+    }
+
+    private String agentTaskNextStep(JSONObject task) {
+        JSONObject progressState = task == null ? null : task.optJSONObject("progress");
+        if (progressState == null) return "";
+        String[] keys = {"next_step", "next_step_id", "next_ready_step", "next_ready_step_id"};
+        for (String key : keys) {
+            String value = progressState.optString(key, "").trim();
+            if (!value.isEmpty()) return value;
+        }
+        return "";
+    }
+
+    private String agentCurtainMeta(JSONObject task) {
+        java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
+        String governor = agentBrigadeLabel(task.optString("governor", ""));
+        if (!governor.isEmpty()) names.add(governor);
+        JSONArray tabs = task.optJSONArray("brigade_tabs");
+        if (tabs != null) {
+            for (int i = 0; i < tabs.length(); i++) {
+                JSONObject tab = tabs.optJSONObject(i);
+                if (tab == null) continue;
+                String label = tab.optString("label", "").trim();
+                if (label.isEmpty()) label = agentBrigadeLabel(tab.optString("governor", ""));
+                if (!label.isEmpty()) names.add(label);
+            }
+        }
+        StringBuilder out = new StringBuilder();
+        for (String name : names) {
+            if (out.length() > 0) out.append("  •  ");
+            out.append(name);
+        }
+        JSONObject mission = task.optJSONObject("mission_state");
+        String nextOwner = mission == null ? "" : mission.optString("next_owner", "").trim();
+        if (!nextOwner.isEmpty() && !"none".equalsIgnoreCase(nextOwner)) {
+            String owner = "user".equalsIgnoreCase(nextOwner) ? "твой ход" : agentBrigadeLabel(nextOwner);
+            if (owner.isEmpty()) owner = nextOwner;
+            if (out.length() > 0) out.append("  •  ");
+            out.append("дальше: ").append(owner);
+        }
+        return out.toString();
+    }
+
+    private void openAgentTaskFromCurtain(String taskId) {
+        setDrawerOpen(false);
+        showTab(TAB_AGENT);
+        if (!agentBrigadeFilter.isEmpty()) {
+            setAgentBrigadeFilter("");
+        }
+        scrollToAgentSection(taskId, 5);
+    }
+
+    private void scrollToAgentSection(String taskId, int attemptsLeft) {
+        if (agentScrollView == null || taskId == null || taskId.isEmpty()) return;
+        agentScrollView.postDelayed(() -> {
+            AgentSection section = agentSections.get(taskId);
+            if (section != null && section.container != null) {
+                agentScrollView.smoothScrollTo(0, Math.max(0, section.container.getTop() - dp(8)));
+            } else if (attemptsLeft > 0) {
+                scrollToAgentSection(taskId, attemptsLeft - 1);
+            }
+        }, attemptsLeft == 5 ? 120 : 260);
     }
 
     private TextView drawerItem(String text) {
         TextView item = new TextView(this);
         item.setText(text);
-        item.setTextSize(16);
+        item.setTextSize(13);
         item.setTypeface(Typeface.DEFAULT_BOLD);
         item.setGravity(Gravity.CENTER_VERTICAL);
-        item.setPadding(dp(18), 0, dp(18), 0);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(52));
-        lp.topMargin = dp(8);
+        item.setPadding(dp(14), 0, dp(14), 0);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(42));
+        lp.topMargin = dp(4);
         item.setLayoutParams(lp);
         return item;
     }
@@ -2985,18 +3589,38 @@ public class MainActivity extends Activity {
     }
 
     private void setDrawerOpen(boolean open) {
+        if (drawer == null || scrim == null) return;
         drawerOpen = open;
+        drawer.animate().cancel();
+        scrim.animate().cancel();
         if (open) {
             scrim.setVisibility(View.VISIBLE);
+            if (drawerHandle != null) drawerHandle.setVisibility(View.GONE);
+            drawer.setPivotX(0f);
+            drawer.setScaleX(0.965f);
+            drawer.setAlpha(0.88f);
+            refreshBrigadeMonitor();
+            startBrigadeDeltaLoop();
+            drawer.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
         }
-        float target = open ? 0f : -drawer.getWidth();
-        drawer.animate().translationX(target).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();
+        int drawerWidth = drawer.getWidth() > 0
+                ? drawer.getWidth()
+                : Math.min(dp(430), getResources().getDisplayMetrics().widthPixels - dp(18));
+        float target = open ? 0f : -drawerWidth;
+        drawer.animate()
+                .translationX(target)
+                .scaleX(open ? 1f : 0.975f)
+                .alpha(open ? 1f : 0.92f)
+                .setDuration(open ? 310 : 230)
+                .setInterpolator(new DecelerateInterpolator())
+                .start();
         scrim.animate()
                 .alpha(open ? 1f : 0f)
-                .setDuration(190)
+                .setDuration(open ? 260 : 190)
                 .withEndAction(() -> {
                     if (!drawerOpen) {
                         scrim.setVisibility(View.GONE);
+                        if (drawerHandle != null) drawerHandle.setVisibility(View.VISIBLE);
                     }
                 })
                 .start();
@@ -3175,12 +3799,15 @@ public class MainActivity extends Activity {
 
     private GradientDrawable drawerBackground() {
         GradientDrawable drawable = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
+                GradientDrawable.Orientation.TL_BR,
                 new int[]{
-                        Color.rgb(25, 20, 39),
-                        SURFACE
+                        Color.rgb(24, 13, 38),
+                        Color.rgb(7, 4, 13),
+                        Color.rgb(14, 8, 24)
                 });
-        drawable.setStroke(dp(1), LINE);
+        float corner = dp(18);
+        drawable.setCornerRadii(new float[]{0, 0, corner, corner, corner, corner, 0, 0});
+        drawable.setStroke(dp(1), Color.argb(160, 155, 77, 255));
         return drawable;
     }
 
@@ -5176,6 +5803,9 @@ public class MainActivity extends Activity {
             agentPinnedScroll = false;
         }
         main.postDelayed(() -> {
+            if (!force && (agentTouchActive || agentPinnedScroll)) {
+                return;
+            }
             int target = Math.max(0, agentMessageList.getBottom() + agentScrollView.getPaddingBottom() - agentScrollView.getHeight());
             if (agentScrollAnimator != null) {
                 agentScrollAnimator.cancel();
