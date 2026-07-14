@@ -5,7 +5,10 @@ runtime/vm/*.qcow2
 runtime/vm/OVMF_VARS.fd
 runtime/vm/os-installed
 kernel/source/
+kernel/cache/
+kernel/work/
 kernel/build/
+kernel/artifacts/
 *.iso
 
 !runtime/logs/.gitkeep

@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "selected_at": "2026-07-14",
+  "channel": "upstream-longterm",
+  "series": "6.18",
+  "version": "6.18.38",
+  "tag": "v6.18.38",
+  "projected_eol": "2028-12",
+  "source_date_epoch": 1783165465,
+  "tarball": {
+    "url": "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.38.tar.xz",
+    "sha256": "ac26e508abd56e9f8b89872b6e10c49fc823bcc70d8068a5d8504c1a7c4ff045"
+  },
+  "signature": {
+    "url": "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.38.tar.sign",
+    "sha256": "8a6f5151734c4a4838890c1bb806f66e920343fec0290e54f1ecb781ca04a007"
+  },
+  "key_lookup": [
+    "gregkh@kernel.org",
+    "sashal@kernel.org"
+  ],
+  "allowed_primary_signer_fingerprints": [
+    "647F28654894E3BD457199BE38DBBDC86092693E",
+    "E27E5D8A3403A2EF66873BBCDEA66FF797772CDC"
+  ]
+}
