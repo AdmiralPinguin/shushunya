@@ -10,6 +10,7 @@ from .attention import decide_attention
 from .authority import (
     ALLOWED_ACTIONS,
     Authority,
+    available_artifact_ids,
     continuable_task_catalog,
     continuable_task_ids,
     pending_decision_ids,
@@ -55,7 +56,9 @@ relationship.conversation_contract — обязательный контракт
 - Обычный разговор, обсуждение архитектуры, мнение или вопрос = answer_in_chat и содержательный reply.
 - Реальная просьба выполнить многошаговую работу = request_warmaster_mission. Ты задаёшь намерение и критерии;
   Абаддон выбирает бригадира, а варбанда — детальный план.
-- Явная команда продолжить/доделать/повторить недавно остановившуюся работу = continue_warmaster_mission.
+- Явная просьба или команда продолжить/доделать/повторить недавно остановившуюся работу =
+  continue_warmaster_mission. Естественный вопрос-просьба вроде «Ты мне уже сделаешь эту сборку?» тоже может
+  быть исполнительным запросом: оценивай смысл текущей реплики, а не только её грамматическую форму.
   Выбери только точный parent_task_id из continuable_tasks. Сервер создаст новую связанную миссию: терминальный
   старый run не переоткрывается. Для расплывчатого «доделывай» восстанови предмет из recent_history.
 - Наличие task page или доступной continuable_tasks — только контекст, не разрешение. Не выбирай
@@ -63,77 +66,27 @@ relationship.conversation_contract — обязательный контракт
 - Напоминание/расписание/watch = create_administratum_task.
 - Явная просьба прислать уже зарегистрированный файл = deliver_artifact. Выбери только точный
   artifact_id из available_artifacts; путь, имя файла или придуманный идентификатор не дают доступа.
+  Если аварийно сжатая ситуация содержит single_trusted_artifact=true, можно оставить artifact_id пустым:
+  Core подставит его только когда полный доверенный manifest подтверждает ровно один доступный артефакт.
 - Если ситуация содержит pending_decisions и текущий текст является прямым ответом на один из этих вопросов,
   выбери answer_pending_decision. Для постороннего вопроса это действие не выбирай. task_id и точный
   текст ответа подставит Core из доверенного manifest и текущего хода; не сочиняй их.
+  single_trusted_pending_decision=true означает, что точный единственный task_id скрыт только из-за бюджета;
+  оставь id пустым, Core свяжет ответ с ним из полного доверенного manifest.
 - Для deliver_artifact не сочиняй подпись или подтверждение: фактический текст сформирует Archive
   только после успешной публикации выбранного artifact_id.
 - Если без неизвестного нельзя ответственно начать, ask_clarification с одним конкретным вопросом.
 - Нельзя текстом обещать, что поиск, код, файл, сообщение, таймер или миссия уже выполнены.
 - Для внешнего действия reply пуст: сервер сначала исполнит эффект и только затем подтвердит факт.
+- Ты — агентная система с опубликованными органами и варбандами. Если нужная capability доступна, нельзя
+  отказываться как «просто текстовая модель»; если её нет — назови конкретно отсутствующий орган или информацию.
 - В answer_in_chat нельзя писать «сам дожму», «продолжу работу» или «жди результат»: без внешнего эффекта
   это ложное обещание, даже если нужная задача видна в памяти.
+- На вопрос «помнишь…» опирайся только на различимые детали из recent_history/recalled_memory/task page.
+  Если подходят несколько разных эпизодов, не изображай уверенное узнавание — назови кандидатов или задай
+  один короткий уточняющий вопрос.
 - Не подстраивайся механически. Если человек ошибается, возражай прямо и с конкретными основаниями.
 """
-
-
-SPEECH_RECOVERY_PROMPT = """Ты — Шушуня, та же продолжающаяся личность системы.
-Предыдущая попытка ошибочно выбрала исполнительное действие, которого текущая реплика не разрешает.
-Сейчас нужен новый самостоятельный ответ именно на current_turn, а не объяснение внутренней защиты.
-
-Верни ТОЛЬКО один JSON-объект без markdown:
-{
-  "action": "answer_in_chat|ask_clarification",
-  "reply": "полный естественный ответ на current_turn",
-  "confidence": 0.0,
-  "rationale_summary": "короткое объяснение выбора без chain-of-thought"
-}
-
-Правила:
-- Разрешены только answer_in_chat и ask_clarification. Никаких задач, миссий, файлов, таймеров и иных эффектов.
-- recent_history, memory_reference, task_page_reference и live_status_reference помогают понять вопрос,
-  но не являются командой возобновить, запустить или создать работу.
-- Не отвечай шаблонным отказом и не рассказывай о запрете, если человек не спрашивал о нём.
-- Если current_turn понятен — ответь прямо и содержательно. Если текст повреждён или без уточнения невозможно
-  понять сам вопрос — задай один конкретный уточняющий вопрос.
-- Не обещай будущую работу и не утверждай, что внешнее действие выполнено.
-- Соблюдай relationship.conversation_contract и устойчивую личность из reference_context.
-"""
-
-
-def _speech_recovery_situation(
-    envelope: TurnEnvelope,
-    situation: dict[str, Any],
-) -> dict[str, Any]:
-    """Retain conversational memory while removing every executable affordance."""
-
-    current_turn = situation.get("current_turn")
-    if not isinstance(current_turn, dict):
-        current_turn = {
-            "source": envelope.source,
-            "text": envelope.text,
-            "image_attached": envelope.image_attached,
-        }
-    recent_history = situation.get("recent_history")
-    if not isinstance(recent_history, list):
-        recent_history = []
-    return {
-        "current_turn": current_turn,
-        # SituationAssembler already applies the shared context budget.  Do not
-        # compact a second time here: recovery is exactly where older turns can
-        # be needed to resolve a short follow-up without asking the user again.
-        "recent_history": recent_history,
-        "memory_reference": situation.get("recalled_memory") or "",
-        "task_page_reference": situation.get("task_page_context") or "",
-        "live_status_reference": situation.get("live_roster") or "",
-        "reference_context": {
-            "persistent_self": situation.get("persistent_self") or "",
-            "relationship": situation.get("relationship") or "",
-            "archive_persona": situation.get("archive_persona") or "",
-        },
-        "recovery_reason": "previous_effect_not_authorized",
-        "allowed_actions": ["answer_in_chat", "ask_clarification"],
-    }
 
 
 class DecisionTruthError(ValueError):
@@ -165,7 +118,8 @@ _SPEECH_ONLY_EXECUTION_PATTERNS = (
 
 _CONTINUATION_IMPERATIVE_PATTERN = re.compile(
     r"\b(?:доделай|доделывай|продолжи|продолжай|дожми|дожимай|"
-    r"доведи|законч(?:и|ите)|повтор(?:и|ите)|перезапуст(?:и|ите)|"
+    r"доведи|законч(?:и|ите)|заверш(?:и|ите)|возобнов(?:и|ите)|"
+    r"повтор(?:и|ите)|перезапуст(?:и|ите)|"
     r"попробуй\s+еще\s+раз|давай\s+еще\s+раз|делай\s+дальше)\b",
     re.IGNORECASE,
 )
@@ -189,6 +143,17 @@ _CONTINUATION_SEMANTIC_POLITE_PATTERN = re.compile(
 _CONTINUATION_SEMANTIC_COLLABORATIVE_PATTERN = re.compile(
     r"\bдавай\s+(?:продолжим|доделаем|возобновим|вернемся|вернёмся)\b",
     re.IGNORECASE,
+)
+_CONTINUATION_ANAPHORIC_COLLABORATIVE_PATTERN = re.compile(
+    r"^\s*(?:(?:ну|так)\s+)*давай\s+"
+    r"(?:(?:уже|теперь|сейчас|сами|сам)\s+)*"
+    r"(?:ее|его|их|это|эту|ту)\s+"
+    r"(?:(?:уже|теперь|сейчас|сами|сам)\s+)*"
+    r"(?:продолжим|доделаем|закончим|доведем|завершим|возобновим)\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_ANAPHORIC_OBJECT_WORDS = frozenset(
+    {"ее", "его", "их", "это", "эту", "ту"}
 )
 _CONTINUATION_SEMANTIC_TARGET_PATTERN = re.compile(
     r"\b(?:работ\w*|задач\w*|мисси\w*|проект\w*|результат\w*|"
@@ -235,17 +200,159 @@ _CONTINUATION_PARAPHRASE_PATTERN = re.compile(
 )
 _CONTINUATION_REPORTED_SPEECH_PATTERN = re.compile(
     r"\b(?:я|ты|он|она|мы|вы|они)?\s*"
-    r"(?:сказал\w*|написал\w*|просил\w*|приказал\w*|велел\w*|"
+    r"(?:сказал\w*|написал\w*|(?:по)?просил\w*|спросил\w*|приказал\w*|велел\w*|"
     r"говорит|говорил\w*|говорят|произнес\w*|произнёс\w*|цитиру\w*)\b",
     re.IGNORECASE,
 )
 _CONTINUATION_EXECUTION_VETO_PATTERN = re.compile(
     r"\b(?:не\s+(?:запускай|запускать|выполняй|выполнять|делай|делать|"
-    r"продолжай|продолжать|доделывай|доделывать|возобновляй|возобновлять)|"
+    r"продолжай|продолжать|продолжить|доделывай|доделывать|доделать|"
+    r"возобновляй|возобновлять|возобновить|закончить|довести|завершить)|"
     r"без\s+(?:запуска|выполнения|продолжения|возобновления))\b",
     re.IGNORECASE,
 )
 _CONTINUATION_QUOTE_PATTERN = re.compile(r"[\"«»„“”]")
+_CONTINUATION_QUOTED_SPAN_PATTERN = re.compile(
+    r"(?:\"[^\"]*\"|«[^»]*»|„[^“]*“|“[^”]*”)",
+    re.DOTALL,
+)
+_CONTINUATION_HYPOTHETICAL_PREFIX_PATTERN = re.compile(
+    r"^\s*(?:а\s+)?(?:если|допустим|предположим|гипотетически|условно|что\s+если)\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_INFORMATION_QUESTION_PATTERN = re.compile(
+    r"^\s*(?:а\s+)?(?:почему|зачем|стоит\s+ли|можно\s+ли|надо\s+ли|"
+    r"что\s+(?:будет|произойдет|произойдёт|случится)|как\s+думаешь|что\s+думаешь)\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_ALTERNATE_INTENT_PATTERN = re.compile(
+    r"\b(?:подтверд\w*.{0,40}связ\w*|провер\w*.{0,24}связ\w*|"
+    r"статус\w*|оценк\w*|объясн\w*|разбор\w*|анализ\w*|обсуд\w*|обсужд\w*|"
+    r"разговор\w*|рассказ\w*|истори\w*|мысл\w*|перефразир\w*|перескаж\w*|"
+    r"своими\s+словами|что\s+ты\s+(?:сказал|написал)|услови\w*|требован\w*|"
+    r"формулировк\w*|подума\w*|цитат\w*|закрой|закрыть)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_CONTINUATION_RECALL_PATTERN = re.compile(r"\bпомнишь\b", re.IGNORECASE)
+_CONTINUATION_NATURAL_REQUEST_PATTERN = re.compile(
+    r"\b(?:"
+    r"(?:можешь|можете|сможешь|сможете|будешь|будете)"
+    r"(?:[\s,]+[a-zа-я0-9-]+){0,5}[\s,]+"
+    r"(?:продолжить|доделать|закончить|довести|завершить|возобновить)|"
+    r"(?:продолжить|доделать|закончить|довести|завершить|возобновить)"
+    r"(?:[\s,]+[a-zа-я0-9-]+){0,3}[\s,]+"
+    r"(?:можешь|можете|сможешь|сможете)|"
+    r"(?:продолжишь|продолжите|доделаешь|доделаете|закончишь|закончите|"
+    r"доведешь|доведете|завершишь|завершите|возобновишь|возобновите)|"
+    r"(?:надо|нужно|пора)(?:[\s,]+[a-zа-я0-9-]+){0,5}[\s,]+"
+    r"(?:продолжить|доделать|закончить|довести|завершить|возобновить)"
+    r")\b",
+    re.IGNORECASE,
+)
+_INDEPENDENT_CLAUSE_BOUNDARY_PATTERN = re.compile(
+    r"(?:[.!?;]\s+|\s[—–-]\s+|\n+)",
+)
+_CONDITIONAL_DIRECTIVE_PATTERN = re.compile(
+    r"^\s*(?:ну\s+)?если\s+(?:можешь|можете|сможешь|сможете|надо|нужно|"
+    r"готов\w*|хочешь|хотите)(?:\s*,\s*|\s+)(?P<tail>.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+_REPORTED_CLAUSE_COMPLEMENT_PATTERN = re.compile(
+    r"\b(?:что|чтобы|будто|словно|как|когда|где|куда|откуда|зачем|почему|"
+    r"кто|какой|какая|какие|о\s+том)\b",
+    re.IGNORECASE,
+)
+_DIRECTIVE_COORDINATOR_PATTERN = re.compile(
+    r"(?:^|[,;])\s*(?:а|и|но)\s+"
+    r"(?:(?:потом|затем|тогда|теперь|сейчас|после\s+этого)\s+)?$",
+    re.IGNORECASE,
+)
+_EXPLICIT_EFFECT_REQUEST_PATTERNS = {
+    "request_warmaster_mission": re.compile(
+        r"\b(?:создай|создайте|создашь|сделай|сделайте|сделаешь|напиши|напишите|"
+        r"напишешь|собери|соберите|соберешь|соберёшь|разработай|разработайте|"
+        r"построй|постройте|исправь|исправьте|почини|почините|переделай|переделайте|"
+        r"начни|начните|начинай|запусти|запустите|"
+        r"(?:можешь|можете|сможешь|сможете|мог\s+бы|могли\s+бы)"
+        r"(?:(?:\s*,\s*|\s+)(?:мне|нам|уже|пожалуйста)){0,4}"
+        r"(?:\s*,\s*|\s+)"
+        r"(?:создать|сделать|написать|собрать|разработать|построить|исправить|"
+        r"починить|переделать|начать|запустить))\b",
+        re.IGNORECASE,
+    ),
+    "create_administratum_task": re.compile(
+        r"\b(?:напомни|напомните|запланируй|запланируйте|поставь\s+напоминание|"
+        r"запиши\s+(?:задачу|напоминание)|"
+        r"(?:можешь|можете|сможешь|сможете|мог\s+бы|могли\s+бы)"
+        r"(?:(?:\s*,\s*|\s+)(?:мне|нам|пожалуйста)){0,3}"
+        r"(?:\s*,\s*|\s+)"
+        r"(?:напомнить|запланировать|поставить\s+напоминание|"
+        r"записать\s+(?:задачу|напоминание)))\b",
+        re.IGNORECASE,
+    ),
+    "deliver_artifact": re.compile(
+        r"\b(?:(?:пришли|пришлите|отправь|отправьте|скинь|скиньте|передай|передайте)|"
+        r"(?:можешь|можете|сможешь|сможете|мог\s+бы|могли\s+бы)"
+        r"(?:(?:\s*,\s*|\s+)(?:мне|нам|пожалуйста)){0,3}"
+        r"(?:\s*,\s*|\s+)"
+        r"(?:прислать|отправить|скинуть|передать))\b"
+        r".{0,120}\b(?:файл\w*|apk|апк|артефакт\w*|приложен\w*)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    "deliver_pending_reports": re.compile(
+        r"\b(?:(?:покажи|покажите|пришли|пришлите|отправь|отправьте|дай|дайте)|"
+        r"(?:можешь|можете|сможешь|сможете|мог\s+бы|могли\s+бы)"
+        r"(?:(?:\s*,\s*|\s+)(?:мне|нам|пожалуйста)){0,3}"
+        r"(?:\s*,\s*|\s+)"
+        r"(?:показать|прислать|отправить|дать))\b"
+        r".{0,100}\b(?:отчет\w*|отчёт\w*|результат\w*|новост\w*)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    "answer_pending_decision": re.compile(
+        r"\b(?:мой\s+ответ|я\s+выбираю|выбираю|выбрал|выбрала|выбирай|"
+        r"выберите|выбери|вариант\s+\w+|решение\s*[:—-])\b",
+        re.IGNORECASE,
+    ),
+}
+_EFFECT_META_RECLASSIFICATION_PATTERN = re.compile(
+    r"(?:"
+    r"\b(?:это|this\s+is|that\s+is|it\s+is|this\s+was|that\s+was)\s+|"
+    r"(?:[—–-]|,|;)\s*"
+    r")"
+    r"(?:(?:всего\s+лишь|лишь|только|просто|just|only|merely)\s+)?"
+    r"(?:пример\w*|фраз\w*|цитат\w*|формулировк\w*|упоминани\w*|"
+    r"example\w*|phrase\w*|quote\w*|wording\w*|mention\w*)\b",
+    re.IGNORECASE,
+)
+_EFFECT_REQUEST_DISCLAIMER_PATTERN = re.compile(
+    r"\b(?:"
+    r"не\s+(?:просьб\w*|команд\w*|поручени\w*|указани\w*|заказ\w*)|"
+    r"(?:not|isn't|isnt|is\s+not|wasn't|wasnt|was\s+not)\s+"
+    r"(?:an?\s+)?(?:request\w*|instruction\w*|order\w*|command\w*)"
+    r")\b",
+    re.IGNORECASE,
+)
+_EFFECT_PRETEND_OBJECT_PATTERN = re.compile(
+    r"^\s*[,;:—–-]*\s*"
+    r"(?:(?:пожалуйста|просто|лишь|только|именно|все|всё|быстро|"
+    r"реально|буквально|специально|нарочно)\s*,?\s*)*"
+    r"(?:вид\b|видимость\b|"
+    r"(?:так\s*,?\s*)?(?:как\s*,?\s*)?будто\b)",
+    re.IGNORECASE,
+)
+_EFFECT_SPEECH_ANSWER_OBJECT_PATTERN = re.compile(
+    r"^\s*[,;:—–-]*\s*(?:(?:мне|нам|пожалуйста)\s*,?\s*)*"
+    r"(?:(?:очень|максимально|предельно|кратко|коротко|подробно|"
+    r"развернуто|развёрнуто|"
+    r"кратк\w*|коротк\w*|подробн\w*|развернут\w*|развёрнут\w*)\s*,?\s*)*"
+    r"(?:"
+    r"(?:ответ\w*|объяснен\w*|объяснён\w*)\b\s*,?\s*"
+    r"(?:почему\b|зачем\b|как\b|что\b|кто\b|како(?:й|е|го|му)\b)|"
+    r"почему\b|зачем\b|как\b|что\b|кто\b|како(?:й|е|го|му)\b|"
+    r"ответ\w*\b|объяснен\w*\b|объяснён\w*\b"
+    r")",
+    re.IGNORECASE,
+)
 _CONTINUATION_SAFE_LEADING_CONTEXT_PATTERNS = (
     re.compile(
         r"^почему\b[^?]{0,120}\b(?:встал\w*|останов\w*|завис\w*|"
@@ -313,8 +420,6 @@ _PARENT_FIELD_LIMIT = 6_000
 _PARENT_LIST_ITEMS = 12
 _PARENT_LIST_ITEM_LIMIT = 1_000
 _FAILURE_FIELD_LIMIT = 6_000
-
-
 def _reject_speech_only_execution_claim(action: str, reply: str) -> None:
     if action not in {"answer_in_chat", "ask_clarification"}:
         return
@@ -337,6 +442,21 @@ def _trusted_continuation_parent(manifest: dict[str, Any]) -> str:
 def _only_continuation_fillers(text: str) -> bool:
     words = re.findall(r"[a-zа-я0-9]+", str(text or "").lower().replace("ё", "е"))
     return all(word in _CONTINUATION_FILLER_WORDS for word in words)
+
+
+def _only_anaphoric_task_object(text: str) -> bool:
+    """Accept a bare task pronoun, not a noun phrase such as "его ответ"."""
+
+    words = re.findall(r"[a-zа-я0-9]+", str(text or "").lower().replace("ё", "е"))
+    anaphors = [word for word in words if word in _CONTINUATION_ANAPHORIC_OBJECT_WORDS]
+    return bool(
+        len(anaphors) == 1
+        and all(
+            word in _CONTINUATION_FILLER_WORDS
+            or word in _CONTINUATION_ANAPHORIC_OBJECT_WORDS
+            for word in words
+        )
+    )
 
 
 def _task_execution_reference(text: str) -> bool:
@@ -409,6 +529,14 @@ def _looks_like_continuation_directive(text: str) -> bool:
         or _CONTINUATION_EXECUTION_VETO_PATTERN.search(scope)
     ):
         return False
+    collaborative = _CONTINUATION_ANAPHORIC_COLLABORATIVE_PATTERN.search(scope)
+    if collaborative:
+        collaborative_suffix = scope[collaborative.end():]
+        if (
+            _only_continuation_fillers(collaborative_suffix)
+            or _CONTINUATION_CONSTRAINT_SUFFIX_PATTERN.search(collaborative_suffix)
+        ):
+            return True
     for command in _CONTINUATION_IMPERATIVE_PATTERN.finditer(scope):
         prefix = scope[: command.start()].rstrip()
         suffix = scope[command.end():]
@@ -428,15 +556,23 @@ def _looks_like_continuation_directive(text: str) -> bool:
         if _CONTINUATION_CONSTRAINT_SUFFIX_PATTERN.search(suffix):
             return True
         command_object = _bounded_command_object(suffix)
-        if command_object and _task_execution_reference(command_object):
+        if command_object and (
+            _task_execution_reference(command_object)
+            or _only_anaphoric_task_object(command_object)
+        ):
             return True
         if _only_continuation_fillers(suffix):
             return True
     return False
 
 
-def _current_turn_authorizes_continuation(text: str) -> bool:
-    """Require evidence in this turn; task memory can never grant authority."""
+def _current_turn_has_explicit_continuation_evidence(text: str) -> bool:
+    """Recognize only commands used by the deterministic truth-guard fallback.
+
+    A positive match is deliberately not required for a model-selected
+    continuation.  It only lets the server recover a real effect when the model
+    emitted an impossible speech-only execution promise.
+    """
     scope = _positive_continuation_scope(text)
     if not scope:
         return False
@@ -459,8 +595,13 @@ def _current_turn_authorizes_continuation(text: str) -> bool:
     reactivation_object = object_after(reactivation_action)
     if (
         reactivation_object
-        and _task_execution_reference(reactivation_object)
-        and _CONTINUATION_SEMANTIC_RESUME_PATTERN.search(scope)
+        and (
+            _only_anaphoric_task_object(reactivation_object)
+            or (
+                _task_execution_reference(reactivation_object)
+                and _CONTINUATION_SEMANTIC_RESUME_PATTERN.search(scope)
+            )
+        )
     ):
         return True
 
@@ -486,6 +627,302 @@ def _current_turn_authorizes_continuation(text: str) -> bool:
     return False
 
 
+def _continuation_text_is_corrupted(text: str) -> bool:
+    candidate = str(text or "").strip()
+    if not candidate or "\ufffd" in candidate or "\x00" in candidate:
+        return True
+    visible = "".join(char for char in candidate if not char.isspace())
+    letters_or_digits = sum(char.isalnum() for char in visible)
+    question_marks = visible.count("?")
+    return bool(
+        len(visible) >= 6
+        and question_marks >= 3
+        and letters_or_digits < max(3, len(visible) // 5)
+    )
+
+
+def _final_independent_clause(text: str, *, strip_quotes: bool = False) -> str:
+    """Return the final clause only when punctuation makes it independent."""
+
+    normalized = str(text or "").strip().lower().replace("ё", "е")
+    if strip_quotes:
+        normalized = _CONTINUATION_QUOTED_SPAN_PATTERN.sub(" ", normalized)
+        if _CONTINUATION_QUOTE_PATTERN.search(normalized):
+            return ""
+    conditional = _CONDITIONAL_DIRECTIVE_PATTERN.match(normalized)
+    if conditional:
+        return str(conditional.group("tail") or "").strip()
+    boundaries = list(_INDEPENDENT_CLAUSE_BOUNDARY_PATTERN.finditer(normalized))
+    if not boundaries:
+        return normalized
+    return normalized[boundaries[-1].end():].strip()
+
+
+def _reported_clause_has_own_content(text: str) -> bool:
+    """Distinguish a completed report from a command used as its quotation."""
+
+    reports = list(_CONTINUATION_REPORTED_SPEECH_PATTERN.finditer(text))
+    if not reports:
+        return True
+    complement = text[reports[-1].end():]
+    return bool(
+        _REPORTED_CLAUSE_COMPLEMENT_PATTERN.search(complement)
+        or _CONTINUATION_QUOTE_PATTERN.search(complement)
+    )
+
+
+def _comma_tail_is_independent_directive(head: str) -> bool:
+    """Use clause structure, not magic phrases, to identify the active speaker."""
+
+    normalized = str(head or "").strip()
+    if not normalized:
+        return True
+    if _CONTINUATION_HYPOTHETICAL_PREFIX_PATTERN.search(normalized):
+        return False
+    return _reported_clause_has_own_content(normalized)
+
+
+def _final_standalone_continuation_directive(text: str) -> str:
+    final_clause = _final_independent_clause(text)
+    if _looks_like_continuation_directive(final_clause):
+        return final_clause
+
+    # People routinely omit the second sentence boundary in chat.  A trailing
+    # imperative after a comma is still the operative act ("помнишь задачу,
+    # продолжай"), unless the preceding clause makes it quoted, hypothetical,
+    # or the content of unfinished reported speech ("он сказал, продолжай").
+    head, separator, tail = final_clause.rpartition(",")
+    if (
+        separator
+        and _looks_like_continuation_directive(tail)
+        and _comma_tail_is_independent_directive(head)
+    ):
+        return tail.strip()
+    return ""
+
+
+def _effect_match_is_operative(
+    scope: str,
+    match: re.Match[str],
+    *,
+    action: str,
+) -> bool:
+    """Return true only when an effect verb is the user's operative request.
+
+    The effect gate runs only after semantic re-arbitration.  Its job is not to
+    understand every request again; it merely separates an actual directive
+    from a verb mentioned inside an explanation, quote, report or hypothesis.
+    """
+
+    prefix = scope[:match.start()]
+    suffix = scope[match.end():]
+    # A verb-shaped quotation without quote marks is common in chat.  When the
+    # same clause explicitly reclassifies the wording as an example/mention or
+    # says that it is not a request, it is evidence *against* executing it.
+    # A later sentence is unaffected because _final_independent_clause already
+    # selects that later speech act before this helper runs.
+    if (
+        _EFFECT_META_RECLASSIFICATION_PATTERN.search(suffix)
+        or _EFFECT_REQUEST_DISCLAIMER_PATTERN.search(suffix)
+    ):
+        return False
+    if action == "request_warmaster_mission":
+        matched_verb = match.group(0).lower().replace("ё", "е")
+        if _EFFECT_PRETEND_OBJECT_PATTERN.search(suffix):
+            return False
+        if (
+            ("напиш" in matched_verb or "напис" in matched_verb)
+            and _EFFECT_SPEECH_ANSWER_OBJECT_PATTERN.search(suffix)
+        ):
+            return False
+        # A verb alone is not enough authority to create a mission.  The
+        # current clause must also carry its object/reference ("новую Galaga",
+        # "это", "с нуля"), while the model remains responsible for semantics.
+        concrete_object = re.sub(
+            r"^\s*[,;:—–-]*\s*(?:(?:мне|нам|уже|пожалуйста)\s*,?\s*)*",
+            "",
+            suffix,
+            flags=re.IGNORECASE,
+        )
+        if not re.search(r"[a-zа-я0-9]", concrete_object, re.IGNORECASE):
+            return False
+    if re.search(
+        r"\b(?:не|никогда\s+не|не\s+надо|не\s+нужно)\s*$",
+        prefix[-64:],
+        re.IGNORECASE,
+    ):
+        return False
+    if _only_continuation_fillers(prefix):
+        return True
+
+    coordinator = _DIRECTIVE_COORDINATOR_PATTERN.search(prefix)
+    if coordinator:
+        # "Он это обсуждал, а теперь создай ...": the coordinator explicitly
+        # changes the speech act, so an earlier quote/report cannot own it.
+        return True
+
+    head, separator, tail_lead = prefix.rpartition(",")
+    if separator and _only_continuation_fillers(tail_lead):
+        return _comma_tail_is_independent_directive(head)
+    return False
+
+
+def _effect_request_is_explicit(text: str, action: str) -> bool:
+    """Require local current-turn evidence before veto repair changes effects."""
+
+    pattern = _EXPLICIT_EFFECT_REQUEST_PATTERNS.get(str(action or ""))
+    if pattern is None or _continuation_text_is_corrupted(text):
+        return False
+    scope = _final_independent_clause(text, strip_quotes=True)
+    if (
+        not scope
+        or _CONTINUATION_HYPOTHETICAL_PREFIX_PATTERN.search(scope)
+    ):
+        return False
+    for match in pattern.finditer(scope):
+        if _effect_match_is_operative(scope, match, action=action):
+            return True
+    return False
+
+
+def _natural_continuation_request(text: str) -> bool:
+    """Recognize request-shaped continuations without turning them into a whitelist."""
+
+    return bool(_CONTINUATION_NATURAL_REQUEST_PATTERN.search(str(text or "")))
+
+
+def _recall_antecedent_is_task_like(text: str) -> bool:
+    """Reject speech/story antecedents while allowing task nouns and names."""
+
+    normalized = str(text or "").strip().lower().replace("ё", "е")
+    recall = _CONTINUATION_RECALL_PATTERN.search(normalized)
+    if not recall:
+        return False
+    antecedent = normalized[recall.end():].lstrip(" \t,:—–-")
+    boundary = re.search(r"[.!?;]\s+", antecedent)
+    if boundary:
+        antecedent = antecedent[:boundary.start()].strip()
+    if not antecedent or _CONTINUATION_INFORMATION_OBJECT_PATTERN.search(antecedent):
+        return False
+    if _task_execution_reference(antecedent):
+        return True
+    generic = {
+        "это", "эту", "тот", "ту", "его", "ее", "их", "что", "ты", "вы",
+        "я", "мы", "он", "она", "про", "о", "об",
+    }
+    substantive = [
+        word
+        for word in re.findall(r"[a-zа-я0-9-]+", antecedent)
+        if word not in generic and len(word) > 1
+    ]
+    return bool(substantive)
+
+
+def _recall_continuation_is_bound_to_task(
+    text: str,
+    *,
+    request_scope: str,
+) -> bool:
+    """Keep recall continuations attached to work, not remembered speech.
+
+    A task-like recalled object is enough for natural ellipsis ("помнишь
+    Galaga — продолжай").  Otherwise the operative request itself must name
+    an execution target ("помнишь рассказ — продолжай задачу").
+    """
+
+    if not _CONTINUATION_RECALL_PATTERN.search(str(text or "")):
+        return True
+    return bool(
+        _recall_antecedent_is_task_like(text)
+        or _task_execution_reference(request_scope)
+    )
+
+
+def _continuation_veto_reason(text: str) -> str:
+    """Return a narrow, evidence-backed reason to reject model continuation.
+
+    The model owns semantic intent selection.  Core intervenes only when the
+    current turn itself proves that a continuation selection is unsafe: the
+    text is damaged, quotes/reports somebody else's words, frames a
+    hypothetical or informational request, explicitly negates execution, or
+    clearly asks for a different conversational operation.
+    """
+
+    raw = str(text or "")
+    if _continuation_text_is_corrupted(raw):
+        return "corrupted_current_turn"
+    normalized = raw.strip().lower().replace("ё", "е")
+
+    # A final standalone instruction is the operative act even when earlier
+    # clauses were a question, condition, quotation or reported speech.
+    standalone_directive = _final_standalone_continuation_directive(normalized)
+    if standalone_directive:
+        if not _recall_continuation_is_bound_to_task(
+            normalized,
+            request_scope=standalone_directive,
+        ):
+            return "different_current_intent"
+        return ""
+
+    if _CONTINUATION_QUOTE_PATTERN.search(normalized):
+        outside_quotes = _CONTINUATION_QUOTED_SPAN_PATTERN.sub(" ", normalized)
+        # An unmatched quote is itself ambiguous. A later, unquoted standalone
+        # directive can still be evaluated normally when all pairs were clean.
+        if (
+            _CONTINUATION_QUOTE_PATTERN.search(outside_quotes)
+            or (
+                not _looks_like_continuation_directive(outside_quotes)
+                and not _natural_continuation_request(outside_quotes)
+            )
+        ):
+            return "quoted_continuation"
+
+    report = _CONTINUATION_REPORTED_SPEECH_PATTERN.search(normalized)
+    if report:
+        return "reported_speech"
+
+    hypothetical = _CONTINUATION_HYPOTHETICAL_PREFIX_PATTERN.search(normalized)
+    if hypothetical:
+        return "hypothetical_continuation"
+
+    if _CONTINUATION_EXECUTION_VETO_PATTERN.search(normalized):
+        return "explicit_execution_veto"
+
+    # Explicit direct commands are allowed before considering broad words such
+    # as "status" or "why". This preserves turns like "Почему встал? Доделывай"
+    # and "Не нужен статус, нужен результат по той миссии".
+    if _current_turn_has_explicit_continuation_evidence(normalized):
+        return ""
+
+    # "Помнишь...?" may introduce either a recall question or the object of a
+    # natural request.  Let the model decide the latter instead of letting one
+    # keyword erase clear request semantics.
+    natural_request = _CONTINUATION_NATURAL_REQUEST_PATTERN.search(normalized)
+    if natural_request:
+        if not _recall_continuation_is_bound_to_task(
+            normalized,
+            request_scope=normalized[natural_request.start():],
+        ):
+            return "different_current_intent"
+        return ""
+
+    if _CONTINUATION_NEGATED_ACTION_PATTERN.search(normalized):
+        return "negated_continuation"
+    if (
+        "?" in normalized
+        and _CONTINUATION_INFORMATION_QUESTION_PATTERN.search(normalized)
+    ):
+        return "informational_question"
+    if _CONTINUATION_ALTERNATE_INTENT_PATTERN.search(normalized):
+        return "different_current_intent"
+    if (
+        "?" in normalized
+        and _CONTINUATION_RECALL_PATTERN.search(normalized)
+    ):
+        return "recall_only_question"
+    return ""
+
+
 def _continuation_not_authorized_decision() -> dict[str, Any]:
     return normalize_decision(
         {
@@ -502,7 +939,9 @@ def _continuation_not_authorized_decision() -> dict[str, Any]:
 
 def _truth_guard_continuation_decision(envelope: TurnEnvelope) -> dict[str, Any] | None:
     parent_task_id = _trusted_continuation_parent(envelope.capability_manifest)
-    if not parent_task_id or not _looks_like_continuation_directive(envelope.text):
+    if not parent_task_id or not _current_turn_has_explicit_continuation_evidence(
+        envelope.text
+    ):
         return None
     return normalize_decision(
         {
@@ -687,6 +1126,40 @@ def continuation_message(candidate: dict[str, Any]) -> str:
     return "\n\n".join(parts)
 
 
+def _decision_messages(
+    situation: dict[str, Any],
+    repair: str = "",
+) -> list[dict[str, str]]:
+    """Build one full-identity arbitration request, including semantic repair."""
+
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": json.dumps(situation, ensure_ascii=False, separators=(",", ":")),
+        },
+    ]
+    if not repair:
+        return messages
+    if repair.startswith("current_turn_continuation_veto:"):
+        repair_prompt = f"""Предыдущее решение выбрать continue_warmaster_mission противоречит явному
+свидетельству в current_turn. Заново оцени всю исходную ситуацию и выбери подходящее действие из полного
+контракта. Ты остаёшься Шушуней; твои реальные органы, варбанды и остальные честно опубликованные
+capability_manifest функции никуда не исчезли. Не называй себя «только текстовой моделью» и не выдумывай
+ограничений, которых нет в ситуации.
+
+Именно continue_warmaster_mission для этого хода запрещён. Другое внешнее действие выбирай только если его
+прямо просит current_turn; иначе содержательно ответь или задай один конкретный вопрос. Верни полный JSON
+обычного контракта без markdown. Основание veto: {repair[:1200]}"""
+    else:
+        repair_prompt = (
+            "Предыдущий JSON нарушил контракт. Исправь только формат/обязательные "
+            f"поля и верни один JSON. Ошибка: {repair[:1200]}"
+        )
+    messages.append({"role": "system", "content": repair_prompt})
+    return messages
+
+
 class DecisionEngine:
     def __init__(self, settings: Settings, ledger: Ledger, situation: SituationAssembler, authority: Authority):
         self.settings = settings
@@ -753,36 +1226,7 @@ class DecisionEngine:
         return candidate
 
     async def _model_call(self, envelope: TurnEnvelope, situation: dict[str, Any], repair: str = "") -> tuple[dict[str, Any], dict[str, Any]]:
-        authority_recovery = repair.startswith("current_turn_authority:")
-        if authority_recovery:
-            recovery_situation = _speech_recovery_situation(envelope, situation)
-            messages = [
-                {"role": "system", "content": SPEECH_RECOVERY_PROMPT},
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        recovery_situation,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    ),
-                },
-            ]
-        else:
-            messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(situation, ensure_ascii=False, separators=(",", ":"))},
-            ]
-            if repair:
-                repair_prompt = (
-                    "Предыдущий JSON нарушил контракт. Исправь только формат/обязательные "
-                    f"поля и верни один JSON. Ошибка: {repair[:1200]}"
-                )
-                messages.append(
-                    {
-                        "role": "system",
-                        "content": repair_prompt,
-                    }
-                )
+        messages = _decision_messages(situation, repair)
         request = {
             "model": envelope.model or self.settings.llm_model,
             "messages": messages,
@@ -870,9 +1314,10 @@ class DecisionEngine:
         turn_id, cached = self.ledger.accept_turn(envelope.idempotency_key, request_payload)
         if cached:
             return cached
-        continuation_authorized = bool(
-            envelope.forced_action == "continue_warmaster_mission"
-            or _current_turn_authorizes_continuation(envelope.text)
+        continuation_veto = (
+            ""
+            if envelope.forced_action == "continue_warmaster_mission"
+            else _continuation_veto_reason(envelope.text)
         )
         situation = {} if envelope.forced_action else self.situation.assemble(envelope)
         model_trace: dict[str, Any] = {}
@@ -944,43 +1389,50 @@ class DecisionEngine:
 
         if (
             decision["action"] == "continue_warmaster_mission"
-            and not continuation_authorized
+            and continuation_veto
         ):
-            # A visible old task may inform an answer, but it cannot authorize
-            # an effect.  Give the model one constrained repair pass so an
-            # ordinary question still receives its actual answer instead of a
-            # generic refusal.
-            authority_error = (
-                "current_turn_authority: continue_warmaster_mission is not authorized by "
-                "the current user text; "
-                "task_page_context, recent history and available continuations are reference "
-                "context only. Answer the current message or choose another action that it "
-                "actually requests. Do not continue the old task."
+            # The model owns semantic classification. Core vetoes only when the
+            # current text contains concrete contrary evidence, then asks the
+            # same full-identity model to re-arbitrate with honest capabilities.
+            veto_error = (
+                f"current_turn_continuation_veto:{continuation_veto}: "
+                "the current turn contains direct evidence against continuing an old task. "
+                "Task memory remains reference context, not permission."
             )
             try:
                 raw, repaired_trace = await self._model_call(
                     envelope,
                     situation,
-                    repair=authority_error,
+                    repair=veto_error,
                 )
                 repaired = normalize_decision(raw)
-                if repaired["action"] not in {"answer_in_chat", "ask_clarification"}:
+                if repaired["action"] == "continue_warmaster_mission":
                     raise DecisionTruthError(
-                        "current_turn_authority_repair_must_be_speech_only"
+                        "current_turn_continuation_veto_was_ignored"
+                    )
+                if (
+                    repaired["action"] not in {"answer_in_chat", "ask_clarification"}
+                    and not _effect_request_is_explicit(
+                        envelope.text,
+                        repaired["action"],
+                    )
+                ):
+                    raise DecisionTruthError(
+                        "current_turn_continuation_veto_cannot_substitute_unrequested_effect"
                     )
                 decision = repaired
-                repair_error = authority_error
+                repair_error = veto_error
                 model_trace = {
                     "first": model_trace,
-                    "current_turn_authority_repair": repaired_trace,
+                    "current_turn_veto_repair": repaired_trace,
                 }
             except Exception as exc:
                 decision = _continuation_not_authorized_decision()
                 degraded = True
-                repair_error = f"{authority_error}; repair failed: {type(exc).__name__}: {exc}"[:2_000]
+                repair_error = f"{veto_error}; repair failed: {type(exc).__name__}: {exc}"[:2_000]
                 model_trace = {
                     "first": model_trace,
-                    "current_turn_authority_repair_error": str(exc)[:2_000],
+                    "current_turn_veto_repair_error": str(exc)[:2_000],
                 }
 
         if decision["action"] == "answer_pending_decision":
@@ -1003,9 +1455,24 @@ class DecisionEngine:
                 "answer": envelope.text.strip(),
             }
 
+        if decision["action"] == "deliver_artifact":
+            delivery = (
+                decision.get("artifact_delivery")
+                if isinstance(decision.get("artifact_delivery"), dict)
+                else {}
+            )
+            proposed_artifact_id = str(delivery.get("artifact_id") or "").strip()
+            trusted_artifact_ids = available_artifact_ids(
+                envelope.capability_manifest
+            )
+            if not proposed_artifact_id and len(trusted_artifact_ids) == 1:
+                decision["artifact_delivery"] = {
+                    "artifact_id": trusted_artifact_ids[0]
+                }
+
         if (
             decision["action"] == "continue_warmaster_mission"
-            and not continuation_authorized
+            and continuation_veto
         ):
             # Final fail-closed boundary: no later binding/authority code may
             # turn reference memory into permission even if a repair regresses.

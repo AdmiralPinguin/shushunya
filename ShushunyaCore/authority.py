@@ -23,6 +23,32 @@ def _artifact_catalog(capability: dict[str, Any] | None) -> list[dict[str, Any]]
     return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
 
 
+def available_artifact_ids(manifest: dict[str, Any]) -> list[str]:
+    """Return every distinct artifact id exposed by the trusted turn manifest.
+
+    Capability actions are single-assignment in Archive's protocol.  Mirroring
+    ``authorize``'s last-declaration semantics here keeps server-side binding
+    and the final authority check on the same catalog even for malformed input
+    containing a duplicate action declaration.  This is server-side authority
+    truth, not a model-facing summary, so it must never be truncated.
+    """
+
+    capability: dict[str, Any] | None = None
+    for item in manifest.get("capabilities", []):
+        if isinstance(item, dict) and item.get("action") == "deliver_artifact":
+            capability = item
+    if not capability or capability.get("available") is not True:
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in _artifact_catalog(capability):
+        artifact_id = str(item.get("artifact_id") or "").strip()
+        if artifact_id and artifact_id not in seen:
+            seen.add(artifact_id)
+            result.append(artifact_id)
+    return result
+
+
 def _artifact_catalog_hint(capability: dict[str, Any] | None) -> str:
     names: list[str] = []
     for item in _artifact_catalog(capability):
@@ -226,12 +252,7 @@ class Authority:
             # The model may select only an opaque id that Archive placed in this
             # turn's capability catalog. A filename, path or invented id is not
             # authority to read or send anything from the host filesystem.
-            catalog = _artifact_catalog(capabilities[action])
-            allowed_ids = {
-                str(item.get("artifact_id") or "").strip()
-                for item in catalog
-                if isinstance(item, dict) and str(item.get("artifact_id") or "").strip()
-            }
+            allowed_ids = set(available_artifact_ids(manifest))
             if artifact_id not in allowed_ids:
                 return Authorization(
                     "deny",

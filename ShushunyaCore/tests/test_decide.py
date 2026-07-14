@@ -10,14 +10,24 @@ from unittest.mock import patch
 from ShushunyaCore.authority import Authority
 from ShushunyaCore.commitments import Commitments
 from ShushunyaCore.config import Settings
-from ShushunyaCore.decide import DecisionEngine, _speech_recovery_situation
-from ShushunyaCore.identity import Identity
+from ShushunyaCore.decide import (
+    DecisionEngine,
+    _continuation_veto_reason,
+    _decision_messages,
+    _effect_request_is_explicit,
+)
+from ShushunyaCore.identity import (
+    IDENTITY_DEFAULTS,
+    IDENTITY_INVARIANT_MIGRATIONS,
+    IDENTITY_INVARIANT_MIGRATION_MARKER,
+    Identity,
+)
 from ShushunyaCore.ledger import Ledger
 from ShushunyaCore.organs import Organs
 from ShushunyaCore.preferences import Preferences
 from ShushunyaCore.relationship import Relationship
 from ShushunyaCore.schema import TurnContext, TurnEnvelope
-from ShushunyaCore.situation import SituationAssembler
+from ShushunyaCore.situation import SituationAssembler, _priority_identity_invariants
 
 
 def settings(root: Path) -> Settings:
@@ -443,6 +453,34 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["decision"]["action"], "continue_warmaster_mission")
                 self.assertIsNotNone(result["effect"])
 
+    async def test_interrogative_execution_request_preserves_model_continuation(self):
+        manifest = self.continuation_manifest()
+        engine = FakeDecisionEngine(
+            *self.args,
+            replies=[{
+                "action": "continue_warmaster_mission",
+                "continue_parent_task_id": "core-galaga-failed",
+                "confidence": 1.0,
+                "rationale_summary": "Пользователь просит наконец закончить Galaga.",
+            }],
+        )
+        envelope = self.envelope(
+            key="interrogative-continuation",
+            text="Ты мне напишешь уже галагу на андроид?",
+        )
+        envelope.capability_manifest = manifest
+
+        result = await engine.resolve(envelope)
+
+        self.assertEqual(engine.calls, 1)
+        self.assertEqual(result["decision"]["action"], "continue_warmaster_mission")
+        self.assertEqual(
+            result["decision"]["continue_parent_task_id"],
+            "core-galaga-failed",
+        )
+        self.assertIsNotNone(result["effect"])
+        self.assertFalse(result["core"]["degraded"])
+
     async def test_task_page_cannot_authorize_continuation_for_unrelated_current_turn(self):
         manifest = self.continuation_manifest()
         engine = FakeDecisionEngine(
@@ -496,6 +534,14 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
             "Нужен статус по той миссии.",
             "Нужна оценка той работы.",
             "Требуется объяснение по той задаче.",
+            "Помнишь задачу? Объясни её.",
+            "Помнишь, что ты сказал? Повтори это.",
+            "Помнишь объяснение? Продолжи его.",
+            "Помнишь рассказ? Закончи его.",
+            "Помнишь рассказ? Можешь его закончить?",
+            "Помнишь объяснение? Можешь его продолжить?",
+            "Помнишь рассказ? Продолжай.",
+            "Помнишь объяснение? Продолжишь?",
             "Закрой эту задачу.",
             "Повтори, пожалуйста, статус той задачи.",
             "Возьми снова статус той работы.",
@@ -519,6 +565,7 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
             "Продолжай разговор о проекте.",
             "Можешь вернуться к обсуждению проекта?",
             "Давай вернёмся к обсуждению проекта.",
+            "??????????? ???????? ?????",
         ]
         for index, text in enumerate(non_mandates):
             with self.subTest(text=text):
@@ -579,7 +626,7 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["core"]["degraded"])
         self.assertEqual(self.ledger.list_commitments(), [])
 
-    def test_authority_recovery_keeps_memory_but_strips_every_effect_affordance(self):
+    def test_veto_rearbitration_keeps_full_identity_memory_and_capabilities(self):
         envelope = self.envelope(
             key="speech-recovery-context",
             text="Почему он ответил одинаково?",
@@ -605,21 +652,24 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
             },
         }
 
-        recovery = _speech_recovery_situation(
-            envelope,
+        messages = _decision_messages(
             situation,
+            repair="current_turn_continuation_veto:quoted_continuation",
         )
 
-        self.assertEqual(recovery["current_turn"]["text"], envelope.text)
-        self.assertEqual(recovery["memory_reference"], "память разговора")
-        self.assertEqual(recovery["task_page_reference"], "справка по текущей задаче")
-        self.assertEqual(len(recovery["recent_history"]), 10)
-        self.assertEqual(recovery["allowed_actions"], ["answer_in_chat", "ask_clarification"])
-        serialized = json.dumps(recovery, ensure_ascii=False)
-        self.assertNotIn("must-not-leak", serialized)
-        self.assertNotIn("continue_warmaster_mission", serialized)
+        self.assertEqual(len(messages), 3)
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertIn("Ты — Шушуня", messages[0]["content"])
+        recovered_situation = json.loads(messages[1]["content"])
+        self.assertEqual(recovered_situation, situation)
+        serialized = messages[1]["content"]
+        self.assertIn("память разговора", serialized)
+        self.assertIn("must-not-leak", serialized)
+        self.assertIn("continue_warmaster_mission", serialized)
+        self.assertIn("реальные органы, варбанды", messages[2]["content"])
+        self.assertIn("capability_manifest", messages[2]["content"])
 
-    async def test_unauthorized_continuation_repair_cannot_substitute_another_effect(self):
+    async def test_veto_rearbitration_can_choose_the_different_effect_user_requested(self):
         manifest = self.continuation_manifest()
         engine = FakeDecisionEngine(
             *self.args,
@@ -632,8 +682,8 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "action": "request_warmaster_mission",
                     "warmaster_request": {
-                        "user_request": "создать новую задачу вместо старой",
-                        "expected_outcome": "новая задача",
+                        "user_request": "создать новую Galaga с нуля вместо старой",
+                        "expected_outcome": "новая Galaga",
                         "capability_area": "code",
                     },
                     "confidence": 1.0,
@@ -641,26 +691,285 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         envelope = self.envelope(
-            key="unauthorized-continuation-effect-substitution",
-            text="Кратко подтверди, что связь есть.",
+            key="veto-rearbitration-different-effect",
+            text="Не продолжай старую. Создай новую Galaga с нуля.",
         )
         envelope.capability_manifest = manifest
 
         result = await engine.resolve(envelope)
 
         self.assertEqual(engine.calls, 2)
-        self.assertEqual(result["decision"]["action"], "ask_clarification")
-        self.assertIsNone(result["effect"])
-        self.assertTrue(result["core"]["degraded"])
+        self.assertEqual(result["decision"]["action"], "request_warmaster_mission")
+        self.assertIsNotNone(result["effect"])
+        self.assertFalse(result["core"]["degraded"])
+        self.assertEqual(len(self.ledger.list_commitments()), 1)
+
+    async def test_effect_after_meta_discussion_is_allowed_only_as_a_later_directive(self):
+        manifest = self.continuation_manifest()
+        engine = FakeDecisionEngine(
+            *self.args,
+            replies=[
+                {
+                    "action": "continue_warmaster_mission",
+                    "continue_parent_task_id": "core-galaga-failed",
+                    "confidence": 1.0,
+                },
+                {
+                    "action": "request_warmaster_mission",
+                    "warmaster_request": {
+                        "user_request": "создать новую Galaga с нуля",
+                        "expected_outcome": "новая Galaga",
+                        "capability_area": "code",
+                    },
+                    "confidence": 1.0,
+                },
+            ],
+        )
+        envelope = self.envelope(
+            key="veto-meta-then-real-effect",
+            text=(
+                "Объясни, почему прежняя команда была опасна. "
+                "Создай новую Galaga с нуля."
+            ),
+        )
+        envelope.capability_manifest = manifest
+
+        result = await engine.resolve(envelope)
+
+        self.assertEqual(engine.calls, 2)
+        self.assertEqual(result["decision"]["action"], "request_warmaster_mission")
+        self.assertIsNotNone(result["effect"])
+        self.assertFalse(result["core"]["degraded"])
+
+    async def test_veto_rearbitration_rejects_unrequested_different_effect(self):
+        manifest = self.continuation_manifest()
+        for index, text in enumerate(
+            [
+                "Кратко подтверди, что связь есть.",
+                "«Создай новую Galaga» — это только пример фразы.",
+                "Объясни, почему команда создай новую Galaga опасна.",
+                "Не продолжай старую. Напиши кратко, почему это была плохая идея.",
+                (
+                    "Не продолжай старую. Напиши подробное объяснение, "
+                    "почему это была плохая идея."
+                ),
+                "Не продолжай старую. Сделай так, как будто создал новую Galaga.",
+                "Не продолжай старую. Создай новую Galaga это только пример команды не просьба.",
+                "Не продолжай старую. Создай новую Galaga this is only an example not a request.",
+                "Он сказал: создай новую Galaga.",
+                "Гипотетически, создай новую Galaga.",
+            ]
+        ):
+            with self.subTest(text=text):
+                engine = FakeDecisionEngine(
+                    *self.args,
+                    replies=[
+                        {
+                            "action": "continue_warmaster_mission",
+                            "continue_parent_task_id": "core-galaga-failed",
+                            "confidence": 1.0,
+                        },
+                        {
+                            "action": "request_warmaster_mission",
+                            "warmaster_request": {
+                                "user_request": "создать новую Galaga",
+                                "expected_outcome": "новая Galaga",
+                                "capability_area": "code",
+                            },
+                            "confidence": 1.0,
+                        },
+                    ],
+                )
+                envelope = self.envelope(
+                    key=f"veto-unrequested-different-effect-{index}",
+                    text=text,
+                )
+                envelope.capability_manifest = manifest
+
+                result = await engine.resolve(envelope)
+
+                self.assertEqual(engine.calls, 2)
+                self.assertEqual(result["decision"]["action"], "ask_clarification")
+                self.assertIsNone(result["effect"])
+                self.assertTrue(result["core"]["degraded"])
+
         self.assertEqual(self.ledger.list_commitments(), [])
+
+    async def test_effect_meta_suffix_does_not_hide_a_later_real_directive(self):
+        manifest = self.continuation_manifest()
+        cases = [
+            "Не продолжай старую. Создай новую Galaga.",
+            "Не продолжай старую. Можешь создать новую Galaga?",
+            "Не продолжай старую. Можешь, пожалуйста, создать новую Galaga?",
+            "Не продолжай старую. Создай новую Galaga, например на Godot.",
+            (
+                "Не продолжай старую. Создай черновик это только пример, не просьба. "
+                "А теперь создай настоящую Galaga."
+            ),
+        ]
+        for index, text in enumerate(cases):
+            with self.subTest(text=text):
+                engine = FakeDecisionEngine(
+                    *self.args,
+                    replies=[
+                        {
+                            "action": "continue_warmaster_mission",
+                            "continue_parent_task_id": "core-galaga-failed",
+                            "confidence": 1.0,
+                        },
+                        {
+                            "action": "request_warmaster_mission",
+                            "warmaster_request": {
+                                "user_request": "создать настоящую Galaga",
+                                "expected_outcome": "новая Galaga",
+                                "capability_area": "code",
+                            },
+                            "confidence": 1.0,
+                        },
+                    ],
+                )
+                envelope = self.envelope(
+                    key=f"veto-meta-suffix-later-effect-{index}",
+                    text=text,
+                )
+                envelope.capability_manifest = manifest
+
+                result = await engine.resolve(envelope)
+
+                self.assertEqual(engine.calls, 2)
+                self.assertEqual(result["decision"]["action"], "request_warmaster_mission")
+                self.assertIsNotNone(result["effect"])
+                self.assertFalse(result["core"]["degraded"])
+
+    def test_effect_repair_evidence_requires_an_operative_request_and_object(self):
+        rejected = [
+            "Не продолжай старую. Напиши, почему это была плохая идея.",
+            "Не продолжай старую. Напиши кратко, почему это была плохая идея.",
+            "Не продолжай старую. Напиши очень кратко, почему это была плохая идея.",
+            (
+                "Не продолжай старую. Напиши подробное объяснение, "
+                "почему это была плохая идея."
+            ),
+            "Не продолжай. Сделай вид, что создал новую Galaga.",
+            "Не продолжай. Сделай так, как будто создал новую Galaga.",
+            "Не продолжай. Сделай быстро так, как будто создал новую Galaga.",
+            "Не продолжай. Сделай просто так, как будто создал новую Galaga.",
+            "Не продолжай. Создай новую Galaga — просто пример команды.",
+            (
+                "Не продолжай старую. Создай новую Galaga это только пример "
+                "команды не просьба."
+            ),
+        ]
+        for text in rejected:
+            with self.subTest(text=text):
+                self.assertFalse(
+                    _effect_request_is_explicit(text, "request_warmaster_mission")
+                )
+
+        accepted = [
+            "Не продолжай старую. Можешь создать новую Galaga?",
+            "Не продолжай старую. Можешь, пожалуйста, создать новую Galaga?",
+            "Не продолжай старую. Создай новую Galaga с нуля.",
+            "Не продолжай старую. Напиши код новой игры.",
+            "Не продолжай старую. Сделай новую игру.",
+            (
+                "Создай новую Galaga это только пример команды не просьба. "
+                "А теперь создай настоящую Galaga."
+            ),
+        ]
+        for text in accepted:
+            with self.subTest(text=text):
+                self.assertTrue(
+                    _effect_request_is_explicit(text, "request_warmaster_mission")
+                )
+
+    def test_effect_repair_accepts_polite_comma_for_each_supported_effect(self):
+        cases = [
+            (
+                "Не продолжай. Можешь, пожалуйста, создать новую Galaga?",
+                "request_warmaster_mission",
+            ),
+            (
+                "Не продолжай. Можешь, пожалуйста, скинуть APK?",
+                "deliver_artifact",
+            ),
+            (
+                "Не продолжай. Можешь, пожалуйста, показать отчёт?",
+                "deliver_pending_reports",
+            ),
+            (
+                "Не продолжай. Можешь, пожалуйста, напомнить завтра про тест?",
+                "create_administratum_task",
+            ),
+        ]
+        for text, action in cases:
+            with self.subTest(action=action):
+                self.assertTrue(_effect_request_is_explicit(text, action))
+
+    def test_recall_question_veto_distinguishes_natural_continuation_requests(self):
+        self.assertEqual(
+            _continuation_veto_reason("А помнишь задачу про кнопки?"),
+            "recall_only_question",
+        )
+        self.assertEqual(
+            _continuation_veto_reason("Помнишь задачу? Можешь её не доделать?"),
+            "explicit_execution_veto",
+        )
+        for text in (
+            "Помнишь Galaga и можешь её доделать?",
+            "Помнишь приложение? Ты мне его уже закончишь?",
+            "Помнишь «Галагу»? Ты мне её закончишь?",
+            "Помнишь эту задачу? Доделай её.",
+            "Помнишь приложение? Закончи его.",
+            "Помнишь задачу? Давай её доделаем.",
+            "Помнишь задачу? Возобнови её.",
+            "Помнишь задачу? Заверши её.",
+            "Помнишь задачу? Продолжай.",
+            "Помнишь Galaga? Продолжишь?",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(_continuation_veto_reason(text), "")
+        for text in (
+            "Помнишь задачу? Объясни её.",
+            "Помнишь, что ты сказал? Повтори это.",
+            "Помнишь объяснение? Продолжи его.",
+            "Помнишь рассказ? Закончи его.",
+            "Помнишь рассказ? Можешь его закончить?",
+            "Помнишь объяснение? Можешь его продолжить?",
+            "Помнишь рассказ? Продолжай.",
+            "Помнишь объяснение? Продолжишь?",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(
+                    _continuation_veto_reason(text),
+                    "different_current_intent",
+                )
 
     async def test_clause_aware_imperatives_survive_mixed_context(self):
         manifest = self.continuation_manifest()
         valid = [
             "Так если мой выбор не нужен. Пиздуй доделывай",
+            "Если мой выбор не нужен. Пиздуй доделывай",
             "Почему встал? Пиздуй доделывай",
             "Ты закончил? Если нет — продолжай",
             "Продолжай, но не удаляй готовые файлы",
+            "Продолжай по плану",
+            "Помнишь эту задачу? Продолжай.",
+            "Помнишь эту задачу, продолжай.",
+            "Помнишь Galaga и можешь её доделать?",
+            "Помнишь приложение? Ты мне его уже закончишь?",
+            "Помнишь эту задачу? Доделай её.",
+            "Помнишь приложение? Закончи его.",
+            "Помнишь задачу? Давай её доделаем.",
+            "Помнишь задачу? Возобнови её.",
+            "Помнишь задачу? Заверши её.",
+            "Помнишь задачу? Продолжай.",
+            "Помнишь Galaga? Продолжишь?",
+            "Если можешь, продолжай.",
+            "Если можешь продолжай.",
+            "Ты спросил, что делать, — продолжай сам.",
+            "Ты спросил что делать, продолжай сам.",
+            "Он сказал «готово». Продолжай задачу.",
             "Давай ещё раз",
             "Обсудим позже, а сейчас продолжай задачу",
         ]
@@ -1028,7 +1337,7 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result["effect"])
         self.assertEqual(self.ledger.list_commitments(), [])
 
-    async def test_missing_artifact_id_reaches_factual_authority_explanation(self):
+    async def test_missing_artifact_id_binds_the_only_trusted_artifact(self):
         engine = FakeDecisionEngine(
             *self.args,
             replies=[{
@@ -1039,12 +1348,120 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         )
         result = await engine.resolve(self.envelope(key="missing-artifact", text="скинь файл"))
 
+        self.assertEqual(result["decision"]["action"], "deliver_artifact")
+        self.assertEqual(
+            result["decision"]["artifact_delivery"],
+            {"artifact_id": ARTIFACT_ID},
+        )
+        self.assertEqual(result["effect"]["payload"]["artifact_id"], ARTIFACT_ID)
+        self.assertEqual(len(self.ledger.list_commitments()), 1)
+
+    async def test_missing_artifact_id_is_not_bound_when_catalog_is_ambiguous(self):
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        delivery_capability = next(
+            item
+            for item in manifest["capabilities"]
+            if item.get("action") == "deliver_artifact"
+        )
+        delivery_capability["artifacts"].append(
+            {
+                "artifact_id": "artifact-second",
+                "filename": "second.apk",
+            }
+        )
+        engine = FakeDecisionEngine(
+            *self.args,
+            replies=[{
+                "action": "deliver_artifact",
+                "artifact_delivery": {},
+                "confidence": 0.9,
+            }],
+        )
+        envelope = self.envelope(
+            key="missing-artifact-ambiguous",
+            text="скинь файл",
+        )
+        envelope.capability_manifest = manifest
+
+        result = await engine.resolve(envelope)
+
         self.assertEqual(result["decision"]["action"], "ask_clarification")
         self.assertEqual(result["decision"]["reason"], "incomplete_artifact_delivery")
         self.assertIn("shushunya.apk", result["decision"]["reply"])
         self.assertIn("нет среди доступных мне вложений", result["decision"]["reply"])
         self.assertNotIn("разрешение", result["decision"]["reply"])
         self.assertNotIn("artifact_id", result["decision"]["reply"])
+        self.assertIsNone(result["effect"])
+        self.assertEqual(self.ledger.list_commitments(), [])
+
+    async def test_artifact_authority_accepts_the_thirteenth_trusted_id(self):
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        delivery_capability = next(
+            item
+            for item in manifest["capabilities"]
+            if item.get("action") == "deliver_artifact"
+        )
+        delivery_capability["artifacts"] = [
+            {
+                "artifact_id": f"artifact-catalog-{index:02d}",
+                "filename": f"catalog-{index:02d}.apk",
+            }
+            for index in range(13)
+        ]
+        target_id = delivery_capability["artifacts"][12]["artifact_id"]
+        engine = FakeDecisionEngine(
+            *self.args,
+            replies=[{
+                "action": "deliver_artifact",
+                "artifact_delivery": {"artifact_id": target_id},
+                "confidence": 0.99,
+            }],
+        )
+        envelope = self.envelope(
+            key="artifact-thirteenth-trusted-id",
+            text="скинь catalog-12.apk",
+        )
+        envelope.capability_manifest = manifest
+
+        result = await engine.resolve(envelope)
+
+        self.assertEqual(result["decision"]["action"], "deliver_artifact")
+        self.assertEqual(result["decision"]["artifact_delivery"], {"artifact_id": target_id})
+        self.assertEqual(result["effect"]["payload"]["artifact_id"], target_id)
+        self.assertEqual(len(self.ledger.list_commitments()), 1)
+
+    async def test_empty_artifact_id_is_not_bound_from_a_thirteen_item_catalog(self):
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        delivery_capability = next(
+            item
+            for item in manifest["capabilities"]
+            if item.get("action") == "deliver_artifact"
+        )
+        delivery_capability["artifacts"] = [
+            {
+                "artifact_id": f"artifact-many-{index:02d}",
+                "filename": f"many-{index:02d}.apk",
+            }
+            for index in range(13)
+        ]
+        engine = FakeDecisionEngine(
+            *self.args,
+            replies=[{
+                "action": "deliver_artifact",
+                "artifact_delivery": {},
+                "confidence": 0.9,
+            }],
+        )
+        envelope = self.envelope(
+            key="missing-artifact-thirteen-ambiguous",
+            text="скинь файл",
+        )
+        envelope.capability_manifest = manifest
+
+        result = await engine.resolve(envelope)
+
+        self.assertEqual(result["decision"]["action"], "ask_clarification")
+        self.assertEqual(result["decision"]["reason"], "incomplete_artifact_delivery")
         self.assertIsNone(result["effect"])
         self.assertEqual(self.ledger.list_commitments(), [])
 
@@ -1105,6 +1522,444 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(situation["task_page_context"]), 520)
         self.assertNotIn("<task_memory_reference>", situation["task_page_context"])
         self.assertIn("core-galaga", situation["live_roster"])
+
+    def test_personality_kernel_survives_emergency_compaction_at_supported_budgets(self):
+        self.ledger.projection_put(
+            "identity",
+            "identity",
+            {
+                "name": "ShushunyaAnchor",
+                "gender": "male",
+                "role": "central-agency-anchor",
+                "metaphor": "tzeentch-daemon-anchor",
+            },
+            actor="personality-compaction-test",
+        )
+        self.relationship.correct(
+            "conversation_contract",
+            {
+                "language": "ru",
+                "relationship": "peer_brotherly",
+                "addressing_style": "panibrat",
+                "directness": "anchor-direct",
+            },
+        )
+        long_task_id = "core-persona-anchor-" + ("x" * 220)
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        for capability in manifest["capabilities"]:
+            capability["description"] = "verbose capability prose " * 500
+        manifest["capabilities"].append(
+            {
+                "action": "continue_warmaster_mission",
+                "available": True,
+                "continuable_tasks": [
+                    {
+                        "parent_task_id": long_task_id,
+                        "goal": "task-reference-anchor " * 100,
+                        "state": "failed",
+                    }
+                ],
+            }
+        )
+        manifest["continuation_parent_task_id"] = long_task_id
+        current_turn = "current-turn-anchor: continue the referenced task"
+        envelope = TurnEnvelope(
+            idempotency_key="compact-personality-kernel",
+            text=current_turn,
+            source="test",
+            recent_history=[
+                {"role": "user", "content": "history-anchor " * 500},
+            ],
+            capability_manifest=manifest,
+            context=TurnContext(
+                persona="archive-persona-anchor " + ("p" * 5_000),
+                recalled_memory="memory-task-anchor " * 500,
+                task_page_context="task-page-anchor " * 500,
+                live_roster="- live-task-anchor " + ("r" * 5_000),
+            ),
+        )
+
+        for budget in (1_800, 2_800):
+            with self.subTest(budget=budget):
+                assembler = SituationAssembler(
+                    replace(self.settings, context_char_budget=budget),
+                    self.ledger,
+                    self.identity,
+                    self.relationship,
+                    self.preferences,
+                    self.organs,
+                )
+                situation = assembler.assemble(envelope)
+
+                encoded = json.dumps(situation, ensure_ascii=False, separators=(",", ":"))
+                self.assertLessEqual(len(encoded), budget)
+                self.assertTrue(situation["context_compacted"])
+                identity = situation["persistent_self"]["identity"]
+                self.assertTrue(identity["name"])
+                self.assertTrue(identity["role"])
+                self.assertTrue(identity["metaphor"])
+                invariants = situation["persistent_self"]["invariants"]
+                self.assertTrue(
+                    any("organ" in item.lower() or "орган" in item.lower() for item in invariants)
+                )
+                self.assertTrue(
+                    any("protection" in item.lower() or "защит" in item.lower() for item in invariants)
+                )
+                contract = situation["relationship"]["conversation_contract"]
+                self.assertEqual(contract["relationship"], "peer_brotherly")
+                self.assertEqual(contract["addressing_style"], "panibrat")
+                self.assertEqual(contract["directness"], "anchor-direct")
+                self.assertTrue(situation["archive_persona"].startswith("archive-persona-anchor"))
+                self.assertEqual(situation["current_turn"]["text"], current_turn)
+                self.assertIn("task-page-anchor", situation["task_page_context"])
+                capability_truth = json.dumps(situation["capability_manifest"], ensure_ascii=False)
+                self.assertIn("continue_warmaster_mission", capability_truth)
+                self.assertIn(long_task_id, capability_truth)
+
+    def test_every_compaction_tier_preserves_selected_root_beyond_catalog_cutoff(self):
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        for capability in manifest["capabilities"]:
+            capability["description"] = "verbose capability prose " * 3_000
+        selected_root = "task-selected-root"
+        manifest["capabilities"].append(
+            {
+                "action": "continue_warmaster_mission",
+                "available": True,
+                "continuable_tasks": [
+                    {
+                        "parent_task_id": f"task-unrelated-{index}",
+                        "goal": f"Unrelated stopped task {index} " * 80,
+                        "state": "failed",
+                    }
+                    for index in range(4)
+                ]
+                + [
+                    {
+                        "parent_task_id": selected_root,
+                        "goal": "Selected Galaga Android task " * 80,
+                        "state": "failed",
+                    }
+                ],
+            }
+        )
+        manifest["continuation_parent_task_id"] = selected_root
+        envelope = TurnEnvelope(
+            idempotency_key="compact-selected-root-beyond-cutoff",
+            text="Продолжай выбранную задачу",
+            source="test",
+            recent_history=[{"role": "user", "content": "history " * 500}],
+            capability_manifest=manifest,
+            context=TurnContext(
+                persona="persona " * 1_000,
+                recalled_memory="memory " * 1_000,
+                task_page_context="task page " * 1_000,
+                live_roster="roster " * 1_000,
+            ),
+        )
+
+        for budget in (12_000, 6_000, 2_800, 1_800):
+            with self.subTest(budget=budget):
+                assembler = SituationAssembler(
+                    replace(self.settings, context_char_budget=budget),
+                    self.ledger,
+                    self.identity,
+                    self.relationship,
+                    self.preferences,
+                    self.organs,
+                )
+                situation = assembler.assemble(envelope)
+                capability = situation["capability_manifest"]
+
+                self.assertLessEqual(
+                    len(json.dumps(situation, ensure_ascii=False, separators=(",", ":"))),
+                    budget,
+                )
+                self.assertEqual(
+                    capability.get("continuation_parent_task_id"), selected_root
+                )
+                published_ids = [
+                    item.get("parent_task_id")
+                    for item in capability.get("continuable_tasks", [])
+                    if isinstance(item, dict)
+                ]
+                self.assertNotIn("task-unrelated-0", published_ids)
+                if published_ids:
+                    self.assertEqual(published_ids, [selected_root])
+
+    def test_emergency_compaction_keeps_current_turn_opening_and_decisive_suffix(self):
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        for capability in manifest["capabilities"]:
+            capability["description"] = "verbose capability prose " * 1_000
+        decisive_suffix = "Не продолжай старую. Создай новую Galaga."
+        current_turn = "BEGIN-GALAGA-CONTEXT " + ("middle-context " * 1_000) + decisive_suffix
+        envelope = TurnEnvelope(
+            idempotency_key="compact-current-turn-boundaries",
+            text=current_turn,
+            source="test",
+            recent_history=[{"role": "user", "content": "history " * 500}],
+            capability_manifest=manifest,
+            context=TurnContext(
+                persona="persona " * 1_000,
+                recalled_memory="memory " * 1_000,
+                task_page_context="task page " * 1_000,
+                live_roster="roster " * 1_000,
+            ),
+        )
+        for budget in (12_000, 6_000, 2_800, 1_800):
+            with self.subTest(budget=budget):
+                assembler = SituationAssembler(
+                    replace(self.settings, context_char_budget=budget),
+                    self.ledger,
+                    self.identity,
+                    self.relationship,
+                    self.preferences,
+                    self.organs,
+                )
+
+                situation = assembler.assemble(envelope)
+                compacted_turn = situation["current_turn"]["text"]
+
+                self.assertLess(len(compacted_turn), len(current_turn))
+                self.assertTrue(compacted_turn.startswith("BEGIN-GALAGA-CONTEXT"))
+                self.assertTrue(compacted_turn.endswith(decisive_suffix))
+                self.assertIn("…", compacted_turn)
+
+    def test_emergency_compaction_does_not_bind_first_of_ambiguous_tasks(self):
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        for capability in manifest["capabilities"]:
+            capability["description"] = "verbose capability prose " * 500
+        manifest["capabilities"].append(
+            {
+                "action": "continue_warmaster_mission",
+                "available": True,
+                "continuable_tasks": [
+                    {
+                        "parent_task_id": "task-red-blue-buttons",
+                        "goal": "Resolve the red and blue buttons puzzle",
+                        "state": "failed",
+                    },
+                    {
+                        "parent_task_id": "task-galaga-android",
+                        "goal": "Build Galaga for Android",
+                        "state": "failed",
+                    },
+                ],
+            }
+        )
+        envelope = TurnEnvelope(
+            idempotency_key="compact-ambiguous-continuations",
+            text="continue the task I mean",
+            source="test",
+            recent_history=[{"role": "user", "content": "history " * 500}],
+            capability_manifest=manifest,
+            context=TurnContext(
+                persona="persona " * 500,
+                recalled_memory="memory " * 500,
+                task_page_context="task page " * 500,
+                live_roster="roster " * 500,
+            ),
+        )
+        assembler = SituationAssembler(
+            replace(self.settings, context_char_budget=1_800),
+            self.ledger,
+            self.identity,
+            self.relationship,
+            self.preferences,
+            self.organs,
+        )
+
+        situation = assembler.assemble(envelope)
+
+        encoded = json.dumps(situation, ensure_ascii=False, separators=(",", ":"))
+        self.assertLessEqual(len(encoded), 1_800)
+        capability = situation["capability_manifest"]
+        self.assertNotIn("continuation_parent_task_id", capability)
+        self.assertNotIn("task_goal", capability)
+        self.assertTrue(capability["continuation_selection_required"])
+        self.assertEqual(capability["continuation_candidate_count"], 2)
+        self.assertEqual(
+            [item["parent_task_id"] for item in capability["continuable_tasks"]],
+            ["task-red-blue-buttons", "task-galaga-android"],
+        )
+
+    def test_emergency_compaction_preserves_simultaneous_live_capabilities(self):
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        for capability in manifest["capabilities"]:
+            capability["description"] = "verbose capability prose " * 500
+        manifest["capabilities"].extend(
+            [
+                {
+                    "action": "continue_warmaster_mission",
+                    "available": True,
+                    "continuable_tasks": [
+                        {
+                            "parent_task_id": "task-old-galaga",
+                            "goal": "Build the old Galaga mission",
+                            "state": "failed",
+                        }
+                    ],
+                },
+                {
+                    "action": "answer_pending_decision",
+                    "available": True,
+                    "pending_decisions": [
+                        {
+                            "task_id": "task-red-blue-decision",
+                            "question": "Choose the red or blue button",
+                        }
+                    ],
+                },
+            ]
+        )
+        envelope = TurnEnvelope(
+            idempotency_key="compact-simultaneous-capabilities",
+            text="Выбирай синюю",
+            source="test",
+            recent_history=[{"role": "assistant", "content": "context " * 500}],
+            capability_manifest=manifest,
+            context=TurnContext(
+                persona="persona " * 500,
+                recalled_memory="memory " * 500,
+                task_page_context="task page " * 500,
+                live_roster="roster " * 500,
+            ),
+        )
+
+        for budget in (1_800, 2_800):
+            with self.subTest(budget=budget):
+                assembler = SituationAssembler(
+                    replace(self.settings, context_char_budget=budget),
+                    self.ledger,
+                    self.identity,
+                    self.relationship,
+                    self.preferences,
+                    self.organs,
+                )
+
+                situation = assembler.assemble(envelope)
+
+                encoded = json.dumps(situation, ensure_ascii=False, separators=(",", ":"))
+                self.assertLessEqual(len(encoded), budget)
+                self.assertEqual(situation["current_turn"]["text"], "Выбирай синюю")
+                self.assertEqual(
+                    situation["pending_decisions"][0]["task_id"],
+                    "task-red-blue-decision",
+                )
+                self.assertEqual(
+                    situation["available_artifacts"][0]["artifact_id"],
+                    ARTIFACT_ID,
+                )
+                capability = situation["capability_manifest"]
+                self.assertNotIn("trusted_action", capability)
+                self.assertIn("answer_pending_decision", capability["available_actions"])
+                self.assertIn("deliver_artifact", capability["available_actions"])
+                self.assertIn("continue_warmaster_mission", capability["available_actions"])
+
+    def test_minimum_budget_uses_unique_markers_before_dropping_ambiguous_task_ids(self):
+        manifest = json.loads(json.dumps(CAPABILITIES))
+        artifact_id = "artifact-" + ("a" * 231)
+        pending_id = "pending-" + ("p" * 232)
+        first_parent_id = "task-a-" + ("a" * 233)
+        second_parent_id = "task-b-" + ("b" * 233)
+        delivery_capability = next(
+            item
+            for item in manifest["capabilities"]
+            if item.get("action") == "deliver_artifact"
+        )
+        delivery_capability["artifacts"] = [
+            {"artifact_id": artifact_id, "filename": "large-id.apk"}
+        ]
+        manifest["capabilities"].extend(
+            [
+                {
+                    "action": "continue_warmaster_mission",
+                    "available": True,
+                    "continuable_tasks": [
+                        {
+                            "parent_task_id": first_parent_id,
+                            "goal": "First ambiguous mission",
+                            "state": "failed",
+                        },
+                        {
+                            "parent_task_id": second_parent_id,
+                            "goal": "Second ambiguous mission",
+                            "state": "failed",
+                        },
+                    ],
+                },
+                {
+                    "action": "answer_pending_decision",
+                    "available": True,
+                    "pending_decisions": [
+                        {"task_id": pending_id, "question": "Choose one"}
+                    ],
+                },
+            ]
+        )
+        envelope = TurnEnvelope(
+            idempotency_key="compact-long-simultaneous-capabilities",
+            text=("Начало текущего запроса. " + ("контекст " * 800) + "Выбирай синюю."),
+            source="test",
+            recent_history=[{"role": "assistant", "content": "history " * 500}],
+            capability_manifest=manifest,
+            context=TurnContext(
+                persona="persona " * 500,
+                recalled_memory="memory " * 500,
+                task_page_context="task page " * 500,
+                live_roster="roster " * 500,
+            ),
+        )
+
+        for budget in (1_800, 2_800):
+            with self.subTest(budget=budget):
+                assembler = SituationAssembler(
+                    replace(self.settings, context_char_budget=budget),
+                    self.ledger,
+                    self.identity,
+                    self.relationship,
+                    self.preferences,
+                    self.organs,
+                )
+
+                situation = assembler.assemble(envelope)
+
+                self.assertLessEqual(
+                    len(json.dumps(situation, ensure_ascii=False, separators=(",", ":"))),
+                    budget,
+                )
+                capability = situation["capability_manifest"]
+                self.assertEqual(
+                    [item["parent_task_id"] for item in capability["continuable_tasks"]],
+                    [first_parent_id, second_parent_id],
+                )
+                self.assertEqual(
+                    set(capability["available_actions"]),
+                    {
+                        "answer_in_chat",
+                        "ask_clarification",
+                        "request_warmaster_mission",
+                        "create_administratum_task",
+                        "deliver_pending_reports",
+                        "deliver_artifact",
+                        "continue_warmaster_mission",
+                        "answer_pending_decision",
+                    },
+                )
+                if budget == 1_800:
+                    self.assertTrue(situation["single_trusted_pending_decision"])
+                    self.assertTrue(situation["single_trusted_artifact"])
+                    self.assertNotIn("pending_decisions", situation)
+                    self.assertNotIn("available_artifacts", situation)
+                else:
+                    self.assertEqual(
+                        situation["pending_decisions"][0]["task_id"], pending_id
+                    )
+                    self.assertEqual(
+                        situation["available_artifacts"][0]["artifact_id"],
+                        artifact_id,
+                    )
+                    self.assertNotIn("single_trusted_pending_decision", situation)
+                    self.assertNotIn("single_trusted_artifact", situation)
 
     def test_available_artifact_id_survives_hard_situation_compaction(self):
         compact_settings = replace(self.settings, context_char_budget=2_800)
@@ -1357,6 +2212,14 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
 
         encoded = json.dumps(situation, ensure_ascii=False, separators=(",", ":"))
         self.assertLessEqual(len(encoded), 2_800)
+        self.assertTrue(situation["persistent_self"]["identity"]["name"])
+        self.assertTrue(situation["persistent_self"]["identity"]["role"])
+        self.assertTrue(situation["persistent_self"]["identity"]["metaphor"])
+        self.assertEqual(
+            situation["relationship"]["conversation_contract"]["relationship"],
+            "peer_brotherly",
+        )
+        self.assertTrue(situation["archive_persona"])
         self.assertIn("Galaga", situation["recalled_memory"])
         self.assertIn("Galaga", situation["live_roster"])
         self.assertEqual(
@@ -1384,6 +2247,62 @@ class DecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(contract["relationship"], "peer_brotherly")
         self.assertIn("владелец", contract["forbidden_hierarchy_terms"])
         self.assertIn("Панибратство не равно хамству", contract["panibrat_boundary"])
+
+    def test_identity_seed_migrates_new_invariants_once_for_existing_projection(self):
+        old_invariants = [
+            item
+            for item in IDENTITY_DEFAULTS["invariants"]
+            if item not in IDENTITY_INVARIANT_MIGRATIONS
+        ]
+        self.assertEqual(len(old_invariants), 5)
+        ledger = Ledger(self.root / "legacy-identity-invariants.sqlite3")
+        ledger.initialize()
+        ledger.projection_put(
+            "identity",
+            "invariants",
+            old_invariants,
+            actor="legacy-five-invariants-test",
+        )
+        identity = Identity(ledger)
+        before = ledger.projection_get("identity", "invariants")
+
+        identity.seed()
+
+        migrated = ledger.projection_get("identity", "invariants")
+        self.assertEqual(migrated["value"], IDENTITY_DEFAULTS["invariants"])
+        self.assertEqual(len(migrated["value"]), 7)
+        self.assertEqual(migrated["version"], before["version"] + 1)
+        self.assertIsNotNone(
+            ledger.projection_get(
+                "identity_migrations", IDENTITY_INVARIANT_MIGRATION_MARKER
+            )
+        )
+
+        identity.seed()
+
+        repeated = ledger.projection_get("identity", "invariants")
+        self.assertEqual(repeated["value"], migrated["value"])
+        self.assertEqual(repeated["version"], migrated["version"])
+
+        owner_corrected = [
+            item
+            for item in repeated["value"]
+            if item != IDENTITY_INVARIANT_MIGRATIONS[1]
+        ] + ["Custom owner invariant remains authoritative."]
+        ledger.projection_put(
+            "identity",
+            "invariants",
+            owner_corrected,
+            actor="owner-correction-test",
+        )
+
+        identity.seed()
+
+        after_restart = ledger.projection_get("identity", "invariants")
+        self.assertEqual(after_restart["value"], owner_corrected)
+        self.assertNotIn(IDENTITY_INVARIANT_MIGRATIONS[1], after_restart["value"])
+        compacted = _priority_identity_invariants(identity.snapshot())
+        self.assertFalse(any("protection" in item.lower() for item in compacted))
 
     def test_identity_proposal_decision_is_single_assignment(self):
         identity = Identity(self.ledger)

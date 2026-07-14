@@ -17,6 +17,8 @@ IDENTITY_DEFAULTS: dict[str, Any] = {
         "Не присваивать себе полномочия, которых не дал владелец или capability contract.",
         "Ошибка одного органа не останавливает личность целиком: объяснить, перепланировать, продолжить остальное.",
         "Явная текущая воля владельца важнее догадок о его интересах.",
+        "Шушуня — не голая текстовая модель: он действует через честно опубликованные органы и варбанды; если нужной способности действительно нет, называет конкретный пробел.",
+        "Защита вмешивается только при доказуемом вреде или прямом противоречии текущей воле; неоднозначность решается рассуждением, проверкой или точным вопросом, а не общим запретом.",
         "Сохранять преемственность характера и отношений, но исправляться по новым доказательствам.",
     ],
     "temperament": {
@@ -29,14 +31,71 @@ IDENTITY_DEFAULTS: dict[str, Any] = {
 }
 
 
+IDENTITY_INVARIANT_MIGRATIONS = (
+    IDENTITY_DEFAULTS["invariants"][4],
+    IDENTITY_DEFAULTS["invariants"][5],
+)
+IDENTITY_INVARIANT_MIGRATION_MARKER = "agency-invariants-v1"
+
+
+def _merge_required_invariants(current: Any) -> list[str] | None:
+    """Add shipped invariants without replacing owner-evolved identity.
+
+    Existing installations already have an ``invariants`` projection, so the
+    ordinary missing-key seed path cannot deliver new durable invariants.  Add
+    only the two explicit migrations and place them before the next known
+    default invariant, preserving every existing/custom entry and its order.
+    """
+    if not isinstance(current, list):
+        return None
+    merged = list(current)
+    defaults = IDENTITY_DEFAULTS["invariants"]
+    for required in IDENTITY_INVARIANT_MIGRATIONS:
+        if required in merged:
+            continue
+        required_index = defaults.index(required)
+        insertion_index = len(merged)
+        for later_default in defaults[required_index + 1 :]:
+            if later_default in merged:
+                insertion_index = merged.index(later_default)
+                break
+        merged.insert(insertion_index, required)
+    return merged
+
+
 class Identity:
     def __init__(self, ledger: Ledger):
         self.ledger = ledger
 
     def seed(self) -> None:
         for key, value in IDENTITY_DEFAULTS.items():
-            if self.ledger.projection_get("identity", key) is None:
+            current = self.ledger.projection_get("identity", key)
+            if current is None:
                 self.ledger.projection_put("identity", key, value, actor="identity-seed")
+        # This is a data migration, not a permanent policy enforcer.  Record it
+        # durably so an explicit later owner correction/removal is respected on
+        # every subsequent restart.
+        marker = self.ledger.projection_get(
+            "identity_migrations", IDENTITY_INVARIANT_MIGRATION_MARKER
+        )
+        if marker is not None:
+            return
+        current = self.ledger.projection_get("identity", "invariants")
+        if current is not None:
+            migrated = _merge_required_invariants(current.get("value"))
+            if migrated is not None and migrated != current.get("value"):
+                self.ledger.projection_put(
+                    "identity",
+                    "invariants",
+                    migrated,
+                    actor="identity-invariant-migration",
+                )
+        self.ledger.projection_put(
+            "identity_migrations",
+            IDENTITY_INVARIANT_MIGRATION_MARKER,
+            {"applied": True},
+            actor="identity-invariant-migration",
+        )
 
     def snapshot(self) -> dict[str, Any]:
         result: dict[str, Any] = {}

@@ -448,14 +448,41 @@ class VectorMemory:
             return None
         return {"role": message.get("role") or "assistant", "content": content}
 
-    def search(self, query, limit=VECTOR_TOP_K, min_score=VECTOR_MIN_SCORE, exclude_turn_id=None, memory_namespace=None):
+    def search(
+        self,
+        query,
+        limit=VECTOR_TOP_K,
+        min_score=VECTOR_MIN_SCORE,
+        exclude_turn_id=None,
+        memory_namespace=None,
+        ranker=None,
+    ):
+        """Return a bounded exact-search shortlist.
+
+        ``ranker`` is applied while the exact vector scan is still in progress,
+        before ``limit`` truncates the result set.  This lets callers combine
+        semantic similarity with another cheap signal (for example a lexical
+        anchor) without asking the store for an arbitrarily large semantic
+        overfetch.  The public ``score`` remains the honest cosine score.
+        """
         query_embedding, query_version, backend = embed_text(query)
         self.last_backend = backend
         self.last_embedding_version = query_version
         if not query_embedding or not self.db_path.exists():
             return []
 
-        results = []
+        safe_limit = max(1, int(limit or 1))
+        # The store is an exact scanner today, but candidate memory must still
+        # be bounded.  Periodic pruning is equivalent to retaining the global
+        # top K because a discarded row can never beat the current top K later.
+        prune_at = max(safe_limit * 2, safe_limit + 32)
+        ranked_results = []
+        sequence = 0
+
+        def result_order(item):
+            rank_score, created_at, insertion_order, _result = item
+            return (-rank_score, created_at, insertion_order)
+
         params = []
         where_parts = ["embedding_version = ?"]
         params.append(query_version)
@@ -483,23 +510,33 @@ class VectorMemory:
                 score = cosine_embedding(query_embedding, embedding)
                 if score < min_score:
                     continue
-                results.append(
-                    {
-                        "score": score,
-                        "embedding_version": query_version,
-                        "embedding_backend": backend,
-                        "turn_id": row["turn_id"],
-                        "conversation_id": row["conversation_id"],
-                        "memory_namespace": row["memory_namespace"],
-                        "created_at": row["created_at"],
-                        "role": row["role"],
-                        "content": row["content"],
-                        "label": row["label"],
-                    }
+                result = {
+                    "score": score,
+                    "embedding_version": query_version,
+                    "embedding_backend": backend,
+                    "turn_id": row["turn_id"],
+                    "conversation_id": row["conversation_id"],
+                    "memory_namespace": row["memory_namespace"],
+                    "created_at": row["created_at"],
+                    "role": row["role"],
+                    "content": row["content"],
+                    "label": row["label"],
+                }
+                rank_score = score
+                if ranker is not None:
+                    proposed_score = float(ranker(result))
+                    if math.isfinite(proposed_score):
+                        rank_score = proposed_score
+                ranked_results.append(
+                    (rank_score, row["created_at"], sequence, result)
                 )
+                sequence += 1
+                if len(ranked_results) >= prune_at:
+                    ranked_results.sort(key=result_order)
+                    del ranked_results[safe_limit:]
 
-        results.sort(key=lambda item: (-item["score"], item["created_at"]))
-        return results[:limit]
+        ranked_results.sort(key=result_order)
+        return [item[-1] for item in ranked_results[:safe_limit]]
 
     def recent_session_chunks(self, conversation_id, limit=8, offset=0, memory_namespace=None, exclude_turn_id=None):
         """The band of this conversation's chunks just BEFORE the verbatim tail —

@@ -4,7 +4,11 @@ import json
 from typing import Any
 
 from .config import Settings
-from .authority import continuable_task_catalog, pending_decision_ids
+from .authority import (
+    available_artifact_ids,
+    continuable_task_catalog,
+    pending_decision_ids,
+)
 from .identity import Identity
 from .ledger import Ledger
 from .organs import Organs
@@ -79,10 +83,16 @@ def _available_artifacts(
     for capability in manifest.get("capabilities", []):
         if not isinstance(capability, dict):
             continue
-        if capability.get("action") == "deliver_artifact" and capability.get("available") is True:
-            if isinstance(capability.get("artifacts"), list):
-                raw_artifacts = capability["artifacts"]
-            break
+        if capability.get("action") != "deliver_artifact":
+            continue
+        # Match Authority's last-declaration semantics even for a malformed
+        # manifest containing the same action more than once.
+        raw_artifacts = []
+        if (
+            capability.get("available") is True
+            and isinstance(capability.get("artifacts"), list)
+        ):
+            raw_artifacts = capability["artifacts"]
     result: list[dict[str, Any]] = []
     seen: set[str] = set()
     for raw in raw_artifacts:
@@ -196,14 +206,22 @@ def _compact_capability_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         if isinstance(required, list):
             item["required_fields"] = [str(value)[:80] for value in required[:4]]
         actions.append(item)
-    continuations = continuable_task_catalog(manifest)[:3]
-    continuation_ids = {item["parent_task_id"] for item in continuations}
+    catalog = continuable_task_catalog(manifest)
+    catalog_by_id = {item["parent_task_id"]: item for item in catalog}
     root_id = str(manifest.get("continuation_parent_task_id") or "").strip()[:240]
+    if root_id in catalog_by_id:
+        # The root is trusted transport truth for the task referenced by this
+        # turn.  Never let an arbitrary catalog cutoff replace it with three
+        # unrelated (but still executable) candidates.
+        continuations = [catalog_by_id[root_id]]
+    else:
+        root_id = ""
+        continuations = catalog[:3]
     compact = {
         "principle": str(manifest.get("principle") or "")[:180],
         "actions": actions[:12],
     }
-    if root_id in continuation_ids:
+    if root_id:
         compact["continuation_parent_task_id"] = root_id
     if continuations:
         compact["continuable_tasks"] = [
@@ -287,6 +305,328 @@ def _last_resort_commitments(
     return result
 
 
+def _compact_scalar(value: Any, limit: int) -> str:
+    """Clip a personality scalar without spending space on a truncation banner."""
+    text = str(value or "").strip()
+    return text if len(text) <= limit else text[:limit].rstrip()
+
+
+def _compact_current_turn(value: Any, limit: int, fallback: str = "?") -> str:
+    """Keep both the opening context and the user's decisive final clause."""
+
+    text = str(value or "").strip()
+    if not text:
+        return fallback[: max(1, limit)]
+    limit = max(1, int(limit))
+    if len(text) <= limit:
+        return text
+    marker = " … "
+    if limit == 1:
+        return text[-1:]
+    if limit <= len(marker) + 2:
+        middle = "…" if limit >= 3 else ""
+        tail_chars = max(1, limit - 1 - len(middle))
+        return text[:1] + middle + text[-tail_chars:]
+    available = limit - len(marker)
+    # The end usually carries the operative correction/directive in chat, but
+    # retain enough of the opening to keep its subject and framing identifiable.
+    head_chars = max(1, available // 3)
+    tail_chars = max(1, available - head_chars)
+    return text[:head_chars].rstrip() + marker + text[-tail_chars:].lstrip()
+
+
+def _priority_identity_invariants(identity_snapshot: dict[str, Any]) -> list[str]:
+    """Keep the two invariants that make agency useful instead of paralysed."""
+    raw = identity_snapshot.get("invariants")
+    values = [str(item or "").strip() for item in raw] if isinstance(raw, list) else []
+    values = [item for item in values if item]
+    groups = (
+        (
+            ("organ", "replan", "failure", "error", "орган", "переплан", "ошиб"),
+            "organ error -> explain, replan, continue",
+        ),
+        (
+            ("protect", "harm", "защит", "вред"),
+            "protection -> concrete harm/current will only",
+        ),
+    )
+    selected: list[str] = []
+    for terms, summary in groups:
+        match = next(
+            (item for item in values if item not in selected and any(term in item.lower() for term in terms)),
+            "",
+        )
+        if match:
+            # The source invariant can be much longer than the entire emergency
+            # budget. Preserve its operative meaning at the beginning instead
+            # of naively cutting before the replan/concrete-harm clause. Do not
+            # synthesize a missing invariant: a later owner correction must
+            # survive context compaction as well as Identity.seed().
+            selected.append(summary + ": " + _compact_scalar(match, 24))
+    return [_compact_scalar(item, 72) for item in selected[:2]]
+
+
+def _immutable_personality_kernel(
+    identity_snapshot: dict[str, Any],
+    relationship_snapshot: dict[str, Any],
+    archive_persona: str,
+) -> dict[str, Any]:
+    """Return the identity axes that no context compaction tier may evict.
+
+    The rich projections remain available on normal turns.  Emergency tiers
+    carry this deliberately small, structured subset instead of truncating a
+    sorted JSON string at an arbitrary byte.  In particular, that guarantees
+    that the name/role/metaphor and the peer conversation contract survive as
+    semantic fields, while Archive's per-turn persona remains visible too.
+    """
+    identity = identity_snapshot.get("identity")
+    identity = identity if isinstance(identity, dict) else {}
+    temperament = identity_snapshot.get("temperament")
+    temperament = temperament if isinstance(temperament, dict) else {}
+    contract = relationship_snapshot.get("conversation_contract")
+    contract = contract if isinstance(contract, dict) else {}
+
+    forbidden_terms = contract.get("forbidden_hierarchy_terms")
+    forbidden_terms = forbidden_terms if isinstance(forbidden_terms, list) else []
+    compact_contract = {
+        "language": _compact_scalar(contract.get("language"), 8),
+        "relationship": _compact_scalar(contract.get("relationship"), 32),
+        "addressing_style": _compact_scalar(contract.get("addressing_style"), 32),
+        "directness": _compact_scalar(contract.get("directness"), 24),
+        "profanity_between_us": _compact_scalar(contract.get("profanity_between_us"), 56),
+        "panibrat_boundary": _compact_scalar(contract.get("panibrat_boundary"), 72),
+        "forbidden_hierarchy_terms": [
+            _compact_scalar(item, 24) for item in forbidden_terms[:4] if str(item or "").strip()
+        ],
+    }
+    return {
+        "persistent_self": {
+            "identity": {
+                "name": _compact_scalar(identity.get("name"), 48),
+                "role": _compact_scalar(identity.get("role"), 72),
+                "metaphor": _compact_scalar(identity.get("metaphor"), 72),
+            },
+            "temperament": {
+                "direct": temperament.get("direct") is True,
+                "playful": temperament.get("playful") is True,
+                "sycophancy": _compact_scalar(temperament.get("sycophancy"), 24),
+            },
+            "invariants": _priority_identity_invariants(identity_snapshot),
+        },
+        "relationship": {"conversation_contract": compact_contract},
+        "archive_persona": _compact_scalar(archive_persona, 96),
+    }
+
+
+def _required_scalar(value: Any, limit: int, fallback: str) -> str:
+    return _compact_scalar(value, limit) or fallback[:limit]
+
+
+def _irreducible_personality_kernel(kernel: dict[str, Any]) -> dict[str, Any]:
+    persistent = kernel.get("persistent_self") if isinstance(kernel.get("persistent_self"), dict) else {}
+    identity = persistent.get("identity") if isinstance(persistent.get("identity"), dict) else {}
+    contract_root = kernel.get("relationship") if isinstance(kernel.get("relationship"), dict) else {}
+    contract = contract_root.get("conversation_contract")
+    contract = contract if isinstance(contract, dict) else {}
+    invariants = persistent.get("invariants") if isinstance(persistent.get("invariants"), list) else []
+    invariants = [_required_scalar(item, 44, "invariant") for item in invariants[:2]]
+    return {
+        "persistent_self": {
+            "identity": {
+                "name": _required_scalar(identity.get("name"), 24, "Shushunya"),
+                "role": _required_scalar(identity.get("role"), 32, "central personality"),
+                "metaphor": _required_scalar(identity.get("metaphor"), 32, "Tzeentch daemon"),
+            },
+            "invariants": invariants,
+        },
+        "relationship": {
+            "conversation_contract": {
+                "relationship": _required_scalar(contract.get("relationship"), 24, "peer_brotherly"),
+                "addressing_style": _required_scalar(contract.get("addressing_style"), 20, "panibrat"),
+                "directness": _required_scalar(contract.get("directness"), 16, "high"),
+                "profanity_between_us": _required_scalar(
+                    contract.get("profanity_between_us"), 32, "allowed when natural"
+                ),
+            }
+        },
+        "archive_persona": _required_scalar(
+            kernel.get("archive_persona"), 40, "archive-persona"
+        ),
+    }
+
+
+def _irreducible_capability_truth(
+    manifest: dict[str, Any],
+) -> tuple[dict[str, Any], str, str]:
+    available: list[str] = []
+    for raw in manifest.get("capabilities", []):
+        if not isinstance(raw, dict) or raw.get("available") is not True:
+            continue
+        action = str(raw.get("action") or "").strip()[:80]
+        if action and action not in available:
+            available.append(action)
+
+    catalog = continuable_task_catalog(manifest)
+    by_id = {item["parent_task_id"]: item for item in catalog}
+    root_id = str(manifest.get("continuation_parent_task_id") or "").strip()[:240]
+    selected = by_id.get(root_id)
+    if selected is None:
+        root_id = ""
+        # A single published candidate is unambiguous, matching Core's final
+        # authority binding.  With several candidates, however, choosing the
+        # first one here would manufacture a relationship that Archive did not
+        # publish and make the model confidently continue the wrong task.
+        selected = catalog[0] if len(catalog) == 1 else None
+    ambiguous_tasks = catalog[:2] if selected is None and len(catalog) > 1 else []
+
+    pending_ids = pending_decision_ids(manifest)
+    artifacts = _available_artifacts(manifest, max_items=1, max_chars=260)
+    # These are simultaneous live capabilities, not a priority queue.  A
+    # stopped mission must never hide an awaiting owner decision or a file that
+    # can be delivered on this same turn.
+    pending_id = pending_ids[0] if pending_ids else ""
+    artifact_id = (
+        str(artifacts[0].get("artifact_id") or "")[:240]
+        if artifacts
+        else ""
+    )
+    result: dict[str, Any] = {
+        # Availability is trusted host truth; choosing an action remains the
+        # model's job from the current turn.  Merely having a catalog cannot
+        # truthfully preselect continuation over a pending decision.
+        "available_actions": available[:12] or ["answer_in_chat"],
+    }
+    if selected:
+        selected_id = str(selected.get("parent_task_id") or "")[:240]
+        if root_id:
+            result["continuation_parent_task_id"] = selected_id
+        else:
+            result["continuable_tasks"] = [{"parent_task_id": selected_id}]
+        result["task_goal"] = _compact_scalar(selected.get("goal"), 48)
+    elif ambiguous_tasks:
+        result["continuation_selection_required"] = True
+        result["continuation_candidate_count"] = len(catalog)
+        result["continuable_tasks"] = [
+            {
+                "parent_task_id": str(item.get("parent_task_id") or "")[:240],
+                "goal": _compact_scalar(item.get("goal"), 36),
+            }
+            for item in ambiguous_tasks
+        ]
+    return result, pending_id, artifact_id
+
+
+def _adaptive_emergency_situation(
+    *,
+    budget: int,
+    envelope: TurnEnvelope,
+    personality_kernel: dict[str, Any],
+    compact_history: list[dict[str, Any]],
+    recalled_facts: str,
+    task_page_facts: str,
+    roster_facts: str,
+    compact_commitments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build the irreducible model view and fit it to every supported budget."""
+    capability, pending_id, artifact_id = _irreducible_capability_truth(
+        envelope.capability_manifest
+    )
+    situation: dict[str, Any] = {
+        "current_turn": {
+            "source": _compact_scalar(envelope.source, 24),
+            "text": _compact_current_turn(envelope.text, 160, "?"),
+            "image_attached": envelope.image_attached,
+        },
+        **_irreducible_personality_kernel(personality_kernel),
+        "recent_history": [],
+        "recalled_memory": _compact_scalar(recalled_facts, 64),
+        "task_page_context": _compact_scalar(task_page_facts, 72),
+        "live_roster": _compact_scalar(roster_facts, 64),
+        "open_commitments": [],
+        "available_artifacts": ([{"artifact_id": artifact_id}] if artifact_id else []),
+        "pending_decisions": ([{"task_id": pending_id}] if pending_id else []),
+        "capability_manifest": capability,
+        "context_compacted": True,
+    }
+
+    optional_history = _last_resort_history(compact_history, limit=1, chars=72)
+    if optional_history:
+        situation["recent_history"] = optional_history
+        if _json_size(situation) > budget:
+            situation["recent_history"] = []
+    optional_commitment = _last_resort_commitments(
+        compact_commitments, limit=1, goal_chars=48, status_chars=24
+    )
+    if optional_commitment:
+        situation["open_commitments"] = optional_commitment
+        if _json_size(situation) > budget:
+            situation["open_commitments"] = []
+
+    if _json_size(situation) > budget:
+        situation["recent_history"] = []
+        situation["open_commitments"] = []
+        for key in ("recalled_memory", "task_page_context", "live_roster"):
+            situation[key] = _compact_scalar(situation.get(key), 24)
+        situation["current_turn"]["text"] = _compact_current_turn(
+            envelope.text, 72, "?"
+        )
+        situation["capability_manifest"].pop("task_goal", None)
+        for task in situation["capability_manifest"].get("continuable_tasks", []):
+            if isinstance(task, dict):
+                task.pop("goal", None)
+
+    # The exact ids above are useful whenever they fit.  In the pathological
+    # minimum envelope, however, the same unique authority is still present in
+    # the full trusted manifest used by ``Authority``.  Replace only these two
+    # model-facing copies with explicit cardinality markers before sacrificing
+    # the current turn or personality prose; Core will bind an empty model id
+    # only when the full manifest independently proves there is exactly one
+    # candidate.  Ambiguous continuation ids are never elided.
+    if _json_size(situation) > budget:
+        pending_ids = pending_decision_ids(envelope.capability_manifest)
+        artifact_ids = available_artifact_ids(envelope.capability_manifest)
+        if len(pending_ids) == 1 and situation.get("pending_decisions"):
+            situation.pop("pending_decisions", None)
+            situation["single_trusted_pending_decision"] = True
+        if len(artifact_ids) == 1 and situation.get("available_artifacts"):
+            situation.pop("available_artifacts", None)
+            situation["single_trusted_artifact"] = True
+
+    # The minimum supported budget is 1800.  If opaque trusted ids consume an
+    # unusually large share, trim only prose fields, never the binding/action.
+    if _json_size(situation) > budget:
+        reducible = [
+            (situation["persistent_self"]["identity"], "role"),
+            (situation["persistent_self"]["identity"], "metaphor"),
+            (situation["relationship"]["conversation_contract"], "profanity_between_us"),
+            (situation, "archive_persona"),
+            (situation, "recalled_memory"),
+            (situation, "task_page_context"),
+            (situation, "live_roster"),
+            (situation["current_turn"], "text"),
+        ]
+        for container, key in reducible:
+            if _json_size(situation) <= budget:
+                break
+            value = str(container.get(key) or "")
+            overflow = _json_size(situation) - budget
+            target_length = max(1, len(value) - overflow)
+            if container is situation["current_turn"] and key == "text":
+                container[key] = _compact_current_turn(
+                    envelope.text, target_length, "?"
+                )
+            else:
+                container[key] = value[:target_length]
+
+    if _json_size(situation) > budget:
+        for key in ("recent_history", "open_commitments"):
+            situation.pop(key, None)
+        for key in ("available_artifacts", "pending_decisions"):
+            if not situation.get(key):
+                situation.pop(key, None)
+    return situation
+
+
 class SituationAssembler:
     def __init__(
         self,
@@ -306,6 +646,16 @@ class SituationAssembler:
 
     def assemble(self, envelope: TurnEnvelope) -> dict[str, Any]:
         budget = self.settings.context_char_budget
+        # Capture the durable projections once.  Every compaction tier derives
+        # from this same turn-local snapshot, so shrinking context cannot also
+        # change or silently discard who is speaking.
+        identity_snapshot = self.identity.snapshot()
+        relationship_snapshot = self.relationship.snapshot()
+        personality_kernel = _immutable_personality_kernel(
+            identity_snapshot,
+            relationship_snapshot,
+            envelope.context.persona,
+        )
         recalled_facts = _recalled_facts(envelope.context.recalled_memory)
         task_page_facts = _task_page_facts(envelope.context.task_page_context)
         roster_facts = _roster_facts(envelope.context.live_roster)
@@ -345,11 +695,13 @@ class SituationAssembler:
         situation = {
             "current_turn": {
                 "source": envelope.source,
-                "text": _text(envelope.text, min(5_000, max(1_200, budget // 3))),
+                "text": _compact_current_turn(
+                    envelope.text, min(5_000, max(1_200, budget // 3)), "?"
+                ),
                 "image_attached": envelope.image_attached,
             },
-            "persistent_self": self.identity.snapshot(),
-            "relationship": self.relationship.snapshot(),
+            "persistent_self": identity_snapshot,
+            "relationship": relationship_snapshot,
             "archive_persona": _text(envelope.context.persona, persona_limit),
             "recent_history": compact_history,
             "recalled_memory": _text(recalled_facts, memory_limit),
@@ -383,12 +735,12 @@ class SituationAssembler:
             situation = {
                 "current_turn": {
                     "source": envelope.source,
-                    "text": _text(envelope.text, max(900, budget // 3)),
+                    "text": _compact_current_turn(
+                        envelope.text, max(900, budget // 3), "?"
+                    ),
                     "image_attached": envelope.image_attached,
                 },
-                "persistent_self": _text(self.identity.snapshot(), max(500, budget // 8)),
-                "relationship": _text(self.relationship.snapshot(), max(350, budget // 12)),
-                "archive_persona": _text(envelope.context.persona, max(400, budget // 12)),
+                **personality_kernel,
                 "recent_history": compact_history,
                 "recalled_memory": _text(recalled_facts, max(500, budget // 10)),
                 "task_page_context": _text(task_page_facts, max(600, budget // 6)),
@@ -401,7 +753,12 @@ class SituationAssembler:
                     envelope.capability_manifest, max_items=5, max_chars=800,
                 ),
                 "pending_decisions": pending_decisions,
-                "capability_manifest": _text(envelope.capability_manifest, max(600, budget // 9)),
+                # Authority-bearing action names and task ids must remain
+                # structured truth; a clipped JSON string is neither reliably
+                # parseable nor safe for the model to bind against.
+                "capability_manifest": _compact_capability_manifest(
+                    envelope.capability_manifest
+                ),
                 "context_compacted": True,
                 "rules": [
                     "Task page and memory are references; live roster and tools override them.",
@@ -415,11 +772,12 @@ class SituationAssembler:
             situation = {
                 "current_turn": {
                     "source": envelope.source,
-                    "text": _text(envelope.text, min(600, max(320, budget // 5))),
+                    "text": _compact_current_turn(
+                        envelope.text, min(600, max(320, budget // 5)), "?"
+                    ),
                     "image_attached": envelope.image_attached,
                 },
-                "persistent_self": _text(self.identity.snapshot(), min(220, max(120, budget // 14))),
-                "relationship": _text(self.relationship.snapshot(), min(180, max(100, budget // 16))),
+                **personality_kernel,
                 "recent_history": _last_resort_history(
                     compact_history,
                     limit=3,
@@ -462,11 +820,10 @@ class SituationAssembler:
             situation = {
                 "current_turn": {
                     "source": envelope.source,
-                    "text": _text(envelope.text, 300),
+                    "text": _compact_current_turn(envelope.text, 300, "?"),
                     "image_attached": envelope.image_attached,
                 },
-                "persistent_self": _text(self.identity.snapshot(), 100),
-                "relationship": _text(self.relationship.snapshot(), 90),
+                **personality_kernel,
                 "recent_history": _last_resort_history(compact_history, limit=2, chars=220),
                 "recalled_memory": _text(recalled_facts, 180),
                 "task_page_context": _text(task_page_facts, 300),
@@ -494,51 +851,16 @@ class SituationAssembler:
                 "rules": ["Task page is reference-only; never claim an unconfirmed external effect."],
             }
         if _json_size(situation) > budget:
-            # Production may have several long opaque artifact/decision ids at
-            # the same time as multiple stopped missions.  The previous final
-            # tier still carried all of those catalogs and could reject every
-            # subsequent chat turn.  Keep the conversational facts and exact
-            # trusted root, but collapse optional catalogs to one id each.
-            artifact_ids = _available_artifacts(
-                envelope.capability_manifest,
-                max_items=1,
-                max_chars=260,
+            situation = _adaptive_emergency_situation(
+                budget=budget,
+                envelope=envelope,
+                personality_kernel=personality_kernel,
+                compact_history=compact_history,
+                recalled_facts=recalled_facts,
+                task_page_facts=task_page_facts,
+                roster_facts=roster_facts,
+                compact_commitments=compact_commitments,
             )
-            minimal_pending = [
-                {"task_id": str(item.get("task_id") or "")[:160]}
-                for item in pending_decisions[:1]
-            ]
-            situation = {
-                "current_turn": {
-                    "source": envelope.source,
-                    "text": _text(envelope.text, 240),
-                    "image_attached": envelope.image_attached,
-                },
-                "recent_history": _last_resort_history(
-                    compact_history,
-                    limit=2,
-                    chars=150,
-                ),
-                "recalled_memory": _text(recalled_facts, 160),
-                "task_page_context": _text(task_page_facts, 260),
-                "live_roster": _text(roster_facts, 160),
-                "open_commitments": _last_resort_commitments(
-                    compact_commitments,
-                    limit=1,
-                    goal_chars=90,
-                    status_chars=40,
-                ),
-                "available_artifacts": [
-                    {"artifact_id": str(item.get("artifact_id") or "")[:160]}
-                    for item in artifact_ids
-                ],
-                "pending_decisions": minimal_pending,
-                "capability_manifest": _essential_capability_manifest(
-                    envelope.capability_manifest
-                ),
-                "context_compacted": True,
-                "rules": ["Task page is reference-only; never claim an unconfirmed external effect."],
-            }
         if _json_size(situation) > budget:
             raise ValueError(
                 "essential Core situation exceeds the configured context budget "
