@@ -5,5 +5,10 @@ __pycache__/
 *.pyo
 .pytest_cache/
 
-# Superseded generated concept art. The live shell uses the SVG/QML body.
+# Superseded generated concept art. The live shell uses one explicitly
+# reviewed cat-free panorama plus the canonical SVG/QML body.
 assets/*.png
+!assets/chaos-sanctum-panorama.png
+
+# Local concept-export scratchpad; canonical vectors live in assets/heresy/.
+heresy/

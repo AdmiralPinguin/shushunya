@@ -49,6 +49,13 @@ class VisualAssetTests(unittest.TestCase):
         self.assertIn("assets/heresy", active_lower)
         self.assertIn("chaos-sanctum-panorama.png", active_lower)
         self.assertEqual(1, active_lower.count("chaos-sanctum-panorama.png"))
+        panorama = ROOT / "assets" / "chaos-sanctum-panorama.png"
+        self.assertTrue(panorama.is_file(), f"Missing live panorama: {panorama}")
+        panorama_reader = QImageReader(str(panorama))
+        self.assertTrue(
+            panorama_reader.canRead(),
+            f"Qt cannot decode live panorama: {panorama_reader.errorString()}",
+        )
         for retired_cat_asset in (
             "shushunya-presence-v2",
             "shushunya-mind-v2",
