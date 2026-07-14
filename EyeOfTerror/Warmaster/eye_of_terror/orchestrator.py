@@ -66,6 +66,14 @@ class TaskMemoryParentConflict(ValueError):
     """A child attempt names ancestry that is not durably provable."""
 
 
+class ExistingMissionReplayError(ValueError):
+    """An existing run cannot be replayed as the requested commander intake."""
+
+    def __init__(self, message: str, *, error_code: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
 def _task_memory_ref(
     task_id: str,
     *,
@@ -349,7 +357,10 @@ def _existing_mission_request(
     mission_id = mission_id_for(task_id, message)
     mission_dir = mission_dir_for(warmaster_root, mission_id)
     if not (mission_dir / "mission.json").is_file():
-        raise ValueError("existing run has no durable commander intake")
+        raise ExistingMissionReplayError(
+            "existing run has no durable commander intake; create a fresh immutable attempt",
+            error_code="existing_mission_invalid",
+        )
     replay = open_mission(
         warmaster_root,
         message,
@@ -358,7 +369,10 @@ def _existing_mission_request(
         task_memory=ref,
     )
     if not replay.get("ok"):
-        raise ValueError(str(replay.get("error") or "existing mission request mismatch"))
+        raise ExistingMissionReplayError(
+            str(replay.get("error") or "existing mission request mismatch"),
+            error_code=str(replay.get("error_code") or "existing_mission_invalid"),
+        )
     mission = replay.get("mission") if isinstance(replay.get("mission"), dict) else {}
     return {**mission, "mission_id": mission_id}
 
@@ -1510,15 +1524,24 @@ def _orchestrate_run_task_locked(
                 requested_memory_ref,
             )
         except (OSError, ValueError) as exc:
+            mission_replay_error = isinstance(exc, ExistingMissionReplayError)
             return {
                 "ok": False,
                 "phase": "task_preflight",
                 "task_id": task_id,
-                "error": f"task-memory lineage conflict: {exc}",
+                "error": (
+                    f"commander intake cannot reuse this immutable task_id: {exc}"
+                    if mission_replay_error
+                    else f"task-memory lineage conflict: {exc}"
+                ),
                 "error_code": (
-                    "task_memory_parent_conflict"
-                    if isinstance(exc, TaskMemoryParentConflict)
-                    else "task_memory_identity_conflict"
+                    exc.error_code
+                    if mission_replay_error
+                    else (
+                        "task_memory_parent_conflict"
+                        if isinstance(exc, TaskMemoryParentConflict)
+                        else "task_memory_identity_conflict"
+                    )
                 ),
                 "next_action": {},
                 "client_action": {},

@@ -227,12 +227,10 @@ class TerminalSkitariiHandler(BaseHTTPRequestHandler):
         return
 
 
-def request_json(
+def request_json_response(
     url: str,
     payload: dict | None = None,
-    *,
-    expected_status: int = 200,
-) -> dict:
+) -> tuple[int, dict]:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         url,
@@ -247,10 +245,20 @@ def request_json(
     except urllib.error.HTTPError as exc:
         status = int(exc.code)
         body = json.loads(exc.read().decode("utf-8"))
-    if status != expected_status:
-        raise AssertionError(f"{url} returned HTTP {status}, expected {expected_status}: {body}")
     if not isinstance(body, dict):
         raise AssertionError(f"{url} returned a non-object JSON payload: {body!r}")
+    return status, body
+
+
+def request_json(
+    url: str,
+    payload: dict | None = None,
+    *,
+    expected_status: int = 200,
+) -> dict:
+    status, body = request_json_response(url, payload)
+    if status != expected_status:
+        raise AssertionError(f"{url} returned HTTP {status}, expected {expected_status}: {body}")
     return body
 
 
@@ -463,6 +471,12 @@ def main() -> int:
                 task_memory=task_memory,
             )
 
+        def temporary_mission_dir(_warmaster_root: Path, mission_id: str) -> Path:
+            return mission_control.mission_dir_for(
+                mission_warmaster_root,
+                mission_id,
+            )
+
         def test_task_memory_page(ref: dict, *_args, **_kwargs) -> dict:
             return {
                 "stage": "task_memory_init",
@@ -517,6 +531,11 @@ def main() -> int:
                 side_effect=gateway_test_governor,
             ),
             mock.patch.object(orchestrator, "open_mission", side_effect=temporary_open_mission),
+            mock.patch.object(
+                orchestrator,
+                "mission_dir_for",
+                side_effect=temporary_mission_dir,
+            ),
             mock.patch.object(
                 orchestrator,
                 "_ensure_task_memory_page",
@@ -813,7 +832,7 @@ def main() -> int:
                     "Create standalone race-beta.txt with exact content beta.",
                 )
                 race_barrier = threading.Barrier(3)
-                race_results: list[dict] = []
+                race_results: list[tuple[int, dict]] = []
                 race_errors: list[BaseException] = []
                 decisions_before_race = ceraxia_brain.call_count
 
@@ -821,7 +840,7 @@ def main() -> int:
                     try:
                         race_barrier.wait(timeout=10)
                         race_results.append(
-                            request_json(
+                            request_json_response(
                                 gateway_base + "/orchestrate_run",
                                 {
                                     "message": message,
@@ -862,10 +881,20 @@ def main() -> int:
                     for path in sorted(race_mission.rglob("*"))
                     if path.is_file()
                 ) + (race_run / "contract.json").read_bytes()
+                successful_race = [
+                    body for status, body in race_results if status == 200
+                ]
+                rejected_race = [
+                    body for status, body in race_results if status == 409
+                ]
                 if (
-                    len(race_results) != 2
-                    or {item.get("phase") for item in race_results}
-                    != {"ready_to_start", "existing_run"}
+                    len(successful_race) != 1
+                    or len(rejected_race) != 1
+                    or successful_race[0].get("phase") != "ready_to_start"
+                    or rejected_race[0].get("error_code")
+                    != "mission_request_identity_conflict"
+                    or "different commander request"
+                    not in str(rejected_race[0].get("error") or "")
                     or winner not in race_messages
                     or winner not in str(race_contract.get("goal") or "")
                     or loser.encode("utf-8") in coherent_bytes
