@@ -431,7 +431,16 @@ def _copy_candidate_for_verification(ex: VmExecutor, base_commit: str) -> VmExec
         "set -e -o pipefail; " + _TRUSTED_GIT_ENV
         + materialize + " && "
         + f"/usr/bin/git -C {destination} init -q && "
-        + f"/usr/bin/git -C {destination} apply --binary --whitespace=nowarn {patch_path}",
+        # An empty patch is a legitimate no-op: the candidate tree is byte-identical
+        # to the reconstructed baseline (e.g. the goal was already satisfied by base).
+        # `git apply` rejects a zero-hunk patch as "No valid patches in input", which
+        # would crash trusted verification and be mislabelled a verifier-internal
+        # failure. Skip the apply when the patch is empty so the reconstruction is the
+        # clean base tree and the behavioural checks still judge it honestly. This is
+        # not gameable: the reconstruction is base, never the candidate's own tree, so
+        # a candidate that changed nothing is judged against base exactly as it stands.
+        + f"if [ -s {patch_path} ]; then "
+        + f"/usr/bin/git -C {destination} apply --binary --whitespace=nowarn {patch_path}; fi",
         timeout=180,
     )
     _sanitize_git_control(child)
