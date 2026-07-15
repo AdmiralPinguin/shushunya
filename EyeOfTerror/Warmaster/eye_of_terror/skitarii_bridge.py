@@ -70,6 +70,12 @@ ACCEPTANCE_SOURCE_TYPE = "commander_order_user_request"
 MAX_ACCEPTANCE_SOURCE_BYTES = 131_072
 MAX_ACCEPTANCE_METADATA_BYTES = 1_048_576
 SKITARII_POLL_INTERVAL_SEC = 0.5
+# A full bounded worker queue (HTTP 429) is transient backpressure, not a task
+# failure.  We retry the mission POST with exponential backoff inside the mission
+# wall budget instead of collapsing a retryable 429 into a dead "blocked" verdict.
+_SKITARII_BACKPRESSURE_BASE_DELAY_SEC = 2.0
+_SKITARII_BACKPRESSURE_MAX_DELAY_SEC = 30.0
+_SKITARII_BACKPRESSURE_MAX_WAIT_SEC = 300
 _MISSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 _OWNED_GIT_LOCKS: dict[str, tuple[int, int, int]] = {}
 _OWNED_GIT_GUARDS: dict[str, tuple[int, tuple[str, ...]]] = {}
@@ -133,6 +139,14 @@ _TEXT_NAMES = {
     "Cargo.toml", "Cargo.lock", "package.json", "package-lock.json", "pnpm-lock.yaml",
     "requirements.txt", "pyproject.toml", "tox.ini", ".gitignore", ".gitattributes",
 }
+
+
+class _SkitariiQueueBackpressure(RuntimeError):
+    """The Skitarii worker queue stayed full for the whole retry budget.
+
+    This is a retryable capacity signal, not a task failure: the mission is still
+    queued and can be dispatched once the warband frees a worker slot.
+    """
 
 
 class SnapshotError(RuntimeError):
@@ -4983,15 +4997,46 @@ def _await_async_skitarii_mission(
         current_ledger.save()
         raise RuntimeError("Skitarii mission request identity does not match the current attempt")
     if not adopted:
-        created = _skitarii_json_request(
-            "POST",
-            "/missions",
-            body=json.dumps(creation_body, ensure_ascii=False).encode("utf-8"),
-            timeout=min(max(float(timeout_sec), 30.0), 180.0),
-            # A crash may happen after service creation but before the ledger write.
-            # The deterministic id turns that race into an idempotent re-attach.
-            allowed_http_statuses=frozenset({409}),
+        creation_bytes = json.dumps(creation_body, ensure_ascii=False).encode("utf-8")
+        post_timeout = min(max(float(timeout_sec), 30.0), 180.0)
+        # A full bounded worker queue (429) is transient backpressure, not a task
+        # failure.  The deterministic requested_id makes each re-POST an idempotent
+        # re-attach (a create that already landed answers 409 below), so we back
+        # off and retry inside the mission wall budget instead of collapsing a
+        # retryable 429 into a dead "blocked" verdict.
+        backpressure_deadline = time.monotonic() + min(
+            max(int(timeout_sec), 30), _SKITARII_BACKPRESSURE_MAX_WAIT_SEC,
         )
+        backpressure_delay = _SKITARII_BACKPRESSURE_BASE_DELAY_SEC
+        while True:
+            created = _skitarii_json_request(
+                "POST",
+                "/missions",
+                body=creation_bytes,
+                timeout=post_timeout,
+                # 409: idempotent re-attach after a crash between POST and the
+                # ledger write.  429: the worker queue is momentarily full.
+                allowed_http_statuses=frozenset({409, 429}),
+            )
+            if created.get("_http_status") != 429:
+                break
+            if time.monotonic() >= backpressure_deadline:
+                raise _SkitariiQueueBackpressure(
+                    "Skitarii worker queue stayed full for the whole retry budget; "
+                    "the mission is still queued and can be retried",
+                )
+            ledger.record_event(
+                "skitarii_queue_backpressure",
+                {
+                    "mission_id": requested_id,
+                    "retry_in_sec": round(backpressure_delay, 1),
+                    "detail": str(created.get("error") or "worker queue full")[:200],
+                },
+            )
+            time.sleep(backpressure_delay)
+            backpressure_delay = min(
+                backpressure_delay * 2, _SKITARII_BACKPRESSURE_MAX_DELAY_SEC,
+            )
         if created.get("_http_status") == 409:
             pending_snapshot = _skitarii_json_request(
                 "GET", f"/missions/{requested_id}", timeout=30.0,
@@ -5621,6 +5666,42 @@ def run_via_skitarii(
         if cancelled is not None:
             return cancelled
         ledger = TaskLedger.load(run_dir / "task_ledger.json")
+        if isinstance(exc, _SkitariiQueueBackpressure):
+            # Capacity backpressure is retryable: name the reason and flag it as
+            # retryable instead of dying mutely.  The deterministic mission id keeps
+            # a later re-dispatch idempotent.
+            ledger.record_event(
+                "skitarii_queue_backpressure_exhausted", {"error": str(exc)[:300]},
+            )
+            failure = _bridge_failure(
+                run_dir,
+                task_id,
+                f"Skitarii worker queue is saturated: {exc}",
+                phase="skitarii_backpressure",
+                status="blocked",
+                error=str(exc),
+            )
+            failure["retryable"] = True
+            failure["next_action"] = {
+                "kind": "retry_skitarii_dispatch",
+                "reason": (
+                    "The Skitarii worker queue was saturated; the mission is queued "
+                    "and can be re-dispatched once a worker slot frees up."
+                ),
+                "retryable": True,
+            }
+            ledger.set_result(failure)
+            ledger.set_status("blocked")
+            try:
+                _finalize_linked_blocked(
+                    run_dir, ledger, str(failure["summary"]),
+                    phase="skitarii_backpressure",
+                )
+            except Exception as finalize_exc:  # noqa: BLE001
+                ledger.record_event(
+                    "skitarii_finalize_error", {"error": str(finalize_exc)[:300]},
+                )
+            return failure
         if (
             _skitarii_terminal_cleanup_proven(ledger)
             and not _skitarii_exception_is_external_blocker(exc)
