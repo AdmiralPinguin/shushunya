@@ -4908,6 +4908,38 @@ def _cancel_service_mission(mission_id: str) -> None:
         pass
 
 
+def _relay_skitarii_progress(latest: Any, snapshot: dict[str, Any], already_relayed: int) -> int:
+    """Surface the fighter's human-readable step notes onto the run event stream.
+
+    The Skitarii mission records readable progress notes (plan choices, actions,
+    revisions) in each event's ``text`` field, but they never leave the worker:
+    the run ledger only sees dispatch/start/verdict milestones. Without this the
+    app shows "handed to the fighter" and then nothing until a final verdict.
+    Relay every new text-bearing note onto the run's own event stream so Ceraxia
+    and the app can read, in plain language, what the fighter is actually doing.
+    """
+    events = snapshot.get("events")
+    if not isinstance(events, list):
+        return already_relayed
+    steps = [
+        event for event in events
+        if isinstance(event, dict) and str(event.get("text") or "").strip()
+    ]
+    if len(steps) <= already_relayed:
+        return already_relayed
+    for step in steps[already_relayed:]:
+        latest.record_event(
+            "skitarii_step",
+            {
+                "text": str(step.get("text") or "").strip()[:1000],
+                "kind": str(step.get("type") or "note"),
+                "at": str(step.get("at") or ""),
+            },
+        )
+    latest.save()
+    return len(steps)
+
+
 def _await_async_skitarii_mission(
     body: bytes,
     run_dir: Path,
@@ -5073,6 +5105,7 @@ def _await_async_skitarii_mission(
     consecutive_errors = 0
     cancel_sent = False
     checkpoint_resume_attempts = 0
+    relayed_progress_count = 0
     while True:
         latest = type(ledger).load(run_dir / "task_ledger.json")
         latest_data = latest.to_dict()
@@ -5135,6 +5168,9 @@ def _await_async_skitarii_mission(
             latest.save()
             _cancel_service_mission(mission_id)
             raise RuntimeError("Skitarii mission identity changed while it was running")
+        relayed_progress_count = _relay_skitarii_progress(
+            latest, snapshot, relayed_progress_count,
+        )
         status = str(snapshot.get("status") or "")
         mission_meta = (
             latest_data.get("skitarii_mission")
