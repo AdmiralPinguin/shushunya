@@ -160,6 +160,11 @@ def event_display(event: dict[str, Any], task_id: str = "") -> dict[str, Any]:
     elif event_type in {"cancel_requested", "resume_execution_requested"}:
         headline = event_type.replace("_", " ").capitalize()
         detail = str(payload.get("reason") or payload.get("mode") or "")
+    elif event_type == "skitarii_step":
+        # The fighter's own plain-language progress note, relayed up from the
+        # worker so the app can show what it is actually doing step by step.
+        headline = "Боец"
+        detail = str(payload.get("text") or "")
     display = {
         "task_id": task_id,
         "at": str(event.get("at") or ""),
