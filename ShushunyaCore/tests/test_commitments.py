@@ -411,7 +411,11 @@ class CommitmentTests(unittest.IsolatedAsyncioTestCase):
             organs.recovery_requests[1]["idempotency_key"],
         )
 
-    async def test_lineage_rejection_retries_same_child_after_repair(self):
+    async def test_broken_lineage_escalates_to_owner(self):
+        # A structurally broken task-memory ancestry (e.g. a legacy parent run with
+        # no task_memory.json) cannot be auto-repaired, so parking it in
+        # waiting_external forever is a silent dead-end. It must escalate to the
+        # owner with a concrete decision instead of waiting mutely.
         snapshot = {
             "task_id": "mission-1",
             "status": "failed",
@@ -430,22 +434,18 @@ class CommitmentTests(unittest.IsolatedAsyncioTestCase):
         first = await commitments.reconcile_one(self.item())
         second = await commitments.reconcile_one(first)
 
-        self.assertEqual(first["state"], "waiting_external")
+        self.assertEqual(first["state"], "waiting_user")
         self.assertEqual(
             first["diagnostic"]["code"],
-            "task_memory_lineage_repair_required",
+            "task_memory_lineage_broken_needs_owner",
         )
-        self.assertFalse(first["diagnostic"]["requires_user"])
+        self.assertTrue(first["diagnostic"]["requires_user"])
         self.assertTrue(
             first["diagnostic"]["evidence"]["previous_attempt"]["_evidence_ref"]
         )
         self.assert_bounded_commitment_evidence(first)
-        self.assertEqual(len(organs.recovery_requests), 2)
-        self.assertEqual(
-            organs.recovery_requests[0]["task_id"],
-            organs.recovery_requests[1]["task_id"],
-        )
-        self.assertEqual(second["state"], "waiting_external")
+        # The goal stays surfaced to the owner, not silently parked.
+        self.assertEqual(second["state"], "waiting_user")
 
     async def test_nested_question_becomes_waiting_user(self):
         snapshot = {

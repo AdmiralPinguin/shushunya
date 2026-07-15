@@ -778,34 +778,40 @@ class Commitments:
                 )
             lineage_error = _task_memory_lineage_error(exc.evidence)
             if lineage_error:
+                # A broken task-memory ancestry (missing/legacy parent run, absent
+                # task_memory.json, or disagreeing identity) cannot be repaired by
+                # retrying or minting more child ids — the diagnostic itself says so.
+                # Parking it in waiting_external forever is a silent dead-end: nothing
+                # reconciles it, so the goal waits mutely for a condition that will
+                # never arrive. Escalate to the owner with a concrete decision instead
+                # of stalling — reason on failure, do not block.
+                lineage_question = (
+                    "Не могу автоматически пересобрать эту цель: её родословная в "
+                    "памяти задачи повреждена (родительский прогон или его "
+                    "task_memory отсутствуют/расходятся), и провенанс так не "
+                    "восстановить. Начать эту цель заново с чистой задачи?"
+                )
                 lineage_repair = {
-                    "code": "task_memory_lineage_repair_required",
-                    "explanation": (
-                        "Abaddon rejected the recovery attempt because its immutable "
-                        "task-memory ancestry is inconsistent. The goal and prior "
-                        "evidence remain preserved; generating more child ids cannot "
-                        "repair provenance."
-                    ),
+                    "code": "task_memory_lineage_broken_needs_owner",
+                    "explanation": lineage_question,
                     "evidence": {
                         "downstream_error_code": lineage_error,
                         "previous_attempt": snapshot_reference,
                         "recovery_payload": recovery_reference,
                         "dispatch_error": dispatch_error_reference,
                     },
-                    "external_dependency": "internal task-memory lineage reconciliation",
                     "required_action": (
-                        "Reconcile the existing parent run, mission record, and Archive "
-                        "page identity without rebinding or deleting their evidence."
+                        "Owner decision required: restart this goal as a fresh root "
+                        "task, or abandon it. Provenance cannot be auto-repaired."
                     ),
                     "resume_condition": (
-                        "The parent task_memory.json, mission lineage, and Archive "
-                        "root identity agree, after which this same recovery can be retried."
+                        "The owner starts a fresh root task for this goal, or cancels it."
                     ),
-                    "requires_user": False,
+                    "requires_user": True,
                 }
                 return self.transition(
                     item["id"],
-                    "waiting_external",
+                    "waiting_user",
                     honest_status=lineage_repair["explanation"],
                     diagnostic=lineage_repair,
                     result={
