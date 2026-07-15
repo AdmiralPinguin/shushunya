@@ -105,6 +105,10 @@ class CompanionViewModel(QObject):
     def currentActivity(self) -> str:  # noqa: N802
         return self._snapshot.current_activity
 
+    @Property("QVariantList", notify=changed)
+    def currentSteps(self):  # noqa: N802
+        return list(self._snapshot.current_steps)
+
     @Property(str, notify=changed)
     def ownerRequest(self) -> str:  # noqa: N802
         return self._snapshot.owner_request

@@ -164,6 +164,43 @@ Item {
         }
     }
 
+    Column {
+        id: workerSteps
+        visible: backend.companion.currentSteps.length > 0
+                 && (view.visualState === "thinking" || view.visualState === "forging")
+        width: view.width * .82
+        x: view.width * .09
+        y: view.height * .40
+        spacing: view.compact ? 5 : 7
+        opacity: view.visualState === "thinking" ? 1.0 : .6
+
+        IncisedText {
+            width: parent.width
+            label: "БОЕЦ РАБОТАЕТ"
+            heading: ""
+            accent: "#3b7f89"
+            headingPixelSize: 1
+            headingLines: 1
+        }
+
+        Repeater {
+            model: backend.companion.currentSteps
+            delegate: Text {
+                id: stepLine
+                required property int index
+                required property string modelData
+                readonly property int total: backend.companion.currentSteps.length
+                visible: index >= total - 6
+                width: workerSteps.width
+                text: "· " + modelData
+                color: "#c8b89a"
+                font.pixelSize: view.compact ? 12 : 13
+                wrapMode: Text.WordWrap
+                opacity: 0.35 + 0.65 * (index + 1) / Math.max(total, 1)
+            }
+        }
+    }
+
     IncisedText {
         visible: (view.visualState === "triumph" || view.visualState === "wounded")
                  && backend.companion.hasResults

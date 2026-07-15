@@ -40,6 +40,7 @@ class CompanionSnapshot:
     presence: str = "idle"
     utterance: str = "Я здесь."
     current_activity: str = ""
+    current_steps: tuple[str, ...] = ()
     owner_request: str = ""
     latest_result: str = ""
     activities: tuple[CompanionItem, ...] = ()
@@ -209,6 +210,7 @@ def build_snapshot(
     planning = any(item.phase in {"now", "next"} for item in agenda)
     presence = "waiting" if waiting else "speaking" if utterance and utterance_recent else "thinking" if active or planning else "idle"
     current_activity = activities[0].text if activities else (f"Думаю о следующем: {agenda[0].text}" if agenda else "")
+    current_steps = activities[0].steps if activities else ()
     latest_result = results[0].text if results else ""
     return CompanionSnapshot(
         name=_text(name, 120) or "Шушуня",
