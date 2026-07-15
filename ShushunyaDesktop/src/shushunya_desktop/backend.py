@@ -27,6 +27,7 @@ class CompanionListModel(QAbstractListModel):
     DetailRole = Qt.UserRole + 3
     PhaseRole = Qt.UserRole + 4
     TimestampRole = Qt.UserRole + 5
+    StepsRole = Qt.UserRole + 6
 
     def __init__(self) -> None:
         super().__init__()
@@ -45,6 +46,7 @@ class CompanionListModel(QAbstractListModel):
             self.DetailRole: item.detail,
             self.PhaseRole: item.phase,
             self.TimestampRole: item.timestamp,
+            self.StepsRole: list(item.steps),
         }.get(role)
 
     def roleNames(self) -> dict[int, bytes]:  # noqa: N802
@@ -54,6 +56,7 @@ class CompanionListModel(QAbstractListModel):
             self.DetailRole: b"detail",
             self.PhaseRole: b"phase",
             self.TimestampRole: b"timestamp",
+            self.StepsRole: b"steps",
         }
 
     def replace(self, items: tuple[CompanionItem, ...]) -> None:

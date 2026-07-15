@@ -609,6 +609,7 @@ class Organs:
             "active": bool(body.get("active")),
             "mission_state": mission_state,
             "summary": summary,
+            "worker_steps": body.get("worker_steps") if isinstance(body.get("worker_steps"), list) else [],
             "result": body.get("result") if isinstance(body.get("result"), (dict, str, list)) else None,
             "final": final if isinstance(final, (dict, str)) else None,
             "next_action": body.get("next_action") if isinstance(body.get("next_action"), dict) else None,

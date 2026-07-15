@@ -377,6 +377,32 @@ def _snapshot_record(snapshot: dict[str, Any]) -> dict[str, Any]:
     return bounded
 
 
+def _merge_worker_activity(prior_result: Any, snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Accumulate the fighter's plain-language steps across reconcile polls.
+
+    Each /orchestration poll only carries the most recent worker steps; keep a
+    rolling, deduplicated tail on the commitment so the app can show the full
+    feed of what the worker is actually doing, not just its final verdict.
+    """
+    prior: list[dict[str, Any]] = []
+    if isinstance(prior_result, dict) and isinstance(prior_result.get("activity_steps"), list):
+        prior = [s for s in prior_result["activity_steps"] if isinstance(s, dict)]
+    seen = {(str(s.get("at") or ""), str(s.get("text") or "")) for s in prior}
+    merged = list(prior)
+    for step in snapshot.get("worker_steps", []) or []:
+        if not isinstance(step, dict):
+            continue
+        text = str(step.get("text") or "").strip()
+        if not text:
+            continue
+        key = (str(step.get("at") or ""), text)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append({"text": text[:1000], "at": str(step.get("at") or "")})
+    return merged[-30:]
+
+
 def _recovery_record(
     payload: dict[str, Any],
     response: dict[str, Any] | None = None,
@@ -1173,11 +1199,19 @@ class Commitments:
                 seconds=30,
             )
 
+        activity_steps = _merge_worker_activity(item.get("result"), snapshot)
+        working_result = {**_snapshot_record(snapshot), "activity_steps": activity_steps}
+        latest_step = activity_steps[-1]["text"] if activity_steps else ""
+        honest = (
+            f"Боец: {latest_step[:180]}"
+            if latest_step
+            else f"Абаддон сообщает состояние {phase or status}; завершение ещё не подтверждено."
+        )
         return self.transition(
             item["id"],
             "working",
-            honest_status=f"Абаддон сообщает состояние {phase or status}; завершение ещё не подтверждено.",
-            result=_snapshot_record(snapshot),
+            honest_status=honest,
+            result=working_result,
         )
 
     async def reconcile_all(self) -> dict[str, int]:

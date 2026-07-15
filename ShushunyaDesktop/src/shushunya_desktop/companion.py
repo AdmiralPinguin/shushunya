@@ -31,6 +31,7 @@ class CompanionItem:
     detail: str = ""
     phase: str = ""
     timestamp: str = ""
+    steps: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +139,17 @@ def _commitment_items(commitments: list[dict[str, Any]]) -> tuple[tuple[Companio
 
         prefix = prefixes.get(state, "Держу в работе")
         detail = _diagnostic_text(item.get("diagnostic")) if state in WAITING_STATES else ""
+        # The worker's live plain-language steps, surfaced by Core on the
+        # commitment so the owner can read what the fighter is actually doing.
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        raw_steps = result.get("activity_steps") if isinstance(result.get("activity_steps"), list) else []
+        steps = tuple(
+            _text(s.get("text"), 300)
+            for s in raw_steps
+            if isinstance(s, dict) and str(s.get("text") or "").strip()
+        )[-30:]
+        if steps and not detail and state in {"working", "revising"}:
+            detail = steps[-1]
         if state == "quarantined":
             # Missing internal acknowledgement/recovery proof is Shushunya's
             # repair responsibility, never an implicit owner decision.
@@ -148,7 +160,7 @@ def _commitment_items(commitments: list[dict[str, Any]]) -> tuple[tuple[Companio
             phase = "recovering"
         else:
             phase = "now" if state in {"working", "revising"} else "queued"
-        activities.append(CompanionItem(item_id, f"{prefix}: {goal}", detail, phase, timestamp))
+        activities.append(CompanionItem(item_id, f"{prefix}: {goal}", detail, phase, timestamp, steps))
         if not owner_request and state == "waiting_user":
             owner_request = detail or f"Нужно решить, как продолжить: {goal}"
     return tuple(activities), tuple(results), owner_request

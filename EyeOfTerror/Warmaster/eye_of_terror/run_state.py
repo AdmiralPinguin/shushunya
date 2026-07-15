@@ -1252,6 +1252,14 @@ def orchestration_state(run_dir: Path, event_limit: int | None = 20, events_afte
     if isinstance(snapshot.get("summary"), dict):
         snapshot["summary"]["mission_state"] = state_view
     snapshot["mission_state"] = state_view
+    # The fighter's plain-language steps, extracted so upstream (Core, the app)
+    # can show what the worker is actually doing without parsing display cards.
+    worker_steps = [
+        {"text": str(ev.get("detail") or "").strip(), "at": str(ev.get("at") or "")}
+        for ev in snapshot.get("display_events", [])
+        if isinstance(ev, dict) and ev.get("type") == "skitarii_step"
+        and str(ev.get("detail") or "").strip()
+    ]
     return {
         "ok": True,
         "task_id": run_dir.name,
@@ -1262,6 +1270,7 @@ def orchestration_state(run_dir: Path, event_limit: int | None = 20, events_afte
         "decision": view["decision"],
         "display": view["display"],
         "display_events": snapshot.get("display_events", []),
+        "worker_steps": worker_steps,
         "governor_activity": snapshot.get("governor_activity", {}),
         "snapshot": snapshot,
         "final": final_payload,
