@@ -203,6 +203,7 @@ def evaluated_source_identity() -> dict:
     )
     shared_source_names = (
         "EyeOfTerror/common_protocol/ceraxia_directive.py",
+        "EyeOfTerror/common_protocol/protocol.py",
     )
     digest = hashlib.sha256()
     for name in source_names:
@@ -849,9 +850,16 @@ def _run_in_fresh_verifier_vm(
 
 def _run_checked(t: dict) -> dict:
     """A task with a ground-truth oracle. Run it, then INDEPENDENTLY re-verify."""
+    tid = f"eval-{t['id']}"
+    # Standalone eval is a root task: task_memory_id/root_task_id/delegating_task_id
+    # all bind to this run's own id (no parent), satisfying the service's immutable
+    # lineage gate without inventing an orphan continuation.
     payload = {
         "goal": t["goal"],
-        "task_id": f"eval-{t['id']}",
+        "task_id": tid,
+        "task_memory_id": tid,
+        "root_task_id": tid,
+        "delegating_task_id": tid,
         "max_wall_sec": 900,
         "standalone_test": True,
     }
@@ -1020,6 +1028,9 @@ def _run_ambiguous(t: dict) -> dict:
         r = _post("/missions", {
             "goal": t["goal"],
             "task_id": eval_task_id,
+            "task_memory_id": eval_task_id,
+            "root_task_id": eval_task_id,
+            "delegating_task_id": eval_task_id,
             "max_wall_sec": 300,
             "standalone_test": True,
         })
