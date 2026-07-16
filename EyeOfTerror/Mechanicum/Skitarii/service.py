@@ -3710,11 +3710,55 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
 
+def _source_reload_watcher(interval_sec: float = 4.0) -> None:
+    """Self-healing hot reload of the warband's own source.
+
+    The gateway's deep readiness attestation refuses to dispatch when the running
+    instance's source SHA disagrees with the checkout on disk — a correct integrity
+    gate, but one that otherwise strands the whole code pipeline behind a manual
+    restart every time a Skitarii file is edited. Instead of that operator crutch,
+    watch the source and re-exec the process the moment it changes AND the single
+    worker slot is idle. A live mission is never interrupted: if busy, we wait and
+    reload once it drains. Result: edit a file -> the service adopts it on its own,
+    its attested SHA matches disk again, and dispatch keeps working with no restart.
+    """
+    if os.environ.get("SKITARII_SOURCE_HOT_RELOAD", "1") != "1":
+        return
+    while True:
+        time.sleep(max(1.0, interval_sec))
+        try:
+            current = _service_source_sha256()
+        except OSError:
+            continue
+        if current == SERVICE_SOURCE_SHA256:
+            continue
+        # Source on disk changed. Only re-exec while idle so no worker is killed
+        # mid-flight; if a mission holds the slot, retry on the next tick.
+        try:
+            with mission_store._GLOCK:
+                active = mission_store._active_count_locked()
+        except Exception:
+            active = 1  # cannot prove idleness -> do not repave
+        if active > 0:
+            continue
+        print(
+            "Skitarii source changed on disk while idle — reloading in place: "
+            f"{SERVICE_SOURCE_SHA256[:12]} -> {current[:12]}",
+            flush=True,
+        )
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
 def main():
     host = os.environ.get("SKITARII_HOST", "127.0.0.1")
     port = int(os.environ.get("SKITARII_PORT", "7200"))
     srv = ThreadingHTTPServer((host, port), Handler)
     srv.daemon_threads = True          # a crashing request thread never takes the server down
+    threading.Thread(
+        target=_source_reload_watcher, name="skitarii-source-reload", daemon=True,
+    ).start()
     print(f"Skitarii warband listening on http://{host}:{port}", flush=True)
     srv.serve_forever()
 
