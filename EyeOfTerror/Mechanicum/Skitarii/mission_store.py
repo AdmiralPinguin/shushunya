@@ -56,6 +56,12 @@ MAX_TERMINAL_DURABLE_BYTES = _env_int(
 MAX_STORE_DURABLE_BYTES = _env_int("SKITARII_MISSION_STORE_MAX_BYTES", 4_000_000_000, 4096)
 MAX_STORE_MISSIONS = _env_int("SKITARII_MISSION_STORE_MAX_COUNT", 128, 1)
 MAX_ACTIVE_MISSIONS = _env_int("SKITARII_MISSION_ACTIVE_MAX_COUNT", 1, 1)
+# A live mission records an event (bumping ``updated``) well within this window,
+# because fighter commands are wall-bounded. A mission still marked active but
+# untouched for far longer has a dead worker; its record must not keep holding
+# the single active slot. Generous by design so a slow-but-alive build is never
+# reaped.
+ACTIVE_MISSION_STALE_SECONDS = _env_float("SKITARII_MISSION_ACTIVE_STALE_SECONDS", 300.0, 60.0)
 MAX_AUTO_REVISION_ATTEMPTS = _env_int(
     "SKITARII_MISSION_AUTO_REVISION_ATTEMPTS", 3, 1
 )
@@ -454,6 +460,48 @@ def _active_count_locked() -> int:
         for mission in _MISSIONS.values()
         if mission.inflight or mission.status in ACTIVE_STATUSES
     )
+
+
+def _reap_stale_active_locked() -> int:
+    """Release the single active slot from missions whose worker is gone.
+
+    Fighter commands are wall-bounded, so a live mission records an event (and
+    bumps ``updated``) within a couple of minutes. A mission still flagged
+    active/inflight but untouched for far longer than ACTIVE_MISSION_STALE_SECONDS
+    has a dead worker — the gateway bridge or the service was restarted out from
+    under it. Left alone it holds the one MAX_ACTIVE slot forever and every new
+    mission fails admission with "worker queue is full". The VM boundary sweeps
+    the workspace before the next mission, so releasing the stale record is safe.
+
+    Callers already hold the global store lock. Only in-memory fields are mutated
+    (no per-mission lock, no persistence) to avoid lock-order deadlocks; durable
+    reaping of a truly crashed record is still done by the startup rehydrate.
+    """
+    now = time.time()
+    reaped = 0
+    for mission in _MISSIONS.values():
+        if mission.status in TERMINAL_STATUSES:
+            continue
+        if not (mission.inflight or mission.status in ACTIVE_STATUSES):
+            continue
+        if (now - float(getattr(mission, "updated", 0.0) or 0.0)) <= ACTIVE_MISSION_STALE_SECONDS:
+            continue
+        prior = dict(mission.result) if isinstance(mission.result, dict) else {}
+        mission.result = {
+            **prior,
+            "status": "blocked",
+            "accepted": False,
+            "error": "worker became unresponsive; active slot released",
+        }
+        mission.question = None
+        mission.inflight = False
+        mission.cleanup_complete = False
+        mission._resume_disabled = True
+        mission._gc_after_restart = True
+        mission.status = "blocked"
+        mission.updated = now
+        reaped += 1
+    return reaped
 
 
 class Mission:
@@ -1100,6 +1148,10 @@ def create(
                     mission._state_locked()
             except PersistenceLimitError as exc:
                 raise PayloadTooLargeError(str(exc)) from exc
+        if _active_count_locked() >= max(1, int(MAX_ACTIVE_MISSIONS)):
+            # A dead-worker mission must never hold the one slot forever. Reap any
+            # stale-active record before refusing admission with a 429.
+            _reap_stale_active_locked()
         if _active_count_locked() >= max(1, int(MAX_ACTIVE_MISSIONS)):
             raise MissionCapacityError("the bounded mission worker queue is full")
         if _store_entry_count() >= max(1, int(MAX_STORE_MISSIONS)):
