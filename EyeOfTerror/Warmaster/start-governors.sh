@@ -26,7 +26,12 @@ start iskandar 7101 -m eye_of_terror.inner_circle.iskandar_service
 start ceraxia  7104 -m eye_of_terror.inner_circle.ceraxia_service \
       --default-run-root runtime/warmaster-runs
 sleep 4
-export SKITARII_AUTOAPPLY="${SKITARII_AUTOAPPLY:-1}"
-export SKITARII_AUTOPUBLISH="${SKITARII_AUTOPUBLISH:-1}"
+# FULL SANDBOX ISOLATION: never seed the fighter with the host monorepo and never
+# patch the live repo (incl. the real Shushunya_M app). App missions build new
+# projects from scratch in an isolated sandbox and hand back a self-contained artifact.
+export SKITARII_WARMMASTER_ARTIFACT_ONLY="${SKITARII_WARMMASTER_ARTIFACT_ONLY:-1}"
+# With isolation on there is no repo patch to auto-apply, so keep auto-apply OFF too.
+export SKITARII_AUTOAPPLY="${SKITARII_AUTOAPPLY:-0}"
+export SKITARII_AUTOPUBLISH="${SKITARII_AUTOPUBLISH:-0}"
 start gateway  7000 -m eye_of_terror.warmaster_gateway --host 127.0.0.1 --port 7000 \
       --run-root runtime/warmaster-runs --governor-transport http --governor-host 127.0.0.1

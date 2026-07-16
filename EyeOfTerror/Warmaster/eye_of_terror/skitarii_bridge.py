@@ -5619,14 +5619,22 @@ def run_via_skitarii(
         return failure
     try:
         goal = _normalize_goal_repo_scope(goal)
-        workspace, is_patch = _collect_workspace(goal)
-        # A Warmaster code mission targets the configured repository even when it
-        # creates only new files. Direct /mission callers can still use greenfield
-        # mode, but the repo bridge must produce an applyable patch, not hide output
-        # in a runtime deliverables directory.
-        if not is_patch and os.environ.get("SKITARII_WARMMASTER_ARTIFACT_ONLY") != "1":
-            workspace = _full_repo_snapshot()
-            is_patch = True
+        if os.environ.get("SKITARII_WARMMASTER_ARTIFACT_ONLY") == "1":
+            # FULL ISOLATION: the fighter sandbox receives NOTHING from the host repo.
+            # New-project ("make X") missions build from scratch in an isolated
+            # workspace and produce a self-contained artifact — the live monorepo
+            # (incl. the real Shushunya_M app) is never seeded in and never patched.
+            # If a mission needs tooling (Android SDK, gradle) it fetches it itself.
+            workspace, is_patch = {}, False
+        else:
+            workspace, is_patch = _collect_workspace(goal)
+            # A Warmaster code mission targets the configured repository even when it
+            # creates only new files. Direct /mission callers can still use greenfield
+            # mode, but the repo bridge must produce an applyable patch, not hide output
+            # in a runtime deliverables directory.
+            if not is_patch:
+                workspace = _full_repo_snapshot()
+                is_patch = True
     except SnapshotError as exc:
         msg = f"Skitarii blocked: complete repository snapshot failed ({exc})."
         ledger.record_event("skitarii_snapshot_blocked", {"error": str(exc)[:300]})
