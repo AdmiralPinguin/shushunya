@@ -976,7 +976,23 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
             "revision_reasons": _revision_reasons(revision_plan),
         }
     )
-    entries = protocol_cards
+    # The fighter's own plain-language steps, relayed onto the run ledger, so the
+    # mobile activity feed shows what the worker is actually doing — not just the
+    # governor's plan/delegation cards. Merged chronologically with protocol cards.
+    fighter_cards = [
+        {
+            "kind": "worker_step",
+            "source": "skitarii",
+            "severity": "info",
+            "at": str(event.get("at") or ""),
+            "headline": "Боец",
+            "detail": str((event.get("payload") or {}).get("text") or "").strip()[:1000],
+        }
+        for event in (ledger.get("events") or [])
+        if isinstance(event, dict) and event.get("type") == "skitarii_step"
+        and str((event.get("payload") or {}).get("text") or "").strip()
+    ]
+    entries = sorted(protocol_cards + fighter_cards, key=lambda card: str(card.get("at") or ""))
     brigade_tabs = _brigade_tabs(protocol_cards, mission_events, summary, ledger)
     return {
         "kind": "governor_activity_report",
