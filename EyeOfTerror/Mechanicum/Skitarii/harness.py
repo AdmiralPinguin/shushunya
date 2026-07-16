@@ -867,8 +867,20 @@ def _describe_action(name: str, args: dict[str, Any], result: str) -> str:
         return f"Читаю страницу: {str(args.get('url') or '').strip()[:120]}"
     if name == "memory_note":
         return f"Помечаю в память: {str(args.get('note') or '').strip()[:120]}"
+    if name == "memory_read":
+        return "Читаю память задачи"
     if name == "ask_user":
         return f"Спрашиваю хозяина: {str(args.get('question') or '').strip()[:140]}"
+    if name == "list_dir":
+        return f"Смотрю каталог {str(args.get('path') or '.').strip()}"
+    if name == "find_files":
+        return f"Ищу файлы по шаблону {str(args.get('pattern') or '').strip()[:80]}"
+    if name == "grep_symbol":
+        return f"Ищу по проекту символ {str(args.get('symbol') or '').strip()[:80]}"
+    if name == "git_diff":
+        return "Смотрю свои изменения (git diff)"
+    if name == "git_log":
+        return "Смотрю историю коммитов"
     return f"Действие: {name}"
 
 
