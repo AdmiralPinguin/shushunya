@@ -2531,7 +2531,7 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
     )
     if revision_guidance:
         goal += revision_guidance
-        note("Previous verification findings were fed into an autonomous repair attempt.")
+        note("Беру замечания прошлой проверки и захожу чинить именно их.")
 
     try:
         ex = _mission_executor(task_id)
@@ -2627,7 +2627,7 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
             "files": {},
         }
     if restored_checkpoint:
-        note("Previous unaccepted workspace checkpoint was restored before the next attempt.")
+        note("Восстановил рабочий каталог с прошлой незачтённой попытки — продолжаю с того же места.")
         _memory(task_memory_id, "Восстановлен незавершённый патч предыдущей попытки.")
     active_checkpoint_lock = threading.Lock()
     active_checkpoint_state = {"fingerprint": None}
@@ -2700,7 +2700,7 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
     ) if (workspace_files or workspace_inventory) else {}
     brief = brief_for_fighter(exploration) if exploration else ""
     if brief:
-        goal += brief; note("Explorer наметил цели/инварианты.")
+        goal += brief; note("Разведка задачи: разобрал, что нужно сделать и что должно заработать по итогу.")
 
     trusted_bypass = (
         payload.get("_trusted_skip_held_out") is True
@@ -2723,7 +2723,7 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
     held_out_degraded_error = ""
     verification_findings: list[dict] = []
     if held_out_required:
-        note(f"Private verifier prepared {len(held_out_checks)} undisclosed behavioural check(s).")
+        note(f"Готовлю {len(held_out_checks)} скрытых проверок поведения — боец их не видит, чтобы не подогнал ответ.")
         try:
             held_out_checks = _isolate_private_oracles(
                 held_out_checks, authoritative_goal,
@@ -2744,8 +2744,8 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
             )
             held_out_checks = []
             note(
-                "Private verification is degraded; continuing only through fresh "
-                "public behavioural replay. " + held_out_failure_error[:240]
+                "Скрытые проверки собрать не удалось — иду только через открытую "
+                "перепроверку поведения. Причина: " + held_out_failure_error[:240]
             )
 
     try:
@@ -2756,14 +2756,16 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
                                   max_fighter_rounds=int(payload.get("max_rounds") or 3),
                                   max_steps=int(payload.get("max_steps") or 40),
                                   max_wall_sec=_remaining_mission_wall_seconds(payload, mission),
-                                  durable_checkpoint_fn=durable_workspace_checkpoint)
+                                  durable_checkpoint_fn=durable_workspace_checkpoint,
+                                  progress=note)
         else:
             verdict = plan_and_run(goal, ex, task_id=task_id,
                                    memory_task_id=task_memory_id,
                                    ask_fn=ask_fn, cancel_fn=cancel_fn,
                                    max_wall_sec=_remaining_mission_wall_seconds(payload, mission),
                                    memory=lambda m: (note(m), _memory(task_memory_id, m)),
-                                   durable_checkpoint_fn=durable_workspace_checkpoint)
+                                   durable_checkpoint_fn=durable_workspace_checkpoint,
+                                   progress=note)
     except Exception as exc:  # noqa: BLE001 - preserve work before outer cleanup
         verdict = _recoverable_pipeline_verdict(
             exc,

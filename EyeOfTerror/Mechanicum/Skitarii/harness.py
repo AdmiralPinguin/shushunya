@@ -834,12 +834,64 @@ def _check_text(check: Any) -> str:
     return f"- run `{cmd}` — it must succeed (exit code 0)"
 
 
+def _returncode_from_result(result: str) -> int | None:
+    try:
+        data = json.loads(result)
+    except (TypeError, ValueError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("returncode"), int):
+        return int(data["returncode"])
+    return None
+
+
+def _describe_action(name: str, args: dict[str, Any], result: str) -> str:
+    """Plain-language Russian line describing one concrete fighter action, for the
+    owner's live feed — he wants to read exactly what the Skitarii does, step by step."""
+    path = str(args.get("path") or "").strip()
+    if name == "write_file":
+        return f"Пишу файл {path}" if path else "Пишу файл"
+    if name == "edit_file":
+        return f"Правлю файл {path}" if path else "Правлю файл"
+    if name == "read_file":
+        return f"Читаю файл {path}" if path else "Читаю файл"
+    if name in {"bash", "bash_background"}:
+        cmd = " ".join(str(args.get("command") or "").split())[:140]
+        prefix = "Запускаю в фоне" if name == "bash_background" else "Запускаю"
+        rc = _returncode_from_result(result)
+        if rc is None:
+            return f"{prefix}: {cmd}"
+        return f"{prefix}: {cmd} — {'готово' if rc == 0 else f'ошибка (код {rc})'}"
+    if name == "web_search":
+        return f"Ищу в сети: {str(args.get('query') or '').strip()[:120]}"
+    if name == "web_fetch":
+        return f"Читаю страницу: {str(args.get('url') or '').strip()[:120]}"
+    if name == "memory_note":
+        return f"Помечаю в память: {str(args.get('note') or '').strip()[:120]}"
+    if name == "ask_user":
+        return f"Спрашиваю хозяина: {str(args.get('question') or '').strip()[:140]}"
+    return f"Действие: {name}"
+
+
 def run_fighter(goal: str, checks: list[Any], executor: Any,
                 max_steps: int = 40, max_wall_sec: int = 3600, task_id: str = "",
                 ask_fn=None, cancel_fn=None,
                 memory_task_id: str | None = None,
-                durable_checkpoint_fn=None) -> dict[str, Any]:
-    """The agentic loop. Returns {ok, summary, artifacts, transcript, steps, seconds}."""
+                durable_checkpoint_fn=None, progress=None) -> dict[str, Any]:
+    """The agentic loop. Returns {ok, summary, artifacts, transcript, steps, seconds}.
+
+    `progress(text)` is an optional callback for a live plain-language feed of what the
+    fighter is actually doing (write/run/read …). It is best-effort and never fatal."""
+    def emit(text: str) -> None:
+        if progress is None:
+            return
+        line = str(text or "").strip()
+        if not line:
+            return
+        try:
+            progress(line)
+        except Exception:
+            pass
+
     settings = _llm_settings()
     started = time.monotonic()
     checks_text = "\n".join(_check_text(c) for c in checks) or "- (no explicit checks; prove the program runs)"
@@ -1019,6 +1071,7 @@ def run_fighter(goal: str, checks: list[Any], executor: Any,
                 args = {}
             if name == "done":
                 summary = str(args.get("summary") or "")
+                emit(f"Готово, сдаю на приёмку: {summary[:160]}" if summary else "Готово, сдаю на приёмку.")
                 lifecycle_checkpoint(
                     step=step,
                     state="The fighter handed its candidate to warband verification.",
@@ -1042,6 +1095,7 @@ def run_fighter(goal: str, checks: list[Any], executor: Any,
                 "args": {k: _bounded_arg(v) for k, v in args.items()},
                 "result": result[:800],
             })
+            emit(_describe_action(name, args, result))
             messages.append({"role": "tool", "tool_call_id": call.get("id") or "", "content": result[:12_000]})
             if name in {"bash", "bash_background", "write_file", "edit_file"}:
                 durable_workspace_checkpoint(

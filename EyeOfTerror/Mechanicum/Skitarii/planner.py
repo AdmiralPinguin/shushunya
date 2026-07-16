@@ -102,15 +102,15 @@ def reconsider(top_goal: str, stuck_goal: str, failed: dict[str, Any]) -> str:
 def _run_with_retry(goal: str, executor: Any, task_id: str, *, memory_task_id: str,
                     top_goal: str,
                     note, max_wall_sec: int, rounds: int = 2, ask_fn=None,
-                    cancel_fn=None, durable_checkpoint_fn=None) -> dict[str, Any]:
+                    cancel_fn=None, durable_checkpoint_fn=None, progress=None) -> dict[str, Any]:
     """Run a fighter; if it gets stuck, let the planner change the approach once."""
     res = run_mission(goal, executor, task_id=task_id,
                       memory_task_id=memory_task_id, max_fighter_rounds=rounds,
                       max_wall_sec=max_wall_sec, ask_fn=ask_fn, cancel_fn=cancel_fn,
-                      durable_checkpoint_fn=durable_checkpoint_fn)
+                      durable_checkpoint_fn=durable_checkpoint_fn, progress=progress)
     if res.get("accepted") or res.get("status") == "cancelled":
         return res
-    note("Планировщик: боец застрял — переобдумываю подход.")
+    note("Планировщик: скитарий застрял — переобдумываю подход.")
     new_goal = reconsider(top_goal, goal, res)
     if not new_goal:
         return res
@@ -118,7 +118,7 @@ def _run_with_retry(goal: str, executor: Any, task_id: str, *, memory_task_id: s
     res2 = run_mission(new_goal, executor, task_id=task_id,
                        memory_task_id=memory_task_id, max_fighter_rounds=rounds,
                        max_wall_sec=max_wall_sec, ask_fn=ask_fn, cancel_fn=cancel_fn,
-                       durable_checkpoint_fn=durable_checkpoint_fn)
+                       durable_checkpoint_fn=durable_checkpoint_fn, progress=progress)
     res2["reconsidered"] = True
     return res2
 
@@ -154,19 +154,27 @@ def _ensure_git(ex) -> bool:
 
 def _run_wave_parallel(
     wave, base_executor, task_id, top_goal, note, per, ask_fn, cancel_fn,
-    memory_task_id="", durable_checkpoint_fn=None,
+    memory_task_id="", durable_checkpoint_fn=None, progress=None,
 ):
     """Run one wave. A single subtask runs in the shared workdir. Several independent
     subtasks each run in a real `git worktree` off the base repo (own branch), then their
     branches are MERGED back with git — a real 3-way merge, so a file changed by two
     subtasks is a genuine merge conflict we surface, not a silent last-writer-wins copy.
     Concurrency is capped. Falls back to cp -a only if git is unavailable."""
+    def _sub_progress(title: str):
+        """Prefix each fighter action with its subtask so parallel feeds stay readable."""
+        if progress is None:
+            return None
+        tag = str(title or "").strip()[:32]
+        return (lambda m: progress(f"[{tag}] {m}")) if tag else progress
+
     if len(wave) == 1:
         return [_run_with_retry(wave[0]["goal"], base_executor, task_id,
                                 memory_task_id=memory_task_id, top_goal=top_goal,
                                 note=note, max_wall_sec=per, ask_fn=ask_fn,
                                 cancel_fn=cancel_fn,
-                                durable_checkpoint_fn=durable_checkpoint_fn)]
+                                durable_checkpoint_fn=durable_checkpoint_fn,
+                                progress=_sub_progress(wave[0].get("title", "")))]
     if durable_checkpoint_fn is not None:
         # Several unmerged tmpfs worktrees cannot be recovered atomically after
         # host loss. Durable production missions keep one replayable workspace.
@@ -177,6 +185,7 @@ def _run_wave_parallel(
                 note=note, max_wall_sec=per, ask_fn=ask_fn,
                 cancel_fn=cancel_fn,
                 durable_checkpoint_fn=durable_checkpoint_fn,
+                progress=_sub_progress(item.get("title", "")),
             )
             for item in wave
         ]
@@ -213,7 +222,8 @@ def _run_wave_parallel(
                               memory_task_id=memory_task_id, top_goal=top_goal,
                               note=note, max_wall_sec=per, ask_fn=None,
                               cancel_fn=cancel_fn,
-                              durable_checkpoint_fn=durable_checkpoint_fn)
+                              durable_checkpoint_fn=durable_checkpoint_fn,
+                              progress=_sub_progress(wave[idx].get("title", "")))
         return idx, res
 
     results: dict[int, dict] = {}
@@ -255,9 +265,10 @@ def _run_wave_parallel(
 def plan_and_run(goal: str, executor: Any, *, task_id: str = "",
                  memory_task_id: str = "", ask_fn=None, cancel_fn=None,
                  max_wall_sec: int = 5400, memory=None,
-                 durable_checkpoint_fn=None) -> dict[str, Any]:
+                 durable_checkpoint_fn=None, progress=None) -> dict[str, Any]:
     """Plan the goal, run fighters per subtask in one shared workdir, then accept the
-    whole thing against the top-level checks. `memory(note)` is an optional callback."""
+    whole thing against the top-level checks. `memory(note)` is an optional callback.
+    `progress(text)` is a live plain-language feed of what each fighter actually does."""
     def note(msg: str) -> None:
         if memory:
             try:
@@ -268,12 +279,13 @@ def plan_and_run(goal: str, executor: Any, *, task_id: str = "",
     subtasks = decompose(goal)
     # small task → single fighter, but with the head's anti-stuck retry
     if len(subtasks) <= 1:
-        note("Планировщик: задача простая, один боец.")
+        note("Планировщик: задача простая — веду одним скитарием.")
         return _run_with_retry(goal, executor, task_id,
                                memory_task_id=memory_task_id, top_goal=goal, note=note,
                                max_wall_sec=max_wall_sec, ask_fn=ask_fn,
                                cancel_fn=cancel_fn,
-                               durable_checkpoint_fn=durable_checkpoint_fn)
+                               durable_checkpoint_fn=durable_checkpoint_fn,
+                               progress=progress)
 
     note(f"Планировщик разбил на {len(subtasks)} подзадач: " + "; ".join(s["title"] for s in subtasks))
     top_spec = build_spec(goal)          # final acceptance for the whole task
@@ -291,6 +303,7 @@ def plan_and_run(goal: str, executor: Any, *, task_id: str = "",
             wave, executor, task_id, goal, note, per, ask_fn, cancel_fn,
             memory_task_id=memory_task_id,
             durable_checkpoint_fn=durable_checkpoint_fn,
+            progress=progress,
         )
         for sub, res in zip(wave, results):
             sub_results.append({"title": sub["title"], "status": res.get("status"),

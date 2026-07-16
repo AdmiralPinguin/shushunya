@@ -23,8 +23,20 @@ def run_mission(goal: str, executor: Any, *, checks: list[str] | None = None,
                 ask_fn=None, cancel_fn=None,
                 max_fighter_rounds: int = 2, max_steps: int = 40,
                 max_wall_sec: int = 3600,
-                durable_checkpoint_fn=None) -> dict[str, Any]:
-    """Drive one code mission end to end. Returns a verdict dict."""
+                durable_checkpoint_fn=None, progress=None) -> dict[str, Any]:
+    """Drive one code mission end to end. Returns a verdict dict.
+
+    `progress(text)` — optional live plain-language feed of what the fighter does."""
+    def emit(text: str) -> None:
+        if progress is None:
+            return
+        line = str(text or "").strip()
+        if line:
+            try:
+                progress(line)
+            except Exception:
+                pass
+
     # 1) Postanovshchik: derive executable success checks (unless caller gave them).
     if checks:
         norm = [c if isinstance(c, dict) else {"cmd": str(c)} for c in checks]
@@ -46,11 +58,13 @@ def run_mission(goal: str, executor: Any, *, checks: list[str] | None = None,
             retry_note = ("\n\nA previous attempt FAILED acceptance. Keep the checks that already pass working, "
                           "and fix exactly these, then re-run them:\n"
                           + "\n".join(f"- `{f['target']}` -> {f.get('why') or f.get('stderr') or 'failed'}" for f in fails))
+            emit(f"Приёмка не прошла — захожу на раунд {rnd}, чиню провалившиеся проверки.")
         fighter = run_fighter(goal + retry_note, checks, executor, task_id=task_id,
                               memory_task_id=memory_task_id,
                               ask_fn=ask_fn, cancel_fn=cancel_fn,
                               max_steps=max_steps, max_wall_sec=max_wall_sec,
-                              durable_checkpoint_fn=durable_checkpoint_fn)
+                              durable_checkpoint_fn=durable_checkpoint_fn,
+                              progress=progress)
         last_fighter = fighter
         if fighter.get("cancelled"):
             return {"status": "cancelled", "accepted": False, "rounds": rounds,
@@ -58,7 +72,9 @@ def run_mission(goal: str, executor: Any, *, checks: list[str] | None = None,
 
         # 3) Priyomshchik: independent re-run. The fighter's own 'ok' is not trusted.
         artifacts = fighter.get("artifacts") or deliverables
+        emit(f"Приёмщик независимо перезапускает {len(checks)} проверк(и) — доверяю только реальному прогону.")
         acceptance = accept(executor, deliverables or artifacts, checks)
+        emit("Приёмка: принято." if acceptance["accepted"] else "Приёмка: НЕ принято, есть провалы.")
         rounds.append({"round": rnd, "fighter_ok": fighter["ok"],
                        "steps": fighter["steps"], "seconds": fighter["seconds"],
                        "acceptance": acceptance})

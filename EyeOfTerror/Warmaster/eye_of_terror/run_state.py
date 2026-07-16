@@ -985,7 +985,7 @@ def governor_activity_report(summary: dict[str, Any], ledger: dict[str, Any]) ->
             "source": "skitarii",
             "severity": "info",
             "at": str(event.get("at") or ""),
-            "headline": "Боец",
+            "headline": "Скитарий",
             "detail": str((event.get("payload") or {}).get("text") or "").strip()[:1000],
         }
         for event in (ledger.get("events") or [])

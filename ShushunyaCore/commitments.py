@@ -1203,7 +1203,7 @@ class Commitments:
         working_result = {**_snapshot_record(snapshot), "activity_steps": activity_steps}
         latest_step = activity_steps[-1]["text"] if activity_steps else ""
         honest = (
-            f"Боец: {latest_step[:180]}"
+            f"Скитарий: {latest_step[:180]}"
             if latest_step
             else f"Абаддон сообщает состояние {phase or status}; завершение ещё не подтверждено."
         )
