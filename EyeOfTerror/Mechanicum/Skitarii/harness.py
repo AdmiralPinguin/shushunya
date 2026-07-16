@@ -168,12 +168,17 @@ def _llm_settings() -> dict[str, Any]:
 
 
 def _chat(messages: list[dict], settings: dict[str, Any]) -> dict[str, Any]:
+    # The fighter backend is a reasoning model (Qwen3.6, server runs --reasoning on):
+    # its thinking lands in reasoning_content while tool calls still parse, so let it
+    # think by default — SKITARII_LLM_ENABLE_THINKING=0 restores the old suppression.
     payload = {
         "model": settings["model"],
         "messages": messages,
         "temperature": 0,
         "max_tokens": settings["max_tokens"],
-        "chat_template_kwargs": {"enable_thinking": False},
+        "chat_template_kwargs": {
+            "enable_thinking": os.environ.get("SKITARII_LLM_ENABLE_THINKING", "1") == "1",
+        },
     }
     enabled_tools = settings.get("tools", TOOLS + _tools.extra_specs())
     if enabled_tools:
