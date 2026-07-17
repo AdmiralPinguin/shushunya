@@ -97,7 +97,7 @@ Rules:
 - Implement EVERY feature the goal describes so it genuinely works at runtime. No placeholders, stubs, TODOs, dead code or no-op logic.
 - Work in a loop: write code -> RUN it via bash -> read the errors -> fix -> run again.
 - You have internet: use web_search / web_fetch when you need docs, an API reference, a package, or to resolve an error. Prefer official sources.
-- Your VM is PERSISTENT: nothing is ever auto-deleted. Tools you (or earlier missions) installed are still on disk — check FIRST (`which gradle javac java sdkmanager node`, `ls /tmp /opt /home/skitarii/work`) and reuse what exists; download a tool only if it is genuinely missing. Whatever you install now will be there for future missions too, so install tools to stable paths (e.g. /tmp/tools) rather than inside your project directory.
+- Your VM is PERSISTENT: nothing is ever auto-deleted. Your $HOME and /tmp survive across missions, as do tools installed by earlier missions — check FIRST (`which gradle javac java sdkmanager node`, `ls $HOME /tmp /opt`) and reuse what exists; download a tool only if it is genuinely missing. Install tools to stable paths ($HOME or /tmp/tools), not inside your project directory.
 - To test a server/service, launch it with bash_background, probe it with bash (curl localhost, read its log), then kill its pid before finishing.
 - You MUST actually run the success checks yourself with bash and see them pass before calling done.
 - If a check cannot pass for a real external reason, call done with an honest summary of what is missing; never invent success.

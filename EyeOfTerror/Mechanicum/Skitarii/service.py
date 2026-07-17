@@ -194,12 +194,22 @@ def _mission_executor(task_id: str) -> VmExecutor:
     # requests with the same task_id can't wipe each other's directory (race fix).
     run_suffix = uuid.uuid4().hex[:16]
     workdir = f"/home/skitarii/work/mission-{run_suffix}"
-    cache_root = f"/tmp/skitarii-cache-{run_suffix}"
+    # PERSISTENT VM: the fighter's real home lives inside the writable work area
+    # (mission commands run with ProtectHome=read-only + ReadWritePaths=work) and
+    # is NEVER wiped, so gradle/npm/pip caches and installed tools accumulate
+    # across missions. JVMs resolve user.home from passwd (root-owned /home/skitarii),
+    # hence the explicit -Duser.home override — without it the Android plugin dies
+    # on ~/.android and gradle on its native-services dir.
+    fighter_home = "/home/skitarii/work/home"
     command_env = {
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTEST_ADDOPTS": "-p no:cacheprovider",
-        "XDG_CACHE_HOME": f"{cache_root}/xdg",
-        "npm_config_cache": f"{cache_root}/npm",
+        "HOME": fighter_home,
+        "GRADLE_USER_HOME": f"{fighter_home}/.gradle",
+        "ANDROID_USER_HOME": f"{fighter_home}/.android",
+        "JAVA_TOOL_OPTIONS": f"-Duser.home={fighter_home}",
+        "XDG_CACHE_HOME": f"{fighter_home}/.cache",
+        "npm_config_cache": f"{fighter_home}/.npm",
     }
     ex = VmExecutor(
         host="127.0.0.1", port=VM_PORT, user="skitarii", key=VM_KEY,

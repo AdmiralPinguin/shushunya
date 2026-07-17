@@ -656,6 +656,15 @@ fi
 sudo -n /usr/local/sbin/skitarii-boundary mkdir -p -- "$home/work"
 sudo -n /usr/local/sbin/skitarii-boundary chown root:root -- "$home/work"
 sudo -n /usr/local/sbin/skitarii-boundary chmod 0711 -- "$home/work"
+# Persistent fighter HOME: mission commands run with ProtectHome=read-only plus
+# ReadWritePaths=/home/skitarii/work, and the passwd home is root-owned — so JVM
+# tools (gradle native services, the Android plugin's ~/.android) need a real
+# writable home INSIDE work. Created once, owned by the fighter, never wiped.
+if [ ! -d "$home/work/home" ]; then
+  sudo -n /usr/local/sbin/skitarii-boundary mkdir -p -- "$home/work/home"
+  sudo -n /usr/local/sbin/skitarii-boundary chown -hR skitarii:skitarii -- "$home/work/home"
+  sudo -n /usr/local/sbin/skitarii-boundary chmod 0700 -- "$home/work/home"
+fi
 sudo -n /usr/local/sbin/skitarii-boundary mkdir -p -- "$home/work/.skitarii-tmp"
 sudo -n /usr/local/sbin/skitarii-boundary chmod 0755 -- "$home/work/.skitarii-tmp"
 for tmp_name in tmp var-tmp dev-shm run-user; do
