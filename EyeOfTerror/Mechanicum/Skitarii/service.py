@@ -1222,11 +1222,19 @@ def _sanitize_git_control(ex: VmExecutor, *, preserve_patch: bool = False) -> No
 
 
 def _scrub_runtime_debris(ex: VmExecutor) -> None:
+    # Interpreter caches PLUS standard build/dependency trees. The fighter
+    # legitimately downloads its own tooling into the isolated sandbox (gradle
+    # distributions, node_modules, …), but none of that may ride into the patch
+    # bundle: a greenfield Android project otherwise drags >20MB of .gradle
+    # caches into the diff and trips MAX_PATCH_BYTES. Deliverable is source.
     command = (
         "/usr/bin/find . -path ./.git -prune -o -type f "
         "\\( -name '*.pyc' -o -name '*.pyo' \\) -exec /usr/bin/rm -f -- {} +; "
         "/usr/bin/find . -path ./.git -prune -o -type d "
-        "\\( -name __pycache__ -o -name .pytest_cache \\) -prune "
+        "\\( -name __pycache__ -o -name .pytest_cache -o -name .gradle "
+        "-o -name build -o -name .cxx -o -name node_modules "
+        "-o -name .venv -o -name venv -o -name dist -o -name target "
+        "-o -name .m2 -o -name .cache \\) -prune "
         "-exec /usr/bin/rm -rf -- {} +"
     )
     _checked_bash(ex, command, timeout=60)

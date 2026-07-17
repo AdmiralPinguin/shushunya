@@ -148,8 +148,11 @@ def _llm_settings() -> dict[str, Any]:
     base = os.environ.get("SKITARII_LLM_BASE_URL", "http://127.0.0.1:8081/v1").rstrip("/")
     if not base.endswith("/v1"):
         base += "/v1"
-    max_tokens = int(os.environ.get("SKITARII_LLM_MAX_TOKENS", "8192"))
-    context_window = int(os.environ.get("SKITARII_LLM_CONTEXT_TOKENS", "32768"))
+    # Defaults mirror the live fighter backend: llama-server --ctx-size 65536 with a
+    # single slot. The reasoning model spends tokens thinking before each tool call,
+    # so the per-reply budget needs headroom too (compaction still fires early).
+    max_tokens = int(os.environ.get("SKITARII_LLM_MAX_TOKENS", "16384"))
+    context_window = int(os.environ.get("SKITARII_LLM_CONTEXT_TOKENS", "65536"))
     context_margin = int(os.environ.get("SKITARII_LLM_CONTEXT_MARGIN_TOKENS", "2048"))
     default_compact_at = max(512, context_window - max_tokens - context_margin)
     return {
