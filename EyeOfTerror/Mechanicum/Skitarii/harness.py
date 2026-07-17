@@ -1071,6 +1071,16 @@ def run_fighter(goal: str, checks: list[Any], executor: Any,
         if not tool_calls:
             content = str(msg.get("content") or "").strip()
             _append_transcript(transcript, {"step": step, "prose": content[:500]})
+            # A reasoning model can spend an entire multi-minute generation thinking
+            # without calling a tool. Silence in the owner's feed looks like a hang,
+            # so surface these steps too — he reads the feed to catch exactly this.
+            reasoning = str(msg.get("reasoning_content") or "").strip()
+            if content:
+                emit(f"Пишет без действия: {content[:140]}")
+            elif reasoning:
+                emit(f"Думает: …{reasoning[-140:]}")
+            else:
+                emit("Пустой шаг без действия — подталкиваю к инструментам.")
             messages.append({"role": "assistant", "content": content})
             messages.append({"role": "user", "content": "Use the tools. If you are finished and the checks passed, call done."})
             pressured, used_tokens = _context_pressure(reply, messages, settings)
