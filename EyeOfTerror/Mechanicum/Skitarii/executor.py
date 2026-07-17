@@ -24,8 +24,12 @@ from typing import Any, Callable
 _BOUNDARY_ACQUIRE_LOCK = threading.Lock()
 _QUARANTINED_BOUNDARIES: list["_ProcessBoundaryLease"] = []
 MAX_COMMAND_OUTPUT_BYTES = int(os.environ.get("SKITARII_MAX_COMMAND_OUTPUT_BYTES", "4000000"))
-MAX_SANDBOX_STORAGE_BYTES = int(os.environ.get("SKITARII_MAX_STORAGE_BYTES", "1000000000"))
-MAX_SANDBOX_FILES = int(os.environ.get("SKITARII_MAX_STORAGE_FILES", "50000"))
+# PERSISTENT VM: the fighter is SUPPOSED to accumulate toolchains and caches
+# (an Android SDK alone is ~1GB / ~100k files), so the old 1GB/50k guards —
+# sized for the ephemeral tmpfs era — would veto every command on a healthy
+# sandbox. The VM disk is 40G with ~6G used by the OS; cap near the disk.
+MAX_SANDBOX_STORAGE_BYTES = int(os.environ.get("SKITARII_MAX_STORAGE_BYTES", "32000000000"))
+MAX_SANDBOX_FILES = int(os.environ.get("SKITARII_MAX_STORAGE_FILES", "2000000"))
 BOUNDARY_HELPER_VERSION = "skitarii-boundary-v3"
 BOUNDARY_HELPER_SHA256 = "3d41c67e619aa0260201137094b25c1d1bfcf9167916bfecd81cfb4a23aafda2"
 _ARTIFACT_POLICY_ERRNOS = {
