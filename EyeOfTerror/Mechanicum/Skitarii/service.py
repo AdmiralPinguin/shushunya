@@ -195,11 +195,26 @@ def _mission_executor(task_id: str) -> VmExecutor:
     run_suffix = uuid.uuid4().hex[:16]
     workdir = f"/home/skitarii/work/mission-{run_suffix}"
     cache_root = f"/tmp/skitarii-cache-{run_suffix}"
+    # Pre-baked toolchain lives in the VM's persistent system area (/opt, survives the
+    # per-mission home wipe). Point every fighter command at it so a build task uses the
+    # ready JDK/Android SDK/gradle instead of re-downloading ~1GB into the ephemeral
+    # sandbox each run. Harmless if /opt is empty — PATH still holds the system dirs.
+    _tc = "/opt/skitarii-toolchain"
     command_env = {
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTEST_ADDOPTS": "-p no:cacheprovider",
         "XDG_CACHE_HOME": f"{cache_root}/xdg",
         "npm_config_cache": f"{cache_root}/npm",
+        "JAVA_HOME": f"{_tc}/jdk",
+        "ANDROID_HOME": f"{_tc}/android-sdk",
+        "ANDROID_SDK_ROOT": f"{_tc}/android-sdk",
+        "GRADLE_USER_HOME": f"{_tc}/gradle-home",
+        "PATH": (
+            f"{_tc}/jdk/bin:{_tc}/gradle/bin:"
+            f"{_tc}/android-sdk/cmdline-tools/latest/bin:"
+            f"{_tc}/android-sdk/platform-tools:"
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        ),
     }
     ex = VmExecutor(
         host="127.0.0.1", port=VM_PORT, user="skitarii", key=VM_KEY,

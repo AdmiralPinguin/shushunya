@@ -266,7 +266,48 @@ write_files:
     content: |
       kernel.core_pattern=|/bin/false
       fs.suid_dumpable=0
+  - path: /opt/skitarii-provision-toolchain.sh
+    owner: root:root
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Bake the Android build toolchain into the VM's persistent system area so code
+      # missions never re-download ~1GB into their ephemeral sandbox. Lives in /opt
+      # (survives the per-mission /home/skitarii wipe). Fail-soft: any network hiccup
+      # leaves PATH intact and the fighter fetches what's missing itself.
+      set -u
+      TC=/opt/skitarii-toolchain
+      GRADLE_VER=8.7
+      CMDLINE_BUILD=11076708
+      export DEBIAN_FRONTEND=noninteractive
+      mkdir -p "$TC"
+      # JDK 17 (AGP 8.x needs 17) via apt, pinned to a stable path.
+      apt-get install -y --no-install-recommends openjdk-17-jdk-headless unzip || true
+      ln -sfn /usr/lib/jvm/java-17-openjdk-amd64 "$TC/jdk"
+      # Gradle
+      if [ ! -x "$TC/gradle/bin/gradle" ]; then
+        curl -fsSL "https://services.gradle.org/distributions/gradle-${GRADLE_VER}-bin.zip" -o /tmp/gradle.zip \
+          && unzip -q /tmp/gradle.zip -d "$TC" && ln -sfn "$TC/gradle-${GRADLE_VER}" "$TC/gradle" && rm -f /tmp/gradle.zip
+      fi
+      # Android cmdline-tools + core packages
+      if [ ! -x "$TC/android-sdk/cmdline-tools/latest/bin/sdkmanager" ]; then
+        mkdir -p "$TC/android-sdk/cmdline-tools"
+        curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_BUILD}_latest.zip" -o /tmp/cmdline.zip \
+          && unzip -q /tmp/cmdline.zip -d "$TC/android-sdk/cmdline-tools" \
+          && mv "$TC/android-sdk/cmdline-tools/cmdline-tools" "$TC/android-sdk/cmdline-tools/latest" && rm -f /tmp/cmdline.zip
+      fi
+      export JAVA_HOME="$TC/jdk"
+      SDKM="$TC/android-sdk/cmdline-tools/latest/bin/sdkmanager"
+      if [ -x "$SDKM" ]; then
+        yes | "$SDKM" --sdk_root="$TC/android-sdk" --licenses >/dev/null 2>&1 || true
+        yes | "$SDKM" --sdk_root="$TC/android-sdk" "platform-tools" "platforms;android-34" "build-tools;34.0.0" || true
+      fi
+      # World-readable toolchain; writable shared gradle cache so deps persist too.
+      chmod -R a+rX "$TC" 2>/dev/null || true
+      mkdir -p "$TC/gradle-home" && chmod 1777 "$TC/gradle-home"
+      echo "skitarii toolchain provision done: $(date -u)"
 runcmd:
+  - bash /opt/skitarii-provision-toolchain.sh > /var/log/skitarii-toolchain.log 2>&1 &
   - if [ -f /etc/sudoers.d/90-cloud-init-users ]; then sed -i -E '/^[[:space:]]*skitarii[[:space:]]+ALL[[:space:]]*=.*NOPASSWD:[[:space:]]*ALL[[:space:]]*$/d' /etc/sudoers.d/90-cloud-init-users; fi
   - mkdir -p /home/skitarii/.ssh /home/skitarii/work
   - chown -hR root:root /home/skitarii
