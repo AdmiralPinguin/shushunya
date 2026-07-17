@@ -2393,11 +2393,16 @@ def _mission_revision_guidance(mission: Any) -> str:
     )
 
 
+_DEFAULT_WALL_SEC = int(os.environ.get("SKITARII_DEFAULT_WALL_SEC", "14400"))   # 4h/fighter
+_DEFAULT_MAX_STEPS = int(os.environ.get("SKITARII_DEFAULT_MAX_STEPS", "120"))
+_DEFAULT_MAX_ROUNDS = int(os.environ.get("SKITARII_DEFAULT_MAX_ROUNDS", "5"))
+
+
 def _remaining_mission_wall_seconds(payload: dict[str, Any], mission: Any) -> int:
     try:
-        configured = max(1, int(payload.get("max_wall_sec") or 3600))
+        configured = max(1, int(payload.get("max_wall_sec") or _DEFAULT_WALL_SEC))
     except (TypeError, ValueError):
-        configured = 3600
+        configured = _DEFAULT_WALL_SEC
     created = getattr(mission, "created", None) if mission is not None else None
     if type(created) not in {int, float}:
         return configured
@@ -2781,8 +2786,8 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
             verdict = run_mission(goal, ex, checks=checks, task_id=task_id,
                                   memory_task_id=task_memory_id,
                                   ask_fn=ask_fn, cancel_fn=cancel_fn,
-                                  max_fighter_rounds=int(payload.get("max_rounds") or 3),
-                                  max_steps=int(payload.get("max_steps") or 40),
+                                  max_fighter_rounds=int(payload.get("max_rounds") or _DEFAULT_MAX_ROUNDS),
+                                  max_steps=int(payload.get("max_steps") or _DEFAULT_MAX_STEPS),
                                   max_wall_sec=_remaining_mission_wall_seconds(payload, mission),
                                   durable_checkpoint_fn=durable_workspace_checkpoint,
                                   progress=note)
@@ -3215,7 +3220,7 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
                         parent_task_id=parent_task_id,
                         ask_fn=ask_fn,
                         cancel_fn=cancel_fn,
-                        max_steps=int(payload.get("max_steps") or 40),
+                        max_steps=int(payload.get("max_steps") or _DEFAULT_MAX_STEPS),
                         max_wall_sec=_remaining_mission_wall_seconds(payload, mission),
                     )
                     verdict["task_id"] = task_id
