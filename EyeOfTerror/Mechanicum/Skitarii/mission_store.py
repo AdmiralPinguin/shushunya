@@ -62,6 +62,12 @@ MAX_ACTIVE_MISSIONS = _env_int("SKITARII_MISSION_ACTIVE_MAX_COUNT", 1, 1)
 # the single active slot. Generous by design so a slow-but-alive build is never
 # reaped.
 ACTIVE_MISSION_STALE_SECONDS = _env_float("SKITARII_MISSION_ACTIVE_STALE_SECONDS", 300.0, 60.0)
+# Cancellation is cooperative but bounded: a fighter mid-LLM-call can't check the
+# cancel flag until that call returns, so a "cancelling" record can pin the single
+# active slot for many minutes (or forever if the worker thread is a zombie). Reap
+# it far sooner than a live-but-quiet mission — the slot must not stay hostage to a
+# cancel that never lands.
+CANCELLING_STALE_SECONDS = _env_float("SKITARII_MISSION_CANCELLING_STALE_SECONDS", 45.0, 5.0)
 MAX_AUTO_REVISION_ATTEMPTS = _env_int(
     "SKITARII_MISSION_AUTO_REVISION_ATTEMPTS", 3, 1
 )
@@ -484,7 +490,14 @@ def _reap_stale_active_locked() -> int:
             continue
         if not (mission.inflight or mission.status in ACTIVE_STATUSES):
             continue
-        if (now - float(getattr(mission, "updated", 0.0) or 0.0)) <= ACTIVE_MISSION_STALE_SECONDS:
+        # A cancel that hasn't landed quickly won't land at all (worker wedged in an
+        # LLM call). Free the slot on the short cancelling threshold; every other
+        # active state uses the ordinary quiet-worker threshold.
+        threshold = (
+            CANCELLING_STALE_SECONDS if mission.status == "cancelling"
+            else ACTIVE_MISSION_STALE_SECONDS
+        )
+        if (now - float(getattr(mission, "updated", 0.0) or 0.0)) <= threshold:
             continue
         prior = dict(mission.result) if isinstance(mission.result, dict) else {}
         mission.result = {
