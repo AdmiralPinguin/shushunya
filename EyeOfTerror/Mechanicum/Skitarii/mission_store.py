@@ -61,7 +61,14 @@ MAX_ACTIVE_MISSIONS = _env_int("SKITARII_MISSION_ACTIVE_MAX_COUNT", 1, 1)
 # untouched for far longer has a dead worker; its record must not keep holding
 # the single active slot. Generous by design so a slow-but-alive build is never
 # reaped.
-ACTIVE_MISSION_STALE_SECONDS = _env_float("SKITARII_MISSION_ACTIVE_STALE_SECONDS", 300.0, 60.0)
+# A reasoning fighter (Qwen3.6 with unbounded thinking) can legitimately spend many
+# minutes inside ONE LLM generation without recording an event — no tool call, so
+# `updated` does not advance. That must NOT read as a dead worker: a 300s threshold
+# false-reaped live fighters mid-thought and churned the mission into recovery. The
+# ceiling has to clear the longest a single generation can take (LLM timeout is 900s),
+# with margin. A truly crashed worker is still caught, just later; the startup
+# rehydrate and the VM boundary sweep remain the hard guarantees.
+ACTIVE_MISSION_STALE_SECONDS = _env_float("SKITARII_MISSION_ACTIVE_STALE_SECONDS", 1800.0, 60.0)
 # Cancellation is cooperative but bounded: a fighter mid-LLM-call can't check the
 # cancel flag until that call returns, so a "cancelling" record can pin the single
 # active slot for many minutes (or forever if the worker thread is a zombie). Reap
