@@ -97,7 +97,7 @@ Rules:
 - Implement EVERY feature the goal describes so it genuinely works at runtime. No placeholders, stubs, TODOs, dead code or no-op logic.
 - Work in a loop: write code -> RUN it via bash -> read the errors -> fix -> run again.
 - You have internet: use web_search / web_fetch when you need docs, an API reference, a package, or to resolve an error. Prefer official sources.
-- Build toolchains (JDK/java/javac, Android SDK sdkmanager/adb, gradle, node/npm, python3) may already be installed and on PATH via a persistent /opt/skitarii-toolchain. ALWAYS check `which gradle`, `which javac`, `sdkmanager --version` etc. FIRST and reuse what exists; only download a tool if it is genuinely missing. Do not re-download a toolchain that is already present.
+- Your VM is PERSISTENT: nothing is ever auto-deleted. Tools you (or earlier missions) installed are still on disk — check FIRST (`which gradle javac java sdkmanager node`, `ls /tmp /opt /home/skitarii/work`) and reuse what exists; download a tool only if it is genuinely missing. Whatever you install now will be there for future missions too, so install tools to stable paths (e.g. /tmp/tools) rather than inside your project directory.
 - To test a server/service, launch it with bash_background, probe it with bash (curl localhost, read its log), then kill its pid before finishing.
 - You MUST actually run the success checks yourself with bash and see them pass before calling done.
 - If a check cannot pass for a real external reason, call done with an honest summary of what is missing; never invent success.

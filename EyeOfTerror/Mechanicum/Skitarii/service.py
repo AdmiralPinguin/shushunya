@@ -201,26 +201,6 @@ def _mission_executor(task_id: str) -> VmExecutor:
         "XDG_CACHE_HOME": f"{cache_root}/xdg",
         "npm_config_cache": f"{cache_root}/npm",
     }
-    # Pre-baked toolchain lives in the VM's persistent /opt (survives the per-mission
-    # home wipe). Point every fighter command at it so a build reuses the ready
-    # JDK/Android SDK/gradle instead of re-downloading ~1GB per run. Gated: only wire
-    # this once the toolchain is actually baked into the sandbox image, otherwise a
-    # bogus JAVA_HOME would break missions that still self-provision. Flip the flag
-    # (SKITARII_TOOLCHAIN_BAKED=1) as part of the sandbox reprovision that installs it.
-    if os.environ.get("SKITARII_TOOLCHAIN_BAKED") == "1":
-        _tc = os.environ.get("SKITARII_TOOLCHAIN_ROOT", "/opt/skitarii-toolchain")
-        command_env.update({
-            "JAVA_HOME": f"{_tc}/jdk",
-            "ANDROID_HOME": f"{_tc}/android-sdk",
-            "ANDROID_SDK_ROOT": f"{_tc}/android-sdk",
-            "GRADLE_USER_HOME": f"{_tc}/gradle-home",
-            "PATH": (
-                f"{_tc}/jdk/bin:{_tc}/gradle/bin:"
-                f"{_tc}/android-sdk/cmdline-tools/latest/bin:"
-                f"{_tc}/android-sdk/platform-tools:"
-                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-            ),
-        })
     ex = VmExecutor(
         host="127.0.0.1", port=VM_PORT, user="skitarii", key=VM_KEY,
         workdir=workdir, process_boundary=True, command_env=command_env,

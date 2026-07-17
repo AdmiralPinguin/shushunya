@@ -636,29 +636,26 @@ for proc in /proc/[0-9]*; do
   echo "pre-existing sandbox uid process survived: $pid" >&2
   exit 1
 done
-set -- /tmp /var/tmp /dev/shm
-[ ! -d "/run/user/$uid" ] || set -- "$@" "/run/user/$uid"
-sudo -n /usr/local/sbin/skitarii-boundary find "$@" -xdev -mindepth 1 -user "$uid" -exec /usr/bin/rm -rf -- {} + 2>/dev/null
-test -z "$(find "$@" -xdev -mindepth 1 -user "$uid" -print -quit 2>/dev/null)"
+# PERSISTENT VM (owner's design): NOTHING is deleted between missions. No /tmp
+# sweep, no home wipe, no work reset, no tmpfs. Tools the fighter installed, its
+# caches and old mission workdirs all stay on disk so the next mission finds and
+# reuses them. Only orphan processes are killed (above) and the SSH door is
+# re-hardened (below). The one legacy umount converts an old tmpfs work mount
+# back to the plain persistent directory.
 if sudo -n /usr/local/sbin/skitarii-boundary mountpoint -q -- "$home/work"; then
   sudo -n /usr/local/sbin/skitarii-boundary umount -- "$home/work"
 fi
 ! sudo -n /usr/local/sbin/skitarii-boundary mountpoint -q -- "$home/work"
-sudo -n /usr/local/sbin/skitarii-boundary find "$home" -mindepth 1 -maxdepth 1 ! -name .ssh ! -name work -exec /usr/bin/rm -rf -- {} +
 sudo -n /usr/local/sbin/skitarii-boundary find "$home/.ssh" -mindepth 1 -maxdepth 1 ! -name authorized_keys -exec /usr/bin/rm -rf -- {} +
-sudo -n /usr/local/sbin/skitarii-boundary chown -hR root:root "$home"
 sudo -n /usr/local/sbin/skitarii-boundary chmod 0755 "$home"
 sudo -n /usr/local/sbin/skitarii-boundary chmod 0755 "$home/.ssh"
 if [ -e "$home/.ssh/authorized_keys" ]; then
   sudo -n /usr/local/sbin/skitarii-boundary chown root:root "$home/.ssh/authorized_keys"
   sudo -n /usr/local/sbin/skitarii-boundary chmod 0644 "$home/.ssh/authorized_keys"
 fi
-sudo -n /usr/local/sbin/skitarii-boundary rm -rf -- "$home/work"
 sudo -n /usr/local/sbin/skitarii-boundary mkdir -p -- "$home/work"
 sudo -n /usr/local/sbin/skitarii-boundary chown root:root -- "$home/work"
 sudo -n /usr/local/sbin/skitarii-boundary chmod 0711 -- "$home/work"
-sudo -n /usr/local/sbin/skitarii-boundary mount -t tmpfs -o size=1073741824,nr_inodes=50000,nosuid,nodev,mode=0711,uid=0,gid=0 tmpfs "$home/work"
-sudo -n /usr/local/sbin/skitarii-boundary mountpoint -q -- "$home/work"
 sudo -n /usr/local/sbin/skitarii-boundary mkdir -p -- "$home/work/.skitarii-tmp"
 sudo -n /usr/local/sbin/skitarii-boundary chmod 0755 -- "$home/work/.skitarii-tmp"
 for tmp_name in tmp var-tmp dev-shm run-user; do
@@ -811,51 +808,26 @@ done
         return ok
 
     def remove_boundary_storage(self, *, strict: bool = True) -> bool:
-        """Trusted cleanup of all guest work/cache storage while the flock is held."""
-        cache_roots: set[str] = set()
-        for key in ("XDG_CACHE_HOME", "npm_config_cache"):
-            value = str(self.command_env.get(key) or "")
-            if value.startswith("/tmp/skitarii-cache-"):
-                cache_roots.add(value)
-                cache_roots.add(posixpath.dirname(value))
-        remove_caches = " ".join(shlex.quote(path) for path in sorted(cache_roots))
+        """Release the process boundary WITHOUT deleting any guest data.
+
+        PERSISTENT VM (owner's design): mission workdirs, caches and every file
+        the fighter created stay on disk forever so later missions reuse them.
+        This step only stops the mission slice and reverts its runtime
+        properties; the old storage-wipe (work reset, cache/tmp sweep) is gone."""
         work_root = shlex.quote(f"/home/{self.user}/work")
-        temp_cleanup = (
-            "uid=$(id -u); set -- /tmp /var/tmp /dev/shm; "
-            "[ ! -d \"/run/user/$uid\" ] || set -- \"$@\" \"/run/user/$uid\"; "
-            "sudo -n /usr/local/sbin/skitarii-boundary find \"$@\" -xdev -mindepth 1 "
-            "-user \"$uid\" -exec /usr/bin/rm -rf -- {} + 2>/dev/null; "
-            "test -z \"$(find \"$@\" -xdev -mindepth 1 -user \"$uid\" "
-            "-print -quit 2>/dev/null)\""
-        )
         if self.boundary_release_on_cleanup:
             remote = (
                 "set -e; "
                 + f"sudo -n /usr/local/sbin/skitarii-boundary systemctl stop {shlex.quote(self.process_slice)} >/dev/null 2>&1; "
-                + f"sudo -n /usr/local/sbin/skitarii-boundary umount -- {work_root}; "
+                + f"if sudo -n /usr/local/sbin/skitarii-boundary mountpoint -q -- {work_root}; then "
+                + f"sudo -n /usr/local/sbin/skitarii-boundary umount -- {work_root}; fi; "
                 + f"! sudo -n /usr/local/sbin/skitarii-boundary mountpoint -q -- {work_root}; "
-                + f"sudo -n /usr/local/sbin/skitarii-boundary rm -rf -- {work_root}; sudo -n /usr/local/sbin/skitarii-boundary mkdir -p -- {work_root}; "
-                + f"sudo -n /usr/local/sbin/skitarii-boundary chown root:root -- {work_root}; sudo -n /usr/local/sbin/skitarii-boundary chmod 0711 -- {work_root}; "
-                + (f"sudo -n /usr/local/sbin/skitarii-boundary rm -rf -- {remove_caches}; " if remove_caches else "")
-                + temp_cleanup + "; "
+                + f"sudo -n /usr/local/sbin/skitarii-boundary mkdir -p -- {work_root}; "
                 + f"sudo -n /usr/local/sbin/skitarii-boundary systemctl revert {shlex.quote(self.process_slice)}; "
-                + f"! sudo -n /usr/local/sbin/skitarii-boundary systemctl is-active --quiet {shlex.quote(self.process_slice)}; "
-                + f"test -z \"$(sudo -n /usr/local/sbin/skitarii-boundary find {work_root} -mindepth 1 -print -quit)\""
+                + f"! sudo -n /usr/local/sbin/skitarii-boundary systemctl is-active --quiet {shlex.quote(self.process_slice)}"
             )
         else:
-            expected_root = PurePosixPath(f"/home/{self.user}/work")
-            work_path = PurePosixPath(self.workdir)
-            if work_path == expected_root or expected_root not in work_path.parents:
-                if strict:
-                    raise RuntimeError(f"unsafe bounded workdir: {self.workdir}")
-                return False
-            q_workdir = shlex.quote(work_path.as_posix())
-            remote = (
-                "set -e; "
-                + f"sudo -n /usr/local/sbin/skitarii-boundary rm -rf -- {q_workdir}; "
-                + temp_cleanup + "; "
-                f"test ! -e {q_workdir} && test ! -L {q_workdir}"
-            )
+            remote = "true"
         try:
             proc = subprocess.run(
                 self._ssh_base() + [remote],
@@ -876,20 +848,10 @@ done
             if strict and self.process_boundary:
                 raise RuntimeError("sandbox boundary lease is unavailable for temp scrub")
             return not self.process_boundary
-        remote = (
-            "set -e; shared=/home/skitarii/work/.skitarii-tmp; "
-            "sudo -n /usr/local/sbin/skitarii-boundary find \"$shared/tmp\" "
-            "\"$shared/var-tmp\" \"$shared/dev-shm\" \"$shared/run-user\" "
-            "-xdev -mindepth 1 -exec /usr/bin/rm -rf -- {} +; "
-            "test -z \"$(find \"$shared/tmp\" \"$shared/var-tmp\" \"$shared/dev-shm\" "
-            "\"$shared/run-user\" -xdev -mindepth 1 -print -quit 2>/dev/null)\"; "
-            "uid=$(id -u); set -- /tmp /var/tmp /dev/shm; "
-            "[ ! -d \"/run/user/$uid\" ] || set -- \"$@\" \"/run/user/$uid\"; "
-            "sudo -n /usr/local/sbin/skitarii-boundary find \"$@\" -xdev -mindepth 1 "
-            "-user \"$uid\" -exec /usr/bin/rm -rf -- {} + 2>/dev/null; "
-            "test -z \"$(find \"$@\" -xdev -mindepth 1 -user \"$uid\" "
-            "-print -quit 2>/dev/null)\""
-        )
+        # PERSISTENT VM (owner's design): temp artifacts are the fighter's data too
+        # (downloaded tools live in /tmp) and must survive between stages and
+        # missions. The scrub is intentionally a no-op.
+        remote = "true"
         try:
             proc = subprocess.run(
                 self._ssh_base() + [remote], capture_output=True, text=True, timeout=45,
