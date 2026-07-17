@@ -102,12 +102,14 @@ def reconsider(top_goal: str, stuck_goal: str, failed: dict[str, Any]) -> str:
 def _run_with_retry(goal: str, executor: Any, task_id: str, *, memory_task_id: str,
                     top_goal: str,
                     note, max_wall_sec: int, rounds: int = 2, ask_fn=None,
-                    cancel_fn=None, durable_checkpoint_fn=None, progress=None) -> dict[str, Any]:
+                    cancel_fn=None, durable_checkpoint_fn=None, progress=None,
+                    build_project: bool = False) -> dict[str, Any]:
     """Run a fighter; if it gets stuck, let the planner change the approach once."""
     res = run_mission(goal, executor, task_id=task_id,
                       memory_task_id=memory_task_id, max_fighter_rounds=rounds,
                       max_wall_sec=max_wall_sec, ask_fn=ask_fn, cancel_fn=cancel_fn,
-                      durable_checkpoint_fn=durable_checkpoint_fn, progress=progress)
+                      durable_checkpoint_fn=durable_checkpoint_fn, progress=progress,
+                      build_project=build_project)
     if res.get("accepted") or res.get("status") == "cancelled":
         return res
     note("Планировщик: скитарий застрял — переобдумываю подход.")
@@ -118,7 +120,8 @@ def _run_with_retry(goal: str, executor: Any, task_id: str, *, memory_task_id: s
     res2 = run_mission(new_goal, executor, task_id=task_id,
                        memory_task_id=memory_task_id, max_fighter_rounds=rounds,
                        max_wall_sec=max_wall_sec, ask_fn=ask_fn, cancel_fn=cancel_fn,
-                       durable_checkpoint_fn=durable_checkpoint_fn, progress=progress)
+                       durable_checkpoint_fn=durable_checkpoint_fn, progress=progress,
+                       build_project=build_project)
     res2["reconsidered"] = True
     return res2
 
@@ -285,10 +288,10 @@ def plan_and_run(goal: str, executor: Any, *, task_id: str = "",
                                max_wall_sec=max_wall_sec, ask_fn=ask_fn,
                                cancel_fn=cancel_fn,
                                durable_checkpoint_fn=durable_checkpoint_fn,
-                               progress=progress)
+                               progress=progress, build_project=True)
 
     note(f"Планировщик разбил на {len(subtasks)} подзадач: " + "; ".join(s["title"] for s in subtasks))
-    top_spec = build_spec(goal)          # final acceptance for the whole task
+    top_spec = build_spec(goal, build_project=True)   # final acceptance = the project builds
     waves = _dependency_waves(subtasks)
     sub_results: list[dict[str, Any]] = []
     per = max(300, max_wall_sec // max(1, len(subtasks)))

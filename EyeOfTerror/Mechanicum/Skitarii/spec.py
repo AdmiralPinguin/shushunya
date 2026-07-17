@@ -1731,7 +1731,61 @@ def build_held_out_checks(goal: str) -> list[dict[str, Any]]:
     return list(build_held_out_plan(goal).get("checks") or [])
 
 
-def build_spec(goal: str) -> dict[str, Any]:
+_INSPECTION_HEADS = {
+    "grep", "egrep", "fgrep", "rg", "ag", "test", "[", "ls", "cat",
+    "stat", "file", "find", "head", "tail", "wc", "readlink", "realpath",
+}
+
+
+def _is_brittle_presence_check(check: dict) -> bool:
+    """True for a bare command whose FIRST token merely inspects files (grep/test/
+    ls/cat…). Such a check proves a file exists or literally contains some text —
+    NOT that the code works — so it makes valid-but-differently-written code fail
+    acceptance forever (e.g. grep 'apply plugin' rejects a modern plugins{} block).
+    A check that RUNS the deliverable and greps its OUTPUT starts with the program,
+    not with grep, and an expect_stdout/oracle check asserts computed output — both
+    are behavioural and kept. Only leading file-inspection with no output evidence
+    is dropped."""
+    if not isinstance(check, dict):
+        return True
+    if str(check.get("expect_stdout") or "").strip() or str(check.get("oracle") or "").strip():
+        return False
+    cmd = str(check.get("cmd") or "").strip()
+    if not cmd:
+        return True
+    try:
+        head = shlex.split(cmd)[0]
+    except ValueError:
+        head = cmd.split()[0] if cmd.split() else ""
+    return head.rsplit("/", 1)[-1] in _INSPECTION_HEADS
+
+
+# (signal substrings in goal/deliverables, canonical build command). The real build
+# succeeding IS the behavioural acceptance of a whole-project task — not a grep for
+# config strings that the sandbox cannot even prove correct.
+_BUILD_ECOSYSTEMS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("build.gradle", "gradlew", "android", "androidmanifest", "gradle", ".kt"),
+     "if [ -x ./gradlew ]; then ./gradlew assembleDebug --stacktrace; "
+     "else gradle assembleDebug --stacktrace; fi"),
+    (("package.json", "node_modules", "react", "vite", "webpack", ".ts", "tsconfig"),
+     "npm ci 2>/dev/null || npm install; npm run build --if-present && (npm test --if-present || true)"),
+    (("cargo.toml", ".rs"), "cargo build --release && cargo test"),
+    (("pom.xml",), "mvn -q -B package"),
+    (("go.mod",), "go build ./... && go test ./..."),
+    (("cmakelists",), "cmake -S . -B build && cmake --build build"),
+    (("makefile",), "make"),
+)
+
+
+def _detect_build_check(goal: str, deliverables: list[str]) -> dict | None:
+    hay = (goal + "\n" + "\n".join(deliverables)).lower()
+    for signals, command in _BUILD_ECOSYSTEMS:
+        if any(s in hay for s in signals):
+            return {"cmd": command}
+    return None
+
+
+def build_spec(goal: str, *, build_project: bool = False) -> dict[str, Any]:
     """Returns {"deliverables": [...], "checks": [...]}.
 
     A check is a STRUCTURED dict (never a hand-written shell one-liner — the model
@@ -1740,6 +1794,10 @@ def build_spec(goal: str) -> dict[str, Any]:
       {"cmd": "...", "expect_stdout": "14"}   -> pass iff trimmed stdout == "14"
       {"cmd": "...", "oracle": "python3 -c 'print(3*(5+2)-8/4)'"}
                                               -> pass iff stdout == oracle's stdout
+
+    ``build_project`` marks a WHOLE-project task (not a scaffolding subtask): its true
+    acceptance is that the project actually builds, so the ecosystem build command is
+    injected as the primary behavioural gate.
     """
     prompt = (
         "You prepare acceptance for a coding task. Return ONE strict JSON object and nothing else:\n"
@@ -1749,16 +1807,18 @@ def build_spec(goal: str) -> dict[str, Any]:
         '             {"cmd": "...", "oracle": "command that computes the correct answer"} ]}\n'
         "Rules for checks:\n"
         "- Each check is a JSON object, NOT a shell string. Do not write pipes/grep/test yourself.\n"
-        "- 'cmd' is a single command that runs the deliverable (e.g. \"python3 calc.py '2+3*4'\").\n"
+        "- 'cmd' is a single command that RUNS or BUILDS the deliverable (e.g. \"python3 calc.py '2+3*4'\",\n"
+        "  \"./gradlew assembleDebug\", \"npm run build\", \"cargo test\").\n"
+        "- FORBIDDEN: acceptance by inspecting file contents (grep/test/ls/cat/find for a literal string or a\n"
+        "  path). That only proves a file holds some text — not that the code works — and wrongly rejects\n"
+        "  valid code written differently (a modern plugins{} block, a renamed symbol). Acceptance MUST\n"
+        "  execute the deliverable: build it, run it, or run its tests.\n"
         "- NEVER put an answer you computed in your head into expect_stdout — you make arithmetic mistakes.\n"
         "  Use expect_stdout ONLY for values written literally in the task text.\n"
         "- For anything you'd have to compute, use 'oracle': a command (python3 -c ... / node -e ...) that\n"
         "  produces the correct answer, so the real interpreter is the source of truth, not you.\n"
-        "- A bare {\"cmd\": ...} (no expect/oracle) passes on exit code 0 — use it ONLY for 'does it run / "
-        "compile'. A compile/syntax check ALONE is NOT acceptance: wrong logic would pass it.\n"
-        "- REQUIRED: include at least one BEHAVIOURAL check that verifies the program does the right thing "
-        "(expect_stdout or oracle on real inputs, or a command that runs the project's tests). Cover the main "
-        "case and at least one edge case. Never rely on compile-only.\n"
+        "- A compile/build check alone is weak for logic; add a BEHAVIOURAL check (expect_stdout or oracle on\n"
+        "  real inputs, or the project's tests) covering the main case and one edge case where feasible.\n"
         "Keep 2-6 checks, runnable on bare Ubuntu with php, python3, node.\n\n"
         f"TASK:\n{goal}"
     )
@@ -1768,12 +1828,24 @@ def build_spec(goal: str) -> dict[str, Any]:
         spec = {}
     deliverables = [str(d) for d in (spec.get("deliverables") or []) if isinstance(d, str)]
     checks = _structured_checks(spec.get("checks"), allow_bare=True, goal=goal)
-    # Fallback: the model gave files but no checks. Never return an empty check set
-    # (that would let a mission be "accepted" having proven nothing). Synthesize a
-    # minimum real check per deliverable — that it at least parses/compiles.
+    # Drop brittle file-inspection checks: they assert a file contains a literal, not
+    # that the code works, and loop forever against valid-but-different code.
+    checks = [c for c in checks if not _is_brittle_presence_check(c)]
+    if build_project:
+        build_check = _detect_build_check(goal, deliverables)
+        if build_check is not None and build_check not in checks:
+            # The real build succeeding is THE behavioural gate for the whole task.
+            checks = [build_check, *checks]
+    # Fallback: the model gave files but no runnable checks survived. Never return an
+    # empty set (that accepts having proven nothing). Assert each deliverable at least
+    # parses / is well-formed — validity, not a magic string.
     if not checks and deliverables:
-        _syntax = {".py": "python3 -m py_compile {p}", ".php": "php -l {p}",
-                   ".js": "node --check {p}", ".sh": "bash -n {p}"}
+        _syntax = {
+            ".py": "python3 -m py_compile {p}", ".php": "php -l {p}",
+            ".js": "node --check {p}", ".sh": "bash -n {p}",
+            ".json": "python3 -c \"import json;json.load(open({p!r}))\"",
+            ".xml": "python3 -c \"import xml.dom.minidom as m;m.parse({p!r})\"",
+        }
         for d in deliverables:
             ext = "." + d.rsplit(".", 1)[-1] if "." in d else ""
             if ext in _syntax:

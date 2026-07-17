@@ -23,10 +23,12 @@ def run_mission(goal: str, executor: Any, *, checks: list[str] | None = None,
                 ask_fn=None, cancel_fn=None,
                 max_fighter_rounds: int = 2, max_steps: int = 40,
                 max_wall_sec: int = 3600,
-                durable_checkpoint_fn=None, progress=None) -> dict[str, Any]:
+                durable_checkpoint_fn=None, progress=None,
+                build_project: bool = False) -> dict[str, Any]:
     """Drive one code mission end to end. Returns a verdict dict.
 
-    `progress(text)` — optional live plain-language feed of what the fighter does."""
+    `progress(text)` — optional live plain-language feed of what the fighter does.
+    `build_project` — whole-project task: acceptance includes the real build."""
     def emit(text: str) -> None:
         if progress is None:
             return
@@ -42,7 +44,7 @@ def run_mission(goal: str, executor: Any, *, checks: list[str] | None = None,
         norm = [c if isinstance(c, dict) else {"cmd": str(c)} for c in checks]
         spec = {"deliverables": [], "checks": norm}
     else:
-        spec = build_spec(goal)
+        spec = build_spec(goal, build_project=build_project)
     checks = spec["checks"]
     deliverables = spec["deliverables"]
 
