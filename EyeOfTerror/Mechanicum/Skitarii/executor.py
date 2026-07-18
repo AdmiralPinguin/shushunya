@@ -1142,8 +1142,22 @@ fi
         if unit and result.get("returncode") in {124, 125}:
             self._stop_one_process_unit(unit)
         if result.get("returncode") == 125:
-            self.boundary_poisoned = True
-            self.stop_process_boundary(strict=False)
+            # 125 is the boundary's internal sentinel, but systemd-run also passes
+            # through the PAYLOAD's own exit status — a fighter script, `timeout`
+            # or git returning 125 must NOT poison the whole sandbox lifecycle.
+            # (That false poison cancelled missions all night: poisoned bash makes
+            # the workspace checkpoint uncapturable, so every next attempt started
+            # from scratch.) Poison only on evidence the UNIT itself failed to run.
+            err = str(result.get("stderr") or "")
+            unit_launch_failure = (
+                "Failed to start transient service" in err
+                or "Failed to connect to bus" in err
+                or "skitarii-boundary" in err
+                or "sudo:" in err
+            )
+            if unit_launch_failure:
+                self.boundary_poisoned = True
+                self.stop_process_boundary(strict=False)
         storage_ok, storage_error = self._check_storage_bounds()
         if not storage_ok:
             self.boundary_poisoned = True
