@@ -333,8 +333,13 @@ def plan_and_run(goal: str, executor: Any, *, task_id: str = "",
     # whole-task acceptance: re-run the top-level checks against the combined project
     acceptance = accept(executor, top_spec["deliverables"], top_spec["checks"])
     note(f"Планировщик: итоговая приёмка — {'принято' if acceptance['accepted'] else 'НЕ принято'}.")
+    # A failed FINAL acceptance is retryable repair work: without these flags the
+    # finalize gate skipped the workspace checkpoint and a fully assembled project
+    # (hundreds of files) was thrown away — the next attempt restarted from scratch.
     return {"status": "done" if acceptance["accepted"] else "failed",
             "accepted": acceptance["accepted"], "subtasks": sub_results,
             "summary": f"Собрано из {len(subtasks)} подзадач. Итоговые проверки: "
                        f"{'все прошли' if acceptance['accepted'] else 'не все прошли'}.",
-            "artifacts": [], "checks": top_spec["checks"], "acceptance": acceptance}
+            "artifacts": [], "checks": top_spec["checks"], "acceptance": acceptance,
+            **({} if acceptance["accepted"] else
+               {"revision_required": True, "retryable": True})}

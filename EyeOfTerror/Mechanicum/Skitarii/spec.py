@@ -1764,7 +1764,12 @@ def _is_brittle_presence_check(check: dict) -> bool:
 # succeeding IS the behavioural acceptance of a whole-project task — not a grep for
 # config strings that the sandbox cannot even prove correct.
 _BUILD_ECOSYSTEMS: tuple[tuple[tuple[str, ...], str], ...] = (
+    # Self-contained: the acceptor runs with a bare PATH, so the check itself finds
+    # the toolchain (persistent /opt in the sandbox) before falling back to PATH.
     (("build.gradle", "gradlew", "android", "androidmanifest", "gradle", ".kt"),
+     'TC=/opt/skitarii-toolchain; [ -d "$TC/jdk" ] && export JAVA_HOME="$TC/jdk"; '
+     '[ -d "$TC/android-sdk" ] && export ANDROID_HOME="$TC/android-sdk" ANDROID_SDK_ROOT="$TC/android-sdk"; '
+     'export PATH="$TC/jdk/bin:$TC/gradle/bin:$PATH"; '
      "if [ -x ./gradlew ]; then ./gradlew assembleDebug --stacktrace; "
      "else gradle assembleDebug --stacktrace; fi"),
     (("package.json", "node_modules", "react", "vite", "webpack", ".ts", "tsconfig"),

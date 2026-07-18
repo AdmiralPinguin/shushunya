@@ -1841,10 +1841,15 @@ def _finalize_service_verdict(
     verdict["task_memory_id"] = task_memory_id
     verdict["root_task_id"] = root_task_id
     verdict["parent_task_id"] = parent_task_id
+    # Any non-accepted FAILED verdict is worth preserving: a missing
+    # revision_required flag once dropped a fully assembled 421-file project.
     retryable = bool(
         verdict.get("accepted") is False
-        and verdict.get("revision_required") is True
         and verdict.get("retryable") is not False
+        and (
+            verdict.get("revision_required") is True
+            or str(verdict.get("status") or "") == "failed"
+        )
     )
     if retryable and capture_workspace:
         current = verdict.get("workspace_checkpoint")
