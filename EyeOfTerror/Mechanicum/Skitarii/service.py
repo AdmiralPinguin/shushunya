@@ -1488,8 +1488,12 @@ def _capture_workspace_checkpoint(
     task_memory_id: str = "",
     root_task_id: str = "",
     parent_task_id: str = "",
+    task_id: str = "",
 ) -> dict:
-    """Capture unaccepted work before the isolated VM workspace is destroyed."""
+    """Capture unaccepted work before the isolated VM workspace is destroyed.
+
+    ``task_id`` records the CREATOR attempt: a child recovery attempt proves
+    lineage by matching its parent against the creator, not the creator's parent."""
     bundle = _build_patch_bundle(ex, base_commit, accepted=False)
     diff = str(bundle.get("unified_diff") or "")
     return {
@@ -1501,6 +1505,7 @@ def _capture_workspace_checkpoint(
         "task_memory_id": task_memory_id,
         "root_task_id": root_task_id,
         "parent_task_id": parent_task_id,
+        "task_id": task_id,
     }
 
 
@@ -1661,8 +1666,18 @@ def _restore_workspace_checkpoint(
         raise ValueError("workspace checkpoint task memory identity mismatch")
     if root_task_id and str(checkpoint.get("root_task_id") or "") != root_task_id:
         raise ValueError("workspace checkpoint root task identity mismatch")
-    if parent_task_id and str(checkpoint.get("parent_task_id") or "") != parent_task_id:
-        raise ValueError("workspace checkpoint parent task identity mismatch")
+    # Lineage: the checkpoint's CREATOR is this attempt's parent (inheritance), or
+    # both share a parent (same-attempt retry). The old equality compared the new
+    # attempt's parent to the creator's parent — a generation off — so EVERY child
+    # recovery refused its parent's work, restarted from scratch, burned its wall
+    # budget and looped. Legacy checkpoints without a creator id are accepted:
+    # provenance is already proven by memory/root identity + sha + base-tree checks,
+    # and _workspace_checkpoint_for_attempt only sources same-task-page records.
+    if parent_task_id:
+        creator = str(checkpoint.get("task_id") or "")
+        chain_parent = str(checkpoint.get("parent_task_id") or "")
+        if creator and creator != parent_task_id and chain_parent != parent_task_id:
+            raise ValueError("workspace checkpoint lineage mismatch")
     if not isinstance(diff, str) or len(diff.encode("utf-8")) > MAX_PATCH_BYTES:
         raise ValueError("workspace checkpoint patch is missing or oversized")
     if not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
@@ -1723,6 +1738,7 @@ def _recoverable_pipeline_verdict(
             task_memory_id=task_memory_id,
             root_task_id=root_task_id,
             parent_task_id=parent_task_id,
+            task_id=task_id,
         )
     except Exception as capture_exc:  # noqa: BLE001 - preserve the original failure
         checkpoint_error = f"{type(capture_exc).__name__}: {capture_exc}"[:1_000]
@@ -1846,6 +1862,7 @@ def _finalize_service_verdict(
                     task_memory_id=task_memory_id,
                     root_task_id=root_task_id,
                     parent_task_id=parent_task_id,
+                    task_id=task_id,
                 )
                 captured["task_memory_id"] = task_memory_id
                 captured["root_task_id"] = root_task_id
@@ -1894,6 +1911,7 @@ def _finalize_service_verdict(
                         task_memory_id=task_memory_id,
                         root_task_id=root_task_id,
                         parent_task_id=parent_task_id,
+                        task_id=task_id,
                     )
                     captured["task_memory_id"] = task_memory_id
                     captured["root_task_id"] = root_task_id
@@ -2671,6 +2689,7 @@ def _execute_mission_body(payload: dict, mission=None) -> dict:
                 task_memory_id=task_memory_id,
                 root_task_id=root_task_id,
                 parent_task_id=parent_task_id,
+                task_id=task_id,
             )
             has_patch = bool(
                 checkpoint.get("unified_diff")
