@@ -14,6 +14,8 @@ import urllib.request
 from pathlib import PurePosixPath
 from typing import Any
 
+from acceptor import check_kind
+
 
 def _first_json_object(content: str) -> dict[str, Any]:
     """Decode the first complete JSON object without swallowing trailing output."""
@@ -1786,8 +1788,31 @@ def _detect_build_check(goal: str, deliverables: list[str]) -> dict | None:
     hay = (goal + "\n" + "\n".join(deliverables)).lower()
     for signals, command in _BUILD_ECOSYSTEMS:
         if any(s in hay for s in signals):
-            return {"cmd": command}
+            # Behavioural by construction: build output goes to stderr (recorded for
+            # diagnosis), stdout carries only the success token, so the acceptor's
+            # structural gate sees an expect_stdout check, not a weak bare "run".
+            return {"cmd": f"({command}) 1>&2 && echo BUILD_OK",
+                    "expect_stdout": "BUILD_OK"}
     return None
+
+
+_BUILDISH_CMD_RE = re.compile(
+    r"gradlew?\b|assemble|npm run build|cargo build|mvn\b|cmake|go build|(^|[;&]\s*)make\b"
+)
+
+
+def _as_build_oracle(check: dict) -> dict:
+    """Turn a bare build command into a behavioural check (success token on stdout).
+
+    Last-resort repair for specs whose checks the acceptor's structural gate would
+    reject as compile/run-only: the fighter cannot change the checks at accept time,
+    so an unpassable spec must be fixed here. Only build-like bare commands are
+    upgraded — everything else is returned untouched."""
+    cmd = str(check.get("cmd") or "")
+    if ("expect_stdout" in check or "oracle" in check or check.get("kind") == "file_bytes"
+            or not _BUILDISH_CMD_RE.search(cmd)):
+        return check
+    return {"cmd": f"({cmd}) 1>&2 && echo BUILD_OK", "expect_stdout": "BUILD_OK"}
 
 
 def build_spec(goal: str, *, build_project: bool = False) -> dict[str, Any]:
@@ -1833,10 +1858,38 @@ def build_spec(goal: str, *, build_project: bool = False) -> dict[str, Any]:
     except Exception:
         spec = {}
     deliverables = [str(d) for d in (spec.get("deliverables") or []) if isinstance(d, str)]
-    checks = _structured_checks(spec.get("checks"), allow_bare=True, goal=goal)
-    # Drop brittle file-inspection checks: they assert a file contains a literal, not
-    # that the code works, and loop forever against valid-but-different code.
-    checks = [c for c in checks if not _is_brittle_presence_check(c)]
+
+    def _cleaned_checks(raw: object) -> list[dict]:
+        parsed = _structured_checks(raw, allow_bare=True, goal=goal)
+        # Drop brittle file-inspection checks: they assert a file contains a literal,
+        # not that the code works, and loop forever against valid-but-different code.
+        return [c for c in parsed if not _is_brittle_presence_check(c)]
+
+    checks = _cleaned_checks(spec.get("checks"))
+    # SPEC-TIME structural gate. The acceptor rejects compile/run-only check sets, but
+    # it does so at ACCEPT time — when the fighter can no longer change the checks, so
+    # a weak spec is an unpassable mission (a real subtask burned all its rounds against
+    # "Add an expect_stdout/oracle" advice addressed to nobody). Repair it here instead:
+    # one regeneration with explicit feedback, then a build-as-oracle fallback.
+    def _has_functional(cs: list[dict]) -> bool:
+        return bool({check_kind(c) for c in cs} & {"behavior", "test"})
+
+    if checks and not _has_functional(checks):
+        feedback = (
+            "\n\nPREVIOUS ATTEMPT REJECTED: every check was compile/run-only — no behavioural or"
+            " functional test, so wrong logic could pass. Add at least one check with expect_stdout"
+            " or oracle that runs the deliverable on real input. If the task is pure"
+            " configuration/scaffolding with no observable stdout, make the BUILD the oracle:"
+            ' {"cmd": "(<build command>) 1>&2 && echo BUILD_OK", "expect_stdout": "BUILD_OK"}.'
+        )
+        try:
+            retry_checks = _cleaned_checks(_chat_json(prompt + feedback).get("checks"))
+        except Exception:
+            retry_checks = []
+        if _has_functional(retry_checks):
+            checks = retry_checks
+        else:
+            checks = [_as_build_oracle(c) for c in checks]
     if build_project:
         build_check = _detect_build_check(goal, deliverables)
         if build_check is not None and build_check not in checks:
