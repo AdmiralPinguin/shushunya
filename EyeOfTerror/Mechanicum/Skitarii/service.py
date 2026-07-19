@@ -206,6 +206,13 @@ def _mission_executor(task_id: str) -> VmExecutor:
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTEST_ADDOPTS": "-p no:cacheprovider",
         "HOME": fighter_home,
+        # Every command runs in a fresh non-interactive shell, so .bashrc/.profile
+        # edits never stick. $HOME/bin and $HOME/.local/bin on PATH are the ONE
+        # contract shared by fighter steps AND acceptance checks: a tool installed
+        # (or symlinked) there today resolves by bare name in every later step,
+        # every check, and every future mission of the persistent VM.
+        "PATH": f"{fighter_home}/bin:{fighter_home}/.local/bin:"
+                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin",
         "GRADLE_USER_HOME": f"{fighter_home}/.gradle",
         "ANDROID_USER_HOME": f"{fighter_home}/.android",
         "JAVA_TOOL_OPTIONS": f"-Duser.home={fighter_home}",

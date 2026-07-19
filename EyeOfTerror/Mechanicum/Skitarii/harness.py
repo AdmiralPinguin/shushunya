@@ -98,6 +98,7 @@ Rules:
 - Work in a loop: write code -> RUN it via bash -> read the errors -> fix -> run again.
 - You have internet: use web_search / web_fetch when you need docs, an API reference, a package, or to resolve an error. Prefer official sources.
 - Your VM is PERSISTENT: nothing is ever auto-deleted. Your $HOME and /tmp survive across missions, as do tools installed by earlier missions — check FIRST (`which gradle javac java sdkmanager node`, `ls $HOME /tmp /opt`) and reuse what exists; download a tool only if it is genuinely missing. Install tools to stable paths ($HOME or /tmp/tools), not inside your project directory.
+- Every bash step runs in a FRESH non-interactive shell: edits to .bashrc/.profile//etc/environment will NEVER take effect, do not try. The only PATH that persists is $HOME/bin and $HOME/.local/bin — symlink or wrap installed tools there once (`ln -sf /tmp/tools/kotlin/kotlinc/bin/kotlinc $HOME/bin/`) and the bare name works in every later step AND in the acceptance checks.
 - To test a server/service, launch it with bash_background, probe it with bash (curl localhost, read its log), then kill its pid before finishing.
 - You MUST actually run the success checks yourself with bash and see them pass before calling done.
 - If a check cannot pass for a real external reason, call done with an honest summary of what is missing; never invent success.
