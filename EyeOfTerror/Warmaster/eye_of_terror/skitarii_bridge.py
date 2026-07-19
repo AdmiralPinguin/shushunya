@@ -5520,7 +5520,7 @@ def _cancelled_bridge_result(run_dir: Path, task_id: str) -> dict[str, Any] | No
 def run_via_skitarii(
     run_dir: Path,
     task_id: str,
-    timeout_sec: int = 5400,
+    timeout_sec: int = 21600,
     execution_mode: str | None = None,
 ) -> dict[str, Any]:
     """Execute or continue the same durable code mission through Skitarii."""
