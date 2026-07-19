@@ -1657,47 +1657,53 @@ def _restore_workspace_checkpoint(
     parent_task_id: str = "",
 ) -> bool:
     """Replay only a controller-produced patch onto the identical caller snapshot."""
+    # Restore is a best-effort ACCELERATION: a stale, foreign or malformed
+    # checkpoint means "start fresh", never "kill the mission". Raising here used
+    # to fail whole attempts on harmless mismatches (cross-resubmit lineage, a
+    # different baseline) and re-ignited the recovery carousel. The only fatal
+    # case left is a git apply that corrupts the workspace AFTER its dry-run
+    # check passed — there the workspace state is genuinely uncertain.
     if not checkpoint:
         return False
     diff = checkpoint.get("unified_diff")
     expected_sha = str(checkpoint.get("patch_sha256") or "")
     expected_tree = str(checkpoint.get("base_tree") or "")
     if task_memory_id and str(checkpoint.get("task_memory_id") or "") != task_memory_id:
-        raise ValueError("workspace checkpoint task memory identity mismatch")
+        return False
     if root_task_id and str(checkpoint.get("root_task_id") or "") != root_task_id:
-        raise ValueError("workspace checkpoint root task identity mismatch")
+        return False
     # Lineage: the checkpoint's CREATOR is this attempt's parent (inheritance), or
-    # both share a parent (same-attempt retry). The old equality compared the new
-    # attempt's parent to the creator's parent — a generation off — so EVERY child
-    # recovery refused its parent's work, restarted from scratch, burned its wall
-    # budget and looped. Legacy checkpoints without a creator id are accepted:
-    # provenance is already proven by memory/root identity + sha + base-tree checks,
-    # and _workspace_checkpoint_for_attempt only sources same-task-page records.
+    # both share a parent (same-attempt retry). Anything else is another goal's
+    # leftovers on the same task page — skip it, don't die on it.
     if parent_task_id:
         creator = str(checkpoint.get("task_id") or "")
         chain_parent = str(checkpoint.get("parent_task_id") or "")
         if creator and creator != parent_task_id and chain_parent != parent_task_id:
-            raise ValueError("workspace checkpoint lineage mismatch")
-    if not isinstance(diff, str) or len(diff.encode("utf-8")) > MAX_PATCH_BYTES:
-        raise ValueError("workspace checkpoint patch is missing or oversized")
+            return False
+    if not isinstance(diff, str) or not diff or len(diff.encode("utf-8")) > MAX_PATCH_BYTES:
+        return False
     if not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
-        raise ValueError("workspace checkpoint hash is invalid")
+        return False
     if hashlib.sha256(diff.encode("utf-8")).hexdigest() != expected_sha:
-        raise ValueError("workspace checkpoint hash mismatch")
+        return False
     if not re.fullmatch(r"[0-9a-f]{40,64}", expected_tree):
-        raise ValueError("workspace checkpoint base tree is invalid")
+        return False
     if _baseline_tree(ex, base_commit) != expected_tree:
-        raise ValueError("workspace checkpoint belongs to a different baseline")
-    if not diff:
         return False
     ex.write_file(_PATCH_FILE, diff)
     try:
         _sanitize_git_control(ex, preserve_patch=True)
+        probe = ex.bash(
+            _TRUSTED_GIT_ENV
+            + f"/usr/bin/git apply --check --binary {_PATCH_FILE}",
+            timeout=120,
+        )
+        if probe.get("returncode") != 0:
+            # Patch does not apply to this workspace — fresh start, not a failure.
+            return False
         _checked_bash(
             ex,
-            _TRUSTED_GIT_ENV
-            + f"set -eu; /usr/bin/git apply --check --binary {_PATCH_FILE}; "
-            + f"/usr/bin/git apply --binary {_PATCH_FILE}",
+            _TRUSTED_GIT_ENV + f"/usr/bin/git apply --binary {_PATCH_FILE}",
             timeout=120,
         )
     finally:
