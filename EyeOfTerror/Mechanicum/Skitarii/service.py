@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import hashlib
 import hmac
 import ipaddress
@@ -1493,20 +1494,26 @@ def _capture_workspace_checkpoint(
     """Capture unaccepted work before the isolated VM workspace is destroyed.
 
     ``task_id`` records the CREATOR attempt: a child recovery attempt proves
-    lineage by matching its parent against the creator, not the creator's parent."""
-    bundle = _build_patch_bundle(ex, base_commit, accepted=False)
-    diff = str(bundle.get("unified_diff") or "")
-    return {
-        "schema_version": 1,
-        "base_tree": _baseline_tree(ex, base_commit),
-        "patch_sha256": hashlib.sha256(diff.encode("utf-8")).hexdigest(),
-        "unified_diff": diff,
-        "changed_files": list(bundle.get("changed_files") or []),
-        "task_memory_id": task_memory_id,
-        "root_task_id": root_task_id,
-        "parent_task_id": parent_task_id,
-        "task_id": task_id,
-    }
+    lineage by matching its parent against the creator, not the creator's parent.
+
+    Capture is a salvage read, so it runs inside the executor's poison-capture
+    window: a cancelled mission's boundary is poisoned, yet its workspace is the
+    only copy of the fighter's unaccepted work."""
+    salvage = getattr(ex, "poison_capture_window", None)
+    with (salvage() if callable(salvage) else contextlib.nullcontext()):
+        bundle = _build_patch_bundle(ex, base_commit, accepted=False)
+        diff = str(bundle.get("unified_diff") or "")
+        return {
+            "schema_version": 1,
+            "base_tree": _baseline_tree(ex, base_commit),
+            "patch_sha256": hashlib.sha256(diff.encode("utf-8")).hexdigest(),
+            "unified_diff": diff,
+            "changed_files": list(bundle.get("changed_files") or []),
+            "task_memory_id": task_memory_id,
+            "root_task_id": root_task_id,
+            "parent_task_id": parent_task_id,
+            "task_id": task_id,
+        }
 
 
 def _mission_workspace_checkpoint(mission: Any) -> dict:
@@ -1849,12 +1856,14 @@ def _finalize_service_verdict(
     verdict["parent_task_id"] = parent_task_id
     # Any non-accepted FAILED verdict is worth preserving: a missing
     # revision_required flag once dropped a fully assembled 421-file project.
+    # Cancelled counts too — Core resubmits after a cancel, and the poisoned
+    # workspace is still readable through the salvage capture window.
     retryable = bool(
         verdict.get("accepted") is False
         and verdict.get("retryable") is not False
         and (
             verdict.get("revision_required") is True
-            or str(verdict.get("status") or "") == "failed"
+            or str(verdict.get("status") or "") in ("failed", "cancelled")
         )
     )
     if retryable and capture_workspace:

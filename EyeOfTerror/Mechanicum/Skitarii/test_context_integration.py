@@ -1,6 +1,7 @@
 """Focused identity and context-overflow integration tests (no live models/VM)."""
 from __future__ import annotations
 
+import contextlib
 import sys
 import threading
 import unittest
@@ -262,6 +263,66 @@ class ContextIntegrationTests(unittest.TestCase):
             )
         self.assertEqual(selected, {})
 
+    def test_service_finalizer_captures_cancelled_work(self) -> None:
+        verdict = {
+            "status": "cancelled",
+            "accepted": False,
+            "summary": "cancelled by user",
+        }
+        checkpoint = {
+            "base_tree": "a" * 40,
+            "patch_sha256": "b" * 64,
+            "unified_diff": "diff",
+            "changed_files": ["app.py"],
+        }
+        with (
+            mock.patch.object(
+                service, "_capture_workspace_checkpoint", return_value=checkpoint,
+            ) as capture,
+            mock.patch.object(service, "_persist_checkpoint"),
+        ):
+            result = service._finalize_service_verdict(
+                verdict,
+                ex=object(),
+                base_commit="base",
+                task_id="attempt-cancelled",
+                task_memory_id="stable-goal",
+                root_task_id="root-goal",
+            )
+        capture.assert_called_once()
+        self.assertEqual(result["workspace_checkpoint"], checkpoint)
+
+    def test_capture_workspace_checkpoint_uses_poison_capture_window(self) -> None:
+        class SalvageExecutor:
+            def __init__(self) -> None:
+                self.window_open = False
+                self.bundle_seen_window: bool | None = None
+
+            @contextlib.contextmanager
+            def poison_capture_window(self):
+                self.window_open = True
+                try:
+                    yield
+                finally:
+                    self.window_open = False
+
+        ex = SalvageExecutor()
+
+        def fake_bundle(executor, base_commit, *, accepted):
+            executor.bundle_seen_window = executor.window_open
+            return {"unified_diff": "diff", "changed_files": ["app.py"]}
+
+        with (
+            mock.patch.object(service, "_build_patch_bundle", side_effect=fake_bundle),
+            mock.patch.object(service, "_baseline_tree", return_value="t" * 40),
+        ):
+            captured = service._capture_workspace_checkpoint(
+                ex, "base", task_id="attempt-9",
+            )
+        self.assertTrue(ex.bundle_seen_window)
+        self.assertFalse(ex.window_open)
+        self.assertEqual(captured["unified_diff"], "diff")
+
     def test_service_finalizer_preserves_retry_patch_and_publishes_leader_state(self) -> None:
         verdict = {
             "status": "failed",
@@ -307,6 +368,7 @@ class ContextIntegrationTests(unittest.TestCase):
             task_memory_id="stable-goal",
             root_task_id="root-goal",
             parent_task_id="",
+            task_id="attempt-21",
         )
         persist.assert_called_once()
         self.assertEqual(persist.call_args.args[0], "stable-goal")

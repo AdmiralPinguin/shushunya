@@ -6,6 +6,7 @@ A fighter's tools never touch the host directly: they go through an Executor.
 """
 from __future__ import annotations
 
+import contextlib
 import errno
 import hashlib
 import posixpath
@@ -123,6 +124,7 @@ class _BoundaryRuntimeState:
         self.lock = threading.RLock()
         self.cancel_generation = 0
         self.poisoned = False
+        self.capture_exempt = 0
         self.local_processes: dict[str, subprocess.Popen] = {}
         self.units_lock = threading.Lock()
         self.units: set[str] = set()
@@ -920,6 +922,21 @@ done
                     time.sleep(delay)
                 self.stop_process_boundary(strict=False)
 
+    @contextlib.contextmanager
+    def poison_capture_window(self):
+        """Salvage exemption: let workspace-checkpoint capture run bash on a
+        poisoned boundary. Entering takes the shared state lock, so the window
+        cannot open while a cancel sweep is still reaping units; a NEW cancel
+        during the window bumps cancel_generation and reaps the capture
+        command like any other. Product work stays blocked outside this scope."""
+        with self._boundary_state_lock:
+            self._boundary_runtime.capture_exempt += 1
+        try:
+            yield
+        finally:
+            with self._boundary_state_lock:
+                self._boundary_runtime.capture_exempt -= 1
+
     def stop_process_boundary(self, *, strict: bool = False) -> bool:
         with self._boundary_state_lock:
             return self._stop_process_boundary_locked(strict=strict)
@@ -1092,7 +1109,7 @@ fi
         return True, ""
 
     def bash(self, command: str, timeout: int = 120) -> ExecResult:
-        if self.boundary_poisoned:
+        if self.boundary_poisoned and not self._boundary_runtime.capture_exempt:
             return ExecResult.make(125, "", "sandbox lifecycle is poisoned and requires cleanup")
         if self.process_boundary and not self.initialize_process_boundary(strict=False):
             return ExecResult.make(125, "", "could not initialize mission process boundary")
@@ -1125,7 +1142,8 @@ fi
                     "spawn_lock": self._boundary_state_lock,
                     "pre_spawn": lambda: (
                         launch_generation == self._boundary_runtime.cancel_generation
-                        and not self.boundary_poisoned
+                        and (not self.boundary_poisoned
+                             or self._boundary_runtime.capture_exempt > 0)
                         and self.boundary_lease is not None
                     ),
                     "on_started": lambda proc: self._current_local_processes.__setitem__(unit, proc),
