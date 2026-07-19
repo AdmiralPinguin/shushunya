@@ -936,6 +936,7 @@ def run_fighter(goal: str, checks: list[Any], executor: Any,
             })
     messages = _fresh_messages(goal_message, wiki_context)
     consecutive_overflows = 0
+    consecutive_llm_errors = 0
 
     def durable_workspace_checkpoint(*, step: int, boundary: str) -> None:
         if durable_checkpoint_fn is None:
@@ -1053,21 +1054,42 @@ def run_fighter(goal: str, checks: list[Any], executor: Any,
         try:
             reply = _chat(messages, settings)
         except LLMRequestError as exc:
-            if not exc.context_overflow or consecutive_overflows >= 2:
-                raise
-            messages = compact_session(
-                step=step,
-                reason=(
-                    "The LLM backend rejected the current session as over its context window. "
-                    "The controller reset the conversation; inspect the unchanged workspace."
-                ),
-                used_tokens=int(settings.get("context_window") or 0),
-                ask_model=True,
-                force_bounded_source=True,
-            )
-            consecutive_overflows += 1
-            continue
+            if exc.context_overflow and consecutive_overflows < 2:
+                messages = compact_session(
+                    step=step,
+                    reason=(
+                        "The LLM backend rejected the current session as over its context window. "
+                        "The controller reset the conversation; inspect the unchanged workspace."
+                    ),
+                    used_tokens=int(settings.get("context_window") or 0),
+                    ask_model=True,
+                    force_bounded_source=True,
+                )
+                consecutive_overflows += 1
+                continue
+            # A transient backend error must not kill the mission. temperature=0 makes
+            # a bare retry replay the SAME broken sample (a tool call truncated at
+            # max_tokens once burned a whole attempt this way), so a malformed-call
+            # rejection also appends a corrective message — new prompt, new sample.
+            if exc.retryable and not exc.context_overflow and consecutive_llm_errors < 3:
+                consecutive_llm_errors += 1
+                emit(f"LLM-бэкенд ответил {exc.status} — повтор {consecutive_llm_errors}/3.")
+                lowered_body = str(exc.body or "").lower()
+                if any(marker in lowered_body for marker in (
+                        "parse tool call", "parse_error", "invalid string",
+                        "missing closing quote")):
+                    messages.append({"role": "user", "content": (
+                        "Your previous tool call was rejected by the backend: its JSON was "
+                        "malformed or truncated (most likely the call was too large and got "
+                        "cut at the generation token limit). Redo the intended action with a "
+                        "SHORTER valid call — write big files in several smaller pieces "
+                        "(write_file the head, then append the rest in chunks)."
+                    )})
+                time.sleep(min(2 * consecutive_llm_errors, 6))
+                continue
+            raise
         consecutive_overflows = 0
+        consecutive_llm_errors = 0
         msg = (reply.get("choices") or [{}])[0].get("message") or {}
         tool_calls = msg.get("tool_calls") or []
         if not tool_calls:
