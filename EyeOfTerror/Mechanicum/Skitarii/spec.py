@@ -37,7 +37,10 @@ def _chat_json(prompt: str) -> dict[str, Any]:
     payload = {
         "model": os.environ.get("SPEC_LLM_MODEL", "Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf"),
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0,
+        # Немного креативности и здесь (решение владельца): на нуле каждая попытка
+        # получает ту же самую нарезку/те же проверки — ретрай не может сменить заход.
+        # JSON-строгость обеспечивает парсер, не жадность декодирования.
+        "temperature": float(os.environ.get("SKITARII_SPEC_TEMPERATURE", "0.2")),
         "max_tokens": 900,
         "chat_template_kwargs": {"enable_thinking": False},
     }
@@ -63,7 +66,10 @@ def _held_out_chat_json(prompt: str) -> dict[str, Any]:
             os.environ.get("SPEC_LLM_MODEL", "Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf"),
         ),
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0,
+        # Немного креативности и здесь (решение владельца): на нуле каждая попытка
+        # получает ту же самую нарезку/те же проверки — ретрай не может сменить заход.
+        # JSON-строгость обеспечивает парсер, не жадность декодирования.
+        "temperature": float(os.environ.get("SKITARII_SPEC_TEMPERATURE", "0.2")),
         "max_tokens": 700,
         "chat_template_kwargs": {"enable_thinking": False},
     }

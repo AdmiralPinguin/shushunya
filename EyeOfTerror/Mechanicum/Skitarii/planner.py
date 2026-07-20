@@ -26,7 +26,10 @@ def _planner_chat(prompt: str, max_tokens: int = 1200) -> str:
     payload = {
         "model": os.environ.get("PLANNER_LLM_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"),
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0,
+        # Немного креативности и здесь (решение владельца): на нуле каждая попытка
+        # получает ту же самую нарезку/те же проверки — ретрай не может сменить заход.
+        # JSON-строгость обеспечивает парсер, не жадность декодирования.
+        "temperature": float(os.environ.get("SKITARII_PLANNER_TEMPERATURE", "0.2")),
         "max_tokens": max_tokens,
     }
     req = urllib.request.Request(f"{base}/chat/completions",
