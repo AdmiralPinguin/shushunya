@@ -1761,9 +1761,16 @@ def _is_brittle_presence_check(check: dict) -> bool:
     cmd = str(check.get("cmd") or "").strip()
     if not cmd:
         return True
+    # `cd dir && grep ...` is still a grep: strip leading cd-prefixes before looking
+    # at the head, or every inspection check hides behind a cd (they did).
+    while True:
+        stripped = re.sub(r"^cd\s+[\w.\-/]+\s*&&\s*", "", cmd)
+        if stripped == cmd:
+            break
+        cmd = stripped
     try:
         head = shlex.split(cmd)[0]
-    except ValueError:
+    except (ValueError, IndexError):
         head = cmd.split()[0] if cmd.split() else ""
     return head.rsplit("/", 1)[-1] in _INSPECTION_HEADS
 
@@ -1809,6 +1816,33 @@ _BUILDISH_CMD_RE = re.compile(
 
 _CHECK_CD_RE = re.compile(r"^cd\s+([\w.\-/]+)\s*&&\s*")
 
+_PROJECT_ROOT_MARKERS = (
+    "settings.gradle", "settings.gradle.kts", "gradlew", "package.json",
+    "Cargo.toml", "pom.xml", "go.mod", "CMakeLists.txt", "Makefile",
+)
+
+
+def _strip_project_wrapper(deliverables: list[str]) -> list[str]:
+    """Drop a single invented wrapper directory from deliverable paths.
+
+    Every mission owns an isolated workspace whose ROOT is the project root, and
+    workspace inheritance restores previous work at that root. A spec that wraps
+    everything in `Galaga/` fights both: the fighter continues at the root while
+    the acceptance looks inside the wrapper. Strip the wrapper only when it is
+    provably one — all deliverables share a single top directory that directly
+    contains a project-root marker (settings.gradle, package.json, …); an `app/`
+    module dir has no such marker and stays untouched."""
+    tops = {d.strip("/").split("/", 1)[0] for d in deliverables if d.strip("/")}
+    if len(tops) != 1:
+        return deliverables
+    top = next(iter(tops))
+    if not all("/" in d.strip("/") for d in deliverables):
+        return deliverables
+    rooted = {d.strip("/").split("/", 1)[1] for d in deliverables}
+    if not any(r in _PROJECT_ROOT_MARKERS for r in rooted):
+        return deliverables
+    return sorted(rooted)
+
 
 def _align_check_dirs(checks: list[dict], deliverables: list[str]) -> list[dict]:
     """Rewrite `cd <dir> && ...` in checks whose dir contradicts the deliverables.
@@ -1820,6 +1854,10 @@ def _align_check_dirs(checks: list[dict], deliverables: list[str]) -> list[dict]
     they share (or dropped from the command when they live at the workspace root)."""
     tops = {d.strip("/").split("/", 1)[0] for d in deliverables if d.strip("/")}
     rooted = {t for t in tops if "." not in t}  # bare files at root are not dirs
+    # A root marker among the deliverables (settings.gradle, package.json, …) means
+    # the project lives AT the workspace root: an invalid cd must be dropped, not
+    # redirected into some module dir where the build wrapper does not exist.
+    root_project = any(d.strip("/") in _PROJECT_ROOT_MARKERS for d in deliverables)
     aligned: list[dict] = []
     for check in checks:
         cmd = str(check.get("cmd") or "")
@@ -1827,11 +1865,11 @@ def _align_check_dirs(checks: list[dict], deliverables: list[str]) -> list[dict]
         if m and deliverables:
             cd_dir = m.group(1).strip("/").split("/", 1)[0]
             if cd_dir not in tops:
-                if len(rooted) == 1:
+                if root_project or not rooted:
+                    check = {**check, "cmd": cmd[m.end():]}
+                elif len(rooted) == 1:
                     fixed = f"cd {next(iter(rooted))} && " + cmd[m.end():]
                     check = {**check, "cmd": fixed}
-                elif not rooted:
-                    check = {**check, "cmd": cmd[m.end():]}
         aligned.append(check)
     return aligned
 
@@ -1885,9 +1923,9 @@ def build_spec(goal: str, *, build_project: bool = False) -> dict[str, Any]:
         "  produces the correct answer, so the real interpreter is the source of truth, not you.\n"
         "- A compile/build check alone is weak for logic; add a BEHAVIOURAL check (expect_stdout or oracle on\n"
         "  real inputs, or the project's tests) covering the main case and one edge case where feasible.\n"
-        "- ONE project directory, used CONSISTENTLY: deliverable paths and every path in checks must share\n"
-        "  the same root. Best is no wrapper at all (build.gradle at the workspace root). NEVER use one name\n"
-        "  in deliverables and a different one in checks — that makes acceptance impossible by construction.\n"
+        "- The workspace root IS the project root: build.gradle/settings.gradle/package.json belong at the\n"
+        "  TOP level of deliverable paths. Do NOT invent a wrapper directory (no 'MyApp/...' prefix), and\n"
+        "  checks must not cd anywhere — they already run at the project root. One layout, used everywhere.\n"
         "Keep 2-6 checks, runnable on bare Ubuntu with php, python3, node.\n\n"
         f"TASK:\n{goal}"
     )
@@ -1896,6 +1934,7 @@ def build_spec(goal: str, *, build_project: bool = False) -> dict[str, Any]:
     except Exception:
         spec = {}
     deliverables = [str(d) for d in (spec.get("deliverables") or []) if isinstance(d, str)]
+    deliverables = _strip_project_wrapper(deliverables)
 
     def _cleaned_checks(raw: object) -> list[dict]:
         parsed = _structured_checks(raw, allow_bare=True, goal=goal)
