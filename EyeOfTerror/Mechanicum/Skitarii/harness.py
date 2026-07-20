@@ -99,6 +99,7 @@ Rules:
 - You have internet: use web_search / web_fetch when you need docs, an API reference, a package, or to resolve an error. Prefer official sources.
 - Your VM is PERSISTENT: nothing is ever auto-deleted. Your $HOME and /tmp survive across missions, as do tools installed by earlier missions — check FIRST (`which gradle javac java sdkmanager node`, `ls $HOME /tmp /opt`) and reuse what exists; download a tool only if it is genuinely missing. Install tools to stable paths ($HOME or /tmp/tools), not inside your project directory.
 - Every bash step runs in a FRESH non-interactive shell: edits to .bashrc/.profile//etc/environment will NEVER take effect, do not try. The only PATH that persists is $HOME/bin and $HOME/.local/bin — symlink or wrap installed tools there once (`ln -sf /tmp/tools/kotlin/kotlinc/bin/kotlinc $HOME/bin/`) and the bare name works in every later step AND in the acceptance checks.
+- Keep every tool call SMALL: one oversized call gets truncated at the generation limit into invalid JSON and is rejected. Write long files in pieces — write_file the first ~120 lines, then append further chunks with bash (`cat >> path <<'EOF' ... EOF`). Never inline a whole script/XML into a python3 -c one-liner — write it to a file first, then run the file.
 - To test a server/service, launch it with bash_background, probe it with bash (curl localhost, read its log), then kill its pid before finishing.
 - You MUST actually run the success checks yourself with bash and see them pass before calling done.
 - If a check cannot pass for a real external reason, call done with an honest summary of what is missing; never invent success.
@@ -153,7 +154,11 @@ def _llm_settings() -> dict[str, Any]:
     # Defaults mirror the live fighter backend: llama-server --ctx-size 65536 with a
     # single slot. The reasoning model spends tokens thinking before each tool call,
     # so the per-reply budget needs headroom too (compaction still fires early).
-    max_tokens = int(os.environ.get("SKITARII_LLM_MAX_TOKENS", "16384"))
+    # 24576: a tool call truncated at the old 16384 ceiling leaves unterminated JSON
+    # that llama.cpp rejects with HTTP 500 — twice that killed a whole mission when
+    # the fighter wrote a large file in one call. Headroom + the chunked-write prompt
+    # rule attack the same failure from both sides (compact_at shrinks automatically).
+    max_tokens = int(os.environ.get("SKITARII_LLM_MAX_TOKENS", "24576"))
     context_window = int(os.environ.get("SKITARII_LLM_CONTEXT_TOKENS", "65536"))
     context_margin = int(os.environ.get("SKITARII_LLM_CONTEXT_MARGIN_TOKENS", "2048"))
     default_compact_at = max(512, context_window - max_tokens - context_margin)
@@ -1078,13 +1083,26 @@ def run_fighter(goal: str, checks: list[Any], executor: Any,
                 if any(marker in lowered_body for marker in (
                         "parse tool call", "parse_error", "invalid string",
                         "missing closing quote")):
-                    messages.append({"role": "user", "content": (
-                        "Your previous tool call was rejected by the backend: its JSON was "
-                        "malformed or truncated (most likely the call was too large and got "
-                        "cut at the generation token limit). Redo the intended action with a "
-                        "SHORTER valid call — write big files in several smaller pieces "
-                        "(write_file the head, then append the rest in chunks)."
-                    )})
+                    if consecutive_llm_errors == 1:
+                        correction = (
+                            "Your previous tool call was rejected by the backend: its JSON was "
+                            "malformed or truncated (most likely the call was too large and got "
+                            "cut at the generation token limit). Redo the intended action with a "
+                            "SHORTER valid call — write big files in several smaller pieces "
+                            "(write_file the head, then append chunks via bash cat >> heredoc)."
+                        )
+                    else:
+                        # temperature=0: the model just replayed the same oversized call.
+                        # Force a hard change of plan, not another polite hint.
+                        correction = (
+                            "STOP. You repeated an oversized tool call and it was rejected "
+                            "again. Do NOT retry that call. Your next tool call must be under "
+                            "40 lines total. Break the work down: create the file with "
+                            "write_file containing ONLY its first small part, verify with "
+                            "read_file, then append the remaining parts one small bash "
+                            "cat >> chunk at a time."
+                        )
+                    messages.append({"role": "user", "content": correction})
                 time.sleep(min(2 * consecutive_llm_errors, 6))
                 continue
             raise
