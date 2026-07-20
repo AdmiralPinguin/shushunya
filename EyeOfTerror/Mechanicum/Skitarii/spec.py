@@ -1807,6 +1807,35 @@ _BUILDISH_CMD_RE = re.compile(
 )
 
 
+_CHECK_CD_RE = re.compile(r"^cd\s+([\w.\-/]+)\s*&&\s*")
+
+
+def _align_check_dirs(checks: list[dict], deliverables: list[str]) -> list[dict]:
+    """Rewrite `cd <dir> && ...` in checks whose dir contradicts the deliverables.
+
+    A real top-level spec demanded deliverables under GalagaApp/ while its checks ran
+    `cd Galaga && ./gradlew ...` — no repair round can satisfy that: moving files to
+    either name still fails the other half. The deliverables are the contract, so a
+    cd into a directory no deliverable lives in is redirected to the single directory
+    they share (or dropped from the command when they live at the workspace root)."""
+    tops = {d.strip("/").split("/", 1)[0] for d in deliverables if d.strip("/")}
+    rooted = {t for t in tops if "." not in t}  # bare files at root are not dirs
+    aligned: list[dict] = []
+    for check in checks:
+        cmd = str(check.get("cmd") or "")
+        m = _CHECK_CD_RE.match(cmd)
+        if m and deliverables:
+            cd_dir = m.group(1).strip("/").split("/", 1)[0]
+            if cd_dir not in tops:
+                if len(rooted) == 1:
+                    fixed = f"cd {next(iter(rooted))} && " + cmd[m.end():]
+                    check = {**check, "cmd": fixed}
+                elif not rooted:
+                    check = {**check, "cmd": cmd[m.end():]}
+        aligned.append(check)
+    return aligned
+
+
 def _as_build_oracle(check: dict) -> dict:
     """Turn a bare build command into a behavioural check (success token on stdout).
 
@@ -1856,6 +1885,9 @@ def build_spec(goal: str, *, build_project: bool = False) -> dict[str, Any]:
         "  produces the correct answer, so the real interpreter is the source of truth, not you.\n"
         "- A compile/build check alone is weak for logic; add a BEHAVIOURAL check (expect_stdout or oracle on\n"
         "  real inputs, or the project's tests) covering the main case and one edge case where feasible.\n"
+        "- ONE project directory, used CONSISTENTLY: deliverable paths and every path in checks must share\n"
+        "  the same root. Best is no wrapper at all (build.gradle at the workspace root). NEVER use one name\n"
+        "  in deliverables and a different one in checks — that makes acceptance impossible by construction.\n"
         "Keep 2-6 checks, runnable on bare Ubuntu with php, python3, node.\n\n"
         f"TASK:\n{goal}"
     )
@@ -1869,7 +1901,9 @@ def build_spec(goal: str, *, build_project: bool = False) -> dict[str, Any]:
         parsed = _structured_checks(raw, allow_bare=True, goal=goal)
         # Drop brittle file-inspection checks: they assert a file contains a literal,
         # not that the code works, and loop forever against valid-but-different code.
-        return [c for c in parsed if not _is_brittle_presence_check(c)]
+        parsed = [c for c in parsed if not _is_brittle_presence_check(c)]
+        # And force path coherence: checks must cd into the deliverables' directory.
+        return _align_check_dirs(parsed, deliverables)
 
     checks = _cleaned_checks(spec.get("checks"))
     # SPEC-TIME structural gate. The acceptor rejects compile/run-only check sets AND
