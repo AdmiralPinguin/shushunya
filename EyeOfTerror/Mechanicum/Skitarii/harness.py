@@ -165,6 +165,7 @@ def _llm_settings() -> dict[str, Any]:
     return {
         "base_url": base,
         "model": os.environ.get("SKITARII_LLM_MODEL", "Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf"),
+        "temperature": float(os.environ.get("SKITARII_LLM_TEMPERATURE", "0.2")),
         "timeout_sec": float(os.environ.get("SKITARII_LLM_TIMEOUT_SEC", "900")),
         "max_tokens": max_tokens,
         "context_window": context_window,
@@ -181,10 +182,17 @@ def _chat(messages: list[dict], settings: dict[str, Any]) -> dict[str, Any]:
     # The fighter backend is a reasoning model (Qwen3.6, server runs --reasoning on):
     # its thinking lands in reasoning_content while tool calls still parse, so let it
     # think by default — SKITARII_LLM_ENABLE_THINKING=0 restores the old suppression.
+    # Greedy decoding (temperature=0) is explicitly discouraged for Qwen3: it loops,
+    # and a failed sample replays IDENTICALLY on retry — three missions died re-sending
+    # the same truncated tool call. 0.2 keeps code conservative while letting retries
+    # actually sample a different continuation; top_p/top_k follow the vendor rec.
+    # (The planner/spec calls keep temperature=0 on purpose: strict JSON, no replay issue.)
     payload = {
         "model": settings["model"],
         "messages": messages,
-        "temperature": 0,
+        "temperature": settings.get("temperature", 0.2),
+        "top_p": 0.95,
+        "top_k": 20,
         "max_tokens": settings["max_tokens"],
         "chat_template_kwargs": {
             "enable_thinking": os.environ.get("SKITARII_LLM_ENABLE_THINKING", "1") == "1",
