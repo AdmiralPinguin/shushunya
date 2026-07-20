@@ -1872,18 +1872,30 @@ def build_spec(goal: str, *, build_project: bool = False) -> dict[str, Any]:
         return [c for c in parsed if not _is_brittle_presence_check(c)]
 
     checks = _cleaned_checks(spec.get("checks"))
-    # SPEC-TIME structural gate. The acceptor rejects compile/run-only check sets, but
-    # it does so at ACCEPT time — when the fighter can no longer change the checks, so
-    # a weak spec is an unpassable mission (a real subtask burned all its rounds against
-    # "Add an expect_stdout/oracle" advice addressed to nobody). Repair it here instead:
-    # one regeneration with explicit feedback, then a build-as-oracle fallback.
+    # SPEC-TIME structural gate. The acceptor rejects compile/run-only check sets AND
+    # empty ones, but it does so at ACCEPT time — when the fighter can no longer change
+    # the checks, so a weak/empty spec is an unpassable mission (one subtask burned all
+    # its rounds against "Add an expect_stdout/oracle" advice addressed to nobody;
+    # another died with every check dropped by the brittle filter and .kt deliverables
+    # no syntax fallback knows). Repair it here instead: one regeneration with explicit
+    # feedback, then a build-as-oracle fallback.
     def _has_functional(cs: list[dict]) -> bool:
         return bool({check_kind(c) for c in cs} & {"behavior", "test"})
 
-    if checks and not _has_functional(checks):
-        feedback = (
-            "\n\nPREVIOUS ATTEMPT REJECTED: every check was compile/run-only — no behavioural or"
-            " functional test, so wrong logic could pass. Add at least one check with expect_stdout"
+    if not _has_functional(checks):
+        if checks:
+            complaint = (
+                "\n\nPREVIOUS ATTEMPT REJECTED: every check was compile/run-only — no behavioural"
+                " or functional test, so wrong logic could pass."
+            )
+        else:
+            complaint = (
+                "\n\nPREVIOUS ATTEMPT REJECTED: no usable check survived — checks that inspect"
+                " file contents (grep/cat or scripts asserting on source text) are forbidden"
+                " and were dropped."
+            )
+        feedback = complaint + (
+            " Add at least one check with expect_stdout"
             " or oracle that runs the deliverable on real input. If the task is pure"
             " configuration/scaffolding with no observable stdout, make the BUILD the oracle:"
             ' {"cmd": "(<build command>) 1>&2 && echo BUILD_OK", "expect_stdout": "BUILD_OK"}.'
@@ -1894,8 +1906,10 @@ def build_spec(goal: str, *, build_project: bool = False) -> dict[str, Any]:
             retry_checks = []
         if _has_functional(retry_checks):
             checks = retry_checks
-        else:
+        elif checks:
             checks = [_as_build_oracle(c) for c in checks]
+        elif retry_checks:
+            checks = [_as_build_oracle(c) for c in retry_checks]
     if build_project:
         build_check = _detect_build_check(goal, deliverables)
         if build_check is not None and build_check not in checks:
@@ -1915,4 +1929,12 @@ def build_spec(goal: str, *, build_project: bool = False) -> dict[str, Any]:
             ext = "." + d.rsplit(".", 1)[-1] if "." in d else ""
             if ext in _syntax:
                 checks.append({"cmd": _syntax[ext].format(p=d)})
+    # Last net: still nothing runnable (e.g. .kt/.java deliverables the syntax map
+    # doesn't know). An empty set is an unpassable mission by construction, so fall
+    # back to the ecosystem build — for JVM/Android sources "the project builds" is
+    # the weakest honest oracle that still executes the code.
+    if not checks:
+        fallback_build = _detect_build_check(goal, deliverables)
+        if fallback_build is not None:
+            checks = [fallback_build]
     return {"deliverables": deliverables, "checks": checks}
