@@ -39,7 +39,13 @@ class ContextIntegrationTests(unittest.TestCase):
             mock.patch.object(warband, "run_fighter", return_value=fighter) as run,
             mock.patch.object(
                 warband, "accept",
-                return_value={"accepted": True, "results": [], "reason": "passed"},
+                # The pre-fighter acceptance must be RED here: a green inherited
+                # workspace legitimately skips the fighter (repair mode), and this
+                # test exists to verify the ids passed to a fighter that runs.
+                side_effect=[
+                    {"accepted": False, "results": [], "reason": "not yet"},
+                    {"accepted": True, "results": [], "reason": "passed"},
+                ],
             ),
         ):
             verdict = warband.run_mission(

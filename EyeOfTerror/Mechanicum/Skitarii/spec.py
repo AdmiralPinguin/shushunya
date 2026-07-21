@@ -1890,6 +1890,21 @@ def _align_check_dirs(checks: list[dict], deliverables: list[str]) -> list[dict]
     return aligned
 
 
+def _canonicalize_build_expect(check: dict) -> dict:
+    """Build command + expect_stdout = a check that fails even on success.
+
+    expect_stdout compares the WHOLE normalized stdout, but a build prints pages
+    (an attempt with a finished gameplay layer died on `gradlew assembleDebug`
+    vs expect 'BUILD SUCCESSFUL' — got gradle's JVM banner). Rewrite to the
+    canonical form: build output to stderr, stdout carries only the token, exit
+    code stays the oracle."""
+    cmd = str(check.get("cmd") or "")
+    if ("expect_stdout" not in check or "oracle" in check
+            or "echo BUILD_OK" in cmd or not _BUILDISH_CMD_RE.search(cmd)):
+        return check
+    return {"cmd": f"({cmd}) 1>&2 && echo BUILD_OK", "expect_stdout": "BUILD_OK"}
+
+
 def _as_build_oracle(check: dict) -> dict:
     """Turn a bare build command into a behavioural check (success token on stdout).
 
@@ -1969,8 +1984,10 @@ def build_spec(goal: str, *, build_project: bool = False,
         # Drop brittle file-inspection checks: they assert a file contains a literal,
         # not that the code works, and loop forever against valid-but-different code.
         parsed = [c for c in parsed if not _is_brittle_presence_check(c)]
-        # And force path coherence: checks must cd into the deliverables' directory.
-        return _align_check_dirs(parsed, deliverables)
+        # Force path coherence: checks must cd into the deliverables' directory.
+        parsed = _align_check_dirs(parsed, deliverables)
+        # And a passable shape for build checks: token on stdout, log on stderr.
+        return [_canonicalize_build_expect(c) for c in parsed]
 
     checks = _cleaned_checks(spec.get("checks"))
     # SPEC-TIME structural gate. The acceptor rejects compile/run-only check sets AND
