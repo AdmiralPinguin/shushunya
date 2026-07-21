@@ -49,7 +49,7 @@ def _extract_json(text: str) -> Any:
         return None
 
 
-def decompose(goal: str) -> list[dict[str, Any]]:
+def decompose(goal: str, existing_files: list[str] | None = None) -> list[dict[str, Any]]:
     """Split the goal into ordered subtasks. Returns [] for a small single-file task
     (the caller then runs one fighter directly)."""
     prompt = (
@@ -59,7 +59,20 @@ def decompose(goal: str) -> list[dict[str, Any]]:
         "subtasks are prerequisites of later ones.\n"
         'Return ONE JSON array and nothing else: [{"title": "...", "goal": "concrete instruction for a coder", '
         '"depends_on": [indexes of earlier subtasks it needs, or []]}]\n\n'
-        f"TASK:\n{goal}"
+        + (
+            # Repair, not rebuild: an inherited workspace already holds most of the
+            # project. Blind decomposition re-plans the full build every attempt and
+            # the fighters fragment it (three package names in one project).
+            "The workspace ALREADY CONTAINS these files from previous attempts:\n"
+            + "\n".join(existing_files[:80]) + "\n"
+            "Plan REPAIR of this existing project, not a rebuild: subtask goals must "
+            "reference the existing paths and packages, extend or fix them, and must "
+            "NOT introduce parallel layouts, new package names, or a language switch. "
+            "Parts that already look complete deserve at most one verification "
+            "subtask, not re-creation.\n\n"
+            if existing_files else ""
+        )
+        + f"TASK:\n{goal}"
     )
     try:
         parsed = _extract_json(_planner_chat(prompt))
@@ -282,7 +295,8 @@ def plan_and_run(goal: str, executor: Any, *, task_id: str = "",
             except Exception:
                 pass
 
-    subtasks = decompose(goal)
+    inherited_files = workspace_file_listing(executor)
+    subtasks = decompose(goal, existing_files=inherited_files)
     # small task → single fighter, but with the head's anti-stuck retry
     if len(subtasks) <= 1:
         note("Планировщик: задача простая — веду одним скитарием.")
@@ -295,7 +309,7 @@ def plan_and_run(goal: str, executor: Any, *, task_id: str = "",
 
     note(f"Планировщик разбил на {len(subtasks)} подзадач: " + "; ".join(s["title"] for s in subtasks))
     top_spec = build_spec(goal, build_project=True,   # final acceptance = the project builds
-                          existing_files=workspace_file_listing(executor))
+                          existing_files=inherited_files)
     waves = _dependency_waves(subtasks)
     sub_results: list[dict[str, Any]] = []
     per = max(300, max_wall_sec // max(1, len(subtasks)))

@@ -49,6 +49,23 @@ def run_mission(goal: str, executor: Any, *, checks: list[str] | None = None,
     checks = spec["checks"]
     deliverables = spec["deliverables"]
 
+    # 1.5) Repair mode, mechanically: on an inherited workspace this subtask may be
+    # ALREADY DONE — run the acceptance first and skip the fighter when it is green.
+    # Without this every retry re-walks the whole staircase, perturbing finished
+    # floors (fresh package names, rewrites) instead of landing on the broken one.
+    if checks:
+        try:
+            pre = accept(executor, deliverables, checks)
+        except Exception:
+            pre = {"accepted": False}
+        if pre.get("accepted"):
+            emit("Уже сдано прошлыми попытками: приёмка зелёная без бойца — не переделываю.")
+            return {"status": "done", "accepted": True,
+                    "rounds": [{"round": 0, "fighter_ok": True, "steps": 0,
+                                "seconds": 0, "acceptance": pre}],
+                    "summary": "already satisfied by the inherited workspace",
+                    "artifacts": deliverables, "checks": checks}
+
     rounds: list[dict[str, Any]] = []
     last_fighter: dict[str, Any] = {}
     for rnd in range(1, max_fighter_rounds + 1):
