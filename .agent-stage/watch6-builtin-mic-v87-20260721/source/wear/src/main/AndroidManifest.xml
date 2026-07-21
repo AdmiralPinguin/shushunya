@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Install-time role guard: phones do not expose hardware.type.watch. -->
+    <uses-feature
+        android:name="android.hardware.type.watch"
+        android:required="true" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Normal permission keeps the connectedDevice failure-delivery anchor
+         legal even when the reported startup failure is BLUETOOTH_PERMISSION. -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:directBootAware="true"
+        android:icon="@drawable/ic_shushunya"
+        android:label="@string/app_name"
+        android:roundIcon="@drawable/ic_shushunya"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Shushunya.Wear"
+        android:usesCleartextTraffic="false">
+
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="false" />
+
+        <activity
+            android:name=".wear.control.MagicToggleActivity"
+            android:directBootAware="true"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="@string/magic_toggle_label"
+            android:launchMode="singleTop"
+            android:noHistory="true"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Shushunya.Wear.Command"
+            android:turnScreenOn="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Shell-only trampoline for a local raw PowerConf source matrix.
+             android.permission.DUMP is held by adb shell, not third-party apps. -->
+        <activity
+            android:name=".wear.audio.PowerConfRawDiagnosticActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:finishOnTaskLaunch="true"
+            android:noHistory="true"
+            android:permission="android.permission.DUMP"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Shushunya.Wear.Command" />
+
+        <receiver
+            android:name=".wear.control.WearActionReceiver"
+            android:directBootAware="true"
+            android:exported="false" />
+
+        <receiver
+            android:name=".wear.data.PackageReplacedReceiver"
+            android:directBootAware="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".wear.control.MagicCommandForegroundService"
+            android:directBootAware="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
+
+        <service
+            android:name=".wear.control.MusicCommandForegroundService"
+            android:directBootAware="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
+
+        <service
+            android:name=".wear.audio.WearMicForegroundService"
+            android:directBootAware="false"
+            android:exported="false"
+            android:foregroundServiceType="microphone|connectedDevice"
+            android:stopWithTask="false" />
+
+        <service
+            android:name=".wear.data.WatchStartupFailureDeliveryService"
+            android:directBootAware="true"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"
+            android:stopWithTask="false" />
+
+        <service
+            android:name=".wear.audio.PowerConfRawDiagnosticService"
+            android:directBootAware="false"
+            android:exported="false"
+            android:foregroundServiceType="microphone|connectedDevice"
+            android:stopWithTask="false" />
+
+        <service
+            android:name=".wear.audio.PrivateTtsPlaybackService"
+            android:directBootAware="true"
+            android:enabled="false"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback"
+            android:stopWithTask="false" />
+
+        <service
+            android:name=".wear.audio.PrivateTtsChannelService"
+            android:directBootAware="true"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
+                <data
+                    android:host="*"
+                    android:path="/shushunya/audio/private-tts/v1"
+                    android:scheme="wear" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".wear.complication.LiveTranslationComplicationService"
+            android:directBootAware="true"
+            android:exported="true"
+            android:icon="@drawable/ic_complication_live_picker"
+            android:label="@string/live_complication_label"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="SHORT_TEXT,SMALL_IMAGE,ICON" />
+            <meta-data
+                android:name="android.support.wearable.complications.SAFE_WATCH_FACES"
+                android:value="com.shushunya.m.watchface" />
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="0" />
+        </service>
+
+        <service
+            android:name=".wear.complication.MusicControlComplicationService"
+            android:directBootAware="true"
+            android:exported="true"
+            android:icon="@drawable/ic_complication_music_picker"
+            android:label="@string/music_complication_label"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="SHORT_TEXT,SMALL_IMAGE,ICON" />
+            <meta-data
+                android:name="android.support.wearable.complications.SAFE_WATCH_FACES"
+                android:value="com.shushunya.m.watchface" />
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="0" />
+        </service>
+
+        <service
+            android:name=".wear.data.WearStateListenerService"
+            android:directBootAware="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:host="*"
+                    android:path="/shushunya/state"
+                    android:scheme="wear" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:host="*"
+                    android:path="/shushunya/magic/prepared"
+                    android:scheme="wear" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:host="*"
+                    android:path="/shushunya/magic/accepted"
+                    android:scheme="wear" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:host="*"
+                    android:path="/shushunya/audio/watch/binding/v1"
+                    android:scheme="wear" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:host="*"
+                    android:path="/shushunya/audio/watch/drain/v1"
+                    android:scheme="wear" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:host="*"
+                    android:path="/shushunya/audio/watch/terminal-ack/v1"
+                    android:scheme="wear" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:host="*"
+                    android:path="/shushunya/audio/watch/startup-failure-ack/v1"
+                    android:scheme="wear" />
+            </intent-filter>
+        </service>
+
+    </application>
+</manifest>

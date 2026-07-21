@@ -1,0 +1,70 @@
+plugins {
+    id("com.android.application")
+}
+
+android {
+    namespace = "com.shushunya.m"
+    compileSdk = 35
+    buildToolsVersion = "35.0.0"
+
+    defaultConfig {
+        applicationId = "com.shushunya.m"
+        minSdk = 33
+        targetSdk = 35
+        versionCode = 87
+        versionName = "8.28-wear-watch6-builtin-mic-racefix-v87"
+    }
+
+    buildFeatures {
+        buildConfig = false
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    def watchKeystorePath = System.getenv("SHUSHUNYA_WATCH_KEYSTORE")
+            ?: findProperty("shushunyaWatchKeystore")
+    def watchKeystorePassword = System.getenv("SHUSHUNYA_WATCH_STORE_PASSWORD")
+            ?: findProperty("shushunyaWatchStorePassword")
+    def watchKeyAlias = System.getenv("SHUSHUNYA_WATCH_KEY_ALIAS")
+            ?: findProperty("shushunyaWatchKeyAlias")
+    def watchKeyPassword = System.getenv("SHUSHUNYA_WATCH_KEY_PASSWORD")
+            ?: findProperty("shushunyaWatchKeyPassword")
+    def hasWatchSigning = watchKeystorePath && watchKeystorePassword
+            && watchKeyAlias && watchKeyPassword
+
+    signingConfigs {
+        if (hasWatchSigning) {
+            watchRelease {
+                storeFile = file(watchKeystorePath)
+                storePassword = watchKeystorePassword
+                keyAlias = watchKeyAlias
+                keyPassword = watchKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = true
+            shrinkResources = true
+            if (hasWatchSigning) signingConfig = signingConfigs.watchRelease
+            proguardFiles(
+                    getDefaultProguardFile("proguard-android-optimize.txt"),
+                    "proguard-rules.pro"
+            )
+        }
+    }
+}
+
+dependencies {
+    implementation("androidx.annotation:annotation:1.10.0")
+    implementation("androidx.wear:wear-remote-interactions:1.2.0")
+    implementation("androidx.wear.watchface:watchface-complications-data-source:1.3.0")
+    implementation("com.google.android.gms:play-services-wearable:20.0.1")
+    testImplementation("junit:junit:4.13.2")
+}

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Шушуня · часы</string>
+    <string name="live_complication_label">Живой перевод KO → RU</string>
+    <string name="music_complication_label">Музыка · пауза/воспроизведение</string>
+    <string name="magic_toggle_label">&#1064;&#1091;&#1096;&#1091;&#1085;&#1103; &#183; &#1088;&#1077;&#1078;&#1080;&#1084; &#1087;&#1077;&#1088;&#1077;&#1074;&#1086;&#1076;&#1072;</string>
+</resources>
