@@ -16,7 +16,7 @@ from typing import Any
 
 from warband import run_mission
 from acceptor import accept
-from spec import build_spec
+from spec import build_spec, workspace_file_listing
 
 
 def _planner_chat(prompt: str, max_tokens: int = 1200) -> str:
@@ -294,7 +294,8 @@ def plan_and_run(goal: str, executor: Any, *, task_id: str = "",
                                progress=progress, build_project=True)
 
     note(f"Планировщик разбил на {len(subtasks)} подзадач: " + "; ".join(s["title"] for s in subtasks))
-    top_spec = build_spec(goal, build_project=True)   # final acceptance = the project builds
+    top_spec = build_spec(goal, build_project=True,   # final acceptance = the project builds
+                          existing_files=workspace_file_listing(executor))
     waves = _dependency_waves(subtasks)
     sub_results: list[dict[str, Any]] = []
     per = max(300, max_wall_sec // max(1, len(subtasks)))

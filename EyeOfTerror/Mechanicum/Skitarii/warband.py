@@ -15,7 +15,7 @@ from typing import Any
 
 from acceptor import accept
 from harness import run_fighter
-from spec import build_spec
+from spec import build_spec, workspace_file_listing
 
 
 def run_mission(goal: str, executor: Any, *, checks: list[str] | None = None,
@@ -44,7 +44,8 @@ def run_mission(goal: str, executor: Any, *, checks: list[str] | None = None,
         norm = [c if isinstance(c, dict) else {"cmd": str(c)} for c in checks]
         spec = {"deliverables": [], "checks": norm}
     else:
-        spec = build_spec(goal, build_project=build_project)
+        spec = build_spec(goal, build_project=build_project,
+                          existing_files=workspace_file_listing(executor))
     checks = spec["checks"]
     deliverables = spec["deliverables"]
 

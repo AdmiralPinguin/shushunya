@@ -1816,6 +1816,22 @@ _BUILDISH_CMD_RE = re.compile(
 
 _CHECK_CD_RE = re.compile(r"^cd\s+([\w.\-/]+)\s*&&\s*")
 
+def workspace_file_listing(executor: Any, limit: int = 80) -> list[str]:
+    """Existing source files of the (possibly inherited) workspace, for spec grounding."""
+    try:
+        res = executor.bash(
+            "find . -type f -not -path './.git/*' -not -path './build/*' "
+            "-not -path './.gradle/*' -not -path './node_modules/*' "
+            f"| sed 's|^\\./||' | sort | head -{int(limit)}",
+            timeout=60,
+        )
+    except Exception:
+        return []
+    if res.get("returncode") != 0:
+        return []
+    return [line.strip() for line in str(res.get("stdout") or "").splitlines() if line.strip()]
+
+
 _PROJECT_ROOT_MARKERS = (
     "settings.gradle", "settings.gradle.kts", "gradlew", "package.json",
     "Cargo.toml", "pom.xml", "go.mod", "CMakeLists.txt", "Makefile",
@@ -1888,7 +1904,8 @@ def _as_build_oracle(check: dict) -> dict:
     return {"cmd": f"({cmd}) 1>&2 && echo BUILD_OK", "expect_stdout": "BUILD_OK"}
 
 
-def build_spec(goal: str, *, build_project: bool = False) -> dict[str, Any]:
+def build_spec(goal: str, *, build_project: bool = False,
+               existing_files: list[str] | None = None) -> dict[str, Any]:
     """Returns {"deliverables": [...], "checks": [...]}.
 
     A check is a STRUCTURED dict (never a hand-written shell one-liner — the model
@@ -1927,7 +1944,18 @@ def build_spec(goal: str, *, build_project: bool = False) -> dict[str, Any]:
         "  TOP level of deliverable paths. Do NOT invent a wrapper directory (no 'MyApp/...' prefix), and\n"
         "  checks must not cd anywhere — they already run at the project root. One layout, used everywhere.\n"
         "Keep 2-6 checks, runnable on bare Ubuntu with php, python3, node.\n\n"
-        f"TASK:\n{goal}"
+        + (
+            # Inherited-workspace grounding: without it the spec invents its own
+            # language/layout each attempt (a Java deliverable list once buried a
+            # finished Kotlin project) and acceptance demands files nobody planned.
+            "The workspace ALREADY CONTAINS these files (work inherited from a previous "
+            "attempt):\n" + "\n".join(existing_files[:80]) + "\n"
+            "Deliverables MUST fit this existing layout: same language, same paths — "
+            "extend or fix what exists, never demand a parallel layout or a language "
+            "switch.\n\n"
+            if existing_files else ""
+        )
+        + f"TASK:\n{goal}"
     )
     try:
         spec = _chat_json(prompt)
