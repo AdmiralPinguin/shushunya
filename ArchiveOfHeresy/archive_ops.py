@@ -2733,6 +2733,67 @@ def assemble_shushunya_turn_context(session_id, user_text, image_data_url="", mo
     }
 
 
+_ARTIFACT_TYPE_WORDS = {
+    "апк": "apk", "apk": "apk",
+    "зип": "zip", "zip": "zip", "архив": "zip", "исходник": "zip", "проект": "zip",
+    "патч": "patch", "patch": "patch", "дифф": "patch", "diff": "patch",
+    "пдф": "pdf", "pdf": "pdf",
+}
+
+_ARTIFACT_TYPE_TESTS = {
+    "apk": lambda fn, mt: fn.endswith(".apk") or "android.package" in mt,
+    "zip": lambda fn, mt: fn.endswith(".zip") or mt == "application/zip",
+    "patch": lambda fn, mt: fn.endswith((".patch", ".diff")) or "diff" in mt,
+    "pdf": lambda fn, mt: fn.endswith(".pdf") or mt == "application/pdf",
+}
+
+
+def _artifact_type_intent(text: str) -> str:
+    """Last explicitly named file type wins: «Это зип опять. Скинь апк» -> apk."""
+    kind = ""
+    for word in re.findall(r"[\w]+", str(text or "").lower()):
+        for prefix, mapped in _ARTIFACT_TYPE_WORDS.items():
+            if word.startswith(prefix):
+                kind = mapped
+    return kind
+
+
+def enforce_artifact_type_intent(decision, catalog, user_text):
+    """Deterministic server guard over the model's artifact pick.
+
+    The turn model once wrote «Пользователь просит APK» in its own reason and
+    still attached the zip sitting in the catalog's first row (name->id slip).
+    When the owner names a file type and the picked artifact contradicts it while
+    the catalog holds a matching one, the server overrides the id; the model's
+    choice is advisory, the explicitly requested type is authority."""
+    if str(decision.get("action") or "") != "deliver_artifact":
+        return decision
+    kind = _artifact_type_intent(user_text)
+    test = _ARTIFACT_TYPE_TESTS.get(kind)
+    if test is None:
+        return decision
+
+    def _ok(item):
+        return test(str(item.get("filename") or "").lower(),
+                    str(item.get("media_type") or "").lower())
+
+    delivery = decision.get("artifact_delivery")
+    chosen_id = str((delivery or {}).get("artifact_id") or "")
+    chosen = next((item for item in (catalog or [])
+                   if str(item.get("artifact_id") or "") == chosen_id), None)
+    if chosen is not None and _ok(chosen):
+        return decision
+    replacement = next((item for item in (catalog or []) if _ok(item)), None)
+    if replacement is None:
+        return decision
+    fixed = dict(decision)
+    fixed["artifact_delivery"] = {"artifact_id": str(replacement.get("artifact_id"))}
+    fixed["reason"] = (str(decision.get("reason") or "")
+                      + f" [server guard: запрошен {kind}, выдан "
+                      + f"{replacement.get('filename')}]")[:1000]
+    return fixed
+
+
 def decide_chat_turn_action(session_id, text, image_data_url="", model=None, payload=None):
     LLM_PRIORITY.set("chat")
     payload = payload if isinstance(payload, dict) else {}
@@ -2784,17 +2845,18 @@ def decide_chat_turn_action(session_id, text, image_data_url="", model=None, pay
             if isinstance(item, dict) and str(item.get("task_id") or "").strip()
         },
     )
+    artifact_catalog = artifact_catalog_for_query(
+        shared_chat_session_id(session_id),
+        audience_source=source,
+        query=user_text,
+        limit=ARTIFACT_CAPABILITY_LIMIT,
+    )
     manifest = turn_capability_manifest(
         image_attached=bool(image_data_url),
         pending_reports=pending_summary(),
         pending_decisions=open_decisions,
         continuable_tasks=continuation_candidates,
-        artifacts=artifact_catalog_for_query(
-            shared_chat_session_id(session_id),
-            audience_source=source,
-            query=user_text,
-            limit=ARTIFACT_CAPABILITY_LIMIT,
-        ),
+        artifacts=artifact_catalog,
     )
     idempotency_key = str(payload.get("core_idempotency_key") or f"archive-turn:{context_bundle['turn_id']}")
     try:
@@ -2813,6 +2875,7 @@ def decide_chat_turn_action(session_id, text, image_data_url="", model=None, pay
         decision = resolution.get("decision") if isinstance(resolution.get("decision"), dict) else {}
         if str(decision.get("action") or "") not in TURN_ACTIONS:
             raise ValueError("Core returned an unknown action")
+        decision = enforce_artifact_type_intent(decision, artifact_catalog, user_text)
         core_state = resolution.get("core") if isinstance(resolution.get("core"), dict) else {}
         if (
             core_state.get("degraded") is True
