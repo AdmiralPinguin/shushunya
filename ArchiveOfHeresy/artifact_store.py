@@ -424,14 +424,34 @@ _ARTIFACT_QUERY_STOPWORDS = {
 }
 
 
+# The owner writes tech terms in Cyrillic («скинь апк»), artifact filenames are
+# Latin (Galaga.apk). Without these aliases the lexical match scores zero, the
+# catalog falls back to pure recency, and the turn model confidently attaches
+# whatever happened to be registered last (it once sent a zip instead of the apk
+# registered 44 ms earlier).
+_ARTIFACT_TERM_ALIASES = {
+    "апк": "apk", "апка": "apk", "апкшка": "apk",
+    "зип": "zip", "зипка": "zip", "зипку": "zip", "архив": "zip",
+    "патч": "patch", "дифф": "diff", "пдф": "pdf",
+    "исходники": "project", "проект": "project",
+    "картинка": "png", "картинку": "png", "фотка": "jpg",
+}
+
+
 def _artifact_query_terms(query: Any) -> list[str]:
     normalized = _normalize_search_text(query)
     terms: list[str] = []
+
+    def _add(term: str) -> None:
+        if len(term) >= 2 and term not in _ARTIFACT_QUERY_STOPWORDS and term not in terms:
+            terms.append(term)
+
     for raw in re.findall(r"[\w][\w.-]{1,63}", normalized, flags=re.UNICODE):
         term = raw.strip("._-")
-        if len(term) < 2 or term in _ARTIFACT_QUERY_STOPWORDS or term in terms:
-            continue
-        terms.append(term)
+        _add(term)
+        alias = _ARTIFACT_TERM_ALIASES.get(term)
+        if alias:
+            _add(alias)
         if len(terms) >= 8:
             break
     return terms
