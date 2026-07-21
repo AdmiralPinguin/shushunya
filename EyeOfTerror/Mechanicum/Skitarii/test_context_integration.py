@@ -207,9 +207,16 @@ class ContextIntegrationTests(unittest.TestCase):
 
     def test_parent_checkpoint_is_same_memory_fallback_only(self) -> None:
         current_checkpoint = {"patch_sha256": "a" * 64}
-        parent_checkpoint = {"patch_sha256": "b" * 64}
+        parent_checkpoint = {
+            "patch_sha256": "b" * 64,
+            "unified_diff": "diff --git a/x b/x",
+            "changed_files": ["x"],
+        }
         current = self._mission({"workspace_checkpoint": current_checkpoint})
-        with mock.patch.object(service.mission_store, "get") as get_parent:
+        with (
+            mock.patch.object(service, "_latest_ancestor_checkpoint", return_value={}),
+            mock.patch.object(service.mission_store, "get") as get_parent,
+        ):
             selected = service._workspace_checkpoint_for_attempt(
                 {"parent_skitarii_mission_id": "parent-1"},
                 current,
@@ -225,9 +232,12 @@ class ContextIntegrationTests(unittest.TestCase):
             "root_task_id": "root-goal",
             "workspace_checkpoint": parent_checkpoint,
         })
-        with mock.patch.object(
-            service.mission_store, "get", return_value=matching_parent,
-        ) as get_parent:
+        with (
+            mock.patch.object(service, "_latest_ancestor_checkpoint", return_value={}),
+            mock.patch.object(
+                service.mission_store, "get", return_value=matching_parent,
+            ) as get_parent,
+        ):
             selected = service._workspace_checkpoint_for_attempt(
                 {"parent_skitarii_mission_id": "parent-1"},
                 empty_current,
@@ -242,8 +252,11 @@ class ContextIntegrationTests(unittest.TestCase):
             "root_task_id": "root-goal",
             "workspace_checkpoint": parent_checkpoint,
         })
-        with mock.patch.object(
-            service.mission_store, "get", return_value=mismatched_parent,
+        with (
+            mock.patch.object(service, "_latest_ancestor_checkpoint", return_value={}),
+            mock.patch.object(
+                service.mission_store, "get", return_value=mismatched_parent,
+            ),
         ):
             selected = service._workspace_checkpoint_for_attempt(
                 {"parent_skitarii_mission_id": "parent-1"},
@@ -258,8 +271,11 @@ class ContextIntegrationTests(unittest.TestCase):
             "root_task_id": "different-root",
             "workspace_checkpoint": parent_checkpoint,
         })
-        with mock.patch.object(
-            service.mission_store, "get", return_value=same_memory_wrong_root,
+        with (
+            mock.patch.object(service, "_latest_ancestor_checkpoint", return_value={}),
+            mock.patch.object(
+                service.mission_store, "get", return_value=same_memory_wrong_root,
+            ),
         ):
             selected = service._workspace_checkpoint_for_attempt(
                 {"parent_skitarii_mission_id": "parent-1"},

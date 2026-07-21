@@ -1548,6 +1548,67 @@ def _parent_skitarii_mission_id_from_payload(payload: dict) -> str:
     return raw
 
 
+_CHECKPOINT_ROOT_MARKERS = (
+    "settings.gradle", "settings.gradle.kts", "gradlew", "package.json",
+    "Cargo.toml", "pom.xml", "go.mod", "CMakeLists.txt", "Makefile",
+)
+
+
+def _pick_ancestor_checkpoint(candidates: list[tuple[float, dict]]) -> dict:
+    """Best non-empty checkpoint: structured project beats a flat pile, then newest.
+
+    Ordering by recency alone would resurrect the LAST attempt's debris (a fighter
+    once dumped flat .java/.class files at the root) instead of the accumulated
+    real project, so checkpoints whose files include a project-root marker rank
+    above markerless ones; recency only breaks ties within a class."""
+    best: tuple[int, float, dict] | None = None
+    for mtime, checkpoint in candidates:
+        if not str(checkpoint.get("unified_diff") or "").strip():
+            continue
+        files = {str(f).strip("/") for f in (checkpoint.get("changed_files") or [])}
+        marker = int(any(f in _CHECKPOINT_ROOT_MARKERS for f in files))
+        if best is None or (marker, mtime) > (best[0], best[1]):
+            best = (marker, mtime, checkpoint)
+    if best is None:
+        return {}
+    chosen = dict(best[2])
+    chosen["ancestor_fallback"] = True
+    return chosen
+
+
+def _latest_ancestor_checkpoint(task_memory_id: str, root_task_id: str) -> dict:
+    """Newest suitable workspace checkpoint of the SAME task page, store-wide.
+
+    The linear parent chain loses the whole estate when one attempt finishes
+    checkpoint-less (a deploy restart once orphaned a 41-file project and the next
+    fighter rebuilt a flat pile from scratch). Identity is matched here; the
+    sha/base-tree/apply validation stays in the restorer, so a stale or foreign
+    patch still degrades to a fresh start instead of dying."""
+    if not task_memory_id or not root_task_id:
+        return {}
+    candidates: list[tuple[float, dict]] = []
+    try:
+        store_root = mission_store._ensure_store_root()
+        for entry in os.scandir(store_root):
+            if not entry.is_dir():
+                continue
+            candidate = mission_store.get(entry.name)
+            if candidate is None or getattr(candidate, "_lock", None) is None:
+                continue
+            with candidate._lock:
+                result = dict(candidate.result) if isinstance(candidate.result, dict) else {}
+            if str(result.get("task_memory_id") or "").strip() != task_memory_id:
+                continue
+            if str(result.get("root_task_id") or "").strip() != root_task_id:
+                continue
+            checkpoint = result.get("workspace_checkpoint")
+            if isinstance(checkpoint, dict) and checkpoint:
+                candidates.append((entry.stat().st_mtime, dict(checkpoint)))
+    except OSError:
+        return {}
+    return _pick_ancestor_checkpoint(candidates)
+
+
 def _workspace_checkpoint_for_attempt(
     payload: dict,
     mission: Any,
@@ -1560,18 +1621,21 @@ def _workspace_checkpoint_for_attempt(
         return current
     parent_id = _parent_skitarii_mission_id_from_payload(payload)
     if not parent_id or not task_memory_id or not root_task_id:
-        return {}
+        return _latest_ancestor_checkpoint(task_memory_id, root_task_id)
     parent = mission_store.get(parent_id)
-    if parent is None or getattr(parent, "_lock", None) is None:
-        return {}
-    with parent._lock:
-        parent_result = dict(parent.result) if isinstance(parent.result, dict) else {}
-    if str(parent_result.get("task_memory_id") or "").strip() != task_memory_id:
-        return {}
-    if str(parent_result.get("root_task_id") or "").strip() != root_task_id:
-        return {}
-    checkpoint = parent_result.get("workspace_checkpoint")
-    return dict(checkpoint) if isinstance(checkpoint, dict) else {}
+    parent_result: dict[str, Any] = {}
+    if parent is not None and getattr(parent, "_lock", None) is not None:
+        with parent._lock:
+            parent_result = dict(parent.result) if isinstance(parent.result, dict) else {}
+    if (str(parent_result.get("task_memory_id") or "").strip() == task_memory_id
+            and str(parent_result.get("root_task_id") or "").strip() == root_task_id):
+        checkpoint = parent_result.get("workspace_checkpoint")
+        if isinstance(checkpoint, dict) and str(
+                (checkpoint or {}).get("unified_diff") or "").strip():
+            return dict(checkpoint)
+    # Parent is missing, foreign, or checkpoint-less (blocked/restart casualties):
+    # fall back to the best ancestor of the same task page instead of losing all.
+    return _latest_ancestor_checkpoint(task_memory_id, root_task_id)
 
 
 def _pending_task_checkpoint_for_attempt(
@@ -1689,7 +1753,9 @@ def _restore_workspace_checkpoint(
     # Lineage: the checkpoint's CREATOR is this attempt's parent (inheritance), or
     # both share a parent (same-attempt retry). Anything else is another goal's
     # leftovers on the same task page — skip it, don't die on it.
-    if parent_task_id:
+    if parent_task_id and not checkpoint.get("ancestor_fallback"):
+        # ancestor_fallback checkpoints were already identity-matched to this task
+        # page at selection time; their creator is legitimately an older attempt.
         creator = str(checkpoint.get("task_id") or "")
         chain_parent = str(checkpoint.get("parent_task_id") or "")
         if creator and creator != parent_task_id and chain_parent != parent_task_id:
