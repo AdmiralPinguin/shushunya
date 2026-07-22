@@ -231,6 +231,17 @@ def _chat(messages: list[dict], settings: dict[str, Any]) -> dict[str, Any]:
             retryable=retryable,
             context_overflow=context_overflow,
         ) from exc
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+        # Socket timeouts and refused connections killed missions mid-fighter:
+        # they flew past the HTTPError-only retry as a naked TimeoutError. A busy
+        # backend is transient by definition — surface it as retryable so the
+        # loop's in-mission retry (3x with backoff) absorbs it.
+        raise LLMRequestError(
+            status=0,
+            body=f"{type(exc).__name__}: {exc}"[:500],
+            retryable=True,
+            context_overflow=False,
+        ) from exc
 
 
 ARCHIVE_URL = os.environ.get("SKITARII_ARCHIVE_URL", "http://127.0.0.1:8090").rstrip("/")
