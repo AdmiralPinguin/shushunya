@@ -14,7 +14,7 @@ import re
 import urllib.request
 from typing import Any
 
-from warband import run_mission
+from warband import run_mission, run_quality_phase
 from acceptor import accept
 from spec import build_spec, workspace_file_listing
 
@@ -351,13 +351,32 @@ def plan_and_run(goal: str, executor: Any, *, task_id: str = "",
     # whole-task acceptance: re-run the top-level checks against the combined project
     acceptance = accept(executor, top_spec["deliverables"], top_spec["checks"])
     note(f"Планировщик: итоговая приёмка — {'принято' if acceptance['accepted'] else 'НЕ принято'}.")
+    quality = None
+    if acceptance["accepted"] and (top_spec.get("quality_contract") or []):
+        note("Планировщик: функция принята — продукт идёт на пробу и к критику качества.")
+        quality = run_quality_phase(
+            goal, executor,
+            contract=top_spec["quality_contract"],
+            product=top_spec.get("product") or {},
+            checks=top_spec["checks"], emit=note,
+            task_id=task_id, memory_task_id=memory_task_id,
+            ask_fn=ask_fn, cancel_fn=cancel_fn,
+            durable_checkpoint_fn=durable_checkpoint_fn, progress=progress,
+            max_wall_sec=max(600, max_wall_sec // 4),
+        )
     # A failed FINAL acceptance is retryable repair work: without these flags the
     # finalize gate skipped the workspace checkpoint and a fully assembled project
     # (hundreds of files) was thrown away — the next attempt restarted from scratch.
     return {"status": "done" if acceptance["accepted"] else "failed",
             "accepted": acceptance["accepted"], "subtasks": sub_results,
             "summary": f"Собрано из {len(subtasks)} подзадач. Итоговые проверки: "
-                       f"{'все прошли' if acceptance['accepted'] else 'не все прошли'}.",
+                       f"{'все прошли' if acceptance['accepted'] else 'не все прошли'}."
+                       + ("" if quality is None else
+                          (" Критик качества: принят." if quality.get("passed")
+                           else f" Критик качества: {len(quality.get('findings') or [])} замечаний.")),
             "artifacts": [], "checks": top_spec["checks"], "acceptance": acceptance,
+            **({} if quality is None else {"quality_report": quality}),
+            **({} if quality is None or quality.get("passed") else
+               {"quality_warnings": quality.get("findings") or []}),
             **({} if acceptance["accepted"] else
                {"revision_required": True, "retryable": True})}

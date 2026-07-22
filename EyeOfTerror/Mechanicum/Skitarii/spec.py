@@ -15,6 +15,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from acceptor import check_kind
+from product_probe import normalize_profile
 
 
 def _first_json_object(content: str) -> dict[str, Any]:
@@ -1939,7 +1940,16 @@ def build_spec(goal: str, *, build_project: bool = False,
         '{"deliverables": ["relative file paths the task must produce"],\n'
         ' "checks": [ {"cmd": "command that runs the program"},\n'
         '             {"cmd": "...", "expect_stdout": "literal expected output"},\n'
-        '             {"cmd": "...", "oracle": "command that computes the correct answer"} ]}\n'
+        '             {"cmd": "...", "oracle": "command that computes the correct answer"} ],\n'
+        ' "product": {"kind": "cli|server|android|web|library|none",\n'
+        '             "run": ["commands that exercise the finished product on real input"],\n'
+        '             "start": "server start command, when kind=server",\n'
+        '             "endpoints": ["urls to probe, when kind=server"]},\n'
+        ' "quality_contract": ["3-7 product-quality criteria a demanding owner would check"]}\n'
+        "quality_contract is the bar ABOVE minimal function: for a game — drawn sprites (not"
+        " colored rectangles), difficulty progression, sound, restart; for a CLI — helpful --help,"
+        " honest exit codes, readable errors; for a server — sane error responses, input validation."
+        " Concrete and checkable by looking at the running product; no vague words like 'good UX'.\n"
         "Rules for checks:\n"
         "- Each check is a JSON object, NOT a shell string. Do not write pipes/grep/test yourself.\n"
         "- 'cmd' is a single command that RUNS or BUILDS the deliverable (e.g. \"python3 calc.py '2+3*4'\",\n"
@@ -2055,4 +2065,10 @@ def build_spec(goal: str, *, build_project: bool = False,
         fallback_build = _detect_build_check(goal, deliverables)
         if fallback_build is not None:
             checks = [fallback_build]
-    return {"deliverables": deliverables, "checks": checks}
+    quality_contract = [
+        str(c).strip() for c in (spec.get("quality_contract") or [])
+        if isinstance(c, str) and str(c).strip()
+    ][:7]
+    product = normalize_profile(spec.get("product"), goal, deliverables)
+    return {"deliverables": deliverables, "checks": checks,
+            "quality_contract": quality_contract, "product": product}
