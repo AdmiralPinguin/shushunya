@@ -1034,7 +1034,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                     governor_host = str(payload.get("governor_host") or default_governor_host).strip() or default_governor_host
                     run_mode = str(payload.get("run_mode") or "http").strip() or "http"
                     host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
-                    timeout_sec = max(1, min(int(payload.get("timeout_sec") or 30), 21600))
+                    timeout_sec = max(1, min(int(payload.get("timeout_sec") or 30), 43200))
                     include_brigade_health = bool(payload.get("include_brigade_health"))
                     prepared = orchestrate_run_task(
                         message,
@@ -1354,7 +1354,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                         return
                     run_mode = str(payload.get("run_mode") or "http").strip() or "http"
                     host = validate_service_host(str(payload.get("host") or "127.0.0.1"))
-                    timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 21600))
+                    timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 43200))
                     max_revision_cycles = max(0, min(int(payload.get("max_revision_cycles") or 3), 8))
                     allow_resume = bool(payload.get("allow_resume", True))
                     governor_transport = str(payload.get("governor_transport") or default_governor_transport).strip() or default_governor_transport
@@ -1940,7 +1940,7 @@ def make_handler(run_root: Path, default_governor_transport: str = "local", defa
                             ),
                         )
                     else:
-                        timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 21600))
+                        timeout_sec = max(1, min(int(payload.get("timeout_sec") or 1800), 43200))
                     execution_mode = "revision" if revision_mode else ("resume" if resume_mode else "full")
                     if parts[2] in {"preflight_local", "preflight_http"}:
                         if parts[2] == "preflight_http":
