@@ -352,8 +352,16 @@ def plan_and_run(goal: str, executor: Any, *, task_id: str = "",
     acceptance = accept(executor, top_spec["deliverables"], top_spec["checks"])
     note(f"Планировщик: итоговая приёмка — {'принято' if acceptance['accepted'] else 'НЕ принято'}.")
     quality = None
-    if acceptance["accepted"] and (top_spec.get("quality_contract") or []):
-        note("Планировщик: функция принята — продукт идёт на пробу и к критику качества.")
+    _contract = top_spec.get("quality_contract") or []
+    # Loud trace: the first v3 galaga silently skipped the whole quality phase and
+    # nobody could see why. Always say out loud whether it ran and, if not, the reason.
+    if not acceptance["accepted"]:
+        note("Планировщик: приёмка не принята — критик качества не запускается.")
+    elif not _contract:
+        note("Планировщик: контракт качества пуст — критик качества пропущен.")
+    if acceptance["accepted"] and _contract:
+        note(f"Планировщик: функция принята, контракт из {len(_contract)} пунктов — "
+             "продукт идёт на пробу и к критику качества.")
         quality = run_quality_phase(
             goal, executor,
             contract=top_spec["quality_contract"],
