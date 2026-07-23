@@ -19,7 +19,7 @@ from acceptor import accept
 from critic import judge_product
 from harness import run_fighter
 from product_probe import collect_evidence
-from spec import build_spec, workspace_file_listing
+from spec import build_spec, workspace_file_listing, arbitrate_failed_checks
 
 _MAX_POLISH_ROUNDS = int(os.environ.get("SKITARII_MAX_POLISH_ROUNDS", "2"))
 
@@ -196,6 +196,7 @@ def run_mission(goal: str, executor: Any, *, checks: list[str] | None = None,
 
     rounds: list[dict[str, Any]] = []
     last_fighter: dict[str, Any] = {}
+    arbitrated = False
     for rnd in range(1, max_fighter_rounds + 1):
         # 2) Fighter: agentic loop against the real checks. On a retry, feed back the
         #    acceptance failures so it fixes the exact thing that failed.
@@ -226,6 +227,30 @@ def run_mission(goal: str, executor: Any, *, checks: list[str] | None = None,
         rounds.append({"round": rnd, "fighter_ok": fighter["ok"],
                        "steps": fighter["steps"], "seconds": fighter["seconds"],
                        "acceptance": acceptance})
+        # Check arbitration (once per mission): the fighter cannot change checks and
+        # burns rounds against a check that is itself wrong. A separate arbiter rules
+        # on the failures; genuinely broken checks are swapped for behavioural
+        # replacements before the next round. The fighter is never its own judge.
+        if (not acceptance["accepted"] and not arbitrated
+                and rnd < max_fighter_rounds and checks):
+            arbitrated = True
+            fails = [r for r in acceptance["results"] if not r.get("ok")]
+            try:
+                rulings = arbitrate_failed_checks(goal, fails, deliverables=deliverables)
+            except Exception:
+                rulings = []
+            swapped = 0
+            for ruling in rulings:
+                if ruling.get("verdict") != "check_broken" or "replacement" not in ruling:
+                    continue
+                for i, c in enumerate(checks):
+                    if str(c.get("cmd") or "") == ruling["cmd"]:
+                        checks[i] = ruling["replacement"]
+                        swapped += 1
+                        break
+            if swapped:
+                emit(f"Арбитр приёмки: {swapped} проверк(и) признаны кривыми и "
+                     "заменены на корректные — не гоняю бойца об заведомо неверное.")
         if acceptance["accepted"]:
             verdict = {"status": "done", "accepted": True, "rounds": rounds,
                        "summary": fighter.get("summary", ""),

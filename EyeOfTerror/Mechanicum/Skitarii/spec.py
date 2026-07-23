@@ -1643,6 +1643,112 @@ def _structured_checks(
     return checks
 
 
+def _arbiter_chat_json(prompt: str) -> dict[str, Any]:
+    """Independent arbiter on the PLANNER model (gemma), not the fighter's Qwen.
+
+    A separate head judges whether a failing check is itself broken; the coder
+    cannot be its own judge (that is how false-accepts sneak in)."""
+    base = os.environ.get(
+        "SKITARII_ARBITER_LLM_BASE_URL",
+        os.environ.get("PLANNER_LLM_BASE_URL", "http://127.0.0.1:8079/v1"),
+    ).rstrip("/")
+    if not base.endswith("/v1"):
+        base += "/v1"
+    payload = {
+        "model": os.environ.get(
+            "SKITARII_ARBITER_LLM_MODEL",
+            os.environ.get("PLANNER_LLM_MODEL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"),
+        ),
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": float(os.environ.get("SKITARII_ARBITER_TEMPERATURE", "0.2")),
+        "max_tokens": 1200,
+    }
+    req = urllib.request.Request(
+        f"{base}/chat/completions",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=300) as resp:
+        content = str(((json.loads(resp.read()).get("choices") or [{}])[0].get("message") or {}).get("content") or "")
+    return _first_json_object(content)
+
+
+def arbitrate_failed_checks(goal: str, failures: list[dict], *,
+                            deliverables: list[str] | None = None) -> list[dict]:
+    """Judge each failing acceptance check: is the CHECK broken, or the code?
+
+    The fighter is powerless to change checks and burns every round against a
+    check that is itself wrong (an unspecified tie-break order, a literal
+    expect_stdout the spec author guessed wrong, a grep for one valid phrasing).
+    A separate arbiter (planner model) rules per check and, when the check is
+    genuinely broken, returns a REPLACEMENT that is still behavioural — it may
+    de-brittle or fully specify a check, never weaken it to a trivial pass.
+
+    Returns a list aligned by `cmd`: [{"cmd", "verdict", "reason", "replacement"?}].
+    Replacements are validated (non-empty, still behavioural, not a bare
+    presence check) before the caller may swap them in."""
+    if not failures:
+        return []
+    items = []
+    for f in failures[:8]:
+        items.append({
+            "cmd": str(f.get("target") or f.get("cmd") or ""),
+            "why": str(f.get("why") or f.get("stderr") or "failed")[:400],
+            "got": str(f.get("stdout") or "")[:300],
+            "expected": str(f.get("expected") or "")[:300],
+        })
+    prompt = (
+        "You are the acceptance ARBITER of a coding warband. A coder's work FAILED these "
+        "acceptance checks. Some checks may themselves be WRONG: an under-specified "
+        "expected output (e.g. tie-break order never stated), a literal expect_stdout the "
+        "author guessed incorrectly, or a check that greps for one valid phrasing of a "
+        "correct-but-different implementation. Others are legitimately the coder's fault.\n"
+        "Rule on EACH check. Return ONE JSON array, one object per check, nothing else:\n"
+        '[{"cmd": "<the exact cmd>", "verdict": "check_broken" | "fighter_at_fault", '
+        '"reason": "<short>", "replacement": {"cmd": "...", "expect_stdout"|"oracle": "..."} | null}]\n'
+        "Rules for a replacement (ONLY when verdict is check_broken):\n"
+        "- It MUST still be behavioural: run the deliverable and judge its OUTPUT with "
+        "expect_stdout or an oracle command; or a real test run. NEVER a bare no-op, "
+        "NEVER grep of source text, NEVER something that passes without exercising the code.\n"
+        "- Fix the actual defect: fully specify the order/format, or use an oracle "
+        "(python3 -c ...) so the real interpreter is the source of truth, not a guess.\n"
+        "- If the check is fine and the code is wrong, verdict fighter_at_fault, replacement null.\n\n"
+        f"TASK:\n{goal}\n\n"
+        + ("DELIVERABLES:\n" + "\n".join(deliverables[:20]) + "\n\n" if deliverables else "")
+        + "FAILED CHECKS:\n" + json.dumps(items, ensure_ascii=False, indent=1)
+    )
+    try:
+        raw = _arbiter_chat_json(prompt)
+    except Exception:
+        return []
+    rulings = raw if isinstance(raw, list) else raw.get("rulings") if isinstance(raw, dict) else None
+    if not isinstance(rulings, list):
+        return []
+    out: list[dict] = []
+    for r in rulings:
+        if not isinstance(r, dict):
+            continue
+        verdict = str(r.get("verdict") or "").strip()
+        cmd = str(r.get("cmd") or "").strip()
+        if not cmd or verdict not in ("check_broken", "fighter_at_fault"):
+            continue
+        ruling = {"cmd": cmd, "verdict": verdict, "reason": str(r.get("reason") or "")[:300]}
+        if verdict == "check_broken":
+            repl = r.get("replacement")
+            valid = _structured_checks([repl], allow_bare=True, goal=goal) if isinstance(repl, dict) else []
+            # A replacement must survive validation, stay non-brittle, and remain
+            # behavioural — otherwise the arbiter would be weakening acceptance.
+            if (valid and not _is_brittle_presence_check(valid[0])
+                    and check_kind(valid[0]) in ("behavior", "test")):
+                ruling["replacement"] = valid[0]
+            else:
+                # No safe replacement -> do not silently drop the check; keep it,
+                # downgrade the ruling so the caller does not swap anything in.
+                ruling["verdict"] = "fighter_at_fault"
+                ruling["reason"] = "check flagged broken but no safe behavioural replacement"
+        out.append(ruling)
+    return out
+
+
 def build_held_out_plan(
     goal: str,
     *,
